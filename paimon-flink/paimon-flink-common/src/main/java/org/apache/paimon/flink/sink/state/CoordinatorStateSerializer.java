@@ -47,7 +47,6 @@ public class CoordinatorStateSerializer implements SimpleVersionedSerializer<Coo
     public byte[] serialize(CoordinatorState state) throws IOException {
         DataOutputSerializer out = new DataOutputSerializer(256);
         out.writeUTF(state.getCommitUser());
-        out.writeLong(state.getWatermark());
         committerStateSerializer.serialize(state.getCommitterStates(), out);
         return out.getCopyOfBuffer();
     }
@@ -62,8 +61,7 @@ public class CoordinatorStateSerializer implements SimpleVersionedSerializer<Coo
                         + CURRENT_VERSION);
         DataInputDeserializer in = new DataInputDeserializer(serialized);
         String commitUser = in.readUTF();
-        long watermark = in.readLong();
         Map<String, byte[]> committerStates = committerStateSerializer.deserialize(in);
-        return new CoordinatorState(commitUser, watermark, committerStates);
+        return new CoordinatorState(commitUser, committerStates);
     }
 }

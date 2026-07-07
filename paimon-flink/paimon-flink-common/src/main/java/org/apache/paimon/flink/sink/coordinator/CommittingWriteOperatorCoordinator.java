@@ -20,14 +20,17 @@ package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableSerializer;
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.state.CoordinatorState;
 import org.apache.paimon.flink.sink.state.CoordinatorStateSerializer;
 import org.apache.paimon.flink.sink.state.MemoryBackendStateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
+import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
@@ -39,14 +42,18 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -73,10 +80,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final int parallelism;
 
     private final WriterCommittables[] subtaskCommittables;
-    private final ListSerializer<Committable> committableSerializer;
+    private final TypeSerializer<CheckpointCommittables> committablesSerializer;
     private final CoordinatorStateSerializer stateSerializer;
     private final ExecutorService commitExecutor;
-    private final SimpleWatermarkValve watermarkValve;
 
     // Populated by resetToCheckpoint and consumed by start. Plain fields are sufficient: both
     // callbacks run on the same scheduler thread in order.
@@ -101,12 +107,15 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         this.failoverAfterRecovery = failoverAfterRecovery;
         this.parallelism = context.currentParallelism();
         this.subtaskCommittables = new WriterCommittables[parallelism];
-        this.committableSerializer = CommittableEvent.createCommittableListSerializer();
+        this.committablesSerializer =
+                new SimpleVersionedSerializerTypeSerializerProxy<>(
+                        () ->
+                                new CheckpointCommittablesSerializer(
+                                        new CommittableSerializer(new CommitMessageSerializer())));
         this.stateSerializer = new CoordinatorStateSerializer();
         this.commitExecutor =
                 Executors.newSingleThreadExecutor(
                         new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context));
-        this.watermarkValve = new SimpleWatermarkValve(parallelism);
         this.state = State.CREATED;
     }
 
@@ -164,9 +173,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                             SimpleVersionedSerialization.writeVersionAndSerialize(
                                     stateSerializer,
                                     new CoordinatorState(
-                                            commitUser,
-                                            watermarkValve.getCurrentWatermark(),
-                                            stateStore.getSerializedStates()));
+                                            commitUser, stateStore.getSerializedStates()));
                     result.complete(checkpointData);
                 },
                 result,
@@ -180,8 +187,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 () -> {
                     if (event instanceof CommittableEvent) {
                         handleCommittableEvent(subtask, (CommittableEvent) event);
-                    } else if (event instanceof WatermarkEvent) {
-                        handleWatermarkEvent(subtask, (WatermarkEvent) event);
+                    } else if (event instanceof RestoredCommittableEvent) {
+                        handleRestoredCommittableEvent(subtask, (RestoredCommittableEvent) event);
                     } else {
                         // TODO: end input handling
                         throw new UnsupportedOperationException("Unsupported event type: " + event);
@@ -207,13 +214,16 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     if (!alignCommittables(checkpointId)) {
                         throw new IllegalStateException("Not all committables reported by writer");
                     }
+                    Map<Long, Long> watermarkPerCheckpoint =
+                            alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
                     commitUpToCheckpoint(
                             checkpointId,
                             pollManifestCommittablesForCheckpoint(
                                     checkpointId,
                                     subtaskCommittables,
-                                    committer,
-                                    watermarkValve.getCurrentWatermark()),
+                                    watermarkPerCheckpoint,
+                                    committer),
+                            watermarkPerCheckpoint,
                             committables -> {
                                 try {
                                     committer.commit(committables);
@@ -262,7 +272,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     WriterCommittables writerCommittables = subtaskCommittables[subtask];
                     if (writerCommittables != null) {
                         // sanity check subtask state
-                        Map<Long, List<Committable>> committables =
+                        Map<Long, CheckpointCommittables> committables =
                                 writerCommittables.getCommittablesBeforeCheckpoint(
                                         checkpointId, false);
                         if (!committables.isEmpty()) {
@@ -286,40 +296,46 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     public void executionAttemptReady(int subtask, int attemptNumber, SubtaskGateway gateway) {}
 
     private void handleCommittableEvent(int subtask, CommittableEvent event) throws Exception {
-        if (state == State.RESTORING) {
-            updateSubtaskCommittables(subtask, event);
-            if (alignCommittables(event.getCheckpointId())) {
-                recover(event.getCheckpointId());
-                transitionState(State.RUNNING);
-            }
-        } else if (state == State.RUNNING) {
-            if (event.isRestoring()) {
-                // a region failover replayed restoring committables while the coordinator itself is
-                // not restoring; it already holds the committed state, so ignore them
-                LOG.info(
-                        "Ignore restoring committables from subtask {} of checkpoint {}, coordinator is running.",
-                        subtask,
-                        event.getCheckpointId());
-            } else {
-                updateSubtaskCommittables(subtask, event);
-            }
+        if (state == State.RUNNING) {
+            updateSubtaskCommittables(
+                    subtask, WriterCommittables.from(event, committablesSerializer));
         } else {
             throw new IllegalStateException(
                     "Illegal state " + state + " while handling committable event " + event);
         }
     }
 
-    private void updateSubtaskCommittables(int subtask, CommittableEvent event) throws IOException {
-        WriterCommittables incoming = WriterCommittables.from(event, committableSerializer);
+    private void handleRestoredCommittableEvent(int subtask, RestoredCommittableEvent event)
+            throws Exception {
+        if (state == State.RESTORING) {
+            updateSubtaskCommittables(
+                    subtask, WriterCommittables.fromRestore(event, committablesSerializer));
+            if (alignCommittables(event.getRestoredCheckpointId())) {
+                recover(event.getRestoredCheckpointId());
+                transitionState(State.RUNNING);
+            }
+        } else if (state == State.RUNNING) {
+            // a region failover replayed restore committables while the coordinator itself is
+            // not restoring; it already holds the committed state, so ignore them
+            LOG.info(
+                    "Ignore restore committables from subtask {} of checkpoint {}, coordinator is running.",
+                    subtask,
+                    event.getRestoredCheckpointId());
+        } else {
+            throw new IllegalStateException(
+                    "Illegal state "
+                            + state
+                            + " while handling restore committables event "
+                            + event);
+        }
+    }
+
+    private void updateSubtaskCommittables(int subtask, WriterCommittables incoming) {
         if (subtaskCommittables[subtask] != null) {
             subtaskCommittables[subtask].mergeWith(incoming);
         } else {
             subtaskCommittables[subtask] = incoming;
         }
-    }
-
-    private void handleWatermarkEvent(int subtask, WatermarkEvent event) {
-        watermarkValve.updateSubtaskWatermark(subtask, event.getWatermark());
     }
 
     private boolean alignCommittables(long checkpointId) {
@@ -335,13 +351,13 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private void recover(long checkpointId) throws Exception {
         if (failoverAfterRecovery) {
             // recommit the restored committables and trigger a failover to reinitialize all writers
+            Map<Long, Long> watermarkPerCheckpoint =
+                    alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
             commitUpToCheckpoint(
                     checkpointId,
                     pollManifestCommittablesForCheckpoint(
-                            checkpointId,
-                            subtaskCommittables,
-                            committer,
-                            watermarkValve.getCurrentWatermark()),
+                            checkpointId, subtaskCommittables, watermarkPerCheckpoint, committer),
+                    watermarkPerCheckpoint,
                     committables -> {
                         int numCommitted = committer.filterAndCommit(committables, true, true);
                         if (numCommitted > 0) {
@@ -363,19 +379,20 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     static NavigableMap<Long, ManifestCommittable> pollManifestCommittablesForCheckpoint(
             long checkpointId,
             WriterCommittables[] subtaskCommittables,
-            Committer<Committable, ManifestCommittable> committer,
-            long watermark)
+            Map<Long, Long> watermarkPerCheckpoint,
+            Committer<Committable, ManifestCommittable> committer)
             throws IOException {
         NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint = new TreeMap<>();
         for (WriterCommittables committables : subtaskCommittables) {
-            NavigableMap<Long, List<Committable>> perCheckpoint =
+            NavigableMap<Long, CheckpointCommittables> perCheckpoint =
                     committables.getCommittablesBeforeCheckpoint(checkpointId, true);
-            for (Map.Entry<Long, List<Committable>> entry : perCheckpoint.entrySet()) {
+            for (Map.Entry<Long, CheckpointCommittables> entry : perCheckpoint.entrySet()) {
                 long currentCheckpointId = entry.getKey();
-                List<Committable> currentCommittables = entry.getValue();
+                List<Committable> currentCommittables = entry.getValue().committables();
                 if (currentCommittables.isEmpty()) {
                     continue;
                 }
+                long watermark = watermarkPerCheckpoint.get(currentCheckpointId);
                 ManifestCommittable manifestCommittable =
                         committablesPerCheckpoint.get(currentCheckpointId);
                 if (manifestCommittable == null) {
@@ -392,20 +409,57 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             }
             committables.clearCommittablesBeforeCheckpoint(checkpointId, true);
         }
+        // A checkpoint could be aligned with all subtasks reporting empty committables; in that
+        // case there is nothing to combine, but the per-checkpoint watermark stays available in
+        // watermarkPerCheckpoint for commitUpToCheckpoint's forceCreatingSnapshot fallback.
         return committablesPerCheckpoint;
     }
 
+    /**
+     * Reduce the per-subtask watermark of each checkpoint (up to {@code checkpointId}, inclusive)
+     * into a single watermark to attach to the committed snapshot. Every subtask must have an entry
+     * for {@code checkpointId} by contract (writers emit one event per barrier, even empty), so
+     * this method observes each subtask through {@link WriterCommittables#watermarkAt}, which
+     * returns {@link Long#MIN_VALUE} for missing entries — matching {@code CommitterOperator}'s
+     * initial-watermark semantics and giving idle handling a single hook to grow into later.
+     */
+    @VisibleForTesting
+    static Map<Long, Long> alignWatermarkPerCheckpoint(
+            long checkpointId, WriterCommittables[] subtaskCommittables) {
+        Set<Long> checkpoints = new TreeSet<>();
+        for (WriterCommittables committables : subtaskCommittables) {
+            checkpoints.addAll(
+                    committables.getCommittablesBeforeCheckpoint(checkpointId, true).keySet());
+        }
+        Map<Long, Long> watermarkPerCheckpoint = new HashMap<>();
+        for (long cp : checkpoints) {
+            long min = Long.MAX_VALUE;
+            for (WriterCommittables committables : subtaskCommittables) {
+                min = Math.min(min, committables.watermarkAt(cp));
+            }
+            watermarkPerCheckpoint.put(cp, min);
+        }
+        return watermarkPerCheckpoint;
+    }
+
     private void commitUpToCheckpoint(
-            long checkpointId, Map<Long, ManifestCommittable> toCommit, CommitAction commitAction)
+            long checkpointId,
+            Map<Long, ManifestCommittable> toCommit,
+            Map<Long, Long> watermarkPerCheckpoint,
+            CommitAction commitAction)
             throws Exception {
         List<ManifestCommittable> committables = new ArrayList<>(toCommit.values());
         if (committables.isEmpty() && committer.forceCreatingSnapshot()) {
+            // Empty commit: the aligned watermark still needs to travel with the forced snapshot,
+            // otherwise the snapshot would silently regress the table's watermark to
+            // Long.MIN_VALUE. Writers persist an entry per (subtask, checkpoint), so the map
+            // always carries this checkpoint.
+            Long watermark = watermarkPerCheckpoint.get(checkpointId);
+            checkNotNull(
+                    watermark, "watermarkPerCheckpoint is missing checkpoint %s", checkpointId);
             committables =
                     Collections.singletonList(
-                            committer.combine(
-                                    checkpointId,
-                                    watermarkValve.getCurrentWatermark(),
-                                    Collections.emptyList()));
+                            committer.combine(checkpointId, watermark, Collections.emptyList()));
         }
         commitAction.accept(committables);
     }
@@ -418,7 +472,6 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     SimpleVersionedSerialization.readVersionAndDeSerialize(
                             stateSerializer, checkpointData);
             commitUser = coordinatorState.getCommitUser();
-            watermarkValve.reset(coordinatorState.getWatermark());
             stateStore = new MemoryBackendStateStore(coordinatorState.getCommitterStates());
         }
     }

@@ -19,55 +19,62 @@
 package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.sink.Committable;
 
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
-import org.apache.flink.core.memory.DataInputDeserializer;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
 /**
- * Buffer of {@link Committable}s received from one writer subtask, indexed by checkpoint id. Lives
- * inside the coordinator and is consumed when a checkpoint is ready to commit.
+ * Per-subtask buffer of {@link CheckpointCommittables} received by the coordinator, indexed by
+ * checkpoint id.
  */
 public class WriterCommittables {
 
     private static final Logger LOG = LoggerFactory.getLogger(WriterCommittables.class);
 
     private long maxCheckpointId;
-    private final NavigableMap<Long, List<Committable>> committablesPerCheckpoint;
+    private final NavigableMap<Long, CheckpointCommittables> committablesPerCheckpoint;
 
     @VisibleForTesting
-    WriterCommittables(long maxCheckpointId, List<Committable> committables) {
+    WriterCommittables(long maxCheckpointId, List<CheckpointCommittables> entries) {
         this.maxCheckpointId = maxCheckpointId;
         this.committablesPerCheckpoint = new TreeMap<>();
-
-        if (!committables.isEmpty()) {
-            groupByCheckpoint(committablesPerCheckpoint, committables);
-            if (maxCheckpointId < committablesPerCheckpoint.lastKey()) {
+        for (CheckpointCommittables entry : entries) {
+            if (entry.checkpointId() > maxCheckpointId) {
                 throw new IllegalStateException(
                         "Invalid input committables, max checkpoint id should not be less than "
                                 + "checkpoint id of committables, max checkpoint is "
                                 + maxCheckpointId
-                                + ", committables are "
-                                + committables);
+                                + ", entry checkpoint is "
+                                + entry.checkpointId());
             }
+            if (committablesPerCheckpoint.containsKey(entry.checkpointId())) {
+                throw new IllegalStateException(
+                        "Invalid input committables, duplicate checkpoint id "
+                                + entry.checkpointId());
+            }
+            committablesPerCheckpoint.put(entry.checkpointId(), entry);
         }
     }
 
-    public NavigableMap<Long, List<Committable>> getCommittablesPerCheckpoint() {
+    @VisibleForTesting
+    WriterCommittables(CheckpointCommittables entry) {
+        this.maxCheckpointId = entry.checkpointId();
+        this.committablesPerCheckpoint = new TreeMap<>();
+        committablesPerCheckpoint.put(entry.checkpointId(), entry);
+    }
+
+    public NavigableMap<Long, CheckpointCommittables> getCommittablesPerCheckpoint() {
         return committablesPerCheckpoint;
     }
 
-    public NavigableMap<Long, List<Committable>> getCommittablesBeforeCheckpoint(
+    public NavigableMap<Long, CheckpointCommittables> getCommittablesBeforeCheckpoint(
             long checkpointId, boolean inclusive) {
         return committablesPerCheckpoint.headMap(checkpointId, inclusive);
     }
@@ -94,7 +101,7 @@ public class WriterCommittables {
                             + other.maxCheckpointId);
         }
         maxCheckpointId = other.maxCheckpointId;
-        for (Map.Entry<Long, List<Committable>> entry :
+        for (Map.Entry<Long, CheckpointCommittables> entry :
                 other.getCommittablesPerCheckpoint().entrySet()) {
             if (committablesPerCheckpoint.containsKey(entry.getKey())) {
                 LOG.error(
@@ -114,6 +121,20 @@ public class WriterCommittables {
         return maxCheckpointId;
     }
 
+    /**
+     * Returns the watermark this subtask reported for {@code checkpointId}. Falls back to {@link
+     * Long#MIN_VALUE} when the subtask has no entry for that checkpoint — that "no observed
+     * watermark" sentinel is what {@link
+     * org.apache.paimon.flink.sink.CoordinatorCommittingRowDataStoreWriteOperator} emits at
+     * barriers before any watermark is seen, and matches {@code CommitterOperator}'s initial value.
+     * Aggregation across subtasks (per-checkpoint min, future idle handling) belongs to the
+     * coordinator, but the per-subtask policy for missing entries lives here.
+     */
+    public long watermarkAt(long checkpointId) {
+        CheckpointCommittables entry = committablesPerCheckpoint.get(checkpointId);
+        return entry == null ? Long.MIN_VALUE : entry.watermark();
+    }
+
     @Override
     public String toString() {
         return String.format(
@@ -122,16 +143,23 @@ public class WriterCommittables {
     }
 
     public static WriterCommittables from(
-            CommittableEvent event, ListSerializer<Committable> serializer) throws IOException {
-        DataInputDeserializer in = new DataInputDeserializer(event.getSerialized());
-        return new WriterCommittables(event.getCheckpointId(), serializer.deserialize(in));
+            CommittableEvent event, TypeSerializer<CheckpointCommittables> serializer)
+            throws IOException {
+        CheckpointCommittables entry = event.deserialize(serializer);
+        if (entry.checkpointId() != event.getCheckpointId()) {
+            throw new IllegalStateException(
+                    "CommittableEvent checkpoint id "
+                            + event.getCheckpointId()
+                            + " does not match payload checkpoint id "
+                            + entry.checkpointId());
+        }
+        return new WriterCommittables(entry);
     }
 
-    @VisibleForTesting
-    static void groupByCheckpoint(
-            Map<Long, List<Committable>> grouped, Collection<Committable> committables) {
-        for (Committable c : committables) {
-            grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);
-        }
+    public static WriterCommittables fromRestore(
+            RestoredCommittableEvent event, TypeSerializer<CheckpointCommittables> serializer)
+            throws IOException {
+        return new WriterCommittables(
+                event.getRestoredCheckpointId(), event.deserialize(serializer));
     }
 }

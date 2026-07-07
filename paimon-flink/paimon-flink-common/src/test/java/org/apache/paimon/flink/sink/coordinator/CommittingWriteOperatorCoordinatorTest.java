@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableSerializer;
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.CommitterOperatorTestBase;
 import org.apache.paimon.flink.sink.StoreCommitter;
@@ -34,12 +35,14 @@ import org.apache.paimon.flink.sink.state.MemoryBackendStateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
+import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.metrics.groups.OperatorCoordinatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointCoordinator;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
@@ -74,8 +77,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Unit tests for {@link CommittingWriteOperatorCoordinator}. */
 public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTestBase {
 
-    private static final ListSerializer<Committable> SERIALIZER =
-            CommittableEvent.createCommittableListSerializer();
+    private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
+            new SimpleVersionedSerializerTypeSerializerProxy<>(
+                    () ->
+                            new CheckpointCommittablesSerializer(
+                                    new CommittableSerializer(new CommitMessageSerializer())));
 
     private String commitUser;
     private volatile Throwable failureCause;
@@ -103,7 +109,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertThat(coordinator.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
 
-        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
         coordinator.notifyCheckpointComplete(1);
         coordinator.waitProcessAllActions();
 
@@ -122,8 +128,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.start();
         coordinator.waitProcessAllActions();
 
-        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
-        coordinator.handleEventFromOperator(1, 0, event(false, committable(table, 1, 2)));
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, 1, 2)));
         coordinator.notifyCheckpointComplete(1);
         coordinator.waitProcessAllActions();
 
@@ -140,19 +146,64 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.start();
         coordinator.waitProcessAllActions();
 
-        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
-        coordinator.handleEventFromOperator(0, 0, new WatermarkEvent(1024L));
+        // watermark travels with the CommittableEvent, so the coordinator commits exactly the
+        // barrier-aligned value the writer captured for that checkpoint
+        coordinator.handleEventFromOperator(0, 0, event(1024L, committable(table, 1, 1)));
         coordinator.notifyCheckpointComplete(1);
         coordinator.waitProcessAllActions();
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
 
-        // Long.MAX_VALUE watermark is ignored, so the committed watermark stays at 1024
-        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 2, 2)));
-        coordinator.handleEventFromOperator(0, 0, new WatermarkEvent(Long.MAX_VALUE));
+        // cp2 carries a later watermark
+        coordinator.handleEventFromOperator(0, 0, event(2048L, committable(table, 2, 2)));
         coordinator.notifyCheckpointComplete(2);
         coordinator.waitProcessAllActions();
-        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
 
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testWatermarkCommitFrozenPerCheckpoint() throws Exception {
+        // Regression: the coordinator must commit the watermark that was frozen at the barrier
+        // of the checkpoint being committed, not any later "current" watermark reported after the
+        // barrier.
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(100L, committable(table, 1, 1)));
+        // A later watermark arriving with cp2 must NOT bleed into cp1's snapshot
+        coordinator.handleEventFromOperator(0, 0, event(500L, committable(table, 2, 2)));
+        coordinator.notifyCheckpointComplete(1);
+        coordinator.waitProcessAllActions();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(100L);
+
+        coordinator.notifyCheckpointComplete(2);
+        coordinator.waitProcessAllActions();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(500L);
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testWatermarkAlignsMinAcrossSubtasks() throws Exception {
+        // Regression: when a checkpoint is committed, the watermark stored in the snapshot must
+        // be the min across subtasks for THAT checkpoint, so a fast subtask's later watermark
+        // cannot advance a snapshot beyond what all writers had actually observed.
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(100L, committable(table, 1, 1)));
+        coordinator.handleEventFromOperator(1, 0, event(200L, committable(table, 1, 2)));
+        coordinator.notifyCheckpointComplete(1);
+        coordinator.waitProcessAllActions();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(100L);
         coordinator.close();
     }
 
@@ -166,8 +217,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         CommittingWriteOperatorCoordinator first = createCoordinator(table, context, false);
         first.start();
         first.waitProcessAllActions();
-        first.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
-        first.handleEventFromOperator(1, 0, event(false, committable(table, 1, 2)));
+        first.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
+        first.handleEventFromOperator(1, 0, event(committable(table, 1, 2)));
         CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
         first.checkpointCoordinator(1, checkpoint);
         first.notifyCheckpointComplete(1);
@@ -187,12 +238,12 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
         assertThat(second.getCommitUser()).isEqualTo(commitUser);
 
-        second.handleEventFromOperator(0, 1, event(true, committable(table, 1, 3)));
+        second.handleEventFromOperator(0, 1, restoreEvent(1L, committable(table, 1, 3)));
         second.waitProcessAllActions();
         assertThat(second.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
 
-        second.handleEventFromOperator(1, 1, event(true, committable(table, 1, 4)));
+        second.handleEventFromOperator(1, 1, restoreEvent(1L, committable(table, 1, 4)));
         second.waitProcessAllActions();
         assertThat(second.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
@@ -212,12 +263,12 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         CommittingWriteOperatorCoordinator first = createCoordinator(table, context, false);
         first.start();
         first.waitProcessAllActions();
-        first.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        first.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
         first.notifyCheckpointComplete(1L);
         first.waitProcessAllActions();
         assertResults(table, "1, 1");
 
-        first.handleEventFromOperator(0, 0, event(false, committable(table, 2, 2)));
+        first.handleEventFromOperator(0, 0, event(committable(table, 2, 2)));
         CompletableFuture<byte[]> cp2State = new CompletableFuture<>();
         first.checkpointCoordinator(2L, cp2State);
         first.waitProcessAllActions();
@@ -232,14 +283,14 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         second.resetToCheckpoint(2L, state);
         second.start();
         second.waitProcessAllActions();
-        second.handleEventFromOperator(0, 0, event(true, committable(table, 2, 2)));
+        second.handleEventFromOperator(0, 0, restoreEvent(2L, committable(table, 2, 2)));
         second.waitProcessAllActions();
         assertThat(second.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
         assertResults(table, "1, 1");
 
         // a fresh checkpoint after recovery commits normally
-        second.handleEventFromOperator(0, 0, event(false, committable(table, 3, 3)));
+        second.handleEventFromOperator(0, 0, event(committable(table, 3, 3)));
         second.notifyCheckpointComplete(3L);
         second.waitProcessAllActions();
         assertResults(table, "1, 1", "3, 3");
@@ -263,10 +314,37 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.waitProcessAllActions();
         assertThat(checkpoint.isCompletedExceptionally()).isTrue();
 
-        coordinator.handleEventFromOperator(0, 0, event(true, committable(table, 2, 1)));
+        coordinator.handleEventFromOperator(0, 0, restoreEvent(2L, committable(table, 2, 1)));
         coordinator.waitProcessAllActions();
         assertThat(coordinator.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        coordinator.close();
+    }
+
+    /**
+     * Steady-state {@link CommittableEvent}s should never arrive while the coordinator is
+     * RESTORING: it rejects checkpoints in that state, so writers have no barrier to emit against.
+     * Guard the invariant with an explicit case so a future change to accept checkpoints during
+     * restore does not silently regress this contract.
+     */
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCommittableEventInRestoringFailsJob() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.resetToCheckpoint(2, emptyState());
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+        assertThat(coordinator.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 2, 1)));
+        coordinator.waitProcessAllActions();
+
+        assertThat(failureCause).isInstanceOf(IllegalStateException.class);
+        assertThat(failureCause).hasMessageContaining("RESTORING");
+        failureCause = null;
         coordinator.close();
     }
 
@@ -279,7 +357,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         // capture coordinator state without committing checkpoint 1
         CommittingWriteOperatorCoordinator first = createCoordinator(table, context, true);
         first.start();
-        first.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        first.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
         CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
         first.checkpointCoordinator(1, checkpoint);
         first.waitProcessAllActions();
@@ -294,7 +372,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         second.resetToCheckpoint(1, state);
         second.start();
         second.waitProcessAllActions();
-        second.handleEventFromOperator(0, 0, event(true, committable(table, 1, 1)));
+        second.handleEventFromOperator(0, 0, restoreEvent(1L, committable(table, 1, 1)));
         second.waitProcessAllActions();
 
         assertThat(failureCause).isInstanceOf(RuntimeException.class);
@@ -319,7 +397,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         List<String> expected = new ArrayList<>();
         for (long cp = 1; cp <= lastCp; cp++) {
             int value = (int) cp;
-            coordinator.handleEventFromOperator(0, 0, event(false, committable(table, cp, value)));
+            coordinator.handleEventFromOperator(0, 0, event(committable(table, cp, value)));
             expected.add(value + ", " + value);
         }
         coordinator.notifyCheckpointComplete(lastCp);
@@ -377,8 +455,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.start();
         coordinator.waitProcessAllActions();
 
-        coordinator.handleEventFromOperator(
-                0, 0, CommittableEvent.create(1L, false, Collections.emptyList(), SERIALIZER));
+        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
         coordinator.notifyCheckpointComplete(1L);
         coordinator.waitProcessAllActions();
 
@@ -401,14 +478,77 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.start();
         coordinator.waitProcessAllActions();
 
-        coordinator.handleEventFromOperator(
-                0, 0, CommittableEvent.create(1L, false, Collections.emptyList(), SERIALIZER));
+        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
         coordinator.notifyCheckpointComplete(1L);
         coordinator.waitProcessAllActions();
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.commitIdentifier()).isEqualTo(1L);
+        coordinator.close();
+    }
+
+    /**
+     * Regression: when {@code forceCreatingSnapshot} produces an empty commit, the watermark that
+     * the barrier had already frozen must be attached to the forced snapshot; otherwise the
+     * snapshot would silently reset the table's watermark to {@link Long#MIN_VALUE}.
+     */
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testForceCreateSnapshotCarriesAlignedWatermark() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.BUCKET, -1);
+                            options.remove("bucket-key");
+                            options.set(CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT, true);
+                        });
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        long frozenWatermark = 4242L;
+        coordinator.handleEventFromOperator(
+                0, 0, eventOf(1L, Collections.emptyList(), frozenWatermark));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.commitIdentifier()).isEqualTo(1L);
+        assertThat(snapshot.watermark()).isEqualTo(frozenWatermark);
+        coordinator.close();
+    }
+
+    /**
+     * Regression: writers persist an entry per (subtask, checkpoint), including empty barriers that
+     * saw no watermark yet ({@link Long#MIN_VALUE}). Alignment must observe those markers or a fast
+     * subtask's later watermark could silently advance the snapshot beyond what all subtasks had
+     * actually seen.
+     */
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testAlignmentHonorsEmptyMinValueMarker() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // subtask-0 has committables and a real watermark; subtask-1 has an empty barrier that
+        // has not yet observed any watermark.
+        coordinator.handleEventFromOperator(0, 0, event(500L, committable(table, 1, 1)));
+        coordinator.handleEventFromOperator(
+                1, 0, eventOf(1L, Collections.emptyList(), Long.MIN_VALUE));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        // Min across subtasks must include subtask-1's Long.MIN_VALUE marker, so the snapshot
+        // watermark stays at Long.MIN_VALUE rather than picking up subtask-0's 500L.
+        assertThat(snapshot.watermark()).isEqualTo(Long.MIN_VALUE);
         coordinator.close();
     }
 
@@ -433,41 +573,84 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         // cp1, cp3 in subtask-0
         writerCommittables[0] =
                 new WriterCommittables(
-                        checkpointId1,
-                        Collections.singletonList(
-                                committable(table, checkpointId1, partitionValue, normalValue++)));
-        writerCommittables[0].mergeWith(
-                new WriterCommittables(checkpointId2, Collections.emptyList()));
+                        new CheckpointCommittables(
+                                checkpointId1,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId1,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark));
         writerCommittables[0].mergeWith(
                 new WriterCommittables(
-                        checkpointId3,
-                        Collections.singletonList(
-                                committable(table, checkpointId3, partitionValue, normalValue++))));
+                        new CheckpointCommittables(
+                                checkpointId2, Collections.emptyList(), watermark)));
+        writerCommittables[0].mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                checkpointId3,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId3,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark)));
         // cp1, cp2 in subtask-1
         writerCommittables[1] =
                 new WriterCommittables(
-                        checkpointId1,
-                        Collections.singletonList(
-                                committable(table, checkpointId1, partitionValue, normalValue++)));
+                        new CheckpointCommittables(
+                                checkpointId1,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId1,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark));
         writerCommittables[1].mergeWith(
                 new WriterCommittables(
-                        checkpointId2,
-                        Collections.singletonList(
-                                committable(table, checkpointId2, partitionValue, normalValue++))));
+                        new CheckpointCommittables(
+                                checkpointId2,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId2,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark)));
         writerCommittables[1].mergeWith(
-                new WriterCommittables(checkpointId3, Collections.emptyList()));
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                checkpointId3, Collections.emptyList(), watermark)));
         // cp2, cp3 in subtask-2
-        writerCommittables[2] = new WriterCommittables(checkpointId1, Collections.emptyList());
+        writerCommittables[2] =
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                checkpointId1, Collections.emptyList(), watermark));
         writerCommittables[2].mergeWith(
                 new WriterCommittables(
-                        checkpointId2,
-                        Collections.singletonList(
-                                committable(table, checkpointId2, partitionValue, normalValue++))));
+                        new CheckpointCommittables(
+                                checkpointId2,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId2,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark)));
         writerCommittables[2].mergeWith(
                 new WriterCommittables(
-                        checkpointId3,
-                        Collections.singletonList(
-                                committable(table, checkpointId3, partitionValue, normalValue++))));
+                        new CheckpointCommittables(
+                                checkpointId3,
+                                Collections.singletonList(
+                                        committable(
+                                                table,
+                                                checkpointId3,
+                                                partitionValue,
+                                                normalValue++)),
+                                watermark)));
 
         StreamTableCommit commit = table.newCommit(commitUser);
         StoreCommitter committer =
@@ -476,7 +659,11 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         NavigableMap<Long, ManifestCommittable> result =
                 CommittingWriteOperatorCoordinator.pollManifestCommittablesForCheckpoint(
-                        checkpointId2, writerCommittables, committer, watermark);
+                        checkpointId2,
+                        writerCommittables,
+                        CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
+                                checkpointId2, writerCommittables),
+                        committer);
 
         BinaryRow partition = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(partition);
@@ -509,13 +696,24 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         assertThat(result.get(checkpointId3)).isNull();
 
-        // verify remaining subtask committables
+        // Verify remaining subtask committables. The WriterCommittables buffer keeps a
+        // per-checkpoint entry even when the checkpoint had no committables (so the frozen
+        // watermark is preserved), which is why the empty-cp3 slot of subtask-1 stays in the map
+        // instead of leaving the buffer empty.
         assertThat(writerCommittables[0].getCommittablesPerCheckpoint().size()).isEqualTo(1);
         assertThat(writerCommittables[0].getCommittablesPerCheckpoint().get(checkpointId3))
                 .isNotNull();
         assertThat(writerCommittables[0].getCommittablesPerCheckpoint().get(checkpointId3).size())
                 .isEqualTo(1);
-        assertThat(writerCommittables[1].getCommittablesPerCheckpoint().isEmpty()).isTrue();
+        assertThat(writerCommittables[1].getCommittablesPerCheckpoint().size()).isEqualTo(1);
+        assertThat(writerCommittables[1].getCommittablesPerCheckpoint().get(checkpointId3))
+                .isNotNull();
+        assertThat(
+                        writerCommittables[1]
+                                .getCommittablesPerCheckpoint()
+                                .get(checkpointId3)
+                                .isEmpty())
+                .isTrue();
         assertThat(writerCommittables[2].getCommittablesPerCheckpoint().size()).isEqualTo(1);
         assertThat(writerCommittables[2].getCommittablesPerCheckpoint().get(checkpointId3))
                 .isNotNull();
@@ -523,6 +721,46 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 .isEqualTo(1);
 
         committer.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testAlignWatermarkPerCheckpointTakesMinAcrossSubtasks() {
+        WriterCommittables[] writerCommittables = new WriterCommittables[3];
+        // subtask-0: cp1 watermark=200, cp2 watermark=500
+        writerCommittables[0] =
+                new WriterCommittables(
+                        new CheckpointCommittables(1L, Collections.emptyList(), 200L));
+        writerCommittables[0].mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(2L, Collections.emptyList(), 500L)));
+        // subtask-1: cp1 watermark=100 (smaller, wins for cp1), cp2 watermark=800 (larger, loses)
+        writerCommittables[1] =
+                new WriterCommittables(
+                        new CheckpointCommittables(1L, Collections.emptyList(), 100L));
+        writerCommittables[1].mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(2L, Collections.emptyList(), 800L)));
+        // subtask-2: cp1 watermark=300 (loses), cp2 watermark=400 (smaller, wins for cp2)
+        writerCommittables[2] =
+                new WriterCommittables(
+                        new CheckpointCommittables(1L, Collections.emptyList(), 300L));
+        writerCommittables[2].mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(2L, Collections.emptyList(), 400L)));
+
+        Map<Long, Long> upToCp1 =
+                CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
+                        1L, writerCommittables);
+        assertThat(upToCp1).hasSize(1);
+        assertThat(upToCp1.get(1L)).isEqualTo(100L);
+
+        Map<Long, Long> upToCp2 =
+                CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
+                        2L, writerCommittables);
+        assertThat(upToCp2).hasSize(2);
+        assertThat(upToCp2.get(1L)).isEqualTo(100L);
+        assertThat(upToCp2.get(2L)).isEqualTo(400L);
     }
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
@@ -565,7 +803,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 0,
                 eventOf(
                         checkpointId,
-                        false,
                         committables(
                                 table, checkpointId, GenericRow.of(1, 2L), GenericRow.of(1, 3L))));
         // write data and checkpoint task-1
@@ -574,7 +811,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 0,
                 eventOf(
                         checkpointId,
-                        false,
                         committables(
                                 table, checkpointId, GenericRow.of(1, 4L), GenericRow.of(1, 5L))));
         // 3. partial failover, fail task-0
@@ -604,7 +840,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 1,
                 eventOf(
                         checkpointId,
-                        false,
                         committables(
                                 table,
                                 checkpointId,
@@ -612,10 +847,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                 GenericRow.of(1, 3L),
                                 GenericRow.of(1, 6L))));
         // write empty data and checkpoint task-1
-        coordinator.handleEventFromOperator(
-                1,
-                0,
-                CommittableEvent.create(checkpointId, false, Collections.emptyList(), SERIALIZER));
+        coordinator.handleEventFromOperator(1, 0, emptyEvent(checkpointId));
         // notify cp complete
         coordinator.notifyCheckpointComplete(checkpointId);
         coordinator.waitProcessAllActions();
@@ -663,17 +895,15 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         // write data and checkpoint task-0
         List<Committable> subtask0Committables =
                 committables(table, checkpointId, GenericRow.of(1, 2L), GenericRow.of(1, 3L));
-        coordinator.handleEventFromOperator(
-                0, 0, eventOf(checkpointId, false, subtask0Committables));
-        CommittableEvent restoreEvent =
-                CommittableEvent.create(checkpointId, true, subtask0Committables, SERIALIZER);
+        coordinator.handleEventFromOperator(0, 0, eventOf(checkpointId, subtask0Committables));
+        // build a restore-event replay for subtask-0 to use later
+        RestoredCommittableEvent restoreEvent = restoreEventOf(checkpointId, subtask0Committables);
         // write data and checkpoint task-1
         coordinator.handleEventFromOperator(
                 1,
                 0,
                 eventOf(
                         checkpointId,
-                        false,
                         committables(
                                 table, checkpointId, GenericRow.of(1, 4L), GenericRow.of(1, 5L))));
         // 3. checkpoint complete
@@ -689,7 +919,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertThat(coordinator.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
 
-        // 5. restore subtask-0
+        // 5. restore subtask-0 — coordinator is already RUNNING, restore event is silently
+        // ignored because the checkpoint is already committed
         coordinator.handleEventFromOperator(0, 1, restoreEvent);
 
         // 6. re-trigger checkpoint
@@ -707,7 +938,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 1,
                 eventOf(
                         checkpointId,
-                        false,
                         committables(
                                 table,
                                 checkpointId,
@@ -715,10 +945,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                 GenericRow.of(1, 7L),
                                 GenericRow.of(1, 8L))));
         // write empty data and checkpoint task-1
-        coordinator.handleEventFromOperator(
-                1,
-                0,
-                CommittableEvent.create(checkpointId, false, Collections.emptyList(), SERIALIZER));
+        coordinator.handleEventFromOperator(1, 0, emptyEvent(checkpointId));
         // 7. notify cp complete
         coordinator.notifyCheckpointComplete(checkpointId);
         coordinator.waitProcessAllActions();
@@ -749,7 +976,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         CommittingWriteOperatorCoordinator first = createCoordinator(table, context, false);
         first.start();
         first.waitProcessAllActions();
-        first.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        first.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
         CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
         first.checkpointCoordinator(1L, checkpoint);
         first.notifyCheckpointComplete(1L);
@@ -764,7 +991,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         second.resetToCheckpoint(1L, state);
         second.start();
         second.waitProcessAllActions();
-        second.handleEventFromOperator(0, 1, event(true, committable(markDoneTable, 1, 1)));
+        second.handleEventFromOperator(0, 1, restoreEvent(1L, committable(markDoneTable, 1, 1)));
         second.waitProcessAllActions();
         assertThat(second.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
@@ -825,8 +1052,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertThat(freshContext.get()).isNotNull();
         assertThat(freshContext.get().isRestored()).isFalse();
         // produce a committed checkpoint so we have real state bytes to restore from
-        fresh.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
-        fresh.handleEventFromOperator(1, 0, event(false, committable(table, 1, 2)));
+        fresh.handleEventFromOperator(0, 0, event(committable(table, 1, 1)));
+        fresh.handleEventFromOperator(1, 0, event(committable(table, 1, 2)));
         CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
         fresh.checkpointCoordinator(1, checkpoint);
         fresh.notifyCheckpointComplete(1);
@@ -930,25 +1157,51 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         return result;
     }
 
-    private CommittableEvent event(boolean isRestoring, Committable committable) throws Exception {
-        List<Committable> list = new ArrayList<>();
-        list.add(committable);
-        return CommittableEvent.create(committable.checkpointId(), isRestoring, list, SERIALIZER);
+    private CommittableEvent event(Committable committable) throws Exception {
+        return eventOf(
+                committable.checkpointId(), Collections.singletonList(committable), Long.MIN_VALUE);
+    }
+
+    private CommittableEvent event(long watermark, Committable committable) throws Exception {
+        return eventOf(
+                committable.checkpointId(), Collections.singletonList(committable), watermark);
+    }
+
+    private CommittableEvent eventOf(long checkpointId, List<Committable> committables)
+            throws Exception {
+        return eventOf(checkpointId, committables, Long.MIN_VALUE);
     }
 
     private CommittableEvent eventOf(
-            long checkpointId, boolean isRestoring, List<Committable> committables)
-            throws Exception {
-        return CommittableEvent.create(checkpointId, isRestoring, committables, SERIALIZER);
+            long checkpointId, List<Committable> committables, long watermark) throws Exception {
+        return CommittableEvent.create(
+                checkpointId,
+                new CheckpointCommittables(checkpointId, committables, watermark),
+                SERIALIZER);
+    }
+
+    private CommittableEvent emptyEvent(long checkpointId) throws Exception {
+        return eventOf(checkpointId, Collections.emptyList(), Long.MIN_VALUE);
+    }
+
+    private RestoredCommittableEvent restoreEvent(
+            long restoredCheckpointId, Committable committable) throws Exception {
+        return restoreEventOf(restoredCheckpointId, Collections.singletonList(committable));
+    }
+
+    private RestoredCommittableEvent restoreEventOf(
+            long restoredCheckpointId, List<Committable> committables) throws Exception {
+        CheckpointCommittables entry =
+                new CheckpointCommittables(restoredCheckpointId, committables, Long.MIN_VALUE);
+        return RestoredCommittableEvent.create(
+                restoredCheckpointId, Collections.singletonList(entry), SERIALIZER);
     }
 
     private byte[] emptyState() throws Exception {
         return SimpleVersionedSerialization.writeVersionAndSerialize(
                 new CoordinatorStateSerializer(),
                 new CoordinatorState(
-                        commitUser,
-                        Long.MIN_VALUE,
-                        new MemoryBackendStateStore().getSerializedStates()));
+                        commitUser, new MemoryBackendStateStore().getSerializedStates()));
     }
 
     private class TestingContext implements OperatorCoordinator.Context {

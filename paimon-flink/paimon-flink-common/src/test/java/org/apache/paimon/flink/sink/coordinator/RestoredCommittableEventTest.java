@@ -23,8 +23,6 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableSerializer;
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -33,15 +31,17 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.apache.paimon.flink.sink.coordinator.WriterCommittablesTest.committableEquals;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit test for {@link CommittableEvent}. */
-public class CommittableEventTest {
+/** Unit test for {@link RestoredCommittableEvent}. */
+public class RestoredCommittableEventTest {
 
     private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
             new SimpleVersionedSerializerTypeSerializerProxy<>(
@@ -50,39 +50,50 @@ public class CommittableEventTest {
                                     new CommittableSerializer(new CommitMessageSerializer())));
 
     @Test
-    public void testSerialization() throws Exception {
-        DataIncrement dataIncrement = randomNewFilesIncrement();
-        CompactIncrement compactIncrement = randomCompactIncrement();
-        CommitMessage commitMessage =
-                new CommitMessageImpl(createTestRow(), 1, 2, dataIncrement, compactIncrement);
-        long checkpointId = 123L;
-        long watermark = 4567L;
-        Committable committable = new Committable(checkpointId, commitMessage);
-        CheckpointCommittables entry =
-                new CheckpointCommittables(
-                        checkpointId, Collections.singletonList(committable), watermark);
-        CommittableEvent event = CommittableEvent.create(checkpointId, entry, SERIALIZER);
+    public void testSerializationWithMultipleEntries() throws Exception {
+        CommitMessage message1 =
+                new CommitMessageImpl(
+                        createTestRow(), 1, 2, randomNewFilesIncrement(), randomCompactIncrement());
+        CommitMessage message2 =
+                new CommitMessageImpl(
+                        createTestRow(), 3, 4, randomNewFilesIncrement(), randomCompactIncrement());
+        Committable committable1 = new Committable(1L, message1);
+        Committable committable2 = new Committable(2L, message2);
 
-        assertThat(event.getCheckpointId()).isEqualTo(checkpointId);
-        CheckpointCommittables decoded = event.deserialize(SERIALIZER);
-        assertThat(decoded.checkpointId()).isEqualTo(checkpointId);
-        assertThat(decoded.watermark()).isEqualTo(watermark);
-        assertThat(decoded.committables()).hasSize(1);
-        assertThat(committableEquals(decoded.committables().get(0), committable)).isTrue();
+        CheckpointCommittables entry1 =
+                new CheckpointCommittables(1L, Collections.singletonList(committable1), 100L);
+        CheckpointCommittables entry2 =
+                new CheckpointCommittables(2L, Collections.singletonList(committable2), 500L);
+        long restoredCheckpointId = 2L;
+        RestoredCommittableEvent event =
+                RestoredCommittableEvent.create(
+                        restoredCheckpointId, Arrays.asList(entry1, entry2), SERIALIZER);
+
+        assertThat(event.getRestoredCheckpointId()).isEqualTo(restoredCheckpointId);
+
+        List<CheckpointCommittables> decoded = event.deserialize(SERIALIZER);
+        assertThat(decoded).hasSize(2);
+
+        assertThat(decoded.get(0).checkpointId()).isEqualTo(1L);
+        assertThat(decoded.get(0).watermark()).isEqualTo(100L);
+        assertThat(decoded.get(0).committables()).hasSize(1);
+        assertThat(committableEquals(decoded.get(0).committables().get(0), committable1)).isTrue();
+
+        assertThat(decoded.get(1).checkpointId()).isEqualTo(2L);
+        assertThat(decoded.get(1).watermark()).isEqualTo(500L);
+        assertThat(decoded.get(1).committables()).hasSize(1);
+        assertThat(committableEquals(decoded.get(1).committables().get(0), committable2)).isTrue();
     }
 
     @Test
-    public void testSerializationWithEmptyCommittable() throws Exception {
-        long checkpointId = 123L;
-        CheckpointCommittables entry =
-                new CheckpointCommittables(checkpointId, Collections.emptyList(), Long.MIN_VALUE);
-        CommittableEvent event = CommittableEvent.create(checkpointId, entry, SERIALIZER);
+    public void testSerializationWithEmptyEntries() throws Exception {
+        long restoredCheckpointId = 7L;
+        RestoredCommittableEvent event =
+                RestoredCommittableEvent.create(
+                        restoredCheckpointId, Collections.emptyList(), SERIALIZER);
 
-        assertThat(event.getCheckpointId()).isEqualTo(checkpointId);
-        CheckpointCommittables decoded = event.deserialize(SERIALIZER);
-        assertThat(decoded.checkpointId()).isEqualTo(checkpointId);
-        assertThat(decoded.watermark()).isEqualTo(Long.MIN_VALUE);
-        assertThat(decoded.committables()).isEmpty();
+        assertThat(event.getRestoredCheckpointId()).isEqualTo(restoredCheckpointId);
+        assertThat(event.deserialize(SERIALIZER)).isEmpty();
     }
 
     private static BinaryRow createTestRow() {

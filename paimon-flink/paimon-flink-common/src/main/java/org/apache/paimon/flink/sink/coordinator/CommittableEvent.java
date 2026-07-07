@@ -18,40 +18,30 @@
 
 package org.apache.paimon.flink.sink.coordinator;
 
-import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.CommittableSerializer;
-import org.apache.paimon.table.sink.CommitMessageSerializer;
-
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
-import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
+import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
- * Operator event sent from a writer subtask to {@link CommittingWriteOperatorCoordinator}, carrying
- * the committables produced for one checkpoint.
+ * Operator event sent from a writer subtask to {@link CommittingWriteOperatorCoordinator} at each
+ * barrier, carrying the {@link CheckpointCommittables} produced for that single checkpoint.
  *
- * <p>{@link Committable} is not directly serializable, so the payload is pre-serialized to {@code
- * byte[]} and decoded on the coordinator side.
- *
- * <p>{@code isRestoring=true} marks events emitted from {@code initializeState} after a global
- * failover, so the coordinator can distinguish replay traffic from normal in-flight checkpoints.
+ * <p>Payload is pre-serialized to bytes on the writer side. The wrapping {@link
+ * org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy} prepends the payload
+ * version to the byte stream, so the version does not need to be a field of this event.
  */
 public class CommittableEvent implements OperatorEvent {
 
     private static final long serialVersionUID = 1L;
 
     private final long checkpointId;
-    private final boolean isRestoring;
     private final byte[] serialized;
 
-    private CommittableEvent(long checkpointId, boolean isRestoring, byte[] serialized) {
+    private CommittableEvent(long checkpointId, byte[] serialized) {
         this.checkpointId = checkpointId;
-        this.isRestoring = isRestoring;
         this.serialized = serialized;
     }
 
@@ -59,38 +49,29 @@ public class CommittableEvent implements OperatorEvent {
         return checkpointId;
     }
 
-    public boolean isRestoring() {
-        return isRestoring;
-    }
-
     public byte[] getSerialized() {
         return serialized;
+    }
+
+    public CheckpointCommittables deserialize(TypeSerializer<CheckpointCommittables> serializer)
+            throws IOException {
+        return serializer.deserialize(new DataInputDeserializer(serialized));
     }
 
     @Override
     public String toString() {
         return String.format(
-                "CommittableEvent{checkpointId=%d, isRestoring=%b, serializedSize=%d}",
-                checkpointId, isRestoring, serialized.length);
+                "CommittableEvent{checkpointId=%d, serializedSize=%d}",
+                checkpointId, serialized.length);
     }
 
     public static CommittableEvent create(
             long checkpointId,
-            boolean isRestoring,
-            List<Committable> committables,
-            ListSerializer<Committable> listSerializer)
+            CheckpointCommittables entry,
+            TypeSerializer<CheckpointCommittables> serializer)
             throws IOException {
         DataOutputSerializer out = new DataOutputSerializer(256);
-        listSerializer.serialize(committables, out);
-        return new CommittableEvent(checkpointId, isRestoring, out.getCopyOfBuffer());
-    }
-
-    public static ListSerializer<Committable> createCommittableListSerializer() {
-        return new ListSerializer<>(createCommittableSerializer());
-    }
-
-    private static TypeSerializer<Committable> createCommittableSerializer() {
-        return new SimpleVersionedSerializerTypeSerializerProxy<>(
-                () -> new CommittableSerializer(new CommitMessageSerializer()));
+        serializer.serialize(entry, out);
+        return new CommittableEvent(checkpointId, out.getCopyOfBuffer());
     }
 }

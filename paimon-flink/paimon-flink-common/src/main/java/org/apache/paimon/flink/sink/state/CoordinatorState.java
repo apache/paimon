@@ -36,25 +36,17 @@ import java.util.Map;
 public class CoordinatorState {
 
     @Nonnull private final String commitUser;
-    private final long watermark;
     @Nonnull private final Map<String, byte[]> committerStates;
 
     public CoordinatorState(
-            @Nonnull String commitUser,
-            long watermark,
-            @Nonnull Map<String, byte[]> committerStates) {
+            @Nonnull String commitUser, @Nonnull Map<String, byte[]> committerStates) {
         this.commitUser = commitUser;
-        this.watermark = watermark;
         this.committerStates = committerStates;
     }
 
     @Nonnull
     public String getCommitUser() {
         return commitUser;
-    }
-
-    public long getWatermark() {
-        return watermark;
     }
 
     @Nonnull

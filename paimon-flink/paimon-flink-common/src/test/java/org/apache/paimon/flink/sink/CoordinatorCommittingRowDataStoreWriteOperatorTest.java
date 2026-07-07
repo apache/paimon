@@ -21,27 +21,32 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.sink.coordinator.CheckpointCommittables;
+import org.apache.paimon.flink.sink.coordinator.CheckpointCommittablesSerializer;
 import org.apache.paimon.flink.sink.coordinator.CommittableEvent;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
-import org.apache.paimon.flink.sink.coordinator.WriterCommittables;
+import org.apache.paimon.flink.sink.coordinator.RestoredCommittableEvent;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
-import org.apache.flink.core.memory.DataInputDeserializer;
+import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.checkpoint.CheckpointCoordinator;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.CoordinatorStore;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
+import org.apache.flink.runtime.state.TestTaskStateManager;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -51,6 +56,7 @@ import org.junit.jupiter.api.Timeout;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -59,8 +65,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link CoordinatorCommittingRowDataStoreWriteOperator}. */
 public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends CommitterOperatorTestBase {
 
-    private static final ListSerializer<Committable> COMMITTABLE_LIST_SERIALIZER =
-            CommittableEvent.createCommittableListSerializer();
+    private static final TypeSerializer<CheckpointCommittables> COMMITTABLES_SERIALIZER =
+            new SimpleVersionedSerializerTypeSerializerProxy<>(
+                    () ->
+                            new CheckpointCommittablesSerializer(
+                                    new CommittableSerializer(new CommitMessageSerializer())));
 
     @Test
     @Timeout(30)
@@ -103,12 +112,9 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
 
         CommittableEvent event = (CommittableEvent) events.get(0);
         assertThat(event.getCheckpointId()).isEqualTo(1L);
-        assertThat(event.isRestoring()).isFalse();
-        assertThat(
-                        WriterCommittables.from(event, COMMITTABLE_LIST_SERIALIZER)
-                                .getCommittablesPerCheckpoint()
-                                .get(1L))
-                .hasSize(1);
+        CheckpointCommittables decoded = event.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(decoded.checkpointId()).isEqualTo(1L);
+        assertThat(decoded.committables()).hasSize(1);
 
         coordinator.handleEventFromOperator(0, 0, event);
         coordinator.notifyCheckpointComplete(1);
@@ -142,21 +148,21 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         harness.processElement(GenericRow.of(1, 10L), 1);
         harness.prepareSnapshotPreBarrier(1);
         harness.snapshot(1, 10);
-        assertEventCheckpointAndRestoring(events.get(events.size() - 1), 1L, false);
+        assertCommittableEventCheckpoint(events.get(events.size() - 1), 1L);
         assertThat(operator.getPendingCommittables()).containsKey(1L);
 
         // cp2: another writing checkpoint, also aborted; cp1 buffer must still be retained
         harness.processElement(GenericRow.of(2, 20L), 2);
         harness.prepareSnapshotPreBarrier(2);
         harness.snapshot(2, 20);
-        assertEventCheckpointAndRestoring(events.get(events.size() - 1), 2L, false);
+        assertCommittableEventCheckpoint(events.get(events.size() - 1), 2L);
         assertThat(operator.getPendingCommittables()).containsKeys(1L, 2L);
 
         // cp3 completes -> headMap(3, true) clears every buffered checkpoint
         harness.processElement(GenericRow.of(3, 30L), 3);
         harness.prepareSnapshotPreBarrier(3);
         harness.snapshot(3, 30);
-        assertEventCheckpointAndRestoring(events.get(events.size() - 1), 3L, false);
+        assertCommittableEventCheckpoint(events.get(events.size() - 1), 3L);
         harness.notifyOfCompletedCheckpoint(3);
         assertThat(operator.getPendingCommittables()).isEmpty();
 
@@ -181,32 +187,135 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         OperatorSubtaskState snapshot = firstHarness.snapshot(1, 10);
         firstHarness.close();
 
-        // session 2: restore from snapshot, expect a single isRestoring=true event carrying the
-        // buffered committable, even though the writer has not produced anything new yet
+        // session 2: restore. Expect exactly one RestoredCommittableEvent carrying the buffered
+        // committables in a single payload.
         List<OperatorEvent> restoredEvents = new ArrayList<>();
         OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
                 createHarness(table, commitUser, restoredEvents::add);
         secondHarness.setup(committableSerializer);
-        secondHarness.initializeState(snapshot);
+        restoreWithCheckpointId(secondHarness, snapshot, 1L);
         secondHarness.open();
 
         assertThat(restoredEvents).hasSize(1);
-        CommittableEvent restoredEvent = (CommittableEvent) restoredEvents.get(0);
-        assertThat(restoredEvent.isRestoring()).isTrue();
-        assertThat(decodeCommittables(restoredEvent)).hasSize(1);
+        RestoredCommittableEvent restoredEvent = (RestoredCommittableEvent) restoredEvents.get(0);
+        assertThat(restoredEvent.getRestoredCheckpointId()).isEqualTo(1L);
+        List<CheckpointCommittables> entries = restoredEvent.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).checkpointId()).isEqualTo(1L);
+        assertThat(entries.get(0).committables()).hasSize(1);
 
-        // a fresh snapshot must persist nothing (the buffer was cleared on restore)
+        // a fresh snapshot must persist a single empty-Long.MIN_VALUE marker for cp2 so the
+        // coordinator can still align that (subtask, checkpoint) — the previous buffer was
+        // cleared on restore and the new barrier has not seen any watermark yet.
         CoordinatorCommittingRowDataStoreWriteOperator operator =
                 (CoordinatorCommittingRowDataStoreWriteOperator) secondHarness.getOperator();
         secondHarness.prepareSnapshotPreBarrier(2);
         secondHarness.snapshot(2, 20);
-        assertThat(operator.getPendingCommittables()).isEmpty();
+        assertThat(operator.getPendingCommittables()).containsOnlyKeys(2L);
+        CheckpointCommittables cp2 = operator.getPendingCommittables().get(2L);
+        assertThat(cp2.committables()).isEmpty();
+        assertThat(cp2.watermark()).isEqualTo(Long.MIN_VALUE);
 
         secondHarness.close();
     }
 
     @Test
-    public void testEmptyRestoreStillSendsIsRestoringSignal() throws Exception {
+    public void testRestoreReplaysFrozenWatermarkPerCheckpoint() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+
+        // session 1: two barriers, each freezing a distinct watermark; neither checkpoint completes
+        List<OperatorEvent> firstEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> firstHarness =
+                createHarness(table, commitUser, firstEvents::add);
+        firstHarness.setup(committableSerializer);
+        firstHarness.open();
+
+        firstHarness.processElement(GenericRow.of(1, 10L), 1);
+        firstHarness.processWatermark(new Watermark(100L));
+        firstHarness.prepareSnapshotPreBarrier(1);
+        firstHarness.snapshot(1, 10);
+
+        firstHarness.processElement(GenericRow.of(2, 20L), 2);
+        firstHarness.processWatermark(new Watermark(500L));
+        firstHarness.prepareSnapshotPreBarrier(2);
+        OperatorSubtaskState snapshot = firstHarness.snapshot(2, 20);
+        firstHarness.close();
+
+        // session 2: restore. Expect a single RestoredCommittableEvent carrying both persisted
+        // (checkpoint, watermark) entries in one payload.
+        List<OperatorEvent> restoredEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
+                createHarness(table, commitUser, restoredEvents::add);
+        secondHarness.setup(committableSerializer);
+        restoreWithCheckpointId(secondHarness, snapshot, 2L);
+        secondHarness.open();
+
+        assertThat(restoredEvents).hasSize(1);
+        RestoredCommittableEvent restoredEvent = (RestoredCommittableEvent) restoredEvents.get(0);
+        assertThat(restoredEvent.getRestoredCheckpointId()).isEqualTo(2L);
+        List<CheckpointCommittables> entries = restoredEvent.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(entries).hasSize(2);
+
+        assertThat(entries.get(0).checkpointId()).isEqualTo(1L);
+        assertThat(entries.get(0).watermark()).isEqualTo(100L);
+        assertThat(entries.get(0).committables()).hasSize(1);
+
+        assertThat(entries.get(1).checkpointId()).isEqualTo(2L);
+        assertThat(entries.get(1).watermark()).isEqualTo(500L);
+        assertThat(entries.get(1).committables()).hasSize(1);
+
+        secondHarness.close();
+    }
+
+    @Test
+    public void testWatermarkArrivingAfterBarrierDoesNotChangeEmittedEvent() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(committableSerializer);
+        harness.open();
+
+        harness.processElement(GenericRow.of(1, 10L), 1);
+        harness.processWatermark(new Watermark(100L));
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+        assertThat(events).hasSize(1);
+
+        // Late-arriving watermark must not touch the already-emitted event for cp1.
+        harness.processWatermark(new Watermark(500L));
+        CheckpointCommittables cp1 =
+                ((CommittableEvent) events.get(0)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp1.checkpointId()).isEqualTo(1L);
+        assertThat(cp1.watermark()).isEqualTo(100L);
+
+        // Next barrier freezes the newer watermark for cp2 without retroactively changing cp1.
+        harness.processElement(GenericRow.of(2, 20L), 2);
+        harness.prepareSnapshotPreBarrier(2);
+        harness.snapshot(2, 20);
+        assertThat(events).hasSize(2);
+        assertThat(
+                        ((CommittableEvent) events.get(0))
+                                .deserialize(COMMITTABLES_SERIALIZER)
+                                .watermark())
+                .isEqualTo(100L);
+        CheckpointCommittables cp2 =
+                ((CommittableEvent) events.get(1)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp2.checkpointId()).isEqualTo(2L);
+        assertThat(cp2.watermark()).isEqualTo(500L);
+
+        harness.close();
+    }
+
+    @Test
+    public void testEmptyRestoreStillSendsRestoreEvent() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         String commitUser = UUID.randomUUID().toString();
         TypeSerializer<Committable> committableSerializer =
@@ -222,33 +331,48 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         OperatorSubtaskState snapshot = firstHarness.snapshot(1, 10);
         firstHarness.close();
 
-        // session 2: restore. Buffer is empty, but the operator must still notify the coordinator
-        // so the coordinator can drive its own restore-alignment.
+        // session 2: restore. The buffer holds a single empty+Long.MIN_VALUE marker persisted at
+        // the previous barrier so the coordinator can align even this "no-data, no-watermark"
+        // checkpoint.
         List<OperatorEvent> restoredEvents = new ArrayList<>();
         OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
                 createHarness(table, commitUser, restoredEvents::add);
         secondHarness.setup(committableSerializer);
-        secondHarness.initializeState(snapshot);
+        restoreWithCheckpointId(secondHarness, snapshot, 1L);
         secondHarness.open();
 
         assertThat(restoredEvents).hasSize(1);
-        CommittableEvent restoredEvent = (CommittableEvent) restoredEvents.get(0);
-        assertThat(restoredEvent.isRestoring()).isTrue();
-        assertThat(decodeCommittables(restoredEvent)).isEmpty();
+        RestoredCommittableEvent restoredEvent = (RestoredCommittableEvent) restoredEvents.get(0);
+        assertThat(restoredEvent.getRestoredCheckpointId()).isEqualTo(1L);
+        List<CheckpointCommittables> entries = restoredEvent.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).checkpointId()).isEqualTo(1L);
+        assertThat(entries.get(0).committables()).isEmpty();
+        assertThat(entries.get(0).watermark()).isEqualTo(Long.MIN_VALUE);
 
         secondHarness.close();
     }
 
-    private void assertEventCheckpointAndRestoring(
-            OperatorEvent event, long expectedCheckpointId, boolean expectedRestoring) {
+    private void assertCommittableEventCheckpoint(OperatorEvent event, long expectedCheckpointId) {
         CommittableEvent committableEvent = (CommittableEvent) event;
         assertThat(committableEvent.getCheckpointId()).isEqualTo(expectedCheckpointId);
-        assertThat(committableEvent.isRestoring()).isEqualTo(expectedRestoring);
     }
 
-    private List<Committable> decodeCommittables(CommittableEvent event) throws Exception {
-        return COMMITTABLE_LIST_SERIALIZER.deserialize(
-                new DataInputDeserializer(event.getSerialized()));
+    private void restoreWithCheckpointId(
+            OneInputStreamOperatorTestHarness<InternalRow, Committable> harness,
+            OperatorSubtaskState snapshot,
+            long restoredCheckpointId)
+            throws Exception {
+        // OneInputStreamOperatorTestHarness#initializeState(OperatorSubtaskState) hard-codes the
+        // reported checkpoint id to 0. Wire the snapshot in manually and go through the
+        // initializeEmptyState() path so the operator observes the real restored checkpoint id.
+        TaskStateSnapshot taskState = new TaskStateSnapshot();
+        taskState.putSubtaskStateByOperatorID(harness.getOperator().getOperatorID(), snapshot);
+        TestTaskStateManager stateManager =
+                (TestTaskStateManager) harness.getEnvironment().getTaskStateManager();
+        stateManager.restoreLatestCheckpointState(
+                Collections.singletonMap(restoredCheckpointId, taskState));
+        harness.initializeEmptyState();
     }
 
     private FileStoreTable createUnawareBucketTable() throws Exception {

@@ -20,21 +20,22 @@ package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.TreeMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -42,43 +43,84 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Unit tests for {@link WriterCommittables}. */
 public class WriterCommittablesTest {
 
-    private static final ListSerializer<Committable> serializer =
-            CommittableEvent.createCommittableListSerializer();
+    private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
+            new SimpleVersionedSerializerTypeSerializerProxy<>(
+                    () ->
+                            new CheckpointCommittablesSerializer(
+                                    new CommittableSerializer(new CommitMessageSerializer())));
 
     @Test
     public void testGetCommittablesPerCheckpoint() throws Exception {
         CommitMessage commitMessage = createEmptyCommitMessage();
         long checkpointId = 1L;
         Committable committable = new Committable(checkpointId, commitMessage);
-        CommittableEvent event =
-                CommittableEvent.create(
-                        checkpointId, false, Collections.singletonList(committable), serializer);
-        WriterCommittables committables = WriterCommittables.from(event, serializer);
-        NavigableMap<Long, List<Committable>> resultCommittables =
+        CheckpointCommittables entry =
+                new CheckpointCommittables(
+                        checkpointId, Collections.singletonList(committable), Long.MIN_VALUE);
+        CommittableEvent event = CommittableEvent.create(checkpointId, entry, SERIALIZER);
+        WriterCommittables committables = WriterCommittables.from(event, SERIALIZER);
+        NavigableMap<Long, CheckpointCommittables> resultCommittables =
                 committables.getCommittablesPerCheckpoint();
 
         assertThat(resultCommittables.size()).isEqualTo(1);
         assertThat(resultCommittables.get(checkpointId).size()).isEqualTo(1);
 
-        Committable resultCommittable = resultCommittables.get(checkpointId).get(0);
+        Committable resultCommittable = resultCommittables.get(checkpointId).committables().get(0);
         assertThat(resultCommittable.checkpointId()).isEqualTo(checkpointId);
         assertThat(resultCommittable.commitMessage()).isEqualTo(commitMessage);
     }
 
     @Test
-    public void testGetCommittablesBeforeCheckpoint() throws Exception {
+    public void testWatermarkIsAttachedToEachCheckpoint() throws Exception {
         CommitMessage commitMessage = createEmptyCommitMessage();
-        long checkpointId = 4L;
-        Committable committable1 = new Committable(1L, commitMessage);
-        Committable committable2 = new Committable(2L, commitMessage);
-        Committable committable3 = new Committable(3L, commitMessage);
-        CommittableEvent event =
-                CommittableEvent.create(
-                        checkpointId,
-                        false,
-                        Arrays.asList(committable1, committable3, committable2),
-                        serializer);
-        WriterCommittables committables = WriterCommittables.from(event, serializer);
+        long watermark = 4242L;
+        long checkpointId = 7L;
+        Committable committable = new Committable(checkpointId, commitMessage);
+        CheckpointCommittables entry =
+                new CheckpointCommittables(
+                        checkpointId, Collections.singletonList(committable), watermark);
+        CommittableEvent event = CommittableEvent.create(checkpointId, entry, SERIALIZER);
+        WriterCommittables committables = WriterCommittables.from(event, SERIALIZER);
+        assertThat(committables.getCommittablesPerCheckpoint().get(checkpointId).watermark())
+                .isEqualTo(watermark);
+    }
+
+    @Test
+    public void testEmptyCheckpointKeepsAnEntryCarryingWatermark() throws Exception {
+        // Even when a checkpoint carries no committables the buffer still records an entry so the
+        // frozen watermark can be aligned with peer subtasks in the coordinator.
+        long watermark = 999L;
+        long checkpointId = 3L;
+        CheckpointCommittables entry =
+                new CheckpointCommittables(checkpointId, Collections.emptyList(), watermark);
+        CommittableEvent event = CommittableEvent.create(checkpointId, entry, SERIALIZER);
+        WriterCommittables committables = WriterCommittables.from(event, SERIALIZER);
+        NavigableMap<Long, CheckpointCommittables> perCheckpoint =
+                committables.getCommittablesPerCheckpoint();
+        assertThat(perCheckpoint.size()).isEqualTo(1);
+        assertThat(perCheckpoint.get(checkpointId).isEmpty()).isTrue();
+        assertThat(perCheckpoint.get(checkpointId).watermark()).isEqualTo(watermark);
+    }
+
+    @Test
+    public void testGetCommittablesBeforeCheckpoint() {
+        CommitMessage commitMessage = createEmptyCommitMessage();
+        long maxCheckpointId = 4L;
+        List<CheckpointCommittables> entries =
+                Arrays.asList(
+                        new CheckpointCommittables(
+                                1L,
+                                Collections.singletonList(new Committable(1L, commitMessage)),
+                                Long.MIN_VALUE),
+                        new CheckpointCommittables(
+                                2L,
+                                Collections.singletonList(new Committable(2L, commitMessage)),
+                                Long.MIN_VALUE),
+                        new CheckpointCommittables(
+                                3L,
+                                Collections.singletonList(new Committable(3L, commitMessage)),
+                                Long.MIN_VALUE));
+        WriterCommittables committables = new WriterCommittables(maxCheckpointId, entries);
         assertThat(committables.getCommittablesBeforeCheckpoint(-1, true).isEmpty()).isTrue();
         assertThat(committables.getCommittablesBeforeCheckpoint(1, false).isEmpty()).isTrue();
         assertThat(committables.getCommittablesBeforeCheckpoint(1, true).isEmpty()).isFalse();
@@ -87,152 +129,153 @@ public class WriterCommittablesTest {
     }
 
     @Test
-    public void testReset() throws Exception {
+    public void testReset() {
         CommitMessage commitMessage = createEmptyCommitMessage();
-        long checkpointId = 4L;
-        Committable committable1 = new Committable(1L, commitMessage);
-        Committable committable2 = new Committable(2L, commitMessage);
-        Committable committable3 = new Committable(3L, commitMessage);
-        CommittableEvent event =
-                CommittableEvent.create(
-                        checkpointId,
-                        true,
-                        Arrays.asList(committable1, committable3, committable2),
-                        serializer);
-        WriterCommittables committables = WriterCommittables.from(event, serializer);
+        long maxCheckpointId = 4L;
+        List<CheckpointCommittables> entries =
+                Arrays.asList(
+                        new CheckpointCommittables(
+                                1L,
+                                Collections.singletonList(new Committable(1L, commitMessage)),
+                                Long.MIN_VALUE),
+                        new CheckpointCommittables(
+                                2L,
+                                Collections.singletonList(new Committable(2L, commitMessage)),
+                                Long.MIN_VALUE),
+                        new CheckpointCommittables(
+                                3L,
+                                Collections.singletonList(new Committable(3L, commitMessage)),
+                                Long.MIN_VALUE));
+        WriterCommittables committables = new WriterCommittables(maxCheckpointId, entries);
         committables.reset();
         assertThat(committables.getMaxCheckpointId()).isLessThan(0);
         assertThat(committables.getCommittablesPerCheckpoint().isEmpty()).isTrue();
     }
 
     @Test
-    public void testGroupByCheckpoint() {
-        TreeMap<Long, List<Committable>> committablesPerCheckpoint = new TreeMap<>();
-        List<Committable> committables = new ArrayList<>();
-        CommitMessage commitMessage = createEmptyCommitMessage();
-        committables.add(new Committable(1L, commitMessage));
-        committables.add(new Committable(2L, commitMessage));
-        committables.add(new Committable(3L, commitMessage));
-        committables.add(new Committable(1L, commitMessage));
-        WriterCommittables.groupByCheckpoint(committablesPerCheckpoint, committables);
-        assertThat(committablesPerCheckpoint.size()).isEqualTo(3);
-        assertThat(committablesPerCheckpoint.get(1L).size()).isEqualTo(2);
-        assertThat(committablesPerCheckpoint.get(2L).size()).isEqualTo(1);
-        assertThat(committablesPerCheckpoint.get(3L).size()).isEqualTo(1);
-    }
-
-    @Test
     public void testMergeWith() throws Exception {
         CommitMessage commitMessage = createEmptyCommitMessage();
         long checkpointId = 1L;
-        WriterCommittables committables;
-        // create original committables;
         Committable committable = new Committable(checkpointId, commitMessage);
-        committables =
-                WriterCommittables.from(
-                        CommittableEvent.create(
+        WriterCommittables committables =
+                new WriterCommittables(
+                        new CheckpointCommittables(
                                 checkpointId,
-                                true,
                                 Collections.singletonList(committable),
-                                serializer),
-                        serializer);
-        // merge new checkpoint committables;
+                                Long.MIN_VALUE));
+        // merge an empty checkpoint — the entry survives so the frozen watermark for cp2 is still
+        // visible to the coordinator alignment.
         checkpointId++;
         committables.mergeWith(
-                WriterCommittables.from(
-                        CommittableEvent.create(
-                                checkpointId, false, Collections.emptyList(), serializer),
-                        serializer));
-        // verify
-        NavigableMap<Long, List<Committable>> results = committables.getCommittablesPerCheckpoint();
-        // checkpoint 2 is empty, it's ignored
-        assertThat(results.size()).isEqualTo(1);
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                checkpointId, Collections.emptyList(), Long.MIN_VALUE)));
+        NavigableMap<Long, CheckpointCommittables> results =
+                committables.getCommittablesPerCheckpoint();
+        assertThat(results.size()).isEqualTo(2);
         assertThat(results.get(1L)).isNotNull();
         assertThat(results.get(1L).size()).isEqualTo(1);
-        assertThat(results.get(2L)).isNull();
+        assertThat(results.get(2L)).isNotNull();
+        assertThat(results.get(2L).isEmpty()).isTrue();
         assertThat(committables.getMaxCheckpointId()).isEqualTo(2L);
         // merge another new committables
         checkpointId++;
         Committable committable1 = new Committable(checkpointId, commitMessage);
         Committable committable2 = new Committable(checkpointId, commitMessage);
         committables.mergeWith(
-                WriterCommittables.from(
-                        CommittableEvent.create(
+                new WriterCommittables(
+                        new CheckpointCommittables(
                                 checkpointId,
-                                false,
                                 Arrays.asList(committable1, committable2),
-                                serializer),
-                        serializer));
+                                Long.MIN_VALUE)));
         // verify
         assertThat(committables.getMaxCheckpointId()).isEqualTo(3L);
-        assertThat(committables.getCommittablesPerCheckpoint().size()).isEqualTo(2);
+        assertThat(committables.getCommittablesPerCheckpoint().size()).isEqualTo(3);
         // verify checkpoint 1
         assertThat(committables.getCommittablesPerCheckpoint().get(1L)).isNotNull();
         assertThat(committables.getCommittablesPerCheckpoint().get(1L).size()).isEqualTo(1);
         assertThat(
                         committableEquals(
-                                committables.getCommittablesPerCheckpoint().get(1L).get(0),
+                                committables
+                                        .getCommittablesPerCheckpoint()
+                                        .get(1L)
+                                        .committables()
+                                        .get(0),
                                 committable))
                 .isTrue();
-        // verify checkpoint 2
-        assertThat(committables.getCommittablesPerCheckpoint().get(2L)).isNull();
+        // verify checkpoint 2 — still present but empty
+        assertThat(committables.getCommittablesPerCheckpoint().get(2L)).isNotNull();
+        assertThat(committables.getCommittablesPerCheckpoint().get(2L).isEmpty()).isTrue();
         // verify checkpoint 3
         assertThat(committables.getCommittablesPerCheckpoint().get(3L)).isNotNull();
         assertThat(committables.getCommittablesPerCheckpoint().get(3L).size()).isEqualTo(2);
         assertThat(
                         committableEquals(
-                                committables.getCommittablesPerCheckpoint().get(3L).get(0),
+                                committables
+                                        .getCommittablesPerCheckpoint()
+                                        .get(3L)
+                                        .committables()
+                                        .get(0),
                                 committable1))
                 .isTrue();
         assertThat(
                         committableEquals(
-                                committables.getCommittablesPerCheckpoint().get(3L).get(1),
+                                committables
+                                        .getCommittablesPerCheckpoint()
+                                        .get(3L)
+                                        .committables()
+                                        .get(1),
                                 committable2))
                 .isTrue();
     }
 
     @Test
-    public void testInvalidMerge() throws Exception {
+    public void testInvalidMerge() {
         CommitMessage commitMessage = createEmptyCommitMessage();
         long checkpointId = 1024L;
         WriterCommittables committables =
-                WriterCommittables.from(
-                        CommittableEvent.create(
+                new WriterCommittables(
+                        new CheckpointCommittables(
                                 checkpointId,
-                                true,
                                 Collections.singletonList(
                                         new Committable(checkpointId, commitMessage)),
-                                serializer),
-                        serializer);
+                                Long.MIN_VALUE));
         // could not merge same checkpoint id
         assertThrows(IllegalStateException.class, () -> committables.mergeWith(committables));
 
         long oldCheckpointId = checkpointId - 1;
         WriterCommittables oldCommittables =
-                WriterCommittables.from(
-                        CommittableEvent.create(
+                new WriterCommittables(
+                        new CheckpointCommittables(
                                 oldCheckpointId,
-                                false,
                                 Collections.singletonList(
                                         new Committable(oldCheckpointId, commitMessage)),
-                                serializer),
-                        serializer);
+                                Long.MIN_VALUE));
         assertThrows(IllegalStateException.class, () -> committables.mergeWith(oldCommittables));
     }
 
     @Test
-    public void testClearCommittablesBeforeCheckpoint() throws Exception {
+    public void testClearCommittablesBeforeCheckpoint() {
         CommitMessage commitMessage = createEmptyCommitMessage();
         Committable committableCp1 = new Committable(1L, commitMessage);
         Committable committableCp2 = new Committable(2L, commitMessage);
         Committable committableCp3 = new Committable(3L, commitMessage);
-        CommittableEvent event =
-                CommittableEvent.create(
+        WriterCommittables committables =
+                new WriterCommittables(
                         3L,
-                        true,
-                        Arrays.asList(committableCp3, committableCp1, committableCp2),
-                        serializer);
-        WriterCommittables committables = WriterCommittables.from(event, serializer);
+                        Arrays.asList(
+                                new CheckpointCommittables(
+                                        1L,
+                                        Collections.singletonList(committableCp1),
+                                        Long.MIN_VALUE),
+                                new CheckpointCommittables(
+                                        2L,
+                                        Collections.singletonList(committableCp2),
+                                        Long.MIN_VALUE),
+                                new CheckpointCommittables(
+                                        3L,
+                                        Collections.singletonList(committableCp3),
+                                        Long.MIN_VALUE)));
         // clear checkpoint < 1, nothing happens
         committables.clearCommittablesBeforeCheckpoint(1L, false);
         assertThat(committables.getMaxCheckpointId()).isEqualTo(3L);
@@ -246,14 +289,22 @@ public class WriterCommittablesTest {
         assertThat(committables.getCommittablesPerCheckpoint().get(2L).size()).isEqualTo(1);
         assertThat(
                         committableEquals(
-                                committables.getCommittablesPerCheckpoint().get(2L).get(0),
+                                committables
+                                        .getCommittablesPerCheckpoint()
+                                        .get(2L)
+                                        .committables()
+                                        .get(0),
                                 committableCp2))
                 .isTrue();
         assertThat(committables.getCommittablesPerCheckpoint().get(3L)).isNotNull();
         assertThat(committables.getCommittablesPerCheckpoint().get(3L).size()).isEqualTo(1);
         assertThat(
                         committableEquals(
-                                committables.getCommittablesPerCheckpoint().get(3L).get(0),
+                                committables
+                                        .getCommittablesPerCheckpoint()
+                                        .get(3L)
+                                        .committables()
+                                        .get(0),
                                 committableCp3))
                 .isTrue();
         // clear all committables
@@ -265,19 +316,40 @@ public class WriterCommittablesTest {
     @Test
     public void testInvalidInputCommittables() {
         CommitMessage commitMessage = createEmptyCommitMessage();
+        // entry checkpointId (2L) exceeds declared maxCheckpointId (1L)
         assertThrows(
                 IllegalStateException.class,
                 () ->
-                        WriterCommittables.from(
-                                CommittableEvent.create(
-                                        1L,
-                                        false,
-                                        Collections.singletonList(
-                                                // invalid checkpoint id, it's bigger than max
-                                                // checkpoint params
-                                                new Committable(2L, commitMessage)),
-                                        serializer),
-                                serializer));
+                        new WriterCommittables(
+                                1L,
+                                Collections.singletonList(
+                                        new CheckpointCommittables(
+                                                2L,
+                                                Collections.singletonList(
+                                                        new Committable(2L, commitMessage)),
+                                                Long.MIN_VALUE))));
+    }
+
+    @Test
+    public void testDuplicateCheckpointIdRejected() {
+        CommitMessage commitMessage = createEmptyCommitMessage();
+        // two entries with the same checkpointId must not silently overwrite each other
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        new WriterCommittables(
+                                2L,
+                                Arrays.asList(
+                                        new CheckpointCommittables(
+                                                1L,
+                                                Collections.singletonList(
+                                                        new Committable(1L, commitMessage)),
+                                                Long.MIN_VALUE),
+                                        new CheckpointCommittables(
+                                                1L,
+                                                Collections.singletonList(
+                                                        new Committable(1L, commitMessage)),
+                                                Long.MIN_VALUE))));
     }
 
     private static CommitMessage createEmptyCommitMessage() {

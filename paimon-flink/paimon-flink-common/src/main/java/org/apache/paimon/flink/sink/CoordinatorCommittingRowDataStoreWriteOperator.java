@@ -19,17 +19,20 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.sink.coordinator.CheckpointCommittables;
+import org.apache.paimon.flink.sink.coordinator.CheckpointCommittablesSerializer;
 import org.apache.paimon.flink.sink.coordinator.CommittableEvent;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
-import org.apache.paimon.flink.sink.coordinator.WatermarkEvent;
+import org.apache.paimon.flink.sink.coordinator.RestoredCommittableEvent;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
+import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -43,7 +46,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
@@ -68,13 +70,17 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private final OperatorEventGateway operatorEventGateway;
 
-    /** Persisted buffer of committables not yet acknowledged by the coordinator. */
-    private transient ListState<Committable> pendingCommittableState;
+    /** Persisted buffer of pending checkpoints not yet acknowledged by the coordinator. */
+    private transient ListState<CheckpointCommittables> pendingCommittableState;
 
-    /** In-memory view of {@link #pendingCommittableState}, grouped by checkpoint id. */
-    private transient NavigableMap<Long, List<Committable>> pendingCommittables;
+    /** In-memory view of {@link #pendingCommittableState}, keyed by checkpoint id. */
+    private transient NavigableMap<Long, CheckpointCommittables> pendingCommittables;
 
-    private transient ListSerializer<Committable> serializer;
+    /** Latest watermark observed on the input; forwarded on subsequent events. */
+    private transient long currentWatermark;
+
+    private transient CheckpointCommittablesSerializer stateSerializer;
+    private transient TypeSerializer<CheckpointCommittables> eventSerializer;
 
     public CoordinatorCommittingRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -89,7 +95,17 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
-        serializer = CommittableEvent.createCommittableListSerializer();
+        stateSerializer =
+                new CheckpointCommittablesSerializer(
+                        new CommittableSerializer(new CommitMessageSerializer()));
+        // Wire the same versioned serializer as a TypeSerializer for the event channel, so the
+        // payload version is embedded in the wire format instead of being carried as a separate
+        // event field.
+        eventSerializer =
+                new SimpleVersionedSerializerTypeSerializerProxy<>(
+                        () ->
+                                new CheckpointCommittablesSerializer(
+                                        new CommittableSerializer(new CommitMessageSerializer())));
         pendingCommittableState =
                 new SimpleVersionedListState<>(
                         context.getOperatorStateStore()
@@ -97,19 +113,30 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                                         new ListStateDescriptor<>(
                                                 PENDING_COMMITTABLE_STATE_NAME,
                                                 BytePrimitiveArraySerializer.INSTANCE)),
-                        new CommittableSerializer(new CommitMessageSerializer()));
+                        stateSerializer);
         pendingCommittables = new TreeMap<>();
+        currentWatermark = Long.MIN_VALUE;
 
         if (context.isRestored()) {
-            // Always replay on restore, even if the buffer is empty: the coordinator relies on
-            // this signal to drive its own restore alignment.
             Preconditions.checkState(context.getRestoredCheckpointId().isPresent());
-            long checkpointId = context.getRestoredCheckpointId().getAsLong();
-            List<Committable> restored = new ArrayList<>();
-            pendingCommittableState.get().forEach(restored::add);
-            LOG.info("Restore {} of checkpoint {} from state", restored, checkpointId);
+            long restoredCheckpointId = context.getRestoredCheckpointId().getAsLong();
+
+            List<CheckpointCommittables> restored = new ArrayList<>();
+            for (CheckpointCommittables entry : pendingCommittableState.get()) {
+                restored.add(entry);
+            }
             pendingCommittableState.clear();
-            sendCommittableEventToCoordinator(checkpointId, true, restored);
+
+            LOG.info(
+                    "Restore pending committables {} of checkpoint {}",
+                    restored,
+                    restoredCheckpointId);
+
+            // Contract: send exactly one RestoredCommittableEvent per subtask, even when the
+            // buffer is empty, so the coordinator can drive its own restore alignment.
+            operatorEventGateway.sendEventToCoordinator(
+                    RestoredCommittableEvent.create(
+                            restoredCheckpointId, restored, eventSerializer));
         }
     }
 
@@ -117,9 +144,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pendingCommittableState.clear();
-        for (List<Committable> committables : pendingCommittables.values()) {
-            pendingCommittableState.addAll(committables);
-        }
+        pendingCommittableState.addAll(new ArrayList<>(pendingCommittables.values()));
     }
 
     @Override
@@ -127,41 +152,38 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         super.notifyCheckpointComplete(checkpointId);
         // operator state already persisted these; we no longer need to replay them on the next
         // restore
-        Map<Long, List<Committable>> completed = pendingCommittables.headMap(checkpointId, true);
-        completed.clear();
+        pendingCommittables.headMap(checkpointId, true).clear();
     }
 
     @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
-        // send the event regardless of whether the list is empty: the coordinator uses an event
-        // per (subtask, checkpoint) for alignment
-        sendCommittableEventToCoordinator(checkpointId, false, committables);
-        if (!committables.isEmpty()) {
-            pendingCommittables.put(checkpointId, committables);
-        }
+        CheckpointCommittables entry =
+                new CheckpointCommittables(checkpointId, committables, currentWatermark);
+        // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.
+        operatorEventGateway.sendEventToCoordinator(
+                CommittableEvent.create(checkpointId, entry, eventSerializer));
+        // Always buffer the per-checkpoint entry so an empty barrier — even one that has not seen
+        // a real watermark yet — survives restore. The coordinator relies on every subtask
+        // having an entry for the checkpoint being aligned so its watermark min stays sound.
+        pendingCommittables.put(checkpointId, entry);
         // Still forward committables downstream even though the commit happens on the coordinator.
         // The downstream is a DiscardingSink, but emitting keeps numRecordsOut observable and
         // preserves the operator's IO metrics.
         committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    private void sendCommittableEventToCoordinator(
-            long checkpointId, boolean isRestoring, List<Committable> committables)
-            throws IOException {
-        CommittableEvent event =
-                CommittableEvent.create(checkpointId, isRestoring, committables, serializer);
-        operatorEventGateway.sendEventToCoordinator(event);
-    }
-
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         super.processWatermark(mark);
-        operatorEventGateway.sendEventToCoordinator(new WatermarkEvent(mark));
+        // Skip Long.MAX_VALUE watermarks (batch or bounded stream end markers).
+        if (mark.getTimestamp() != Long.MAX_VALUE) {
+            currentWatermark = mark.getTimestamp();
+        }
     }
 
     @VisibleForTesting
-    NavigableMap<Long, List<Committable>> getPendingCommittables() {
+    NavigableMap<Long, CheckpointCommittables> getPendingCommittables() {
         return pendingCommittables;
     }
 }
