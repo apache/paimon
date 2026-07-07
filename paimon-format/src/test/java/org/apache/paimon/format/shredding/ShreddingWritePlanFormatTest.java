@@ -47,18 +47,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Format tests for shredding write plans. */
+/** Tests for format integration of {@link ShreddingWritePlanWriterFactory}. */
 class ShreddingWritePlanFormatTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void testParquetMapSharedShreddingFieldMetadataRoundtrip() throws Exception {
+    void testParquetWritesMapSharedShreddingMetadataThroughVariantWrapper() throws Exception {
         FileFormat format =
                 new ParquetFileFormat(
                         new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
@@ -74,7 +76,7 @@ class ShreddingWritePlanFormatTest {
     }
 
     @Test
-    void testOrcMapSharedShreddingFieldMetadataRoundtrip() throws Exception {
+    void testOrcWritesMapSharedShreddingMetadata() throws Exception {
         FileFormat format =
                 new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
 
@@ -88,18 +90,17 @@ class ShreddingWritePlanFormatTest {
     }
 
     private Map<String, Map<String, String>> writeAndReadFieldMetadata(
-            FileFormat format, String suffix, String compression) throws IOException {
+            FileFormat format, String extension, String compression) throws IOException {
         FileIO fileIO = LocalFileIO.create();
-        Path file = new Path(tempDir.resolve("data." + suffix).toUri().toString());
+        Path file = new Path(tempDir.toString(), UUID.randomUUID() + "." + extension);
         RowType rowType = logicalRowType();
 
         FormatWriterFactory writerFactory =
                 ShreddingWritePlanWriterFactories.wrapMapSharedShredding(
-                        format.createWriterFactory(rowType), rowType, sharedShreddingOptions());
+                        format.createWriterFactory(rowType), rowType, mapSharedShreddingOptions());
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = writerFactory.create(out, compression);
         writer.addElement(GenericRow.of(1, stringKeyMap("a", 10L, "b", 20L, "c", 30L)));
-        writer.addElement(GenericRow.of(2, stringKeyMap("b", 40L, "d", 50L)));
         writer.close();
         out.close();
 
@@ -114,10 +115,10 @@ class ShreddingWritePlanFormatTest {
                 DataTypes.FIELD(1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
     }
 
-    private static CoreOptions sharedShreddingOptions() {
+    private static CoreOptions mapSharedShreddingOptions() {
         Options options = new Options();
         options.setString("fields.tags.map.storage-layout", "shared-shredding");
-        options.setString("fields.tags.map.shared-shredding.max-columns", "4");
+        options.setString("fields.tags.map.shared-shredding.max-columns", "2");
         return new CoreOptions(options);
     }
 
@@ -134,9 +135,12 @@ class ShreddingWritePlanFormatTest {
         assertThat(fieldMeta.nameToId())
                 .containsEntry("a", 0)
                 .containsEntry("b", 1)
-                .containsEntry("c", 2)
-                .containsEntry("d", 3);
-        assertThat(fieldMeta.numColumns()).isEqualTo(4);
+                .containsEntry("c", 2);
+        assertThat(fieldMeta.fieldToColumns())
+                .containsEntry(0, Collections.singletonList(0))
+                .containsEntry(1, Collections.singletonList(1));
+        assertThat(fieldMeta.overflowFieldSet()).containsExactly(2);
+        assertThat(fieldMeta.numColumns()).isEqualTo(2);
         assertThat(fieldMeta.maxRowWidth()).isEqualTo(3);
     }
 
