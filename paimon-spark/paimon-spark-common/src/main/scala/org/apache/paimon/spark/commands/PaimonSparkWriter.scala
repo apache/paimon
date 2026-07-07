@@ -295,11 +295,7 @@ case class PaimonSparkWriter(
       .getOrElse(assignerParallelism)
 
     def partitionByKey(): DataFrame = {
-      repartitionByKeyPartitionHash(
-        sparkSession,
-        preparedData,
-        assignerParallelism,
-        numAssigners)
+      repartitionByKeyPartitionHash(sparkSession, preparedData, assignerParallelism, numAssigners)
     }
 
     if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
