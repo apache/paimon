@@ -219,7 +219,8 @@ public class BlobTableTest extends TableTestBase {
         }
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
@@ -569,7 +570,8 @@ public class BlobTableTest extends TableTestBase {
         // Step 4: compact blob table using DataEvolutionCompactCoordinator
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -627,7 +629,8 @@ public class BlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -697,7 +700,8 @@ public class BlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -746,7 +750,8 @@ public class BlobTableTest extends TableTestBase {
         // Step 4: compact merges files into the same split
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -1153,7 +1158,8 @@ public class BlobTableTest extends TableTestBase {
 
         // Run blob compaction
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
@@ -1174,7 +1180,9 @@ public class BlobTableTest extends TableTestBase {
 
         // Verify no more blob compaction tasks needed
         table = getTableDefault();
-        coordinator = new DataEvolutionCompactCoordinator(table, true, false);
+        coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks2;
         try {
             tasks2 = coordinator.plan();

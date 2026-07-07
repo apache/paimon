@@ -103,7 +103,8 @@ public class MultipleBlobTableTest extends TableTestBase {
         assertThat(beforeBlobFileCount).isEqualTo(40);
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
@@ -117,7 +118,9 @@ public class MultipleBlobTableTest extends TableTestBase {
         long afterBlobFileCount =
                 after.stream().filter(file -> isBlobFile(file.fileName())).count();
         assertThat(afterBlobFileCount).isLessThan(beforeBlobFileCount);
-        coordinator = new DataEvolutionCompactCoordinator(table, true, false);
+        coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         assertThat(coordinator.plan().stream().anyMatch(task -> task.type() == BLOB)).isFalse();
 
         AtomicInteger integer = new AtomicInteger(0);
@@ -145,7 +148,8 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isFalse();
 
@@ -372,7 +376,8 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -502,7 +507,8 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         // Run compaction
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         if (!tasks.isEmpty()) {
             List<CommitMessage> compactMessages = new ArrayList<>();

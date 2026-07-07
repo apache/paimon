@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
@@ -603,8 +604,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private void compactDataEvolutionTable(FileStoreTable table, boolean compactBlob)
             throws Exception {
+        Snapshot snapshot = table.latestSnapshot().get();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, compactBlob, false);
+                new DataEvolutionCompactCoordinator(table, compactBlob, false, snapshot);
         List<CommitMessage> commitMessages = new ArrayList<>();
         try {
             while (true) {
@@ -617,7 +619,8 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(commitMessages).isNotEmpty();
 
         commitMessages.addAll(
-                new DataEvolutionCompactionCommitPreparation(table).prepare(commitMessages));
+                new DataEvolutionCompactionCommitPreparation(table, snapshot)
+                        .prepare(commitMessages));
         commitDefault(commitMessages);
     }
 

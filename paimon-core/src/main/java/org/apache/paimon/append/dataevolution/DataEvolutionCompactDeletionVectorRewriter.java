@@ -68,9 +68,11 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DataEvolutionCompactDeletionVectorRewriter {
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
 
-    public DataEvolutionCompactDeletionVectorRewriter(FileStoreTable table) {
+    public DataEvolutionCompactDeletionVectorRewriter(FileStoreTable table, Snapshot snapshot) {
         this.table = table;
+        this.snapshot = snapshot;
     }
 
     public List<CommitMessage> rewriteDeletionVectors(List<CommitMessage> messages) {
@@ -78,7 +80,6 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             return Collections.emptyList();
         }
 
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
         Map<BinaryRow, AppendDeleteFileMaintainer> maintainerByParts =
                 collectMaintainers(snapshot, messages);
         if (maintainerByParts.isEmpty()) {

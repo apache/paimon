@@ -75,15 +75,16 @@ public class DataEvolutionCompactCoordinator {
     private final CompactPlanner planner;
 
     public DataEvolutionCompactCoordinator(
-            FileStoreTable table, boolean compactBlob, boolean compactVector) {
-        this(table, null, compactBlob, compactVector);
+            FileStoreTable table, boolean compactBlob, boolean compactVector, Snapshot snapshot) {
+        this(table, null, compactBlob, compactVector, snapshot);
     }
 
     public DataEvolutionCompactCoordinator(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
             boolean compactBlob,
-            boolean compactVector) {
+            boolean compactVector,
+            Snapshot snapshot) {
         CoreOptions options = table.coreOptions();
 
         long targetFileSize = options.targetFileSize(false);
@@ -94,7 +95,8 @@ public class DataEvolutionCompactCoordinator {
         this.scanner =
                 new CompactScanner(
                         table.newSnapshotReader().withPartitionFilter(partitionPredicate),
-                        table.store().newScan().withPartitionFilter(partitionPredicate));
+                        table.store().newScan().withPartitionFilter(partitionPredicate),
+                        snapshot);
         boolean materializeDeletions =
                 options.deletionVectorsEnabled()
                         && options.dataEvolutionCompactionMaterializeDeletions();
@@ -133,6 +135,10 @@ public class DataEvolutionCompactCoordinator {
         return Collections.emptyList();
     }
 
+    public Snapshot snapshot() {
+        return scanner.snapshot();
+    }
+
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 
@@ -140,12 +146,16 @@ public class DataEvolutionCompactCoordinator {
         private final Snapshot snapshot;
         private final Queue<List<ManifestFileMeta>> metas;
 
-        private CompactScanner(SnapshotReader snapshotReader, FileStoreScan scan) {
+        private CompactScanner(
+                SnapshotReader snapshotReader, FileStoreScan scan, Snapshot snapshot) {
             this.scan = scan;
-            this.snapshot = snapshotReader.snapshotManager().latestSnapshot();
+            this.snapshot = snapshot;
 
             List<ManifestFileMeta> manifestFileMetas =
-                    snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
+                    snapshotReader
+                            .manifestsReader()
+                            .read(this.snapshot, ScanMode.ALL)
+                            .filteredManifests;
 
             if (allContainsRowId(manifestFileMetas)) {
                 RangeHelper<ManifestFileMeta> rangeHelper =

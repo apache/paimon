@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
@@ -28,18 +29,21 @@ import java.util.List;
 public class DataEvolutionCompactionCommitPreparation {
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
 
-    public DataEvolutionCompactionCommitPreparation(FileStoreTable table) {
+    public DataEvolutionCompactionCommitPreparation(FileStoreTable table, Snapshot snapshot) {
         this.table = table;
+        this.snapshot = snapshot;
     }
 
     public List<CommitMessage> prepare(List<CommitMessage> messages) {
         List<CommitMessage> result = new ArrayList<>();
         result.addAll(
-                new DataEvolutionCompactDeletionVectorRewriter(table)
+                new DataEvolutionCompactDeletionVectorRewriter(table, snapshot)
                         .rewriteDeletionVectors(messages));
         result.addAll(
-                new DataEvolutionCompactGlobalIndexDropper(table).dropGlobalIndexes(messages));
+                new DataEvolutionCompactGlobalIndexDropper(table, snapshot)
+                        .dropGlobalIndexes(messages));
         return result;
     }
 }

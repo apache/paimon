@@ -466,7 +466,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 .thenReturn(Arrays.asList(entry1, entry2).iterator());
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         assertThat(tasks).hasSize(1);
@@ -546,7 +546,8 @@ public class DataEvolutionCompactCoordinatorTest {
         when(partitionPredicate.test(partitionB)).thenReturn(true);
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, partitionPredicate, false, false, snapshot);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         assertThat(tasks).hasSize(1);

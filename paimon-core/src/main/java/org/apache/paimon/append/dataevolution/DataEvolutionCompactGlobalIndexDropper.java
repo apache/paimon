@@ -46,19 +46,16 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 class DataEvolutionCompactGlobalIndexDropper {
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
 
-    DataEvolutionCompactGlobalIndexDropper(FileStoreTable table) {
+    DataEvolutionCompactGlobalIndexDropper(FileStoreTable table, Snapshot snapshot) {
         this.table = table;
+        this.snapshot = snapshot;
     }
 
     List<CommitMessage> dropGlobalIndexes(List<CommitMessage> messages) {
         Set<BinaryRow> partitions = materializedPartitions(messages);
         if (partitions.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        if (snapshot == null) {
             return Collections.emptyList();
         }
 

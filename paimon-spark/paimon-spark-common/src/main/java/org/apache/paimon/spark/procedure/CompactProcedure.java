@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
@@ -498,8 +499,13 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
         List<DataEvolutionCompactTask> compactionTasks;
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
         DataEvolutionCompactCoordinator compactCoordinator =
-                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, partitionPredicate, false, false, snapshot);
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         try {
@@ -581,7 +587,8 @@ public class CompactProcedure extends BaseProcedure {
                                         messageSerializerser.getVersion(), serializedMessage));
                     }
                     messages.addAll(
-                            new DataEvolutionCompactionCommitPreparation(table).prepare(messages));
+                            new DataEvolutionCompactionCommitPreparation(table, snapshot)
+                                    .prepare(messages));
                     commit.commit(messages);
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);
