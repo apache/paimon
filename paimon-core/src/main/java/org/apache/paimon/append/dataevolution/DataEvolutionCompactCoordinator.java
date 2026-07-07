@@ -96,14 +96,13 @@ public class DataEvolutionCompactCoordinator {
                         table.newSnapshotReader().withPartitionFilter(partitionPredicate),
                         table.store().newScan().withPartitionFilter(partitionPredicate),
                         snapshot);
-        boolean reassignRowIdAndMaterializeDeletions =
-                options.deletionVectorsEnabled()
-                        && options.dataEvolutionCompactionReassignRowIdAndMaterializeDeletions();
+        boolean rewriteRowIds =
+                options.deletionVectorsEnabled() && options.dataEvolutionCompactionRewriteRowIds();
         this.planner =
                 new CompactPlanner(
                         compactBlob,
                         compactVector,
-                        reassignRowIdAndMaterializeDeletions,
+                        rewriteRowIds,
                         table.store().newIndexFileHandler(),
                         scanner.snapshot(),
                         targetFileSize,

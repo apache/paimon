@@ -25,6 +25,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -77,12 +78,14 @@ import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests filename-anchored deletion vectors for data evolution tables. */
 public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private static final Range FULL_RANGE = new Range(0, 14);
     private static final Range FIRST_RANGE = new Range(0, 4);
+    private static final int VECTOR_DIM = 2;
     private static final List<DvSpec> DEFAULT_DV_SPECS =
             Arrays.asList(
                     new DvSpec(new Range(0, 4), 1, 4),
@@ -371,10 +374,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
-                        .key(),
-                "true");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -425,10 +425,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         dynamicOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), targetFileSize + " B");
         dynamicOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
-        dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
-                        .key(),
-                "true");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -462,10 +459,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
-                        .key(),
-                "true");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -491,10 +485,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
-                        .key(),
-                "true");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -508,6 +499,52 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertDeletionFileRanges(split);
         assertThat(split.mergedRowCount()).hasValue(10L);
         assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testMaterializeCompactionFailsFastForDedicatedVectorFiles() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()));
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "128 MB");
+        schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "128 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f1");
+        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
+        catalog.createTable(identifier("vector_dv_table"), schemaBuilder.build(), true);
+
+        FileStoreTable table = getTable(identifier("vector_dv_table"));
+        for (int batch = 0; batch < 2; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(
+                            GenericRow.of(
+                                    rowId,
+                                    BinaryVector.fromPrimitiveArray(
+                                            new float[] {rowId, rowId + 0.5F})));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(
+                        table.store().newScan().plan().files().stream()
+                                .map(ManifestEntry::file)
+                                .anyMatch(file -> isVectorStoreFile(file.fileName())))
+                .isTrue();
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(FIRST_RANGE, 1)));
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        assertThatThrownBy(() -> compactDataEvolutionTable(table.copy(dynamicOptions), false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Materializing deletion vectors for vector-store files is not supported.");
     }
 
     @Test
@@ -629,7 +666,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         commitMessages.addAll(
                 new DataEvolutionCompactionCommitPreparation(table, snapshot)
                         .prepare(commitMessages));
-        commitDefault(commitMessages);
+        commit(table, commitMessages);
     }
 
     private void commitDeletionVectors(FileStoreTable table, List<DvSpec> deletionVectorSpecs)
@@ -659,7 +696,8 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
             }
         }
 
-        commitDefault(
+        commit(
+                table,
                 Collections.singletonList(
                         new CommitMessageImpl(
                                 BinaryRow.EMPTY_ROW,
@@ -672,6 +710,13 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                         newIndexFiles,
                                         deletedIndexFiles),
                                 CompactIncrement.emptyIncrement())));
+    }
+
+    private static void commit(FileStoreTable table, List<CommitMessage> commitMessages)
+            throws Exception {
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
     }
 
     private Map<Range, String> anchorFilesByRange(FileStoreTable table) {

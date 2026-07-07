@@ -228,10 +228,11 @@ Deleting rows with deletion vectors does not physically remove the original
 data immediately. If a table has many deleted rows, run compaction to
 materialize the deletions; otherwise, the deleted data still consumes storage
 space and may reduce read efficiency. Set
-`data-evolution.compaction.reassign-row-id-and-materialize-deletions=true` for
-compaction to rewrite all column files in the compacted range, reassign row IDs,
-and remove the materialized deletion vectors. This also drops global indexes for
-the affected partitions because row IDs change.
+`data-evolution.compaction.rewrite-row-ids=true` for compaction to rewrite all
+column files in the compacted range, physically apply deletion vectors, and
+reassign row IDs. Enable this only when callers do not rely on stable `_ROW_ID`;
+this invalidates row-id based references and drops global indexes for affected
+partitions.
 
 :::
 
@@ -254,7 +255,7 @@ To physically remove deleted rows during compaction:
 ```sql
 CALL sys.compact(
     table => 'target_table',
-    options => 'data-evolution.compaction.reassign-row-id-and-materialize-deletions=true'
+    options => 'data-evolution.compaction.rewrite-row-ids=true'
 );
 ```
 

@@ -605,7 +605,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = false)
+      compactDataEvolutionTable(rewriteRowIds = false)
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -645,7 +645,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = true)
+      compactDataEvolutionTable(rewriteRowIds = true)
 
       checkAnswer(
         sql("SELECT id, b, c FROM t ORDER BY id"),
@@ -692,7 +692,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       assert(btreeIndexEntryCount("t") > 0)
 
       sql("DELETE FROM t WHERE id IN (2, 4)")
-      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = true)
+      compactDataEvolutionTable(rewriteRowIds = true)
 
       checkAnswer(
         sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
@@ -701,14 +701,15 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  private def compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions: Boolean): Unit = {
-    val materializeOption =
-      if (reassignRowIdAndMaterializeDeletions) {
-        ",data-evolution.compaction.reassign-row-id-and-materialize-deletions=true"
+  private def compactDataEvolutionTable(rewriteRowIds: Boolean): Unit = {
+    val rewriteRowIdsOption =
+      if (rewriteRowIds) {
+        ",data-evolution.compaction.rewrite-row-ids=true"
       } else {
         ""
       }
-    sql(s"CALL sys.compact(table => 't', options => 'compaction.min.file-num=2$materializeOption')")
+    sql(
+      s"CALL sys.compact(table => 't', options => 'compaction.min.file-num=2$rewriteRowIdsOption')")
   }
 
   private def btreeIndexEntryCount(tableName: String): Int = {

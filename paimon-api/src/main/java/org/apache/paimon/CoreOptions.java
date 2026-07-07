@@ -2427,18 +2427,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
-    public static final ConfigOption<Boolean>
-            DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS =
-                    key("data-evolution.compaction.reassign-row-id-and-materialize-deletions")
-                            .booleanType()
-                            .defaultValue(false)
-                            .withDescription(
-                                    "Whether to reassign row IDs and physically apply deletions during compaction. "
-                                            + "For data-evolution tables, "
-                                            + "enabling this triggers full-column compaction (including blobs and vectors), "
-                                            + "row-id reassignment, and global index invalidation. "
-                                            + "Set to true only when physical deletion is required. "
-                                            + "If the goal is merely to merge small files with a low deletion ratio, keep this disabled.");
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
+            key("data-evolution.compaction.rewrite-row-ids")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
+                                    + "Enable only when callers do not rely on stable _ROW_ID; "
+                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
 
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
@@ -3940,8 +3936,8 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_BITMAP64);
     }
 
-    public boolean dataEvolutionCompactionReassignRowIdAndMaterializeDeletions() {
-        return options.get(DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS);
+    public boolean dataEvolutionCompactionRewriteRowIds() {
+        return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
     }
 
     public FileIndexOptions indexColumnsOptions() {

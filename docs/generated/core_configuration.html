@@ -465,10 +465,10 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
-            <td><h5>data-evolution.compaction.reassign-row-id-and-materialize-deletions</h5></td>
+            <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to reassign row IDs and physically apply deletions during compaction. For data-evolution tables, enabling this triggers full-column compaction (including blobs and vectors), row-id reassignment, and global index invalidation. Set to true only when physical deletion is required. If the goal is merely to merge small files with a low deletion ratio, keep this disabled.</td>
+            <td>Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. Enable only when callers do not rely on stable _ROW_ID; this invalidates row-id based references and drops global indexes for affected partitions.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
