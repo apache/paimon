@@ -5,7 +5,11 @@ sidebar_position: 13
 
 # Data Lineage
 
-Paimon implements [FLIP-314](https://cwiki.apache.org/confluence/spaces/FLINK/pages/255070913/FLIP-314+Support+Customized+Job+Lineage+Listener) to expose lineage information through Flink's native `LineageVertexProvider` interface. This allows lineage consumers (such as [OpenLineage](https://openlineage.io/docs/integrations/flink/flink2)) to automatically discover Paimon datasets in the Flink job graph.
+Paimon implements [FLIP-314](https://cwiki.apache.org/confluence/spaces/FLINK/pages/255070913/FLIP-314+Support+Customized+Job+Lineage+Listener) to expose lineage information through Flink's native [LineageVertexProvider](https://nightlies.apache.org/flink/flink-docs-stable/docs/internals/data_lineage/) interface. This allows lineage consumers (such as [OpenLineage](https://openlineage.io/docs/integrations/flink/flink2)) to automatically discover Paimon datasets in the Flink job graph.
+
+:::info
+Data Lineage support is available only for Flink 2.0 and above.
+:::
 
 ## Table API / SQL
 
