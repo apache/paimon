@@ -52,6 +52,7 @@ from pypaimon.read.scanner.primary_key_table_split_generator import \
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
 
 
@@ -221,7 +222,15 @@ class FileScanner:
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
-        self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
+        row_ranges = (
+            _row_ranges_from_predicate(predicate) if predicate else None
+        )
+        if predicate and row_ranges is not None:
+            self.predicate_for_stats = remove_row_id_filter(predicate)
+        else:
+            self.predicate_for_stats = predicate
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, {SpecialFields.ROW_ID.name})
         # Partition columns aren't in data files, so skip them for value-stats pruning.
         self.predicate_for_stats = exclude_predicate_with_fields(
             self.predicate_for_stats, set(self.table.partition_keys))

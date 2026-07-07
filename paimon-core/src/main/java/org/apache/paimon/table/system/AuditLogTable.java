@@ -341,6 +341,16 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withFilter(Predicate predicate, Predicate pushdownPredicate) {
+            Optional<Predicate> converted = convert(predicate);
+            Optional<Predicate> convertedPushdown = convert(pushdownPredicate);
+            if (converted.isPresent()) {
+                wrapped.withFilter(converted.get(), convertedPushdown.orElse(null));
+            }
+            return this;
+        }
+
+        @Override
         public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
             wrapped.withPartitionFilter(partitionSpec);
             return this;

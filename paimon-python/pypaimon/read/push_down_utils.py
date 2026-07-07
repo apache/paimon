@@ -150,6 +150,12 @@ def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
             filtered.append(r)
         return PredicateBuilder.and_predicates(filtered)
     if predicate.method == "or":
+        fields = _get_all_fields(predicate)
+        if (
+            SpecialFields.ROW_ID.name in fields
+            and fields != {SpecialFields.ROW_ID.name}
+        ):
+            return predicate
         new_children = []
         for c in predicate.literals or []:
             r = remove_row_id_filter(c)
