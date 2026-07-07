@@ -57,7 +57,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -754,12 +753,14 @@ public class SchemaValidation {
         if (StringUtils.isEmpty(compression)) {
             return;
         }
-        String normalized = compression.toLowerCase(Locale.ROOT);
-        if (!"none".equals(normalized) && !"lz4".equals(normalized) && !"zstd".equals(normalized)) {
+        try {
+            MapSharedShreddingUtils.normalizeFieldDictCompression(compression);
+        } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(
                     String.format(
                             "MAP shared-shredding only supports none/lz4/zstd compression, but %s is %s.",
-                            optionKey, compression));
+                            optionKey, compression),
+                    e);
         }
     }
 

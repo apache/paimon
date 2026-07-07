@@ -296,7 +296,7 @@ public class MapSharedShreddingUtils {
         return compression == null || "none".equalsIgnoreCase(compression);
     }
 
-    private static String normalizeFieldDictCompression(@Nullable String compression) {
+    public static String normalizeFieldDictCompression(@Nullable String compression) {
         if (compression == null) {
             return MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION;
         }
