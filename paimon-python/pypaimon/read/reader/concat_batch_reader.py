@@ -16,7 +16,7 @@
 # under the License.
 
 import collections
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -126,7 +126,6 @@ class MergeAllBatchReader(RecordBatchReader):
                     )
         else:
             self.merged_batch = None
-            return None
         dataset = ds.InMemoryDataset(self.merged_batch)
         self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
         return self.reader.read_next_batch()
@@ -241,7 +240,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
-                 blob_as_descriptor: bool = False, deletion_vector=None):
+                 blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
@@ -253,28 +252,31 @@ class BlobFallbackBatchReader(RecordBatchReader):
         else:
             self._deletion_vector_range, self._deletion_vector = deletion_vector
         self._returned = False
+        self._batch_size = max(1, batch_size)
+        self._target_row_ids: Optional[List[int]] = None
+        self._position = 0
         self._readers: List[RecordBatchReader] = []
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        if self._returned:
+        if self._target_row_ids is None:
+            self._target_row_ids = self._compute_target_row_ids()
+
+        if self._position >= len(self._target_row_ids):
             return None
-        self._returned = True
+
+        batch_row_ids = self._target_row_ids[
+            self._position:self._position + self._batch_size
+        ]
+        self._position += len(batch_row_ids)
 
         groups: Dict[int, Dict[int, Tuple[object, bool]]] = {}
-        target_row_ids = self._target_row_ids()
 
         for file, supplier in self._file_reader_suppliers:
-            row_ids = self._selected_row_ids(file)
-            blob_values = self._read_blob_values(file, supplier)
-            if len(blob_values) != len(row_ids):
-                raise ValueError(
-                    "Blob fallback reader returned an unexpected row count "
-                    f"for {file.file_name}: expect {len(row_ids)}, got {len(blob_values)}."
-                )
-            if not row_ids:
+            blob_values = self._read_blob_values(file, supplier, set(batch_row_ids))
+            if not blob_values:
                 continue
             group = groups.setdefault(file.max_sequence_number, {})
-            for row_id, blob in zip(row_ids, blob_values):
+            for row_id, blob in blob_values.items():
                 if row_id in group:
                     raise ValueError(
                         "Blob files within the same max sequence should not overlap."
@@ -293,7 +295,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
             return None
 
         result = []
-        for row_id in target_row_ids:
+        for row_id in batch_row_ids:
             found = False
             for max_sequence_number in sorted(groups.keys(), reverse=True):
                 candidate = groups[max_sequence_number].get(row_id)
@@ -312,7 +314,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
             names=[self._field_name],
         )
 
-    def _target_row_ids(self) -> List[int]:
+    def _compute_target_row_ids(self) -> List[int]:
         file_ranges = [
             file.row_id_range()
             for file, _ in self._file_reader_suppliers
@@ -357,23 +359,51 @@ class BlobFallbackBatchReader(RecordBatchReader):
             row_id - self._deletion_vector_range.from_
         )
 
-    def _read_blob_values(self, file: DataFileMeta, supplier: Callable) -> List[object]:
+    def _read_blob_values(
+        self, file: DataFileMeta, supplier: Callable, wanted_row_ids: Set[int]
+    ) -> Dict[int, object]:
+        selected_row_ids = self._selected_row_ids(file)
+        positions_and_row_ids = [
+            (pos, row_id)
+            for pos, row_id in enumerate(selected_row_ids)
+            if row_id in wanted_row_ids
+        ]
+        if not positions_and_row_ids:
+            return {}
+
         reader = supplier()
         if reader is None:
-            return []
-        self._readers.append(reader)
+            return {}
         try:
+            if len(reader.blob_lengths) != len(selected_row_ids):
+                raise ValueError(
+                    "Blob fallback reader returned an unexpected row count "
+                    f"for {file.file_name}: expect {len(selected_row_ids)}, "
+                    f"got {len(reader.blob_lengths)}."
+                )
+            blob_lengths = [reader.blob_lengths[pos] for pos, _ in positions_and_row_ids]
+            blob_offsets = [reader.blob_offsets[pos] for pos, _ in positions_and_row_ids]
             iterator = BlobRecordIterator(
                 reader._file_io,
                 reader.file_path,
-                reader.blob_lengths,
-                reader.blob_offsets,
+                blob_lengths,
+                blob_offsets,
                 self._field_name,
                 reader._input_stream,
             )
-            return [row.values[0] for row in iterator]
+
+            blobs = []
+            for row in iterator:
+                blobs.append(row.values[0])
+            # blobs = [row.values[0] for row in iterator]
+            return {
+                row_id: blob
+                for (_, row_id), blob in zip(positions_and_row_ids, blobs)
+            }
         except AttributeError as e:
             raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
+        finally:
+            reader.close()
 
     def close(self) -> None:
         for reader in self._readers:

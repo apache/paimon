@@ -69,12 +69,13 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
         )
         self._values_by_file_name = values_by_file_name
 
-    def _read_blob_values(self, file, supplier):
+    def _read_blob_values(self, file, supplier, wanted_row_ids):
         values = self._values_by_file_name[file.file_name]
-        return [
-            values[row_id - file.first_row_id]
+        return {
+            row_id: values[row_id - file.first_row_id]
             for row_id in self._selected_row_ids(file)
-        ]
+            if row_id in wanted_row_ids
+        }
 
 
 def _file(name, first_row_id, row_count, max_sequence_number):

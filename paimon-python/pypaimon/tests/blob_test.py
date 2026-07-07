@@ -28,7 +28,9 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.common.options import Options
+from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
@@ -245,6 +247,59 @@ class BlobTest(unittest.TestCase):
         self.assertIsInstance(blob, BlobView)
         self.assertFalse(blob.is_resolved())
         self.assertEqual(blob.view_struct, view_struct)
+
+    def test_blob_fallback_batch_reader_respects_batch_size(self):
+        class FakeBlobReader:
+            def __init__(self):
+                self._file_io = None
+                self.file_path = "fake.blob"
+                self.blob_lengths = [20, 20, 20, 20, 20]
+                self.blob_offsets = [0, 100, 200, 300, 400]
+                self._input_stream = None
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        data_file = DataFileMeta(
+            file_name="fake.blob",
+            file_size=0,
+            row_count=5,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=10,
+            file_path="fake.blob",
+        )
+        reader = BlobFallbackBatchReader(
+            [(data_file, FakeBlobReader)],
+            "picture",
+            pa.large_binary(),
+            blob_as_descriptor=True,
+            batch_size=2,
+        )
+
+        first = reader.read_arrow_batch()
+        second = reader.read_arrow_batch()
+        third = reader.read_arrow_batch()
+        self.assertIsNone(reader.read_arrow_batch())
+
+        self.assertEqual(first.num_rows, 2)
+        self.assertEqual(second.num_rows, 2)
+        self.assertEqual(third.num_rows, 1)
+        offsets = []
+        for batch in (first, second, third):
+            offsets.extend(
+                BlobDescriptor.deserialize(value.as_py()).offset
+                for value in batch.column("picture")
+            )
+        self.assertEqual(offsets, [4, 104, 204, 304, 404])
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
