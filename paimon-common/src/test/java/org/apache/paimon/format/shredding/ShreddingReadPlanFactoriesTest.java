@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ShreddingReadPlanFactories}. */
@@ -51,6 +52,45 @@ class ShreddingReadPlanFactoriesTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(
                         "Composing multiple active shredding read plans is not supported.");
+    }
+
+    @Test
+    void testIdentityUsesStructuralTypeEquality() {
+        RowType logicalType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.INT()));
+        RowType equivalentPhysicalType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.INT()));
+
+        assertThat(new TestReadPlan(logicalType, equivalentPhysicalType).isIdentity()).isTrue();
+    }
+
+    private static class TestReadPlan implements ShreddingReadPlan {
+
+        private final RowType logicalType;
+        private final RowType physicalType;
+
+        private TestReadPlan(RowType logicalType, RowType physicalType) {
+            this.logicalType = logicalType;
+            this.physicalType = physicalType;
+        }
+
+        @Override
+        public RowType logicalRowType() {
+            return logicalType;
+        }
+
+        @Override
+        public RowType physicalRowType() {
+            return physicalType;
+        }
+
+        @Override
+        public ShreddingBatchAssembler batchAssembler() {
+            return new ShreddingBatchAssembler() {
+                @Override
+                public VectorizedColumnBatch assemble(VectorizedColumnBatch physicalBatch) {
+                    return physicalBatch;
+                }
+            };
+        }
     }
 
     private static class ActiveReadPlanFactory implements ShreddingReadPlanFactory {

@@ -30,6 +30,6 @@ public interface ShreddingReadPlan {
     ShreddingBatchAssembler batchAssembler();
 
     default boolean isIdentity() {
-        return logicalRowType() == physicalRowType();
+        return logicalRowType().equals(physicalRowType());
     }
 }
