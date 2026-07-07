@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MapStorageLayout
+import org.apache.paimon.data.shredding.MapSelectedKeysMetadataUtils
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils
 import org.apache.paimon.spark.PaimonScan
 
@@ -173,6 +174,10 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
   }
 
   private def canPushDown(scan: PaimonScan, access: MapKeyAccess): Boolean = {
+    if (!canEncodeKey(access.key)) {
+      return false
+    }
+
     access.mapType match {
       case MapType(StringType, _, _) =>
         fieldType(scan.table.rowType(), access.path) match {
@@ -181,18 +186,18 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
               CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.path.head)
             layout match {
               case MapStorageLayout.SHARED_SHREDDING =>
-                if (access.path.length != 1) {
-                  throw new UnsupportedOperationException(
-                    s"Nested shared-shredding MAP selected-key pushdown is not supported: " +
-                      s"${access.path.mkString(".")}.")
-                }
-                true
+                access.path.length == 1
               case _ => true
             }
           case _ => false
         }
       case _ => false
     }
+  }
+
+  private def canEncodeKey(key: String): Boolean = {
+    !key.contains(MapSelectedKeysMetadataUtils.KEY_DELIMITER) &&
+    !key.startsWith(MapSelectedKeysMetadataUtils.METADATA_KEY)
   }
 
   private def isStringKeyMap(mapType: org.apache.paimon.types.MapType): Boolean = {

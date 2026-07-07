@@ -19,9 +19,10 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
+import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
 import org.apache.paimon.spark.execution.TruncatePaimonTableWithFilterExec
 
 import org.apache.spark.sql.{DataFrame, PaimonUtils, Row}
@@ -29,6 +30,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, 
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.execution.CommandResultExec
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.functions._
 import org.junit.jupiter.api.Assertions
 
@@ -115,6 +117,19 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
       // topN
       val sqlText2 = "SELECT id FROM T ORDER BY id ASC NULLS LAST LIMIT 5"
       Assertions.assertEquals(getPaimonScan(sqlText2), getPaimonScan(sqlText2))
+    }
+  }
+
+  test("Paimon Optimization: map selected-key pushdown skips metadata-unsafe keys") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (id INT, attrs MAP<STRING, BIGINT>)")
+
+      val delimiterKeyScan = mapSelectedKeysPaimonScan("SELECT attrs['a;b'] FROM T")
+      Assertions.assertTrue(delimiterKeyScan.pushedMapSelectedKeys.isEmpty)
+
+      val metadataPrefixKeyScan =
+        mapSelectedKeysPaimonScan("SELECT attrs['__PAIMON_MAP_SELECTED_KEYS:key1'] FROM T")
+      Assertions.assertTrue(metadataPrefixKeyScan.pushedMapSelectedKeys.isEmpty)
     }
   }
 
@@ -232,6 +247,12 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
   }
 
   def extractorExpression(cteIndex: Int, output: Seq[Attribute], fieldIndex: Int): NamedExpression
+
+  private def mapSelectedKeysPaimonScan(sqlText: String): PaimonScan = {
+    PushDownMapSelectedKeys(sql(sqlText).queryExecution.optimizedPlan).collectFirst {
+      case relation: DataSourceV2ScanRelation => relation.scan.asInstanceOf[PaimonScan]
+    }.get
+  }
 
   def checkTruncatePaimonTable(df: DataFrame): Unit = {
     val plan = df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan
