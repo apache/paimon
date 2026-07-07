@@ -57,10 +57,10 @@ Please note that
   ```
   After these operations, partition `dt=2022-01-01` uses 4 buckets, `dt=2022-01-02` uses 8 buckets, and any
   new partitions will use the latest table-level default (8 buckets in this case).
-  Each partition retains its own bucket count from its data files, 
+  Each partition retains its own bucket count from its data files,
   and the new bucket count only applies to newly created partitions or partitions that
   have been reorganized with `INSERT OVERWRITE`.
-  
+
 :::warning
   Per-partition bucket counts are currently supported by the **Flink** engine only. The **Spark** writer
   still derives the bucket from the single table-level bucket count, so when partitions have different
@@ -73,8 +73,8 @@ Please note that
 - **Unpartitioned tables** require a full rescale before writing. If you change the bucket number and attempt
   to write without reorganizing the data first, a `RuntimeException` will be thrown:
   ```text
-  Try to write table/partition ... with a new bucket num ..., 
-  but the previous bucket num is ... Please switch to batch mode, 
+  Try to write table/partition ... with a new bucket num ...,
+  but the previous bucket num is ... Please switch to batch mode,
   and perform INSERT OVERWRITE to rescale current data layout first.
   ```
 - During overwrite period, make sure there are no other jobs writing the same table/partition.
