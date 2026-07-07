@@ -416,7 +416,6 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 for (_, row_id), blob in zip(positions_and_row_ids, blobs)
             }
         except AttributeError as e:
-            self._close_state_reader(state)
             raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
 
     def _reader_for_state(self, state: _BlobFileState):
@@ -427,19 +426,14 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             state.reader_initialized = True
             return None
-        try:
-            if len(reader.blob_lengths) != len(state.selected_row_ids):
-                raise ValueError(
-                    "Blob fallback reader returned an unexpected row count "
-                    f"for {state.file.file_name}: expect {len(state.selected_row_ids)}, "
-                    f"got {len(reader.blob_lengths)}."
-                )
-        except AttributeError as e:
+        actual_rows = len(reader.blob_lengths)
+        if len(reader.blob_lengths) != len(state.selected_row_ids):
             reader.close()
-            raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
-        except Exception:
-            reader.close()
-            raise
+            raise ValueError(
+                "Blob fallback reader returned an unexpected row count "
+                f"for {state.file.file_name}: expect {len(state.selected_row_ids)}, "
+                f"got {actual_rows}."
+            )
 
         state.reader = reader
         state.reader_initialized = True
