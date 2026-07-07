@@ -24,6 +24,9 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
@@ -37,13 +40,16 @@ import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
+import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -62,8 +68,12 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -234,6 +244,57 @@ public class RowToColumnConverterTest {
     }
 
     @Test
+    public void testConvertCharType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.CHAR(10)));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row1 = GenericRow.of(BinaryString.fromString("hello"));
+        GenericRow row2 = GenericRow.of(BinaryString.fromString("world"));
+
+        HeapBytesVector bytesVector = new HeapBytesVector(2);
+        WritableColumnVector[] vectors = new WritableColumnVector[] {bytesVector};
+
+        converter.convert(row1, vectors);
+        converter.convert(row2, vectors);
+
+        assertThat(new String(bytesVector.getBytes(0).getBytes())).isEqualTo("hello");
+        assertThat(new String(bytesVector.getBytes(1).getBytes())).isEqualTo("world");
+    }
+
+    @Test
+    public void testElementConverterAppendFromObjectAndColumnVector() {
+        RowToColumnConverter.ElementConverter converter =
+                RowToColumnConverter.createElementConverter(DataTypes.STRING());
+        HeapBytesVector sourceVector = new HeapBytesVector(1);
+        sourceVector.appendByteArray("from-vector".getBytes(), 0, "from-vector".length());
+
+        HeapBytesVector targetVector = new HeapBytesVector(2);
+        converter.append(BinaryString.fromString("from-object"), targetVector);
+        converter.append(sourceVector, 0, targetVector);
+
+        assertThat(new String(targetVector.getBytes(0).getBytes())).isEqualTo("from-object");
+        assertThat(new String(targetVector.getBytes(1).getBytes())).isEqualTo("from-vector");
+    }
+
+    @Test
+    public void testElementConverterSupportsAllSupportedTypes() {
+        for (ElementCase elementCase : elementCases()) {
+            elementCase.verify();
+        }
+    }
+
+    @Test
+    public void testElementConverterRejectsUnsupportedTypes() {
+        assertThatThrownBy(() -> RowToColumnConverter.createElementConverter(DataTypes.BLOB()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(
+                        () ->
+                                RowToColumnConverter.createElementConverter(
+                                        DataTypes.MULTISET(DataTypes.INT())))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     public void testConvertBinaryType() {
         RowType rowType = RowType.of(new DataField(0, "f", new BinaryType(5)));
         RowToColumnConverter converter = new RowToColumnConverter(rowType);
@@ -249,6 +310,23 @@ public class RowToColumnConverterTest {
 
         assertThat(new String(bytesVector.getBytes(0).getBytes())).isEqualTo("hello");
         assertThat(new String(bytesVector.getBytes(1).getBytes())).isEqualTo("world");
+    }
+
+    @Test
+    public void testConvertVariantType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VARIANT()));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+        GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
+
+        HeapRowVector rowVector =
+                new HeapRowVector(1, new HeapBytesVector(1), new HeapBytesVector(1));
+        WritableColumnVector[] vectors = new WritableColumnVector[] {rowVector};
+
+        converter.convert(GenericRow.of(variant), vectors);
+
+        assertThat(rowVector.isNullAt(0)).isFalse();
+        assertThat(rowVector.getRow(0).getBinary(0)).isEqualTo(variant.value());
+        assertThat(rowVector.getRow(0).getBinary(1)).isEqualTo(variant.metadata());
     }
 
     @Test
@@ -607,5 +685,315 @@ public class RowToColumnConverterTest {
                             return method.invoke(vector, args);
                         });
         return (InternalVector) proxy;
+    }
+
+    private static List<ElementCase> elementCases() {
+        Decimal smallDecimal = Decimal.fromBigDecimal(new BigDecimal("12.34"), 5, 2);
+        Decimal longDecimal = Decimal.fromBigDecimal(new BigDecimal("1234567890.12"), 12, 2);
+        Decimal bytesDecimal =
+                Decimal.fromBigDecimal(new BigDecimal("12345678901234567890.12"), 22, 2);
+        Timestamp millisTimestamp = Timestamp.fromEpochMillis(1234567890L);
+        Timestamp microsTimestamp = Timestamp.fromMicros(1234567890123456L);
+        Timestamp nanosTimestamp = Timestamp.fromEpochMillis(1234567890L, 123456);
+        GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
+
+        Map<BinaryString, Integer> map = new LinkedHashMap<>();
+        map.put(BinaryString.fromString("k1"), 1);
+        map.put(BinaryString.fromString("k2"), 2);
+
+        return Arrays.asList(
+                new ElementCase(
+                        DataTypes.BOOLEAN(),
+                        true,
+                        () -> new HeapBooleanVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapBooleanVector) vector).getBoolean(rowId))
+                                        .isTrue()),
+                new ElementCase(
+                        DataTypes.TINYINT(),
+                        (byte) 12,
+                        () -> new HeapByteVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapByteVector) vector).getByte(rowId))
+                                        .isEqualTo((byte) 12)),
+                new ElementCase(
+                        DataTypes.SMALLINT(),
+                        (short) 123,
+                        () -> new HeapShortVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapShortVector) vector).getShort(rowId))
+                                        .isEqualTo((short) 123)),
+                new ElementCase(
+                        DataTypes.INT(),
+                        123,
+                        () -> new HeapIntVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapIntVector) vector).getInt(rowId)).isEqualTo(123)),
+                new ElementCase(
+                        DataTypes.BIGINT(),
+                        123L,
+                        () -> new HeapLongVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapLongVector) vector).getLong(rowId))
+                                        .isEqualTo(123L)),
+                new ElementCase(
+                        DataTypes.FLOAT(),
+                        1.25F,
+                        () -> new HeapFloatVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapFloatVector) vector).getFloat(rowId))
+                                        .isEqualTo(1.25F)),
+                new ElementCase(
+                        DataTypes.DOUBLE(),
+                        2.5D,
+                        () -> new HeapDoubleVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapDoubleVector) vector).getDouble(rowId))
+                                        .isEqualTo(2.5D)),
+                new ElementCase(
+                        DataTypes.DATE(),
+                        12345,
+                        () -> new HeapIntVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapIntVector) vector).getInt(rowId))
+                                        .isEqualTo(12345)),
+                new ElementCase(
+                        DataTypes.TIME(),
+                        67890,
+                        () -> new HeapIntVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapIntVector) vector).getInt(rowId))
+                                        .isEqualTo(67890)),
+                new ElementCase(
+                        DataTypes.CHAR(10),
+                        BinaryString.fromString("char"),
+                        () -> new HeapBytesVector(3),
+                        (vector, rowId) ->
+                                assertThat(bytes((HeapBytesVector) vector, rowId))
+                                        .isEqualTo("char")),
+                new ElementCase(
+                        DataTypes.VARCHAR(10),
+                        BinaryString.fromString("varchar"),
+                        () -> new HeapBytesVector(3),
+                        (vector, rowId) ->
+                                assertThat(bytes((HeapBytesVector) vector, rowId))
+                                        .isEqualTo("varchar")),
+                new ElementCase(
+                        DataTypes.BINARY(6),
+                        "binary".getBytes(),
+                        () -> new HeapBytesVector(3),
+                        (vector, rowId) ->
+                                assertThat(bytes((HeapBytesVector) vector, rowId))
+                                        .isEqualTo("binary")),
+                new ElementCase(
+                        DataTypes.VARBINARY(9),
+                        "varbinary".getBytes(),
+                        () -> new HeapBytesVector(3),
+                        (vector, rowId) ->
+                                assertThat(bytes((HeapBytesVector) vector, rowId))
+                                        .isEqualTo("varbinary")),
+                new ElementCase(
+                        DataTypes.DECIMAL(5, 2),
+                        smallDecimal,
+                        () -> new HeapIntVector(3),
+                        decimalSource(smallDecimal),
+                        (vector, rowId) ->
+                                assertThat(((HeapIntVector) vector).getInt(rowId))
+                                        .isEqualTo((int) smallDecimal.toUnscaledLong())),
+                new ElementCase(
+                        DataTypes.DECIMAL(12, 2),
+                        longDecimal,
+                        () -> new HeapLongVector(3),
+                        decimalSource(longDecimal),
+                        (vector, rowId) ->
+                                assertThat(((HeapLongVector) vector).getLong(rowId))
+                                        .isEqualTo(longDecimal.toUnscaledLong())),
+                new ElementCase(
+                        DataTypes.DECIMAL(22, 2),
+                        bytesDecimal,
+                        () -> new HeapBytesVector(3),
+                        decimalSource(bytesDecimal),
+                        (vector, rowId) ->
+                                assertThat(((HeapBytesVector) vector).getBytes(rowId).getBytes())
+                                        .isEqualTo(bytesDecimal.toUnscaledBytes())),
+                new ElementCase(
+                        DataTypes.TIMESTAMP(3),
+                        millisTimestamp,
+                        () -> new HeapLongVector(3),
+                        timestampSource(millisTimestamp),
+                        (vector, rowId) ->
+                                assertThat(((HeapLongVector) vector).getLong(rowId))
+                                        .isEqualTo(millisTimestamp.getMillisecond())),
+                new ElementCase(
+                        DataTypes.TIMESTAMP(6),
+                        microsTimestamp,
+                        () -> new HeapLongVector(3),
+                        timestampSource(microsTimestamp),
+                        (vector, rowId) ->
+                                assertThat(((HeapLongVector) vector).getLong(rowId))
+                                        .isEqualTo(microsTimestamp.toMicros())),
+                new ElementCase(
+                        DataTypes.TIMESTAMP(9),
+                        nanosTimestamp,
+                        () -> new HeapTimestampVector(3),
+                        (vector, rowId) ->
+                                assertThat(((HeapTimestampVector) vector).getTimestamp(rowId, 9))
+                                        .isEqualTo(nanosTimestamp)),
+                new ElementCase(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                        millisTimestamp,
+                        () -> new HeapLongVector(3),
+                        timestampSource(millisTimestamp),
+                        (vector, rowId) ->
+                                assertThat(((HeapLongVector) vector).getLong(rowId))
+                                        .isEqualTo(millisTimestamp.getMillisecond())),
+                new ElementCase(
+                        DataTypes.VARIANT(),
+                        variant,
+                        () -> new HeapRowVector(3, new HeapBytesVector(3), new HeapBytesVector(3)),
+                        (vector, rowId) -> {
+                            InternalRow row = ((HeapRowVector) vector).getRow(rowId);
+                            assertThat(row.getBinary(0)).isEqualTo(variant.value());
+                            assertThat(row.getBinary(1)).isEqualTo(variant.metadata());
+                        }),
+                new ElementCase(
+                        DataTypes.ARRAY(DataTypes.INT()),
+                        new GenericArray(new Object[] {1, 2, 3}),
+                        () -> new HeapArrayVector(3, new HeapIntVector(9)),
+                        (vector, rowId) -> {
+                            InternalArray array = ((HeapArrayVector) vector).getArray(rowId);
+                            assertThat(array.size()).isEqualTo(3);
+                            assertThat(array.getInt(0)).isEqualTo(1);
+                            assertThat(array.getInt(1)).isEqualTo(2);
+                            assertThat(array.getInt(2)).isEqualTo(3);
+                        }),
+                new ElementCase(
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()),
+                        new GenericMap(map),
+                        () -> new HeapMapVector(3, new HeapBytesVector(6), new HeapIntVector(6)),
+                        (vector, rowId) -> {
+                            InternalMap internalMap = ((HeapMapVector) vector).getMap(rowId);
+                            assertThat(internalMap.size()).isEqualTo(2);
+                            assertThat(internalMap.keyArray().getString(0).toString())
+                                    .isEqualTo("k1");
+                            assertThat(internalMap.valueArray().getInt(0)).isEqualTo(1);
+                            assertThat(internalMap.keyArray().getString(1).toString())
+                                    .isEqualTo("k2");
+                            assertThat(internalMap.valueArray().getInt(1)).isEqualTo(2);
+                        }),
+                new ElementCase(
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "id", DataTypes.INT()),
+                                DataTypes.FIELD(1, "name", DataTypes.STRING())),
+                        GenericRow.of(1, BinaryString.fromString("Alice")),
+                        () -> new HeapRowVector(3, new HeapIntVector(3), new HeapBytesVector(3)),
+                        (vector, rowId) -> {
+                            InternalRow row = ((HeapRowVector) vector).getRow(rowId);
+                            assertThat(row.getInt(0)).isEqualTo(1);
+                            assertThat(row.getString(1).toString()).isEqualTo("Alice");
+                        }),
+                new ElementCase(
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()),
+                        BinaryVector.fromPrimitiveArray(new float[] {1.0F, 2.0F, 3.0F}),
+                        () -> new HeapVectorColumnVector(3, new HeapFloatVector(9), 3),
+                        (vector, rowId) ->
+                                assertThat(
+                                                ((HeapVectorColumnVector) vector)
+                                                        .getVector(rowId)
+                                                        .toFloatArray())
+                                        .containsExactly(1.0F, 2.0F, 3.0F)));
+    }
+
+    private static String bytes(HeapBytesVector vector, int rowId) {
+        return new String(vector.getBytes(rowId).getBytes());
+    }
+
+    private static Supplier<ColumnVector> decimalSource(Decimal decimal) {
+        return () ->
+                new DecimalColumnVector() {
+                    @Override
+                    public boolean isNullAt(int i) {
+                        return false;
+                    }
+
+                    @Override
+                    public Decimal getDecimal(int i, int precision, int scale) {
+                        return decimal;
+                    }
+                };
+    }
+
+    private static Supplier<ColumnVector> timestampSource(Timestamp timestamp) {
+        return () ->
+                new TimestampColumnVector() {
+                    @Override
+                    public boolean isNullAt(int i) {
+                        return false;
+                    }
+
+                    @Override
+                    public Timestamp getTimestamp(int i, int precision) {
+                        return timestamp;
+                    }
+                };
+    }
+
+    private static class ElementCase {
+
+        private final DataType type;
+        private final Object value;
+        private final Supplier<WritableColumnVector> vectorSupplier;
+        private final Supplier<ColumnVector> sourceSupplier;
+        private final BiConsumer<ColumnVector, Integer> assertion;
+
+        private ElementCase(
+                DataType type,
+                Object value,
+                Supplier<WritableColumnVector> vectorSupplier,
+                BiConsumer<ColumnVector, Integer> assertion) {
+            this(
+                    type,
+                    value,
+                    vectorSupplier,
+                    () -> createSourceVector(type, value, vectorSupplier),
+                    assertion);
+        }
+
+        private ElementCase(
+                DataType type,
+                Object value,
+                Supplier<WritableColumnVector> vectorSupplier,
+                Supplier<ColumnVector> sourceSupplier,
+                BiConsumer<ColumnVector, Integer> assertion) {
+            this.type = type;
+            this.value = value;
+            this.vectorSupplier = vectorSupplier;
+            this.sourceSupplier = sourceSupplier;
+            this.assertion = assertion;
+        }
+
+        private void verify() {
+            RowToColumnConverter.ElementConverter converter =
+                    RowToColumnConverter.createElementConverter(type);
+
+            WritableColumnVector objectTarget = vectorSupplier.get();
+            converter.append(value, objectTarget);
+            assertion.accept(objectTarget, 0);
+
+            WritableColumnVector vectorTarget = vectorSupplier.get();
+            converter.append(sourceSupplier.get(), 0, vectorTarget);
+            assertion.accept(vectorTarget, 0);
+
+            WritableColumnVector nullTarget = vectorSupplier.get();
+            converter.append(null, nullTarget);
+            assertThat(nullTarget.isNullAt(0)).isTrue();
+        }
+
+        private static ColumnVector createSourceVector(
+                DataType type, Object value, Supplier<WritableColumnVector> vectorSupplier) {
+            WritableColumnVector source = vectorSupplier.get();
+            RowToColumnConverter.createElementConverter(type).append(value, source);
+            return source;
+        }
     }
 }
