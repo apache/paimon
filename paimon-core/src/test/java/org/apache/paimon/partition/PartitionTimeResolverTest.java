@@ -30,6 +30,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
@@ -38,8 +40,8 @@ import java.time.LocalDateTime;
 import java.time.Period;
 import java.time.temporal.TemporalAmount;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -172,71 +174,53 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$a1201", "yyyyMMdd", "a")).isEqualTo(Period.ofYears(1));
 
         assertThat(extractMinStep("$a01", "yyMMdd", "a")).isEqualTo(Period.ofMonths(1));
+        assertThat(extractMinStep("$a1", "yyMd", "a")).isEqualTo(Period.ofMonths(1));
         assertThat(extractMinStep("$a1201", "yyMMdd", "a")).isEqualTo(Period.ofYears(1));
+        assertThat(extractMinStep("$a-12-1", "yy-M-d", "a")).isEqualTo(Period.ofYears(1));
         assertThat(extractMinStep("$a $aa", "yyMM dd", "a", "aa")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("$a'", "yyMMdd''", "a")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$aJan", "yyMMM", "a")).isEqualTo(Period.ofYears(1));
+        assertThat(extractMinStep("$a1", "yyM", "a")).isEqualTo(Period.ofYears(1));
+        assertThat(extractMinStep("$a12", "yyM", "a")).isEqualTo(Period.ofYears(1));
     }
 
     @Test
     public void testResolvePartitionValues() {
-        LinkedHashMap<String, String> partitionValues =
+        Map<String, String> partitionValues =
                 new PartitionTimeResolver(
                                 Arrays.asList("dt", "hour"), "$dt $hour:00:00", "yyyyMMdd HH:mm:ss")
                         .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 12, 0, 0));
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                        put("hour", "12");
-                    }
-                },
-                partitionValues);
+        assertEquals(ImmutableMap.of("dt", "20230101", "hour", "12"), partitionValues);
 
         partitionValues =
                 new PartitionTimeResolver(Arrays.asList("dt", "hr"), "$dt $hr", "yyyyMMdd HH")
                         .resolvePartitionValues(LocalDateTime.of(2023, 1, 2, 3, 0, 0));
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230102");
-                        put("hr", "03");
-                    }
-                },
-                partitionValues);
+        assertEquals(ImmutableMap.of("dt", "20230102", "hr", "03"), partitionValues);
 
         partitionValues =
                 new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyyMMdd")
                         .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 0, 0, 0));
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                    }
-                },
-                partitionValues);
+        assertEquals(ImmutableMap.of("dt", "20230101"), partitionValues);
 
         partitionValues =
                 new PartitionTimeResolver(Arrays.asList("dt", "t"), "$dtT$t", "yy-M-d'T'H:m:ss")
                         .resolvePartitionValues(LocalDateTime.of(2023, 12, 1, 11, 2, 3));
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "23-12-1");
-                        put("t", "11:2:03");
-                    }
-                },
-                partitionValues);
+        assertEquals(ImmutableMap.of("dt", "23-12-1", "t", "11:2:03"), partitionValues);
 
         partitionValues =
                 new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yy-MMM-d")
                         .resolvePartitionValues(LocalDateTime.of(2023, 12, 1, 11, 2, 3));
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "23-Dec-1");
-                    }
-                },
-                partitionValues);
+        assertEquals(ImmutableMap.of("dt", "23-Dec-1"), partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("y", "m"), "$y$m", "yyMMM")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 12, 1, 11, 2, 3));
+        assertEquals(ImmutableMap.of("y", "23", "m", "Dec"), partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("ym"), "$ym", "yy-M")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 11, 2, 3));
+        assertEquals(ImmutableMap.of("ym", "23-1"), partitionValues);
     }
 
     @Test
@@ -271,6 +255,85 @@ public class PartitionTimeResolverTest {
         resolver = new PartitionTimeResolver(Arrays.asList("dt"), "$dt-$dt", "yyyyMMdd-yyyyMMdd");
         assertThat(resolver.parsePartitionValues(Arrays.asList("20230102")))
                 .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver =
+                new PartitionTimeResolver(
+                        Arrays.asList("aa", "a", "aaa"), "$a-$aa-$aaa", "yyyy-MM-dd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("01", "2023", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("ymd"), "$ymd", "yyyy-MM-dd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023-01-02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("ymd"), "$ymd", "yyyy-M-d");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023-1-2")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("ym"), "$ym-2", "yyyy-M-d");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023-1")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("ym"), "$ym-12", "yyyy-M-d");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023-1")))
+                .isEqualTo(LocalDateTime.parse("2023-01-12T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("y"), "$y-1-2", "yyyy-M-d");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("ym"), "$ym", "yyyy-MM");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023-01")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("y"), "$y-12", "yyyy-MM");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023")))
+                .isEqualTo(LocalDateTime.parse("2023-12-01T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("y"), "$y-Dec", "yyyy-MMM");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023")))
+                .isEqualTo(LocalDateTime.parse("2023-12-01T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("y"), "$y", "yyyy");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("y"), "$y", "yy");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("23")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+
+        assertThatThrownBy(
+                        () ->
+                                new PartitionTimeResolver(Arrays.asList("y"), "$y-22", "yyyy-MM")
+                                        .parsePartitionValues(Arrays.asList("2026")))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Failed to match pattern '$y-22' to formatter 'yyyy-MM'"));
+
+        assertThatThrownBy(
+                        () ->
+                                new PartitionTimeResolver(
+                                                Arrays.asList("y", "m"), "$y-$m", "yyyy-MM")
+                                        .parsePartitionValues(Arrays.asList("2026", "22")))
+                .hasMessageContaining("Text '2026-22' could not be parsed");
+
+        assertThatThrownBy(
+                        () ->
+                                new PartitionTimeResolver(Arrays.asList("ym"), "$ym", "yyyy-M")
+                                        .parsePartitionValues(null))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                IllegalArgumentException.class, "Values cannot be null"));
+
+        assertThatThrownBy(
+                        () ->
+                                new PartitionTimeResolver(
+                                                Arrays.asList("y", "m"), "$y-$m", "yyyy-M")
+                                        .parsePartitionValues(Arrays.asList("2026", "1", "2")))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                IllegalArgumentException.class, "Values size mismatch"));
     }
 
     @Test
