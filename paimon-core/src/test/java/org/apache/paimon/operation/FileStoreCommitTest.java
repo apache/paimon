@@ -1133,6 +1133,51 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testRtasAppendAfterTruncateResetsInheritedIndexAndStats() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        store.commitData(generateDataList(1), s -> partition, kv -> 0);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "stale-index", 0, 0), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 1L, 1L, 1L, 0L, 8L, 8L));
+        Statistics fakeStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 1L, 100L, fakeColStatsMap);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        }
+
+        try (FileStoreCommitImpl truncateCommit = store.newCommit()) {
+            truncateCommit.withOperation(Snapshot.Operation.TRUNCATE);
+            truncateCommit.truncateTable(1L);
+        }
+
+        List<KeyValue> replacement = generateDataList(1);
+        store.commitDataImpl(
+                replacement,
+                s -> partition,
+                kv -> 0,
+                false,
+                null,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> {
+                    commit.withOperation(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+                    commit.commit(committable, false);
+                });
+
+        Snapshot rtasSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(rtasSnapshot.operation()).isEqualTo(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+        assertThat(rtasSnapshot.indexManifest()).isNull();
+        assertThat(rtasSnapshot.statistics()).isNull();
+    }
+
+    @Test
     public void testDropStatsForOverwrite() throws Exception {
         TestFileStore store = createStore(false);
         store.options().toConfiguration().set(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS, true);
