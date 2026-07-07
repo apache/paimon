@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -97,6 +98,18 @@ public class DataEvolutionBatchScanTest {
         ArgumentCaptor<Predicate> captor = ArgumentCaptor.forClass(Predicate.class);
         verify(snapshotReader).withFilter(same(predicate), captor.capture());
         assertThat(captor.getValue()).isSameAs(nonRowIdPredicate);
+    }
+
+    @Test
+    public void testWithShardKeepsDataEvolutionWrapper() {
+        DataTableBatchScan batchScan = mock(DataTableBatchScan.class);
+        when(batchScan.withShard(0, 2)).thenReturn(batchScan);
+
+        DataEvolutionBatchScan scan = new DataEvolutionBatchScan(null, batchScan);
+        DataTableScan returned = scan.withShard(0, 2);
+
+        assertThat(returned).isSameAs(scan);
+        verify(batchScan).withShard(0, 2);
     }
 
     @Test
