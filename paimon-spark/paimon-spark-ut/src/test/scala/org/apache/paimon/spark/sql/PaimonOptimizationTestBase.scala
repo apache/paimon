@@ -120,9 +120,27 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
     }
   }
 
-  test("Paimon Optimization: map selected-key pushdown skips metadata-unsafe keys") {
+  test("Paimon Optimization: map selected-key pushdown only supports shared-shredding map") {
     withTable("T") {
       spark.sql("CREATE TABLE T (id INT, attrs MAP<STRING, BIGINT>)")
+
+      val normalMapScan = mapSelectedKeysPaimonScan("SELECT attrs['key1'] FROM T")
+      Assertions.assertTrue(normalMapScan.pushedMapSelectedKeys.isEmpty)
+    }
+
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, attrs MAP<STRING, BIGINT>)
+                  |TBLPROPERTIES (
+                  |  'fields.attrs.map.storage-layout' = 'shared-shredding'
+                  |)
+                  |""".stripMargin)
+
+      val sharedShreddingMapScan =
+        mapSelectedKeysPaimonScan("SELECT attrs['key1'], attrs['key2'] FROM T")
+      Assertions.assertEquals(
+        Map(Seq("attrs") -> Seq("key1", "key2")),
+        sharedShreddingMapScan.pushedMapSelectedKeys)
 
       val delimiterKeyScan = mapSelectedKeysPaimonScan("SELECT attrs['a;b'] FROM T")
       Assertions.assertTrue(delimiterKeyScan.pushedMapSelectedKeys.isEmpty)

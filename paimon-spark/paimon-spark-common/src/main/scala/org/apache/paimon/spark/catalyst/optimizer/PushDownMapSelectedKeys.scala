@@ -33,7 +33,7 @@ import org.apache.spark.sql.types.{DataType, MapType, StringType, StructField, S
 import scala.collection.mutable
 
 /**
- * Pushes literal-key MAP access on MAP columns into Paimon scan read type.
+ * Pushes literal-key MAP access on shared-shredding MAP columns into Paimon scan read type.
  *
  * <p>Example: {@code SELECT id, attrs['key1'], attrs['key2'] FROM T} becomes a scan returning
  * {@code attrs} as {@code struct<0:valueType,1:valueType>} and a project reading struct fields.
@@ -187,7 +187,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
             layout match {
               case MapStorageLayout.SHARED_SHREDDING =>
                 access.path.length == 1
-              case _ => true
+              case _ => false
             }
           case _ => false
         }
