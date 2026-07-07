@@ -368,7 +368,6 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
-
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {

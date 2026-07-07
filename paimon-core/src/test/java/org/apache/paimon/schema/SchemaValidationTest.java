@@ -1278,8 +1278,7 @@ class SchemaValidationTest {
     private List<DataField> topLevelPayloadFields(DataType payloadType) {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT()),
-                new DataField(
-                        1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
                 new DataField(2, "payload", payloadType));
     }
 
