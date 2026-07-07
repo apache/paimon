@@ -69,12 +69,12 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
         )
         self._values_by_file_name = values_by_file_name
 
-    def _read_blob_values(self, file, supplier, wanted_row_ids):
-        values = self._values_by_file_name[file.file_name]
+    def _read_blob_values(self, state, batch_row_ids):
+        values = self._values_by_file_name[state.file.file_name]
         return {
-            row_id: values[row_id - file.first_row_id]
-            for row_id in self._selected_row_ids(file)
-            if row_id in wanted_row_ids
+            row_id: values[row_id - state.file.first_row_id]
+            for row_id in batch_row_ids
+            if row_id in state.row_id_to_pos
         }
 
 

@@ -249,6 +249,8 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(blob.view_struct, view_struct)
 
     def test_blob_fallback_batch_reader_respects_batch_size(self):
+        created_readers = []
+
         class FakeBlobReader:
             def __init__(self):
                 self._file_io = None
@@ -260,6 +262,11 @@ class BlobTest(unittest.TestCase):
 
             def close(self):
                 self.closed = True
+
+        def supplier():
+            reader = FakeBlobReader()
+            created_readers.append(reader)
+            return reader
 
         data_file = DataFileMeta(
             file_name="fake.blob",
@@ -278,7 +285,7 @@ class BlobTest(unittest.TestCase):
             file_path="fake.blob",
         )
         reader = BlobFallbackBatchReader(
-            [(data_file, FakeBlobReader)],
+            [(data_file, supplier)],
             "picture",
             pa.large_binary(),
             blob_as_descriptor=True,
@@ -300,6 +307,97 @@ class BlobTest(unittest.TestCase):
                 for value in batch.column("picture")
             )
         self.assertEqual(offsets, [4, 104, 204, 304, 404])
+        self.assertEqual(1, len(created_readers))
+        self.assertFalse(created_readers[0].closed)
+
+        reader.close()
+        self.assertTrue(created_readers[0].closed)
+
+    def test_blob_fallback_batch_reader_reuses_version_readers(self):
+        created_by_file = {}
+
+        class FakeBlobReader:
+            def __init__(self, file_path, blob_lengths, blob_offsets):
+                self._file_io = None
+                self.file_path = file_path
+                self.blob_lengths = blob_lengths
+                self.blob_offsets = blob_offsets
+                self._input_stream = None
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        def data_file(name, max_sequence_number):
+            return DataFileMeta(
+                file_name=name,
+                file_size=0,
+                row_count=5,
+                min_key=None,
+                max_key=None,
+                key_stats=None,
+                value_stats=None,
+                min_sequence_number=max_sequence_number,
+                max_sequence_number=max_sequence_number,
+                schema_id=0,
+                level=0,
+                extra_files=[],
+                first_row_id=0,
+                file_path=name,
+            )
+
+        def supplier(file_path, blob_lengths, blob_offsets):
+            def create_reader():
+                reader = FakeBlobReader(file_path, blob_lengths, blob_offsets)
+                created_by_file.setdefault(file_path, []).append(reader)
+                return reader
+            return create_reader
+
+        old_file = data_file("old.blob", 1)
+        new_file = data_file("new.blob", 2)
+        reader = BlobFallbackBatchReader(
+            [
+                (
+                    old_file,
+                    supplier(
+                        "old.blob",
+                        [20, 20, 20, 20, 20],
+                        [0, 100, 200, 300, 400],
+                    ),
+                ),
+                (
+                    new_file,
+                    supplier(
+                        "new.blob",
+                        [-2, 20, -2, 20, -2],
+                        [-1, 1000, -1, 3000, -1],
+                    ),
+                ),
+            ],
+            "picture",
+            pa.large_binary(),
+            blob_as_descriptor=True,
+            batch_size=2,
+        )
+
+        offsets = []
+        batch = reader.read_arrow_batch()
+        while batch is not None:
+            offsets.extend(
+                BlobDescriptor.deserialize(value.as_py()).offset
+                for value in batch.column("picture")
+            )
+            batch = reader.read_arrow_batch()
+
+        self.assertEqual([4, 1004, 204, 3004, 404], offsets)
+        self.assertEqual(1, len(created_by_file["old.blob"]))
+        self.assertEqual(1, len(created_by_file["new.blob"]))
+        self.assertFalse(created_by_file["old.blob"][0].closed)
+        self.assertFalse(created_by_file["new.blob"][0].closed)
+
+        reader.close()
+        self.assertTrue(created_by_file["old.blob"][0].closed)
+        self.assertTrue(created_by_file["new.blob"][0].closed)
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
