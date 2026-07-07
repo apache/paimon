@@ -37,7 +37,7 @@ class MapSelectedKeysPushDownUtilsTest extends AnyFunSuite {
 
     val rewritten = MapSelectedKeysPushDownUtils.rewriteRowType(
       rowType,
-      Map(Seq("attrs") -> Seq("key1", "key2"))
+      Map("attrs" -> Seq("key1", "key2"))
     )
 
     assert(rewritten.getField("id").`type`() == DataTypes.INT())
@@ -57,7 +57,7 @@ class MapSelectedKeysPushDownUtilsTest extends AnyFunSuite {
     assert(attrsRowType.getField("1").`type`().isNullable)
   }
 
-  test("rewrite nested map field with selected keys") {
+  test("ignore nested map field with selected keys") {
     val nestedType = DataTypes.ROW(
       DataTypes.FIELD(2, "name", DataTypes.STRING()),
       DataTypes.FIELD(3, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.DOUBLE()))
@@ -69,20 +69,12 @@ class MapSelectedKeysPushDownUtilsTest extends AnyFunSuite {
 
     val rewritten = MapSelectedKeysPushDownUtils.rewriteRowType(
       rowType,
-      Map(Seq("profile", "attrs") -> Seq("key1", "key2"))
+      Map("profile.attrs" -> Seq("key1", "key2"))
     )
 
     val profile = rewritten.getField("profile").`type`().asInstanceOf[RowType]
     assert(profile.getField("name").`type`() == DataTypes.STRING())
-
-    val attrs = profile.getField("attrs")
-    assert(attrs.description() == "__PAIMON_MAP_SELECTED_KEYS:key1;key2")
-    assert(
-      MapSelectedKeysMetadataUtils.selectedKeys(attrs.description()).asScala == Seq("key1", "key2"))
-
-    val attrsRowType = attrs.`type`().asInstanceOf[RowType]
-    assert(attrsRowType.getFieldNames.asScala == Seq("0", "1"))
-    assert(attrsRowType.getField("0").`type`() == DataTypes.DOUBLE())
-    assert(attrsRowType.getField("1").`type`() == DataTypes.DOUBLE())
+    assert(profile.getField("attrs").description() == null)
+    assert(profile.getField("attrs").`type`().isInstanceOf[MapType])
   }
 }

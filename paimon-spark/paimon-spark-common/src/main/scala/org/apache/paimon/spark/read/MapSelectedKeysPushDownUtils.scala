@@ -24,27 +24,17 @@ import org.apache.paimon.types.{DataField, MapType, RowType}
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-/** MAP selected-key pushdown business logic. */
+/** Shared-shredding MAP selected-key pushdown business logic. */
 object MapSelectedKeysPushDownUtils {
 
-  /** Replace accepted MAP fields with selected-key ROW fields in the temporary read type. */
-  def rewriteRowType(rt: RowType, accepted: Map[Seq[String], Seq[String]]): RowType =
-    rewriteRowType(rt, accepted, Vector.empty)
-
-  private def rewriteRowType(
-      rt: RowType,
-      accepted: Map[Seq[String], Seq[String]],
-      prefix: Seq[String]): RowType = {
-    val newFields = rt.getFields.asScala.map(f => rewriteField(f, accepted, prefix)).asJava
+  /** Replace accepted top-level MAP fields with selected-key ROW fields in the read type. */
+  def rewriteRowType(rt: RowType, accepted: Map[String, Seq[String]]): RowType = {
+    val newFields = rt.getFields.asScala.map(f => rewriteField(f, accepted)).asJava
     new RowType(rt.isNullable, newFields)
   }
 
-  private def rewriteField(
-      field: DataField,
-      accepted: Map[Seq[String], Seq[String]],
-      prefix: Seq[String]): DataField = {
-    val path = prefix :+ field.name()
-    accepted.get(path) match {
+  private def rewriteField(field: DataField, accepted: Map[String, Seq[String]]): DataField = {
+    accepted.get(field.name()) match {
       case Some(keys) =>
         field.`type`() match {
           case mapType: MapType =>
@@ -58,36 +48,23 @@ object MapSelectedKeysPushDownUtils {
               keys.asJava)
           case _ => field
         }
-      case None =>
-        field.`type`() match {
-          case nested: RowType => field.newType(rewriteRowType(nested, accepted, path))
-          case _ => field
-        }
+      case None => field
     }
   }
 
-  /** "col=[key1,key2], nested.col=[key1]" rendering for `Scan.description()`. */
+  /** "col=[key1,key2]" rendering for `Scan.description()`. */
   def describeRewrittenRowType(rt: RowType): Option[String] = {
     val parts = mutable.ArrayBuffer.empty[String]
-    collectSelectedKeys(rt, Vector.empty, parts)
+    collectSelectedKeys(rt, parts)
     if (parts.isEmpty) None else Some(parts.mkString(", "))
   }
 
-  private def collectSelectedKeys(
-      rt: RowType,
-      prefix: Seq[String],
-      out: mutable.ArrayBuffer[String]): Unit = {
+  private def collectSelectedKeys(rt: RowType, out: mutable.ArrayBuffer[String]): Unit = {
     rt.getFields.asScala.foreach {
       field =>
-        val path = prefix :+ field.name()
         if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(field)) {
           val keys = MapSelectedKeysMetadataUtils.selectedKeys(field.description()).asScala
-          out.append(s"${path.mkString(".")}=[${keys.mkString(",")}]")
-        } else {
-          field.`type`() match {
-            case child: RowType => collectSelectedKeys(child, path, out)
-            case _ =>
-          }
+          out.append(s"${field.name()}=[${keys.mkString(",")}]")
         }
     }
   }

@@ -129,6 +129,13 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
     }
 
     withTable("T") {
+      spark.sql("CREATE TABLE T (id INT, profile STRUCT<attrs: MAP<STRING, BIGINT>>)")
+
+      val nestedMapScan = mapSelectedKeysPaimonScan("SELECT profile.attrs['key1'] FROM T")
+      Assertions.assertTrue(nestedMapScan.pushedMapSelectedKeys.isEmpty)
+    }
+
+    withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, attrs MAP<STRING, BIGINT>)
                   |TBLPROPERTIES (
@@ -139,7 +146,7 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
       val sharedShreddingMapScan =
         mapSelectedKeysPaimonScan("SELECT attrs['key1'], attrs['key2'] FROM T")
       Assertions.assertEquals(
-        Map(Seq("attrs") -> Seq("key1", "key2")),
+        Map("attrs" -> Seq("key1", "key2")),
         sharedShreddingMapScan.pushedMapSelectedKeys)
 
       val delimiterKeyScan = mapSelectedKeysPaimonScan("SELECT attrs['a;b'] FROM T")

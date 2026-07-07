@@ -54,7 +54,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedHybridSearch: Option[HybridSearch] = None
   def pushedFullTextSearch: Option[FullTextSearch] = None
   def pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty
-  def pushedMapSelectedKeys: Map[Seq[String], Seq[String]] = Map.empty
+  def pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty
 
   // Runtime push down
   val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty

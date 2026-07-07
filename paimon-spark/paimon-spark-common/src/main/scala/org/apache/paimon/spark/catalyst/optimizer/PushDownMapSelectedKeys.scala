@@ -96,7 +96,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     }
 
     val pushedMapSelectedKeys = scan.pushedMapSelectedKeys ++ selectedMaps.values.map {
-      selected => selected.path -> selected.keys.toSeq
+      selected => selected.path.head -> selected.keys.toSeq
     }.toMap
     val rewrittenScan = scan.copy(pushedMapSelectedKeys = pushedMapSelectedKeys)
     val rewrittenOutput =
@@ -174,21 +174,16 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
   }
 
   private def canPushDown(scan: PaimonScan, access: MapKeyAccess): Boolean = {
-    if (!canEncodeKey(access.key)) {
+    if (access.path.length != 1 || !canEncodeKey(access.key)) {
       return false
     }
 
     access.mapType match {
       case MapType(StringType, _, _) =>
-        fieldType(scan.table.rowType(), access.path) match {
+        fieldType(scan.table.rowType(), access.path.head) match {
           case Some(mapType: org.apache.paimon.types.MapType) if isStringKeyMap(mapType) =>
-            val layout =
-              CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.path.head)
-            layout match {
-              case MapStorageLayout.SHARED_SHREDDING =>
-                access.path.length == 1
-              case _ => false
-            }
+            CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.path.head) ==
+              MapStorageLayout.SHARED_SHREDDING
           case _ => false
         }
       case _ => false
@@ -252,16 +247,11 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
 
   private def fieldType(
       rowType: org.apache.paimon.types.RowType,
-      path: Seq[String]): Option[org.apache.paimon.types.DataType] = {
-    if (path.isEmpty || !rowType.containsField(path.head)) {
+      fieldName: String): Option[org.apache.paimon.types.DataType] = {
+    if (!rowType.containsField(fieldName)) {
       None
-    } else if (path.length == 1) {
-      Some(rowType.getField(path.head).`type`())
     } else {
-      rowType.getField(path.head).`type`() match {
-        case nested: org.apache.paimon.types.RowType => fieldType(nested, path.tail)
-        case _ => None
-      }
+      Some(rowType.getField(fieldName).`type`())
     }
   }
 
@@ -271,45 +261,14 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
       selections: Seq[SelectedMap]): DataType = {
     selections.find(_.path == Seq(fieldName)) match {
       case Some(selected) => selected.structType
-      case None =>
-        dataType match {
-          case struct: StructType =>
-            StructType(struct.fields.map {
-              field =>
-                val nestedSelections =
-                  selections.filter(s => s.path.length > 1 && s.path(1) == field.name)
-                if (nestedSelections.isEmpty) {
-                  field
-                } else {
-                  field.copy(
-                    dataType = rewriteSparkType(
-                      field.dataType,
-                      field.name,
-                      nestedSelections.map(s => s.copy(path = s.path.tail))))
-                }
-            })
-          case other => other
-        }
+      case None => dataType
     }
   }
 
   private def buildPathExpression(
       root: AttributeReference,
       path: Seq[String]): Option[Expression] = {
-    if (path.isEmpty || path.head != root.name) {
-      None
-    } else {
-      path.tail
-        .foldLeft(Option((root: Expression, root.dataType))) {
-          case (Some((current, struct: StructType)), name) =>
-            struct.fields.zipWithIndex.find(_._1.name == name).map {
-              case (field, ordinal) =>
-                ((GetStructField(current, ordinal, Some(name)): Expression), field.dataType)
-            }
-          case _ => None
-        }
-        .map(_._1)
-    }
+    if (path == Seq(root.name)) Some(root) else None
   }
 
   private case class MapKeyCandidate(
