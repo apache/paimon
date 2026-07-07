@@ -18,16 +18,19 @@
 
 package org.apache.paimon.partition;
 
+import java.text.ParsePosition;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.Period;
+import java.time.Year;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalAmount;
+import java.time.temporal.TemporalField;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -37,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -126,10 +130,13 @@ public class PartitionTimeResolver {
     }
 
     public LocalDateTime parsePartitionValues(List<?> partitionValues) {
+        checkArgument(partitionValues != null, "Values cannot be null");
+
         Map<String, Object> valueMap = new HashMap<>();
         for (int i = 0; i < partitionColumns.size(); i++) {
             valueMap.put(partitionColumns.get(i), partitionValues.get(i));
         }
+        checkArgument(partitionValues.size() == valueMap.size(), "Values size mismatch");
 
         StringBuilder timestampString = new StringBuilder();
         for (PatternToken token : patternTokens) {
@@ -140,12 +147,32 @@ public class PartitionTimeResolver {
             }
         }
         DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
-        try {
+
+        Set<ChronoField> fields =
+                formatTokens.stream()
+                        .filter(t -> t instanceof TimeFieldToken)
+                        .map(t -> ((TimeFieldToken) t).field)
+                        .collect(Collectors.toSet());
+
+        if (fields.contains(ChronoField.HOUR_OF_DAY)
+                || fields.contains(ChronoField.CLOCK_HOUR_OF_AMPM)
+                || fields.contains(ChronoField.MINUTE_OF_HOUR)
+                || fields.contains(ChronoField.SECOND_OF_MINUTE)) {
             return LocalDateTime.parse(timestampString, dateTimeFormatter);
-        } catch (DateTimeParseException e) {
-            return LocalDateTime.of(
-                    LocalDate.parse(timestampString, dateTimeFormatter), LocalTime.MIDNIGHT);
         }
+        if (fields.contains(ChronoField.DAY_OF_MONTH)) {
+            return LocalDate.parse(timestampString, dateTimeFormatter).atStartOfDay();
+        }
+        if (fields.contains(ChronoField.MONTH_OF_YEAR)) {
+            return YearMonth.parse(timestampString, dateTimeFormatter).atDay(1).atStartOfDay();
+        }
+        if (fields.contains(ChronoField.YEAR)) {
+            return Year.parse(timestampString, dateTimeFormatter)
+                    .atMonth(1)
+                    .atDay(1)
+                    .atStartOfDay();
+        }
+        throw new IllegalStateException("No time field found in formatter");
     }
 
     /** Parses formatter into format tokens (time fields and literals). */
@@ -293,38 +320,32 @@ public class PartitionTimeResolver {
         return false;
     }
 
-    /**
-     * Checks if a literal pattern token matches a sequence of format tokens. Verifies total length
-     * and literal content match.
-     */
+    /** Checks if a literal pattern token matches a sequence of format tokens. */
     private boolean matchLiteral(String patternToken, int startIdx, int endIdx) {
-        int formatTokenTotalLen = 0;
-        for (int i = startIdx; i < endIdx; i++) {
-            formatTokenTotalLen += formatTokens.get(i).getLength();
-        }
-        if (patternToken.length() != formatTokenTotalLen) {
-            return false;
-        }
-
-        int pos = 0;
+        StringBuilder subFormatter = new StringBuilder();
         for (int i = startIdx; i < endIdx; i++) {
             FormatToken token = formatTokens.get(i);
-            int tokenLen = token.getLength();
-            String sub = patternToken.substring(pos, pos + tokenLen);
+            subFormatter.append(formatter, token.start, token.end);
+        }
 
-            if (token instanceof LiteralToken) {
-                if (!((LiteralToken) token).token.equals(sub)) {
-                    return false;
-                }
-            } else {
-                ChronoField field = ((TimeFieldToken) token).field;
-                try {
-                    field.checkValidIntValue(Long.parseLong(sub));
-                } catch (NumberFormatException | DateTimeException e) {
-                    return false;
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern(subFormatter.toString(), Locale.ROOT);
+        ParsePosition pp = new ParsePosition(0);
+        try {
+            TemporalAccessor ta = fmt.parse(patternToken, pp);
+            if (pp.getErrorIndex() >= 0 || pp.getIndex() != patternToken.length()) {
+                return false;
+            }
+            for (TemporalField field : FIELD_MAP.values()) {
+                if (ta.isSupported(field)) {
+                    try {
+                        ta.get(field);
+                    } catch (DateTimeException ignored) {
+                        return false;
+                    }
                 }
             }
-            pos += tokenLen;
+        } catch (Exception ignored) {
+            return false;
         }
         return true;
     }
