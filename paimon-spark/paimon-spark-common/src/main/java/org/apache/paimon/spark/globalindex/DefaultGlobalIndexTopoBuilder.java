@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -95,14 +96,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             List<DataField> extraFields,
             Options options)
             throws IOException {
-        Options tableOptions = table.coreOptions().toConfiguration();
-        long rowsPerShard =
-                tableOptions
-                        .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                        .orElse(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
-        checkArgument(
-                rowsPerShard > 0,
-                "Option 'global-index.row-count-per-shard' must be greater than 0.");
+        long rowsPerShard = rowsPerShard(options);
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
@@ -161,12 +155,29 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             return Collections.emptyList();
         }
 
+        int parallelism = parallelism(taskList.size(), options);
         List<byte[]> commitMessageBytes =
                 javaSparkContext
-                        .parallelize(taskList, taskList.size())
+                        .parallelize(taskList, parallelism)
                         .map(DefaultGlobalIndexTopoBuilder::buildIndex)
                         .collect();
         return CommitMessageSerializer.deserializeAll(commitMessageBytes);
+    }
+
+    static long rowsPerShard(Options options) {
+        long rowsPerShard = options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
+        checkArgument(
+                rowsPerShard > 0,
+                "Option 'global-index.row-count-per-shard' must be greater than 0.");
+        return rowsPerShard;
+    }
+
+    static int parallelism(int taskCount, Options options) {
+        int maxParallelism = options.get(GLOBAL_INDEX_BUILD_MAX_PARALLELISM);
+        checkArgument(
+                maxParallelism > 0,
+                "Option 'global-index.build.max-parallelism' must be greater than 0.");
+        return Math.min(taskCount, maxParallelism);
     }
 
     private static byte[] buildIndex(Pair<byte[], byte[]> builderAndSplits) throws Exception {
