@@ -412,6 +412,92 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggWithDefaultDelimiterIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertThat(result.toString()).isEqualTo("user1,user2");
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("user1,user2,user3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggFirstNonBlankValueWithoutLeadingDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+
+        BinaryString accumulator = null;
+        accumulator = (BinaryString) fieldListaggAgg.agg(accumulator, BinaryString.fromString(" "));
+        accumulator =
+                (BinaryString)
+                        fieldListaggAgg.agg(accumulator, BinaryString.fromString("first line"));
+
+        assertThat(accumulator.toString()).isEqualTo("first line");
+    }
+
+    @Test
     public void testFieldMaxAgg() {
         FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
