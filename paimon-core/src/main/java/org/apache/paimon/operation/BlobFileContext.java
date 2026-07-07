@@ -35,20 +35,20 @@ public class BlobFileContext {
 
     private final Set<String> blobDescriptorFields;
     private final Set<String> blobInlineFields;
-    private final Set<String> blobExternalStorageFields;
-    @Nullable private final String blobExternalStoragePath;
+    private final boolean writeNullOnMissingFile;
+    private final boolean writeNullOnFetchFailure;
 
     private @Nullable BlobConsumer blobConsumer;
 
     private BlobFileContext(
             Set<String> blobDescriptorFields,
             Set<String> blobInlineFields,
-            Set<String> blobExternalStorageFields,
-            @Nullable String blobExternalStoragePath) {
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
-        this.blobExternalStorageFields = blobExternalStorageFields;
-        this.blobExternalStoragePath = blobExternalStoragePath;
+        this.writeNullOnMissingFile = writeNullOnMissingFile;
+        this.writeNullOnFetchFailure = writeNullOnFetchFailure;
     }
 
     @Nullable
@@ -58,14 +58,10 @@ public class BlobFileContext {
         }
         Set<String> descriptorFields = options.blobDescriptorField();
         Set<String> inlineFields = options.blobInlineField();
-        Set<String> externalStorageField = options.blobExternalStorageField();
-        String externalStoragePath = options.blobExternalStoragePath();
         boolean requireBlobFile = false;
         for (DataField field : rowType.getFields()) {
             DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB
-                    && (!inlineFields.contains(field.name())
-                            || externalStorageField.contains(field.name()))) {
+            if (type == DataTypeRoot.BLOB && !inlineFields.contains(field.name())) {
                 requireBlobFile = true;
                 break;
             }
@@ -74,7 +70,10 @@ public class BlobFileContext {
             return null;
         }
         return new BlobFileContext(
-                descriptorFields, inlineFields, externalStorageField, externalStoragePath);
+                descriptorFields,
+                inlineFields,
+                options.blobWriteNullOnMissingFile(),
+                options.blobWriteNullOnFetchFailure());
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -97,17 +96,16 @@ public class BlobFileContext {
         return blobInlineFields;
     }
 
-    public Set<String> blobExternalStorageFields() {
-        return blobExternalStorageFields;
-    }
-
-    @Nullable
-    public String blobExternalStoragePath() {
-        return blobExternalStoragePath;
-    }
-
     @Nullable
     public BlobConsumer blobConsumer() {
         return blobConsumer;
+    }
+
+    public boolean writeNullOnMissingFile() {
+        return writeNullOnMissingFile;
+    }
+
+    public boolean writeNullOnFetchFailure() {
+        return writeNullOnFetchFailure;
     }
 }

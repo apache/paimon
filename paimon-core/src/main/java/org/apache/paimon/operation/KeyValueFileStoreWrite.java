@@ -212,7 +212,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     restoreFiles);
         }
 
-        boolean lookupEnabled = !ignorePreviousFiles && options.needLookup();
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
@@ -223,7 +222,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         compactExecutor,
                         restoreFiles,
                         dvMaintainer,
-                        lookupEnabled);
+                        ignorePreviousFiles);
 
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),

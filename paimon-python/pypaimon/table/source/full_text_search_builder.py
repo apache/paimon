@@ -35,18 +35,8 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
-    def with_text_column(self, name: str) -> 'FullTextSearchBuilder':
-        """The text column to search."""
-        pass
-
-    @abstractmethod
-    def with_query_text(self, query_text: str) -> 'FullTextSearchBuilder':
-        """The query text to search."""
-        pass
-
-    @abstractmethod
-    def with_query_operator(self, query_operator: str) -> 'FullTextSearchBuilder':
-        """The default operator for query terms. Supported values are 'or' and 'and'."""
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        """The full-text query string to search against the given field."""
         pass
 
     @abstractmethod
@@ -75,28 +65,17 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def __init__(self, table: 'FileStoreTable'):
         self._table = table
         self._limit: int = 0
-        self._text_column: Optional['DataField'] = None
-        self._query_text: Optional[str] = None
-        self._query_operator: str = "or"
+        self._field_name: Optional[str] = None
+        self._query: Optional[str] = None
         self._partition_filter = None
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
         return self
 
-    def with_text_column(self, name: str) -> 'FullTextSearchBuilder':
-        field_dict = {f.name: f for f in self._table.fields}
-        if name not in field_dict:
-            raise ValueError(f"Text column '{name}' not found in table schema")
-        self._text_column = field_dict[name]
-        return self
-
-    def with_query_text(self, query_text: str) -> 'FullTextSearchBuilder':
-        self._query_text = query_text
-        return self
-
-    def with_query_operator(self, query_operator: str) -> 'FullTextSearchBuilder':
-        self._query_operator = query_operator
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        self._field_name = field_name
+        self._query = query
         return self
 
     def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
@@ -135,22 +114,30 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        if self._text_column is None:
-            raise ValueError("Text column must be set via with_text_column()")
         return FullTextScanImpl(
             self._table,
-            self._text_column,
+            self._text_columns(),
             partition_filter=self._partition_filter,
         )
 
     def new_full_text_read(self) -> FullTextRead:
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
-        if self._text_column is None:
-            raise ValueError("Text column must be set via with_text_column()")
-        if self._query_text is None:
-            raise ValueError("Query text must be set via with_query_text()")
         return FullTextReadImpl(
-            self._table, self._limit, self._text_column,
-            self._query_text, self._query_operator
+            self._table,
+            self._limit,
+            self._text_columns(),
+            self._query,
+            partition_filter=self._partition_filter,
         )
+
+    def _text_columns(self):
+        if self._query is None:
+            raise ValueError("Query must be set via with_query()")
+        if self._field_name is None:
+            raise ValueError("Field name must be set via with_query()")
+        field_dict = {f.name: f for f in self._table.fields}
+        if self._field_name not in field_dict:
+            raise ValueError(
+                f"Text column '{self._field_name}' not found in table schema")
+        return [field_dict[self._field_name]]

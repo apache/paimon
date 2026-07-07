@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
+import org.apache.paimon.operation.DataEvolutionSplitRead
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -30,6 +31,7 @@ import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -42,6 +44,7 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
 
 import java.util.Collections
+import java.util.function.Function
 
 import scala.collection.JavaConverters._
 
@@ -144,16 +147,82 @@ trait PaimonRowLevelCommand
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       condition: Expression,
       relation: DataSourceV2Relation,
-      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
+      sparkSession: SparkSession,
+      dataEvolutionEnabled: Boolean = false): Dataset[SparkDeletionVector] = {
     val filteredRelation =
       createNewScanPlan(candidateDataSplits, relation, Some(condition))
     val dataset = createDataset(sparkSession, filteredRelation)
-    collectDeletionVectors(dataFilePathToMeta, dataset, sparkSession)
+    val deletionTargets =
+      if (dataEvolutionEnabled) {
+        dataEvolutionDeletionTargets(candidateDataSplits, dataset, sparkSession)
+      } else {
+        pathAndIndexDeletionTargets(dataset, sparkSession)
+      }
+    buildDeletionVectors(dataFilePathToMeta, deletionTargets, sparkSession)
+  }
+
+  /**
+   * Collect deletion targets for data evolution tables: find all [AnchorFile, Deletion position]
+   * pairs. For deletion positions, we simply use `recordRowId - anchorFileRangeStart` to get the
+   * offset, instead of calculating returned positions.
+   */
+  private def dataEvolutionDeletionTargets(
+      candidateDataSplits: Seq[DataSplit],
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Dataset[PaimonRowLevelCommand.DeletionTarget] = {
+    import sparkSession.implicits._
+
+    val anchorRanges = dataEvolutionAnchorRanges(candidateDataSplits)
+    val broadcastAnchorRanges = sparkSession.sparkContext.broadcast(anchorRanges)
+
+    dataset
+      .select(col(ROW_ID_COLUMN))
+      .as[Long]
+      .map {
+        rowId =>
+          val (filePath, rowIndex) =
+            PaimonRowLevelCommand.rowIdToPathAndIndex(rowId, broadcastAnchorRanges.value)
+          PaimonRowLevelCommand.DeletionTarget(filePath, rowIndex)
+      }
   }
 
   protected def collectDeletionVectors(
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       dataset: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
+    buildDeletionVectors(
+      dataFilePathToMeta,
+      pathAndIndexDeletionTargets(dataset, sparkSession),
+      sparkSession)
+  }
+
+  protected def collectDataEvolutionDeletionVectors(
+      candidateDataSplits: Seq[DataSplit],
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
+    buildDeletionVectors(
+      dataFilePathToMeta,
+      dataEvolutionDeletionTargets(candidateDataSplits, dataset, sparkSession),
+      sparkSession)
+  }
+
+  private def pathAndIndexDeletionTargets(
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Dataset[PaimonRowLevelCommand.DeletionTarget] = {
+    import sparkSession.implicits._
+    dataset
+      .select(PATH_AND_INDEX_META_COLUMNS.map(col): _*)
+      .as[(String, Long)]
+      .map {
+        case (filePath, rowIndex) =>
+          PaimonRowLevelCommand.DeletionTarget(filePath, rowIndex)
+      }
+  }
+
+  private def buildDeletionVectors(
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      deletionTargets: Dataset[PaimonRowLevelCommand.DeletionTarget],
       sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
     // convert to a serializable map
@@ -164,16 +233,14 @@ trait PaimonRowLevelCommand
 
     val my_table = table
     val dvBitmap64 = my_table.coreOptions().deletionVectorBitmap64()
-    dataset
-      .select(PATH_AND_INDEX_META_COLUMNS.map(col): _*)
-      .as[(String, Long)]
-      .groupByKey(_._1)
+    deletionTargets
+      .groupByKey(_.filePath)
       .mapGroups {
         (filePath, iter) =>
           val dv =
             if (dvBitmap64) new Bitmap64DeletionVector() else new BitmapDeletionVector()
           while (iter.hasNext) {
-            dv.delete(iter.next()._2)
+            dv.delete(iter.next().rowIndex)
           }
 
           val (bucketPath, partition, bucket, dataFilePath) =
@@ -186,6 +253,33 @@ trait PaimonRowLevelCommand
             DeletionVector.serializeToBytes(dv)
           )
       }
+  }
+
+  private def dataEvolutionAnchorRanges(
+      candidateDataSplits: Seq[DataSplit]): Array[PaimonRowLevelCommand.AnchorRange] = {
+    val identity =
+      new Function[DataFileMeta, DataFileMeta] {
+        override def apply(file: DataFileMeta): DataFileMeta = file
+      }
+
+    candidateDataSplits
+      .flatMap {
+        split =>
+          DataEvolutionSplitRead.mergeRangesAndSort(split.dataFiles()).asScala.map {
+            group =>
+              val anchor = retrieveAnchorFile(group, identity)
+              val range = anchor.nonNullRowIdRange()
+              val anchorFilePath =
+                if (anchor.externalPath().isPresent) {
+                  anchor.externalPath().get()
+                } else {
+                  split.bucketPath() + "/" + anchor.fileName()
+                }
+              PaimonRowLevelCommand.AnchorRange(range.from, range.to, anchorFilePath)
+          }
+      }
+      .sortBy(_.from)
+      .toArray
   }
 
   protected def buildDeletedCommitMessage(
@@ -211,5 +305,41 @@ trait PaimonRowLevelCommand
           )
       }
       .toSeq
+  }
+}
+
+object PaimonRowLevelCommand {
+
+  /** A data-evolution anchor file and its covered row-id range. */
+  final private[commands] case class AnchorRange(from: Long, to: Long, filePath: String)
+
+  /** A deletion target represented by data file path and local row index. */
+  final private[commands] case class DeletionTarget(filePath: String, rowIndex: Long)
+
+  /** Binary search to lookup anchor file & range for each row id. */
+  private[commands] def rowIdToPathAndIndex(
+      rowId: Long,
+      anchorRanges: Array[AnchorRange]): (String, Long) = {
+    var low = 0
+    var high = anchorRanges.length - 1
+    var candidate = -1
+
+    while (low <= high) {
+      val mid = (low + high) >>> 1
+      if (anchorRanges(mid).from <= rowId) {
+        candidate = mid
+        low = mid + 1
+      } else {
+        high = mid - 1
+      }
+    }
+
+    if (candidate < 0 || rowId > anchorRanges(candidate).to) {
+      throw new IllegalStateException(
+        s"Cannot find data-evolution deletion-vector anchor range for row id $rowId.")
+    }
+
+    val anchor = anchorRanges(candidate)
+    (anchor.filePath, rowId - anchor.from)
   }
 }

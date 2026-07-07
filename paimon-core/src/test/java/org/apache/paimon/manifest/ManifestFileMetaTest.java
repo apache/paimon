@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -960,6 +961,146 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    @Test
+    public void testManifestSortMaxRewriteSizeSmallerThanTargetFileSizeStillRewrites() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 5; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int partition = manifest; partition <= manifest + 20; partition++) {
+                entries.add(
+                        makeEntry(true, String.format("m%d-p%d", manifest, partition), partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Set<String> inputManifestFileNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.target-file-size", "2B");
+        testOptions.set("manifest-sort.max-rewrite-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        boolean hasRewrittenManifest = false;
+        for (ManifestFileMeta meta : merged) {
+            if (inputManifestFileNames.contains(meta.fileName())) {
+                continue;
+            }
+
+            hasRewrittenManifest = true;
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within rewritten manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+        assertThat(hasRewrittenManifest)
+                .as("Small max rewrite size should still rewrite at least one useful batch")
+                .isTrue();
+    }
+
+    @Test
+    public void testManifestSortWithSpillableExternalSortBuffer() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 4; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int i = 0; i < 80; i++) {
+                int partition = manifest % 2 == 0 ? 79 - i : i;
+                entries.add(
+                        makeEntry(
+                                true,
+                                String.format(
+                                        "spill-manifest-%02d-entry-%03d-payload-padding-%040d",
+                                        manifest, i, i),
+                                partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+        testOptions.set("local-sort.max-num-file-handles", "2");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within a manifest should be sorted after spill")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+    }
+
+    @Test
+    public void testManifestSortUsesExternalIOManagerWithoutClosingIt() throws Exception {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 2; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int i = 0; i < 40; i++) {
+                int partition = manifest == 0 ? 39 - i : i;
+                entries.add(
+                        makeEntry(
+                                true,
+                                String.format(
+                                        "external-io-manager-%02d-entry-%03d-payload-%040d",
+                                        manifest, i, i),
+                                partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+
+        java.nio.file.Path spillBase = tempDir.resolve("manifest-spill");
+        java.nio.file.Files.createDirectories(spillBase);
+        IOManager ioManager = IOManager.create(spillBase.toString());
+        try {
+            List<ManifestFileMeta> merged =
+                    ManifestFileMerger.merge(
+                            input,
+                            manifestFile,
+                            getPartitionType(),
+                            CoreOptions.fromMap(testOptions.toMap()),
+                            ioManager);
+
+            assertEquivalentEntries(input, merged);
+            assertThat(spillBase.toFile().list((dir, name) -> name.startsWith("paimon-")))
+                    .isNotEmpty();
+        } finally {
+            ioManager.close();
+        }
+        assertThat(spillBase.toFile().list()).isEmpty();
+    }
+
     /**
      * Test that sort rewrite correctly eliminates DELETE entries and their corresponding ADD
      * entries. The key condition is that totalDeltaFileSize must reach manifestFullCompactionSize
@@ -1021,6 +1162,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "10B");
+        testOptions.set("manifest-sort.max-rewrite-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+        testOptions.set("local-sort.max-num-file-handles", "2");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
@@ -1062,6 +1207,189 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(prevPartition);
             }
         }
+    }
+
+    @Test
+    public void testDataEvolutionManifestSortByPartitionAndRowId() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "A-row30", 0, 30, 5),
+                        makeRowIdEntry(true, "A-row10-seq3", 3, 10, 5, 3)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "B-row20", 1, 20, 5),
+                        makeRowIdEntry(true, "B-row0", 2, 0, 5)));
+        input.add(makeManifest(makeRowIdEntry(true, "C-row10-seq5", 3, 10, 5, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        List<ManifestEntry> outputEntries = new ArrayList<>();
+        for (ManifestFileMeta meta : merged) {
+            outputEntries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("A-row30", "B-row20", "B-row0", "C-row10-seq5", "A-row10-seq3");
+
+        for (int i = 1; i < outputEntries.size(); i++) {
+            int previousPartition = outputEntries.get(i - 1).partition().getInt(0);
+            int currentPartition = outputEntries.get(i).partition().getInt(0);
+            long previousRowId = outputEntries.get(i - 1).file().nonNullFirstRowId();
+            long currentRowId = outputEntries.get(i).file().nonNullFirstRowId();
+            assertThat(currentPartition)
+                    .as("Data evolution manifest entries should be sorted by partition first")
+                    .isGreaterThanOrEqualTo(previousPartition);
+            if (currentPartition == previousPartition) {
+                assertThat(currentRowId)
+                        .as("Data evolution manifest entries should be sorted by RowID")
+                        .isGreaterThanOrEqualTo(previousRowId);
+            }
+        }
+    }
+
+    @Test
+    public void testDataEvolutionManifestSortUsesConfiguredPartitionFieldBeforeRowId() {
+        RowType multiPartitionType = RowType.of(new IntType(), new IntType(), new IntType());
+        ManifestFile multiPartManifestFile = createManifestFileForPartitionType(multiPartitionType);
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartRowIdEntry(
+                                                "region10-dt2-row30", 10, 2, 0, 30, 5),
+                                        makeMultiPartRowIdEntry(
+                                                "region20-dt1-row5", 20, 1, 0, 5, 5)))
+                        .get(0));
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartRowIdEntry(
+                                                "region5-dt2-row10", 5, 2, 0, 10, 5),
+                                        makeMultiPartRowIdEntry(
+                                                "region0-dt1-row20", 0, 1, 0, 20, 5)))
+                        .get(0));
+
+        Options defaultOptions = new Options();
+        defaultOptions.set("manifest-sort.enabled", "true");
+        defaultOptions.set("data-evolution.enabled", "true");
+        defaultOptions.set("manifest.full-compaction-threshold-size", "1B");
+        List<ManifestFileMeta> sortedByFullPartition =
+                ManifestFileMerger.merge(
+                        input,
+                        multiPartManifestFile,
+                        multiPartitionType,
+                        CoreOptions.fromMap(defaultOptions.toMap()));
+        assertThat(readFileNames(multiPartManifestFile, sortedByFullPartition))
+                .containsExactly(
+                        "region0-dt1-row20",
+                        "region5-dt2-row10",
+                        "region10-dt2-row30",
+                        "region20-dt1-row5");
+
+        Options configuredFieldOptions = new Options();
+        configuredFieldOptions.set("manifest-sort.enabled", "true");
+        configuredFieldOptions.set("manifest-sort.partition-field", "f1");
+        configuredFieldOptions.set("data-evolution.enabled", "true");
+        configuredFieldOptions.set("manifest.full-compaction-threshold-size", "1B");
+        List<ManifestFileMeta> sortedByDt =
+                ManifestFileMerger.merge(
+                        input,
+                        multiPartManifestFile,
+                        multiPartitionType,
+                        CoreOptions.fromMap(configuredFieldOptions.toMap()));
+        assertThat(readFileNames(multiPartManifestFile, sortedByDt))
+                .containsExactly(
+                        "region20-dt1-row5",
+                        "region0-dt1-row20",
+                        "region5-dt2-row10",
+                        "region10-dt2-row30");
+    }
+
+    @Test
+    public void testDataEvolutionManifestSortFallsBackToPartitionWhenRowIdStatsMissing() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p2-row0", 2, 0, 5)));
+        input.add(makeManifest(makeEntry(true, "legacy-p0", 0)));
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p1-row10", 1, 10, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        assertThat(
+                        readEntries(merged).stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("legacy-p0", "rowid-p1-row10", "rowid-p2-row0");
+    }
+
+    @Test
+    public void testDataEvolutionMinorManifestSortPreservesUnmatchedDeleteEntries() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(true, "survivor-row30", 0, 30, 5, 1)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(false, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(false, "old-row10", 0, 10, 5, 1),
+                        makeRowIdEntry(true, "new-row20", 0, 20, 5, 2)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        List<ManifestEntry> outputEntries = readEntries(merged);
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+
+        assertThat(
+                        FileEntry.mergeEntries(outputEntries).stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
     }
 
     /**
@@ -1497,5 +1825,137 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         null));
+    }
+
+    private ManifestFile createManifestFileForPartitionType(RowType partitionType) {
+        Path path = new Path(tempDir.toString());
+        FileIO fileIO = FileIOFinder.find(path);
+        return new ManifestFile.Factory(
+                        fileIO,
+                        new SchemaManager(fileIO, path),
+                        partitionType,
+                        avro,
+                        "zstd",
+                        new FileStorePathFactory(
+                                path,
+                                partitionType,
+                                "default",
+                                CoreOptions.FILE_FORMAT.defaultValue(),
+                                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                                CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                null,
+                                null,
+                                CoreOptions.ExternalPathStrategy.NONE,
+                                null,
+                                false,
+                                null),
+                        Long.MAX_VALUE,
+                        null)
+                .create();
+    }
+
+    private ManifestEntry makeMultiPartRowIdEntry(
+            String fileName, int region, int dt, int hour, long firstRowId, long rowCount) {
+        BinaryRow binaryRow = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, region);
+        writer.writeInt(1, dt);
+        writer.writeInt(2, hour);
+        writer.complete();
+
+        return ManifestEntry.create(
+                FileKind.ADD,
+                binaryRow,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        rowCount,
+                        binaryRow,
+                        binaryRow,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        firstRowId,
+                        Collections.singletonList("f0")));
+    }
+
+    private List<String> readFileNames(
+            ManifestFile manifestFile, List<ManifestFileMeta> manifestMetas) {
+        List<String> fileNames = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestMetas) {
+            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+                fileNames.add(entry.file().fileName());
+            }
+        }
+        return fileNames;
+    }
+
+    /** Create a ManifestEntry with row ID metadata for data evolution manifest sort tests. */
+    private ManifestEntry makeRowIdEntry(
+            boolean isAdd, String fileName, int partition, long firstRowId, long rowCount) {
+        return makeRowIdEntry(isAdd, fileName, partition, firstRowId, rowCount, 0);
+    }
+
+    private ManifestEntry makeRowIdEntry(
+            boolean isAdd,
+            String fileName,
+            int partition,
+            long firstRowId,
+            long rowCount,
+            long sequenceNumber) {
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, partition);
+        writer.complete();
+
+        return ManifestEntry.create(
+                isAdd ? FileKind.ADD : FileKind.DELETE,
+                binaryRow,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        rowCount,
+                        binaryRow,
+                        binaryRow,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        sequenceNumber,
+                        sequenceNumber,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        firstRowId,
+                        Collections.singletonList("f0")));
+    }
+
+    private List<ManifestEntry> readEntries(List<ManifestFileMeta> manifestMetas) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestMetas) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+        return entries;
     }
 }

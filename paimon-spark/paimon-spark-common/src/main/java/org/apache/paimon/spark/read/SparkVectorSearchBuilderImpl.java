@@ -38,6 +38,7 @@ public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 
     @Override
     public VectorRead newVectorRead() {
-        return new SparkVectorReadImpl(table, filter, limit, vectorColumn, vector, options);
+        return new SparkVectorReadImpl(
+                table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 }

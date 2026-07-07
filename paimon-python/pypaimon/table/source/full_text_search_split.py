@@ -15,38 +15,31 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Split of full-text search."""
+"""Splits of full-text search."""
 
 from dataclasses import dataclass
 from typing import List
 
 from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.utils.range import Range
+
+
+class FullTextSearchSplit:
+    """Base split of full-text search."""
 
 
 @dataclass
-class FullTextSearchSplit:
-    """Split of full-text search."""
+class IndexFullTextSearchSplit(FullTextSearchSplit):
+    """Split to read full-text index files."""
 
+    column_name: str
     row_range_start: int
     row_range_end: int
     full_text_index_files: List[IndexFileMeta]
 
-    def __eq__(self, other):
-        if not isinstance(other, FullTextSearchSplit):
-            return False
-        return (
-            self.row_range_start == other.row_range_start
-            and self.row_range_end == other.row_range_end
-            and self.full_text_index_files == other.full_text_index_files
-        )
 
-    def __hash__(self):
-        return hash((self.row_range_start, self.row_range_end, tuple(self.full_text_index_files)))
+@dataclass
+class RawFullTextSearchSplit(FullTextSearchSplit):
+    """Split to scan raw rows for full-text search."""
 
-    def __repr__(self):
-        return (
-            f"FullTextSearchSplit("
-            f"row_range_start={self.row_range_start}, "
-            f"row_range_end={self.row_range_end}, "
-            f"full_text_index_files={self.full_text_index_files})"
-        )
+    row_ranges: List[Range]

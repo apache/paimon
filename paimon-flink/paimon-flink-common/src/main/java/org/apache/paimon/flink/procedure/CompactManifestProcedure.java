@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -27,6 +28,8 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import javax.annotation.Nullable;
 
 import java.util.HashMap;
 
@@ -43,9 +46,14 @@ public class CompactManifestProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
             })
-    public String[] call(ProcedureContext procedureContext, String tableId, String options)
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            @Nullable String options,
+            @Nullable Boolean dryRun)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -55,6 +63,10 @@ public class CompactManifestProcedure extends ProcedureBase {
         ProcedureUtils.putAllOptions(dynamicOptions, options);
 
         table = table.copy(dynamicOptions);
+
+        if (dryRun != null && dryRun) {
+            return new String[] {ManifestCompactDryRun.execute(table)};
+        }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();

@@ -197,4 +197,121 @@ public class JavaPyE2ETest {
         assertThat(indexEntries.get(0).indexFile().indexType())
                 .isEqualTo(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
     }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testVindexVectorRawFallbackWrite() throws Exception {
+        String tableName = "test_vindex_vector_raw_fallback";
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+        LocalFileIO fileIO = LocalFileIO.create();
+        if (fileIO.exists(tablePath)) {
+            fileIO.delete(tablePath, true);
+        }
+
+        int dimension = 4;
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), new ArrayType(new FloatType())},
+                        new String[] {"id", "embedding"});
+
+        Options options = new Options();
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        options.setString(
+                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".dimension",
+                String.valueOf(dimension));
+        options.setString(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".metric", "l2");
+        options.setString(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".nlist", "2");
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        float[][] indexedVectors =
+                new float[][] {
+                    new float[] {0.0f, 1.0f, 0.0f, 0.0f},
+                    new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                    new float[] {0.0f, 0.0f, 0.0f, 1.0f}
+                };
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < indexedVectors.length; i++) {
+                write.write(GenericRow.of(i, new GenericArray(indexedVectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        DataField embeddingField = table.rowType().getField("embedding");
+        Options indexOptions = table.coreOptions().toConfiguration();
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                embeddingField,
+                                indexOptions);
+
+        for (int i = 0; i < indexedVectors.length; i++) {
+            writer.write(indexedVectors[i], i);
+        }
+
+        List<ResultEntry> entries = writer.finish();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).rowCount()).isEqualTo(indexedVectors.length);
+
+        Range rowRange = new Range(0, indexedVectors.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        embeddingField.id(),
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(3, new GenericArray(new float[] {1.0f, 0.0f, 0.0f, 0.0f})));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<org.apache.paimon.manifest.IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest());
+        assertThat(indexEntries).hasSize(1);
+        assertThat(indexEntries.get(0).indexFile().rowCount()).isEqualTo(indexedVectors.length);
+        assertThat(indexEntries.get(0).indexFile().indexType())
+                .isEqualTo(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
+    }
 }

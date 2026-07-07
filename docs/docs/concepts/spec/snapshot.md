@@ -62,3 +62,6 @@ Snapshot File is JSON, it includes:
 15. changelogRecordCount: record count of all changelog produced in this snapshot. 
 16. watermark: watermark for input records, from Flink watermark mechanism, Long.MIN_VALUE if there is no watermark. 
 17. statistics: stats file name for statistics of this table.
+18. properties: additional key-value properties of this snapshot.
+19. nextRowId: next row id for row tracking.
+20. operation: logical operation type, e.g. WRITE, DELETE, UPDATE, MERGE. Null if not set.

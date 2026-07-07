@@ -193,7 +193,7 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
 
         public BucketedAppendClusterTask(
                 List<DataFileMeta> toCluster, int outputLevel, CompactRewriter rewriter) {
-            super(null);
+            super(null, "");
             this.toCluster = toCluster;
             this.outputLevel = outputLevel;
             this.rewriter = rewriter;

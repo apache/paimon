@@ -129,9 +129,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     val fullTextSearch = pushedFullTextSearch.get
     val ftBuilder = table
       .newFullTextSearchBuilder()
-      .withQueryText(fullTextSearch.queryText())
-      .withQueryOperator(fullTextSearch.queryOperator())
-      .withTextColumn(fullTextSearch.fieldName())
+      .withQuery(fullTextSearch.column(), fullTextSearch.query())
       .withLimit(fullTextSearch.limit())
     if (pushedPartitionFilters.nonEmpty) {
       ftBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))

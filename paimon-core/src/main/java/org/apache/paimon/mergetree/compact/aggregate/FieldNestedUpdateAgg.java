@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.codegen.RecordEqualiser;
@@ -32,7 +33,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,8 +41,6 @@ import java.util.Map;
 import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
-import static org.apache.paimon.options.ConfigOptions.key;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -61,17 +60,14 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final RecordComparator sequenceComparator;
     private final boolean hasSequenceField;
 
+    private final CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy;
     private final int countLimit;
-
-    public FieldNestedUpdateAgg(
-            String name, ArrayType dataType, List<String> nestedKey, int countLimit) {
-        this(name, dataType, nestedKey, Collections.emptyList(), countLimit);
-    }
 
     public FieldNestedUpdateAgg(
             String name,
             ArrayType dataType,
             List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy,
             List<String> nestedSequenceField,
             int countLimit) {
         super(name, dataType);
@@ -85,12 +81,11 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             this.elementEqualiser = null;
         }
 
+        this.nestedKeyNullStrategy = nestedKeyNullStrategy;
+
         // If nestedSequenceField is set, we need to compare sequence fields to determine
         // whether to update. Only update when the new sequence is greater than the old one.
         if (!nestedSequenceField.isEmpty()) {
-            checkArgument(
-                    this.keyProjection != null,
-                    "nested-sequence-field requires nested-key to be set.");
             this.sequenceProjection = newProjection(nestedType, nestedSequenceField);
             this.hasSequenceField = true;
 
@@ -116,42 +111,38 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null || inputField == null) {
-            return accumulator == null ? inputField : accumulator;
-        }
-
-        InternalArray acc = (InternalArray) accumulator;
-        InternalArray input = (InternalArray) inputField;
-
-        if (acc.size() >= countLimit) {
+        if (inputField == null) {
             return accumulator;
         }
 
-        int remainCount = countLimit - acc.size();
+        InternalArray input = (InternalArray) inputField;
 
-        List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
-        addNonNullRows(acc, rows);
-        addNonNullRows(input, rows, remainCount);
-
-        if (keyProjection != null) {
-            Map<BinaryRow, InternalRow> map = new HashMap<>();
-            for (InternalRow row : rows) {
-                BinaryRow key = keyProjection.apply(row).copy();
-                if (hasSequenceField) {
-                    // When sequence field is configured, only update if the new sequence is greater
-                    InternalRow existing = map.get(key);
-                    if (existing == null || compareSequence(row, existing) >= 0) {
-                        map.put(key, row);
-                    }
-                } else {
-                    map.put(key, row);
-                }
+        if (keyProjection == null) {
+            if (accumulator == null) {
+                List<InternalRow> rows = new ArrayList<>(input.size());
+                addNonNullRows(input, rows, countLimit);
+                return new GenericArray(rows.toArray());
             }
 
-            rows = new ArrayList<>(map.values());
+            InternalArray acc = (InternalArray) accumulator;
+            if (acc.size() >= countLimit) {
+                return accumulator;
+            }
+
+            int remainCount = countLimit - acc.size();
+
+            List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
+            addNonNullRows(acc, rows);
+            addNonNullRows(input, rows, remainCount);
+            return new GenericArray(rows.toArray());
         }
 
-        return new GenericArray(rows.toArray());
+        Map<BinaryRow, InternalRow> map = new HashMap<>();
+        if (accumulator != null) {
+            addNestedRows((InternalArray) accumulator, map, false);
+        }
+        addNestedRows(input, map, true);
+        return new GenericArray(new ArrayList<>(map.values()).toArray());
     }
 
     @Override
@@ -183,14 +174,22 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
                     continue;
                 }
                 InternalRow row = acc.getRow(i, nestedFields);
-                map.put(keyProjection.apply(row).copy(), row);
+                BinaryRow key = keyProjection.apply(row).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.put(key, row);
             }
 
             for (int i = 0; i < retract.size(); i++) {
                 if (retract.isNullAt(i)) {
                     continue;
                 }
-                map.remove(keyProjection.apply(retract.getRow(i, nestedFields)));
+                BinaryRow key = keyProjection.apply(retract.getRow(i, nestedFields)).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.remove(key);
             }
 
             return new GenericArray(new ArrayList<>(map.values()).toArray());
@@ -233,6 +232,56 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             }
             rows.add(array.getRow(i, nestedFields));
             count++;
+        }
+    }
+
+    private void addNestedRows(
+            InternalArray array, Map<BinaryRow, InternalRow> rows, boolean limitNewKeys) {
+        checkNotNull(keyProjection);
+
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                continue;
+            }
+
+            InternalRow row = array.getRow(i, nestedFields);
+            BinaryRow key = keyProjection.apply(row).copy();
+
+            if (!applyNestedKeyNullStrategy(key)) {
+                continue;
+            }
+
+            InternalRow existing = rows.get(key);
+            if (existing != null) {
+                if (!hasSequenceField || compareSequence(row, existing) >= 0) {
+                    rows.put(key, row);
+                }
+            } else if (!limitNewKeys || rows.size() < countLimit) {
+                rows.put(key, row);
+            }
+        }
+    }
+
+    private boolean applyNestedKeyNullStrategy(BinaryRow key) {
+        if (!key.anyNull()) {
+            // The nested-key satisfies primary key semantics.
+            return true;
+        }
+        switch (nestedKeyNullStrategy) {
+            case MERGE:
+                // Preserve the previous behavior.
+                return true;
+            case IGNORE:
+                return false;
+            case ERROR:
+                throw new IllegalArgumentException(
+                        "Nested key contains null values. Primary key fields must not be null.");
+            default:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Unsupported nested-key-null-strategy '%s'. Supported values are: %s.",
+                                nestedKeyNullStrategy,
+                                Arrays.toString(CoreOptions.NestedKeyNullStrategy.values())));
         }
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
@@ -26,11 +27,14 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
+
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createArray;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createMap;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createRow;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.deepEqualsInternalRow;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RowCompactedSerializer}. */
 abstract class RowCompactedSerializerTest extends SerializerTestInstance<InternalRow> {
@@ -195,6 +199,41 @@ abstract class RowCompactedSerializerTest extends SerializerTestInstance<Interna
 
         private static RowCompactedSerializer getRowSerializer() {
             return new RowCompactedSerializer(RowType.of(DataTypes.VARIANT(), DataTypes.VARIANT()));
+        }
+    }
+
+    static final class VectorTypesTest extends RowCompactedSerializerTest {
+        public VectorTypesTest() {
+            super(getRowSerializer(), getData());
+        }
+
+        private static InternalRow[] getData() {
+            return new GenericRow[] {
+                GenericRow.of((Object) null),
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f})),
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {-1.0f, 0.5f, 4.5f}))
+            };
+        }
+
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(RowType.of(DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        }
+
+        @Test
+        public void testSerializeVectorWithInvalidLength() {
+            GenericRow row =
+                    GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f}));
+
+            assertThatThrownBy(() -> getRowSerializer().serializeToBytes(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Vector length mismatch");
+        }
+
+        @Test
+        public void testCreateSliceComparatorWithVectorType() {
+            assertThatThrownBy(() -> getRowSerializer().createSliceComparator())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("not comparable");
         }
     }
 

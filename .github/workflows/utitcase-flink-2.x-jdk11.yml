@@ -20,6 +20,12 @@ name: UTCase and ITCase Flink 2.x on JDK 11
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'paimon-python/**'
+      - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -49,6 +55,9 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
+
+      - name: Install paimon-full-text Java dependency
+        run: bash .github/workflows/install-paimon-full-text.sh java
 
       - name: Build Flink
         run:  |

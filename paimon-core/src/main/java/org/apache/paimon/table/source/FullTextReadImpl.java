@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -31,13 +30,21 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -49,27 +56,35 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class FullTextReadImpl implements FullTextRead {
 
     private final FileStoreTable table;
+    @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
     private final DataField textColumn;
-    private final String queryText;
-    private final String queryOperator;
+    private final String query;
+
+    public FullTextReadImpl(FileStoreTable table, int limit, DataField textColumn, String query) {
+        this(table, null, limit, Collections.singletonList(textColumn), query);
+    }
 
     public FullTextReadImpl(
-            FileStoreTable table, int limit, DataField textColumn, String queryText) {
-        this(table, limit, textColumn, queryText, "or");
+            FileStoreTable table, int limit, List<DataField> textColumns, String query) {
+        this(table, null, limit, textColumns, query);
     }
 
     public FullTextReadImpl(
             FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
             int limit,
-            DataField textColumn,
-            String queryText,
-            String queryOperator) {
+            List<DataField> textColumns,
+            String query) {
         this.table = table;
+        this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.textColumn = textColumn;
-        this.queryText = queryText;
-        this.queryOperator = queryOperator;
+        if (textColumns.size() != 1) {
+            throw new IllegalArgumentException(
+                    "Full-text search expects exactly one text column, got: " + textColumns);
+        }
+        this.textColumn = textColumns.get(0);
+        this.query = query;
     }
 
     @Override
@@ -78,7 +93,73 @@ public class FullTextReadImpl implements FullTextRead {
             return GlobalIndexResult.createEmpty();
         }
 
-        IndexFileMeta firstFile = splits.get(0).fullTextIndexFiles().get(0);
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+
+        int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
+        ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
+
+        Map<String, List<IndexFullTextSearchSplit>> splitsByColumn = new HashMap<>();
+        List<Range> rawRowRanges = new ArrayList<>();
+        for (FullTextSearchSplit split : splits) {
+            if (split instanceof IndexFullTextSearchSplit) {
+                IndexFullTextSearchSplit indexSplit = (IndexFullTextSearchSplit) split;
+                splitsByColumn
+                        .computeIfAbsent(indexSplit.columnName(), k -> new ArrayList<>())
+                        .add(indexSplit);
+            } else if (split instanceof RawFullTextSearchSplit) {
+                rawRowRanges.addAll(((RawFullTextSearchSplit) split).rowRanges());
+            }
+        }
+
+        GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
+        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        ScoredGlobalIndexResult result =
+                evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, liveRows);
+        if (!rawRowRanges.isEmpty()) {
+            result =
+                    new RawFullTextReadImpl(
+                                    table, partitionFilter, limit, textColumn, this::evalQuery)
+                            .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
+        }
+        return result.topK(limit);
+    }
+
+    ScoredGlobalIndexResult evalQuery(
+            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
+            IndexPathFactory indexPathFactory,
+            GlobalIndexFileReader indexFileReader,
+            ExecutorService executor) {
+        return evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, null);
+    }
+
+    private ScoredGlobalIndexResult evalQuery(
+            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
+            IndexPathFactory indexPathFactory,
+            GlobalIndexFileReader indexFileReader,
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
+        return evalColumnQuery(
+                textColumn.name(),
+                splitsByColumn,
+                indexPathFactory,
+                indexFileReader,
+                executor,
+                liveRows);
+    }
+
+    private ScoredGlobalIndexResult evalColumnQuery(
+            String column,
+            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
+            IndexPathFactory indexPathFactory,
+            GlobalIndexFileReader indexFileReader,
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
+        List<IndexFullTextSearchSplit> columnSplits = splitsByColumn.get(column);
+        if (columnSplits == null || columnSplits.isEmpty()) {
+            return ScoredGlobalIndexResult.createEmpty();
+        }
+
+        IndexFileMeta firstFile = columnSplits.get(0).fullTextIndexFiles().get(0);
         String indexType = firstFile.indexType();
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
@@ -94,14 +175,10 @@ public class FullTextReadImpl implements FullTextRead {
                     GlobalIndexerFactoryUtils.load(indexType)
                             .create(textColumn, table.coreOptions().toConfiguration());
         }
-        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-
-        int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
-        ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
 
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
-                new ArrayList<>(splits.size());
-        for (FullTextSearchSplit split : splits) {
+                new ArrayList<>(columnSplits.size());
+        for (IndexFullTextSearchSplit split : columnSplits) {
             futures.add(
                     eval(
                             globalIndexer,
@@ -109,7 +186,10 @@ public class FullTextReadImpl implements FullTextRead {
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
                             split.fullTextIndexFiles(),
-                            executor));
+                            indexFileReader,
+                            executor,
+                            GlobalIndexLiveRowFilter.forRange(
+                                    liveRows, split.rowRangeStart(), split.rowRangeEnd())));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -122,7 +202,7 @@ public class FullTextReadImpl implements FullTextRead {
             }
         }
 
-        return result.topK(limit);
+        return result;
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
@@ -131,7 +211,12 @@ public class FullTextReadImpl implements FullTextRead {
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexFileMeta> fullTextIndexFiles,
-            ExecutorService executor) {
+            GlobalIndexFileReader indexFileReader,
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 includeRowIds) {
+        if (includeRowIds != null && includeRowIds.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : fullTextIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -141,15 +226,21 @@ public class FullTextReadImpl implements FullTextRead {
                             indexFile.fileSize(),
                             meta.indexMeta()));
         }
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         FullTextSearch fullTextSearch =
-                new FullTextSearch(queryText, limit, textColumn.name(), queryOperator);
+                new FullTextSearch(
+                                textColumn.name(),
+                                query,
+                                candidateLimit(rowRangeStart, rowRangeEnd))
+                        .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+    }
+
+    private static int candidateLimit(long rowRangeStart, long rowRangeEnd) {
+        long size = rowRangeEnd - rowRangeStart + 1;
+        return size > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) size;
     }
 }

@@ -25,10 +25,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.variant.GenericVariant;
-import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -40,8 +37,8 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
@@ -67,20 +64,11 @@ public class ParquetRowDataWriter {
     public static final long NANOS_PER_MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1);
     public static final long NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
-    private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
-    @Nullable private final RowType shreddingSchemas;
 
-    public ParquetRowDataWriter(
-            RecordConsumer recordConsumer,
-            RowType rowType,
-            GroupType schema,
-            Configuration conf,
-            @Nullable RowType shreddingSchemas) {
-        this.conf = conf;
+    public ParquetRowDataWriter(RecordConsumer recordConsumer, RowType rowType, GroupType schema) {
         this.recordConsumer = recordConsumer;
-        this.shreddingSchemas = shreddingSchemas;
         this.rowWriter = new RowWriter(rowType, schema);
     }
 
@@ -138,9 +126,15 @@ public class ParquetRowDataWriter {
             GroupType groupType = type.asGroupType();
             LogicalTypeAnnotation annotation = type.getLogicalTypeAnnotation();
 
-            if (t instanceof ArrayType
+            if ((t instanceof ArrayType || t instanceof VectorType)
                     && annotation instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                return new ArrayWriter(((ArrayType) t).getElementType(), groupType);
+                DataType elementType =
+                        t instanceof ArrayType
+                                ? ((ArrayType) t).getElementType()
+                                : ((VectorType) t).getElementType();
+                Integer expectedVectorLength =
+                        t instanceof VectorType ? ((VectorType) t).getLength() : null;
+                return new ArrayWriter(elementType, groupType, expectedVectorLength);
             } else if (t instanceof MapType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
@@ -152,11 +146,7 @@ public class ParquetRowDataWriter {
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
             } else if (t instanceof VariantType && type instanceof GroupType) {
-                RowType shreddingSchema =
-                        shreddingSchemas != null && shreddingSchemas.containsField(type.getName())
-                                ? (RowType) shreddingSchemas.getField(type.getName()).type()
-                                : null;
-                return new VariantWriter(groupType, shreddingSchema);
+                return new VariantWriter();
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -511,8 +501,10 @@ public class ParquetRowDataWriter {
         private final String elementName;
         private final FieldWriter elementWriter;
         private final String repeatedGroupName;
+        @Nullable private final Integer expectedVectorLength;
 
-        private ArrayWriter(DataType t, GroupType groupType) {
+        private ArrayWriter(
+                DataType t, GroupType groupType, @Nullable Integer expectedVectorLength) {
             // Get the internal array structure
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -521,21 +513,34 @@ public class ParquetRowDataWriter {
             this.elementName = elementType.getName();
 
             this.elementWriter = createWriter(t, elementType);
+            this.expectedVectorLength = expectedVectorLength;
         }
 
         @Override
         public void write(InternalRow row, int ordinal) {
-            writeArrayData(row.getArray(ordinal));
+            writeArrayData(
+                    expectedVectorLength != null ? row.getVector(ordinal) : row.getArray(ordinal));
         }
 
         @Override
         public void write(InternalArray arrayData, int ordinal) {
-            writeArrayData(arrayData.getArray(ordinal));
+            writeArrayData(
+                    expectedVectorLength != null
+                            ? arrayData.getVector(ordinal)
+                            : arrayData.getArray(ordinal));
         }
 
         private void writeArrayData(InternalArray arrayData) {
             recordConsumer.startGroup();
             int listLength = arrayData.size();
+
+            if (expectedVectorLength != null && listLength != expectedVectorLength) {
+                throw new IllegalArgumentException(
+                        "Vector length mismatch: expected "
+                                + expectedVectorLength
+                                + " but got "
+                                + listLength);
+            }
 
             if (listLength > 0) {
                 recordConsumer.startField(repeatedGroupName, 0);
@@ -615,19 +620,6 @@ public class ParquetRowDataWriter {
 
     private class VariantWriter implements FieldWriter {
 
-        @Nullable private final VariantSchema variantSchema;
-        @Nullable private final RowWriter shreddedVariantWriter;
-
-        public VariantWriter(GroupType groupType, @Nullable RowType shreddingSchema) {
-            if (shreddingSchema != null) {
-                variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
-                shreddedVariantWriter = new RowWriter(shreddingSchema, groupType);
-            } else {
-                variantSchema = null;
-                shreddedVariantWriter = null;
-            }
-        }
-
         @Override
         public void write(InternalRow row, int ordinal) {
             writeVariant(row.getVariant(ordinal));
@@ -639,15 +631,6 @@ public class ParquetRowDataWriter {
         }
 
         private void writeVariant(Variant variant) {
-            if (shreddedVariantWriter != null) {
-                recordConsumer.startGroup();
-                InternalRow shreddedVariant =
-                        PaimonShreddingUtils.castShredded((GenericVariant) variant, variantSchema);
-                shreddedVariantWriter.write(shreddedVariant);
-                recordConsumer.endGroup();
-                return;
-            }
-
             recordConsumer.startGroup();
             recordConsumer.startField(Variant.VALUE, 0);
             recordConsumer.addBinary(Binary.fromReusedByteArray(variant.value()));

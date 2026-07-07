@@ -18,64 +18,75 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 
-/** FullTextSearch to perform full-text search on a text column. */
+/** FullTextSearch to perform full-text search with a query string. */
 public class FullTextSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final String queryText;
     private final String fieldName;
+    private final String query;
     private final int limit;
-    private final String queryOperator;
 
-    public FullTextSearch(String queryText, int limit, String fieldName) {
-        this(queryText, limit, fieldName, "or");
-    }
+    @Nullable private RoaringNavigableMap64 includeRowIds;
 
-    public FullTextSearch(String queryText, int limit, String fieldName, String queryOperator) {
-        if (queryText == null || queryText.isEmpty()) {
-            throw new IllegalArgumentException("Query text cannot be null or empty");
+    public FullTextSearch(String fieldName, String query, int limit) {
+        if (fieldName == null || fieldName.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
+        }
+        if (query == null) {
+            throw new IllegalArgumentException("Query cannot be null");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
-        if (fieldName == null || fieldName.isEmpty()) {
-            throw new IllegalArgumentException("Field name cannot be null or empty");
-        }
-        this.queryText = queryText;
-        this.limit = limit;
         this.fieldName = fieldName;
-        String normalizedOperator =
-                queryOperator == null ? "or" : queryOperator.trim().toLowerCase();
-        if (!"or".equals(normalizedOperator) && !"and".equals(normalizedOperator)) {
-            throw new IllegalArgumentException(
-                    "Query operator must be 'or' or 'and', got: " + queryOperator);
-        }
-        this.queryOperator = normalizedOperator;
-    }
-
-    public String queryText() {
-        return queryText;
+        this.query = query;
+        this.limit = limit;
     }
 
     public int limit() {
         return limit;
     }
 
+    public String column() {
+        return fieldName;
+    }
+
     public String fieldName() {
         return fieldName;
     }
 
-    public String queryOperator() {
-        return queryOperator;
+    public String query() {
+        return query;
+    }
+
+    public RoaringNavigableMap64 includeRowIds() {
+        return includeRowIds;
+    }
+
+    public FullTextSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
+        this.includeRowIds = includeRowIds;
+        return this;
+    }
+
+    public FullTextSearch offsetRange(long from, long to) {
+        if (includeRowIds != null) {
+            FullTextSearch target = new FullTextSearch(fieldName, query, limit);
+            target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
+            return target;
+        }
+        return this;
     }
 
     @Override
     public String toString() {
         return String.format(
-                "FullTextSearch{field=%s, query='%s', limit=%d, operator=%s}",
-                fieldName, queryText, limit, queryOperator);
+                "FullTextSearch{fieldName=%s, limit=%d, query=%s}", fieldName, limit, query);
     }
 }

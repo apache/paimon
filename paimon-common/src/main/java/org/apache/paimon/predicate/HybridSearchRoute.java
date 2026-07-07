@@ -39,8 +39,7 @@ public class HybridSearchRoute implements Serializable {
     private final RouteType routeType;
     private final String fieldName;
     private final float[] vector;
-    private final String queryText;
-    private final String queryOperator;
+    private final String fullTextQuery;
     private final int limit;
     private final float weight;
     private final Map<String, String> options;
@@ -55,7 +54,7 @@ public class HybridSearchRoute implements Serializable {
             int limit,
             float weight,
             Map<String, String> options) {
-        this(RouteType.VECTOR, fieldName, vector, null, "or", limit, weight, options);
+        this(RouteType.VECTOR, fieldName, vector, null, limit, weight, options);
     }
 
     public static HybridSearchRoute vector(
@@ -68,29 +67,24 @@ public class HybridSearchRoute implements Serializable {
     }
 
     public static HybridSearchRoute fullText(
-            String fieldName,
-            String queryText,
-            String queryOperator,
-            int limit,
-            float weight,
-            Map<String, String> options) {
+            String fieldName, String query, int limit, float weight, Map<String, String> options) {
+        checkFullTextOptions(options);
         return new HybridSearchRoute(
-                RouteType.FULL_TEXT,
-                fieldName,
-                null,
-                queryText,
-                queryOperator,
-                limit,
-                weight,
-                options);
+                RouteType.FULL_TEXT, fieldName, null, query, limit, weight, options);
+    }
+
+    private static void checkFullTextOptions(Map<String, String> options) {
+        if (options != null && !options.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Full-text hybrid route options are not supported yet.");
+        }
     }
 
     private HybridSearchRoute(
             RouteType routeType,
             String fieldName,
             float[] vector,
-            String queryText,
-            String queryOperator,
+            String fullTextQuery,
             int limit,
             float weight,
             Map<String, String> options) {
@@ -103,27 +97,20 @@ public class HybridSearchRoute implements Serializable {
         if (routeType == RouteType.VECTOR && vector == null) {
             throw new IllegalArgumentException("Search vector cannot be null for vector route");
         }
-        if (routeType == RouteType.FULL_TEXT && (queryText == null || queryText.isEmpty())) {
-            throw new IllegalArgumentException(
-                    "Query text cannot be null or empty for full-text route");
+        if (routeType == RouteType.FULL_TEXT && fullTextQuery == null) {
+            throw new IllegalArgumentException("Query cannot be null for full-text route");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
-        if (weight <= 0) {
-            throw new IllegalArgumentException("Weight must be positive, got: " + weight);
-        }
-        String normalizedOperator =
-                queryOperator == null ? "or" : queryOperator.trim().toLowerCase();
-        if (!"or".equals(normalizedOperator) && !"and".equals(normalizedOperator)) {
+        if (!Float.isFinite(weight) || weight <= 0) {
             throw new IllegalArgumentException(
-                    "Query operator must be 'or' or 'and', got: " + queryOperator);
+                    "Weight must be finite and positive, got: " + weight);
         }
         this.routeType = routeType;
         this.fieldName = fieldName;
         this.vector = vector;
-        this.queryText = queryText;
-        this.queryOperator = normalizedOperator;
+        this.fullTextQuery = fullTextQuery;
         this.limit = limit;
         this.weight = weight;
         this.options =
@@ -157,12 +144,8 @@ public class HybridSearchRoute implements Serializable {
         return vector;
     }
 
-    public String queryText() {
-        return queryText;
-    }
-
-    public String queryOperator() {
-        return queryOperator;
+    public String fullTextQuery() {
+        return fullTextQuery;
     }
 
     public int limit() {
@@ -182,7 +165,11 @@ public class HybridSearchRoute implements Serializable {
     }
 
     public FullTextSearch toFullTextSearch() {
-        return new FullTextSearch(queryText, limit, fieldName, queryOperator);
+        return new FullTextSearch(fieldName, fullTextQuery, limit);
+    }
+
+    public Iterable<String> columns() {
+        return Collections.singletonList(fieldName);
     }
 
     @Override
@@ -204,27 +191,35 @@ public class HybridSearchRoute implements Serializable {
 
         private String fieldName;
         private float[] vector;
-        private String queryText;
-        private String queryOperator = "or";
+        private String fullTextQuery;
+        private RouteType routeType;
         private int limit;
         private float weight = 1.0f;
         private Map<String, String> options = new HashMap<>();
 
         public Builder vectorColumn(String fieldName) {
+            setRouteType(RouteType.VECTOR);
             this.fieldName = fieldName;
             return this;
         }
 
         public Builder field(String fieldName) {
-            return vectorColumn(fieldName);
-        }
-
-        public Builder textColumn(String fieldName) {
             this.fieldName = fieldName;
             return this;
         }
 
+        public Builder fullTextColumn(String fieldName) {
+            setRouteType(RouteType.FULL_TEXT);
+            this.fieldName = fieldName;
+            return this;
+        }
+
+        public Builder textColumn(String fieldName) {
+            return fullTextColumn(fieldName);
+        }
+
         public Builder queryVector(float[] vector) {
+            setRouteType(RouteType.VECTOR);
             this.vector = vector;
             return this;
         }
@@ -233,14 +228,23 @@ public class HybridSearchRoute implements Serializable {
             return queryVector(vector);
         }
 
-        public Builder queryText(String queryText) {
-            this.queryText = queryText;
+        public Builder query(String query) {
+            checkRouteType(RouteType.FULL_TEXT);
+            this.routeType = RouteType.FULL_TEXT;
+            this.fullTextQuery = query;
             return this;
         }
 
-        public Builder queryOperator(String queryOperator) {
-            this.queryOperator = queryOperator;
-            return this;
+        private void setRouteType(RouteType routeType) {
+            checkRouteType(routeType);
+            this.routeType = routeType;
+        }
+
+        private void checkRouteType(RouteType routeType) {
+            if (this.routeType != null && this.routeType != routeType) {
+                throw new IllegalArgumentException(
+                        "Cannot mix vector and full-text hybrid route settings");
+            }
         }
 
         public Builder limit(int limit) {
@@ -266,8 +270,16 @@ public class HybridSearchRoute implements Serializable {
         }
 
         public HybridSearchRoute build() {
-            if (queryText != null) {
-                return fullText(fieldName, queryText, queryOperator, limit, weight, options);
+            if (routeType == RouteType.FULL_TEXT) {
+                checkFullTextOptions(options);
+                return new HybridSearchRoute(
+                        RouteType.FULL_TEXT,
+                        fieldName,
+                        null,
+                        fullTextQuery,
+                        limit,
+                        weight,
+                        options);
             }
             return HybridSearchRoute.vector(fieldName, vector, limit, weight, options);
         }

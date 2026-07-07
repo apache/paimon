@@ -18,10 +18,17 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -38,6 +45,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.data.BinaryArray.fromLongArray;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
@@ -413,6 +421,25 @@ public class TableScanTest extends ScannerTestBase {
                 .isEqualTo(60);
         assertThat(((DataSplit) splits2.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
 
+        // A non-partition filter must disable TopN pushdown, else it prunes splits by sort-column
+        // stats unaware the filter removes rows. "b" >= 0 matches every row, so all 9 splits are
+        // kept instead of pruned to 3.
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        TableScan.Plan planWithFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(2, 0L))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithFilter.splits().size()).isEqualTo(9);
+
+        // A partition-only filter keeps TopN pushdown enabled (surviving rows all pass): still 3.
+        TableScan.Plan planWithPartitionFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(0, 0))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithPartitionFilter.splits().size()).isEqualTo(3);
+
         // with bottom1 null last
         TableScan.Plan plan3 =
                 table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();
@@ -531,6 +558,58 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    public void testPushDownTopNWithDeletionVectorsEnabled() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        createAppendOnlyTable(options);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 1; i <= 5; i++) {
+            write.write(rowData(i, i * 10, i * 100L));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        write.close();
+        commit.close();
+
+        assertThat(table.newScan().plan().splits()).hasSize(5);
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        TableScan.Plan plan =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(((DataSplit) plan.splits().get(0)).minValue(1, field, evolutions)).isEqualTo(10);
+    }
+
+    @Test
+    public void testPushDownTopNKeepsWideDeletionVectorSplits() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+        TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+
+        DataSplit tightLowSplit = newTestSplit("tight-low", 10, 19, null);
+        DataSplit tightHighSplit = newTestSplit("tight-high", 100, 109, null);
+        DataSplit wideSplit = newTestSplit("wide", 1000, 1009, new DeletionFile("dv", 0, 0, 1L));
+
+        List<Split> result =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                topN.orders().get(0),
+                                topN.limit(),
+                                Arrays.asList(tightLowSplit, tightHighSplit, wideSplit));
+
+        assertThat(result).containsExactly(wideSplit, tightLowSplit);
+    }
+
+    @Test
     public void testPushDownTopNSchemaEvolution() throws Exception {
         createAppendOnlyTable();
 
@@ -618,5 +697,51 @@ public class TableScanTest extends ScannerTestBase {
                 .isNull();
         assertThat(((DataSplit) plan2.splits().get(0)).maxValue(field.id(), field, evolutions))
                 .isNull();
+    }
+
+    private DataSplit newTestSplit(
+            String name, int minValue, int maxValue, DeletionFile deletionFile) {
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        name,
+                        0,
+                        maxValue - minValue + 1L,
+                        new SimpleStats(
+                                newStatsRow(0, minValue, 0L),
+                                newStatsRow(0, maxValue, 0L),
+                                fromLongArray(new Long[] {0L, 0L, 0L})),
+                        0,
+                        0,
+                        table.schema().id(),
+                        Collections.emptyList(),
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        DataSplit.Builder builder =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("dummy")
+                        .rawConvertible(true)
+                        .withDataFiles(Collections.singletonList(file));
+        if (deletionFile != null) {
+            builder.withDataDeletionFiles(Collections.singletonList(deletionFile));
+        }
+        return builder.build();
+    }
+
+    private BinaryRow newStatsRow(int pt, int a, long b) {
+        BinaryRow row = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, pt);
+        writer.writeInt(1, a);
+        writer.writeLong(2, b);
+        writer.complete();
+        return row;
     }
 }

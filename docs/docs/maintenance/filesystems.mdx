@@ -332,6 +332,21 @@ Download [paimon-jindo-@@VERSION@@.jar](https://repository.apache.org/snapshots/
 
 </Unstable>
 
+### Server-Side Encryption
+
+Paimon can stamp OSS server-side-encryption headers on the writes it performs (`PutObject`, server-side `CopyObject` used by rename/commit, and multipart-upload initiation) via three keys that map 1:1 to the OSS request headers:
+
+```yaml
+# Encryption method: AES256, KMS or SM4 (-> x-oss-server-side-encryption)
+fs.oss.server-side-encryption: KMS
+# Customer CMK key id, only valid with KMS (-> x-oss-server-side-encryption-key-id)
+fs.oss.server-side-encryption-key-id: your-cmk-key-id
+# Data-encryption algorithm SM4, only valid with KMS (-> x-oss-server-side-data-encryption)
+fs.oss.server-side-data-encryption: SM4
+```
+
+When any of these is set, Paimon takes over the SSE headers on its write paths (these keys take precedence over hadoop-aliyun's native `fs.oss.server-side-encryption-algorithm`). A key id or `SM4` data-encryption requires `fs.oss.server-side-encryption=KMS` (it defaults to `KMS` when unset), and is rejected otherwise.
+
 ## S3
 
 <Stable>

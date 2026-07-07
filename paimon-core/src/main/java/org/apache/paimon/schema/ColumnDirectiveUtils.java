@@ -43,8 +43,6 @@ public final class ColumnDirectiveUtils {
     public static final String BLOB_FIELD_DIRECTIVE = "__BLOB_FIELD";
     public static final String BLOB_DESCRIPTOR_FIELD_DIRECTIVE = "__BLOB_DESCRIPTOR_FIELD";
     public static final String BLOB_VIEW_FIELD_DIRECTIVE = "__BLOB_VIEW_FIELD";
-    public static final String BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE =
-            "__BLOB_EXTERNAL_STORAGE_FIELD";
     public static final String VECTOR_FIELD_DIRECTIVE = "__VECTOR_FIELD";
 
     private ColumnDirectiveUtils() {}
@@ -67,13 +65,8 @@ public final class ColumnDirectiveUtils {
         if (!comment.startsWith("__BLOB")) {
             return null;
         }
-        // match longer prefixes first
-        String optionKey = matchDirective(comment, BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE);
-        String marker = BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE;
-        if (optionKey == null) {
-            optionKey = matchDirective(comment, BLOB_VIEW_FIELD_DIRECTIVE);
-            marker = BLOB_VIEW_FIELD_DIRECTIVE;
-        }
+        String optionKey = matchDirective(comment, BLOB_VIEW_FIELD_DIRECTIVE);
+        String marker = BLOB_VIEW_FIELD_DIRECTIVE;
         if (optionKey == null) {
             optionKey = matchDirective(comment, BLOB_DESCRIPTOR_FIELD_DIRECTIVE);
             marker = BLOB_DESCRIPTOR_FIELD_DIRECTIVE;
@@ -85,12 +78,11 @@ public final class ColumnDirectiveUtils {
         Preconditions.checkArgument(
                 optionKey != null,
                 "Unsupported BLOB directive in column comment: '%s'. Supported directives are "
-                        + "'%s', '%s', '%s' and '%s'.",
+                        + "'%s', '%s' and '%s'.",
                 comment,
                 BLOB_FIELD_DIRECTIVE,
                 BLOB_DESCRIPTOR_FIELD_DIRECTIVE,
-                BLOB_VIEW_FIELD_DIRECTIVE,
-                BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE);
+                BLOB_VIEW_FIELD_DIRECTIVE);
         String realComment =
                 comment.length() == marker.length()
                         ? null
@@ -159,8 +151,6 @@ public final class ColumnDirectiveUtils {
             return CoreOptions.BLOB_DESCRIPTOR_FIELD.key();
         } else if (BLOB_VIEW_FIELD_DIRECTIVE.equals(marker)) {
             return CoreOptions.BLOB_VIEW_FIELD.key();
-        } else if (BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE.equals(marker)) {
-            return CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key();
         } else if (VECTOR_FIELD_DIRECTIVE.equals(marker)) {
             return CoreOptions.VECTOR_FIELD.key();
         } else {
@@ -184,9 +174,6 @@ public final class ColumnDirectiveUtils {
         }
         DataType newType = convertType(directive, fieldName, sourceType);
         modifyFieldOptions(directive.optionKey(), fieldName, options);
-        if (CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key().equals(directive.optionKey())) {
-            modifyFieldOptions(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), fieldName, options);
-        }
         return new ConvertedColumn(newType, directive.realComment());
     }
 
@@ -261,8 +248,6 @@ public final class ColumnDirectiveUtils {
             option = CoreOptions.BLOB_DESCRIPTOR_FIELD;
         } else if (CoreOptions.BLOB_VIEW_FIELD.key().equals(optionKey)) {
             option = CoreOptions.BLOB_VIEW_FIELD;
-        } else if (CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key().equals(optionKey)) {
-            option = CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD;
         } else if (CoreOptions.VECTOR_FIELD.key().equals(optionKey)) {
             option = CoreOptions.VECTOR_FIELD;
         } else {
@@ -287,8 +272,7 @@ public final class ColumnDirectiveUtils {
             new ConfigOption[] {
                 CoreOptions.BLOB_FIELD,
                 CoreOptions.BLOB_DESCRIPTOR_FIELD,
-                CoreOptions.BLOB_VIEW_FIELD,
-                CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD
+                CoreOptions.BLOB_VIEW_FIELD
             };
 
     private static final ConfigOption<String>[] VECTOR_OPTIONS =

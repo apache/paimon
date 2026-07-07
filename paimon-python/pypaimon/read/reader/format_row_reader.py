@@ -17,7 +17,7 @@
 
 import struct
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -29,10 +29,21 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     ArrayType, DataField, MapType, MultisetType, PyarrowFieldParser, RowType, VectorType, AtomicType
 )
+from pypaimon.table.special_fields import SpecialFields
 
 FOOTER_SIZE = 32
 MAGIC = 0x524F5753  # "ROWS"
 VERSION = 1
+
+
+def _special_field(name: str):
+    if name == SpecialFields.ROW_ID.name:
+        return SpecialFields.ROW_ID
+    if name == SpecialFields.SEQUENCE_NUMBER.name:
+        return SpecialFields.SEQUENCE_NUMBER
+    if name == SpecialFields.VALUE_KIND.name:
+        return SpecialFields.VALUE_KIND
+    return None
 
 
 class FormatRowReader(RecordBatchReader):
@@ -48,9 +59,13 @@ class FormatRowReader(RecordBatchReader):
         self._file_size = file_io.get_file_size(file_path)
 
         full_fields_map = {field.name: field for field in full_fields}
-        self._projected_fields = [full_fields_map[name] for name in read_fields]
+        self._read_field_names = list(read_fields)
+        self._projected_fields = [full_fields_map[name] for name in read_fields
+                                  if name in full_fields_map]
+        self._missing_fields = [name for name in read_fields
+                                if name not in full_fields_map]
         self._all_fields = full_fields
-        self._schema = PyarrowFieldParser.from_paimon_schema(self._projected_fields)
+        self._physical_schema = PyarrowFieldParser.from_paimon_schema(self._projected_fields)
 
         self._block_compressed_sizes: List[int] = []
         self._block_uncompressed_sizes: List[int] = []
@@ -97,13 +112,12 @@ class FormatRowReader(RecordBatchReader):
         block_data = self._read_and_decompress_block(self._current_block_idx)
         self._current_block_idx += 1
 
-        columns = self._decode_block(block_data)
+        columns, row_count = self._decode_block(block_data)
 
-        if not columns or all(len(col) == 0 for col in columns):
+        if row_count == 0:
             return None
 
-        pydict = {field.name: columns[i] for i, field in enumerate(self._projected_fields)}
-        table = pa.Table.from_pydict(pydict, self._schema)
+        table = self._build_table(columns, row_count)
 
         if self._push_down_predicate is not None:
             dataset = ds.InMemoryDataset(table)
@@ -123,13 +137,12 @@ class FormatRowReader(RecordBatchReader):
         self._blocks_to_read_pos += 1
 
         block_data = self._read_and_decompress_block(block_idx)
-        columns = self._decode_block(block_data, row_filter=local_rows)
+        columns, row_count = self._decode_block(block_data, row_filter=local_rows)
 
-        if not columns or all(len(col) == 0 for col in columns):
+        if row_count == 0:
             return self._read_batch_indexed()
 
-        pydict = {field.name: columns[i] for i, field in enumerate(self._projected_fields)}
-        table = pa.Table.from_pydict(pydict, self._schema)
+        table = self._build_table(columns, row_count)
 
         if self._push_down_predicate is not None:
             dataset = ds.InMemoryDataset(table)
@@ -211,8 +224,35 @@ class FormatRowReader(RecordBatchReader):
         uncompressed_size = self._block_uncompressed_sizes[block_idx]
         return decompressor.decompress(compressed_data, max_output_size=uncompressed_size)
 
+    def _build_table(self, columns: List[List], row_count: int) -> pa.Table:
+        pydict = {
+            field.name: columns[i]
+            for i, field in enumerate(self._projected_fields)
+        }
+        if not self._missing_fields:
+            return pa.Table.from_pydict(pydict, self._physical_schema)
+
+        arrays = []
+        fields = []
+        projected_by_name = {field.name: field for field in self._projected_fields}
+        for name in self._read_field_names:
+            if name in projected_by_name:
+                field = projected_by_name[name]
+                pa_type = PyarrowFieldParser.from_paimon_type(field.type)
+                arrays.append(pa.array(pydict[name], type=pa_type))
+                fields.append(pa.field(name, pa_type, nullable=field.type.nullable))
+            else:
+                special_field = _special_field(name)
+                pa_type = (
+                    PyarrowFieldParser.from_paimon_type(special_field.type)
+                    if special_field is not None else pa.null()
+                )
+                arrays.append(pa.nulls(row_count, type=pa_type))
+                fields.append(pa.field(name, pa_type, nullable=not SpecialFields.is_system_field(name)))
+        return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
     def _decode_block(self, block_data: bytes,
-                      row_filter: Optional[List[int]] = None) -> List[List]:
+                      row_filter: Optional[List[int]] = None) -> Tuple[List[List], int]:
         data_len = len(block_data)
         row_count = struct.unpack_from('<i', block_data, data_len - 4)[0]
         offset_array_start = data_len - 4 - row_count * 4
@@ -229,6 +269,7 @@ class FormatRowReader(RecordBatchReader):
         header_size = (arity + 7) // 8
 
         rows_to_read = row_filter if row_filter is not None else range(row_count)
+        rows_to_read_count = len(rows_to_read)
         proj_set = set(projected_indices)
         proj_col_map = {field_idx: col_idx for col_idx, field_idx in enumerate(projected_indices)}
 
@@ -249,7 +290,7 @@ class FormatRowReader(RecordBatchReader):
                     if field_idx in proj_set:
                         columns[proj_col_map[field_idx]].append(value)
 
-        return columns
+        return columns, rows_to_read_count
 
 
 class _RowDecoder:

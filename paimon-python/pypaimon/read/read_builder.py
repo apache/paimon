@@ -44,10 +44,15 @@ class ReadBuilder:
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[List[int]]] = None
+        self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
+        return self
+
+    def with_partition_filter(self, partition_filter: Predicate) -> 'ReadBuilder':
+        self._partition_filter = partition_filter
         return self
 
     def with_projection(self, projection: List[str]) -> 'ReadBuilder':
@@ -77,7 +82,8 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            partition_predicate=self._partition_filter,
         )
 
     def new_read(self) -> TableRead:

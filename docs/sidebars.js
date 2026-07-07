@@ -187,6 +187,7 @@ const sidebars = {
     },
     "items": [
       "pypaimon/python-api",
+      "pypaimon/multimodal-api",
       "pypaimon/manage-tags",
       "pypaimon/ray-data",
       "pypaimon/daft",

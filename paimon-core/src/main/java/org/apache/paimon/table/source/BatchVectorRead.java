@@ -26,10 +26,5 @@ import java.util.List;
 public interface BatchVectorRead {
 
     /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
-    default List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
-        return readBatch(plan.splits());
-    }
-
-    /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
-    List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits);
+    List<GlobalIndexResult> readBatch(VectorScan.Plan plan);
 }

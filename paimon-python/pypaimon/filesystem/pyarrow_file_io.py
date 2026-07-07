@@ -646,7 +646,7 @@ class PyArrowFileIO(FileIO):
         try:
             import mosaic
             with self.new_output_stream(path) as output_stream:
-                mosaic.write_table(data, output_stream)
+                mosaic.write_table(data, output_stream, options=kwargs.get("options"))
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e

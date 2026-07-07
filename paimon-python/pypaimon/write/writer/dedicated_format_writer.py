@@ -25,9 +25,15 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import VectorType
+from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.row_utils import (
+    require_columns,
+    row_to_named_values,
+    row_values_to_arrow_table,
+    value_for_arrow,
+)
 from pypaimon.write.writer.data_writer import DataWriter
 
 logger = logging.getLogger(__name__)
@@ -145,29 +151,13 @@ class DedicatedFormatWriter(DataWriter):
                 options=options,
             )
 
-        # Initialize ExternalStorageBlobWriter if configured
-        self._external_storage_writer = None
-        external_storage_fields = self.options.blob_external_storage_fields()
-        external_storage_path = self.options.blob_external_storage_path()
-        if external_storage_fields and external_storage_path:
-            from pypaimon.write.writer.external_storage_blob_writer import \
-                ExternalStorageBlobWriter
-            self._external_storage_writer = ExternalStorageBlobWriter(
-                file_io=self.file_io,
-                external_storage_path=external_storage_path,
-                external_storage_fields=external_storage_fields,
-                blob_target_file_size=self.options.blob_target_file_size(),
-                data_file_prefix=CoreOptions.data_file_prefix(self.options),
-            )
-
         logger.info(
             "Initialized DedicatedFormatWriter with blob columns: %s, blob file columns: %s, "
-            "vector columns: %s, descriptor stored columns: %s, external storage fields: %s, view stored columns: %s",
+            "vector columns: %s, descriptor stored columns: %s, view stored columns: %s",
             self.blob_column_names,
             self.blob_file_column_names,
             self.vector_write_columns,
             sorted(self.blob_descriptor_fields),
-            sorted(external_storage_fields) if external_storage_fields else [],
             sorted(self.blob_view_fields)
         )
 
@@ -197,11 +187,6 @@ class DedicatedFormatWriter(DataWriter):
 
     def write(self, data: pa.RecordBatch):
         try:
-            # Transform external-storage fields: write raw blob to external storage,
-            # replace with serialized BlobDescriptor
-            if self._external_storage_writer:
-                data = self._external_storage_writer.transform_batch(data)
-
             # Split data into normal, blob, and vector parts
             normal_data, blob_data_map, vector_data = self._split_data(data)
             self._validate_inline_stored_fields_input(data)
@@ -235,6 +220,82 @@ class DedicatedFormatWriter(DataWriter):
             self.abort()
             raise e
 
+    def write_row(self, row):
+        try:
+            values_by_name = row_to_named_values(
+                row, self.table.table_schema.fields)
+            required_columns = (
+                list(self.normal_column_names)
+                + list(self.blob_file_column_names)
+                + list(self.vector_write_columns)
+            )
+            require_columns(values_by_name, required_columns, "write_row")
+
+            if self.normal_column_names:
+                normal_values = dict(values_by_name)
+                for field_name in self.normal_column_names:
+                    normal_values[field_name] = (
+                        self._normal_row_value(field_name, normal_values[field_name])
+                    )
+                normal_data = row_values_to_arrow_table(
+                    normal_values,
+                    self.table.table_schema.fields,
+                    self.normal_column_names,
+                ).to_batches()[0]
+                processed_normal = self._process_normal_data(normal_data)
+                if processed_normal is not None:
+                    if self.pending_normal_data is None:
+                        self.pending_normal_data = processed_normal
+                    else:
+                        self.pending_normal_data = self._merge_normal_data(
+                            self.pending_normal_data, processed_normal)
+
+            for blob_column in self.blob_file_column_names:
+                arrow_type = PyarrowFieldParser.from_paimon_type(
+                    self.table.field_dict[blob_column].type)
+                self.blob_writers[blob_column].write_blob(
+                    values_by_name[blob_column], arrow_type)
+
+            if self.vector_writer is not None and self.vector_write_columns:
+                vector_data = row_values_to_arrow_table(
+                    values_by_name,
+                    self.table.table_schema.fields,
+                    self.vector_write_columns,
+                ).to_batches()[0]
+                self.vector_writer.write(vector_data)
+
+            self.record_count += 1
+            if self._should_roll_normal():
+                self._close_current_writers()
+
+        except Exception as e:
+            logger.error("Exception occurs when writing row. Cleaning up.", exc_info=e)
+            self.abort()
+            raise e
+
+    def _normal_row_value(self, field_name: str, value):
+        if field_name in self.blob_descriptor_fields and value is not None:
+            from pypaimon.table.row.blob import Blob
+
+            if isinstance(value, Blob):
+                try:
+                    return value.to_descriptor().serialize()
+                except Exception as e:
+                    raise ValueError(
+                        "blob-descriptor-field row values must be serialized "
+                        "BlobDescriptor bytes or a Blob with a descriptor."
+                    ) from e
+            return value
+
+        if field_name in self.blob_view_fields and value is not None:
+            from pypaimon.table.row.blob import BlobView
+
+            if isinstance(value, BlobView):
+                return value.view_struct.serialize()
+            return value
+
+        return value_for_arrow(value)
+
     def prepare_commit(self) -> List[DataFileMeta]:
         # Close any remaining data
         self._close_current_writers()
@@ -247,8 +308,6 @@ class DedicatedFormatWriter(DataWriter):
 
         try:
             self._close_current_writers()
-            if self._external_storage_writer:
-                self._external_storage_writer.close()
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
@@ -263,8 +322,6 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer.abort()
         if self.vector_writer is not None:
             self.vector_writer.abort()
-        if self._external_storage_writer:
-            self._external_storage_writer.abort()
         committed_non_blob_files = [
             file_meta for file_meta in self.committed_files
             if not DataFileMeta.is_blob_file(file_meta.file_name)
@@ -421,7 +478,7 @@ class DedicatedFormatWriter(DataWriter):
         elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
-            self.file_io.write_mosaic(file_path, data)
+            self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
             self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
         else:

@@ -130,4 +130,47 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                 .isEqualTo(
                         "[+I[1, 101, 15, 20221208], +I[4, 1001, 16, 20221208], +I[5, 10001, 15, 20221209]]");
     }
+
+    @Test
+    public void testManifestCompactDryRun() {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " hh INT,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'manifest.full-compaction-threshold-size' = '10000 T',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+
+        sql(
+                "INSERT INTO T VALUES (1, '10', 15, '20221208'), (4, '100', 16, '20221208'), (5, '1000', 15, '20221209')");
+
+        sql(
+                "INSERT OVERWRITE T VALUES (1, '10', 15, '20221208'), (4, '100', 16, '20221208'), (5, '1000', 15, '20221209')");
+
+        sql(
+                "INSERT OVERWRITE T VALUES (1, '10', 15, '20221208'), (4, '100', 16, '20221208'), (5, '1000', 15, '20221209')");
+
+        Assertions.assertThat(
+                        sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
+                .isEqualTo(6L);
+
+        String dryRunResult =
+                Objects.requireNonNull(
+                                sql("CALL sys.compact_manifest(`table` => 'default.T', `dry_run` => true)")
+                                        .get(0)
+                                        .getField(0))
+                        .toString();
+
+        Assertions.assertThat(dryRunResult).startsWith("Dry run:");
+        Assertions.assertThat(dryRunResult).contains("deleted entries in");
+
+        // verify dry run did not actually compact
+        Assertions.assertThat(
+                        sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
+                .isEqualTo(6L);
+    }
 }

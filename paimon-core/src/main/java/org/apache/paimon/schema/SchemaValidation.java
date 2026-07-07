@@ -20,8 +20,10 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
+import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
@@ -43,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -69,6 +72,7 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
+import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
@@ -100,7 +104,12 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class SchemaValidation {
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
+            Arrays.asList(
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    MultisetType.class,
+                    VectorType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -203,7 +212,6 @@ public class SchemaValidation {
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
-        validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
 
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         Set<String> fieldsInDedicatedFile =
@@ -355,6 +363,8 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+
+        validateMapStorageLayout(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -604,6 +614,52 @@ public class SchemaValidation {
         createMergeFunctionFactory(schema);
     }
 
+    private static void validateMapStorageLayout(TableSchema schema, CoreOptions options) {
+        String layoutSuffix = "." + MAP_STORAGE_LAYOUT;
+        Map<String, DataField> fieldMap = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            fieldMap.put(field.name(), field);
+        }
+
+        for (String key : options.toMap().keySet()) {
+            if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
+                continue;
+            }
+
+            String fieldName =
+                    key.substring(
+                            (FIELDS_PREFIX + ".").length(), key.length() - layoutSuffix.length());
+            DataField field = fieldMap.get(fieldName);
+            if (field == null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout but does not exist in table schema.",
+                                fieldName));
+            }
+
+            DataType fieldType = field.type();
+            if (!(fieldType instanceof MapType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout but its type is not MAP.",
+                                fieldName));
+            }
+
+            MapStorageLayout layout = options.mapStorageLayout(fieldName);
+            if (layout != MapStorageLayout.SHARED_SHREDDING) {
+                continue;
+            }
+
+            if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.",
+                                fieldName));
+            }
+            options.mapSharedShreddingMaxColumns(fieldName);
+        }
+    }
+
     private static void validateFileIndex(TableSchema schema) {
         CoreOptions options = new CoreOptions(schema.options());
         FileIndexOptions fileIndexOptions = options.indexColumnsOptions();
@@ -839,9 +895,6 @@ public class SchemaValidation {
                     rowTrackingEnabled,
                     "Data evolution config must enabled with row-tracking.enabled");
             checkArgument(
-                    !options.deletionVectorsEnabled(),
-                    "Data evolution config must disabled with deletion-vectors.enabled");
-            checkArgument(
                     !options.clusteringIncrementalEnabled(),
                     "Data evolution config must disabled with clustering.incremental");
         }
@@ -939,37 +992,6 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
-    }
-
-    private static void validateBlobExternalStorageFields(
-            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
-        Set<String> blobFieldNames =
-                rowType.getFields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
-                        .map(DataField::name)
-                        .collect(Collectors.toCollection(HashSet::new));
-        Set<String> configured = options.blobExternalStorageField();
-        for (String field : configured) {
-            checkArgument(
-                    blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-            checkArgument(
-                    blobDescriptorFields.contains(field),
-                    "Field '%s' in '%s' must also be in '%s'.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(),
-                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
-        }
-        if (!configured.isEmpty()) {
-            String externalStoragePath = options.blobExternalStoragePath();
-            checkArgument(
-                    externalStoragePath != null && !externalStoragePath.isEmpty(),
-                    "'%s' must be set when '%s' is configured.",
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-        }
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
@@ -1113,10 +1135,12 @@ public class SchemaValidation {
 
     private static void validateManifestSort(TableSchema schema, CoreOptions options) {
         if (options.manifestSortEnabled()) {
-            checkArgument(
-                    !schema.partitionKeys().isEmpty(),
-                    "Cannot enable '%s' for non-partition table.",
-                    CoreOptions.MANIFEST_SORT_ENABLED.key());
+            if (!options.dataEvolutionEnabled()) {
+                checkArgument(
+                        !schema.partitionKeys().isEmpty(),
+                        "Cannot enable '%s' for non-partition table.",
+                        CoreOptions.MANIFEST_SORT_ENABLED.key());
+            }
             String sortPartitionField = options.manifestSortPartitionField();
             if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
                 checkArgument(

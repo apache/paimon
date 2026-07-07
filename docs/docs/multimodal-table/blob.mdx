@@ -72,7 +72,7 @@ For details about the blob file format structure, see [File Format - BLOB](../co
 
 ## Storage Modes
 
-Paimon supports four storage modes for BLOB fields, selected via **comment directives** on the column:
+Paimon supports three storage modes for BLOB fields, selected via **comment directives** on the column:
 
 1. **Default blob storage** (`__BLOB_FIELD`)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
@@ -80,10 +80,7 @@ Paimon supports four storage modes for BLOB fields, selected via **comment direc
 2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
    Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
 
-3. **External-storage descriptor mode** (`__BLOB_EXTERNAL_STORAGE_FIELD`)
-   At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
-
-4. **Blob view storage** (`__BLOB_VIEW_FIELD`)
+3. **Blob view storage** (`__BLOB_VIEW_FIELD`)
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
 This allows one table to mix different storage modes for different BLOB columns.
@@ -126,16 +123,6 @@ This allows one table to mix different storage modes for different BLOB columns.
         Controls whether blob view fields are resolved to the upstream BLOB
         content at read time. Set to <code>false</code> when forwarding blob view
         references from one view table to another.
-      </td>
-    </tr>
-    <tr>
-      <td><h5>blob-external-storage-path</h5></td>
-      <td>No</td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>String</td>
-      <td>
-        External storage path for fields declared with <code>__BLOB_EXTERNAL_STORAGE_FIELD</code>.
-        Orphan file cleanup is not applied to this path.
       </td>
     </tr>
     <tr>
@@ -278,7 +265,6 @@ Supported directives:
 | `__BLOB_FIELD` | Raw bytes in `.blob` files | `blob-field` |
 | `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
 | `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
-| `__BLOB_EXTERNAL_STORAGE_FIELD` | Raw data to external path, descriptor inline | `blob-external-storage-field` + `blob-descriptor-field` |
 
 ## Adding a Blob Column
 
@@ -459,28 +445,6 @@ CREATE TABLE descriptor_table (
 
 Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
 
-## External Storage
-
-If you want Paimon to write raw blob data to a separate external location while keeping only descriptor bytes inline, use `__BLOB_EXTERNAL_STORAGE_FIELD`:
-
-```sql
-CREATE TABLE external_table (
-    id INT,
-    image BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
-) WITH (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-external-storage-path' = 'oss://bucket/path/'
-);
-```
-
-For these fields:
-
-- raw blob data is written to the configured external storage path
-- normal data files keep only serialized `BlobDescriptor` bytes
-- writes can still start from raw BLOB input
-- the field is treated as descriptor-based for operations such as `MERGE INTO`
-
 ## Blob View
 
 Blob view is useful when a downstream table should reference BLOB values already stored in an upstream table, without copying the bytes or creating new `.blob` files. A blob view field stores only a small `BlobViewStruct` inline. When the field is read, Paimon resolves the referenced BLOB from the upstream table.
@@ -585,8 +549,7 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
 3. **No Statistics**: Statistics collection is not supported for blob columns.
 4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
-5. **External Storage Cleanup**: Files written through `blob-external-storage-path` are outside Paimon's orphan file cleanup scope.
-6. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
+5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
 
 ## Best Practices
 
@@ -596,10 +559,6 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 3. **Use Descriptor Fields When Reusing External Blob Files**: Use `__BLOB_DESCRIPTOR_FIELD` for fields that should keep descriptor references instead of writing new `.blob` files.
 
-4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Use `__BLOB_EXTERNAL_STORAGE_FIELD` with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
+4. **Use Blob View to Avoid Copying BLOB Data**: Use `__BLOB_VIEW_FIELD` when a downstream table only needs to reference BLOB values from an upstream table.
 
-5. **Manage External Storage Lifecycle Separately**: Files written to `blob-external-storage-path` are not cleaned up by Paimon, so retention and deletion should be managed externally.
-
-6. **Use Blob View to Avoid Copying BLOB Data**: Use `__BLOB_VIEW_FIELD` when a downstream table only needs to reference BLOB values from an upstream table.
-
-7. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
+5. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.

@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.errors.ErrorMessages;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -541,10 +542,16 @@ public class ConflictDetection {
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
                         && columnChecker.conflictsWith(file)) {
+                    LOG.debug(
+                            "Data evolution row id conflict detected for table {}, commit user {}, "
+                                    + "snapshot {}, file {}.",
+                            tableName,
+                            commitUser,
+                            snapshot.id(),
+                            file);
                     return Optional.of(
                             new RuntimeException(
-                                    "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
-                                            + " updating the same file, which can render some updates ineffective."));
+                                    ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE));
                 }
             }
         }

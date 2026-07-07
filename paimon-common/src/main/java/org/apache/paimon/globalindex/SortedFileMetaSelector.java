@@ -232,16 +232,29 @@ public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<Glo
     }
 
     protected boolean overlaps(SortedIndexFileMeta meta, Object from, Object to) {
-        return comparator.compare(from, deserialize(meta.lastKey())) <= 0
-                && comparator.compare(to, deserialize(meta.firstKey())) >= 0;
+        if (meta.firstKey() != null && comparator.compare(to, deserialize(meta.firstKey())) < 0) {
+            return false;
+        }
+        if (meta.lastKey() != null && comparator.compare(from, deserialize(meta.lastKey())) > 0) {
+            return false;
+        }
+        return true;
     }
 
     protected int compareFirstKey(SortedIndexFileMeta meta, Object literal) {
-        return comparator.compare(deserialize(meta.firstKey()), literal);
+        byte[] firstKey = meta.firstKey();
+        if (firstKey == null) {
+            return -1;
+        }
+        return comparator.compare(deserialize(firstKey), literal);
     }
 
     protected int compareLastKey(SortedIndexFileMeta meta, Object literal) {
-        return comparator.compare(deserialize(meta.lastKey()), literal);
+        byte[] lastKey = meta.lastKey();
+        if (lastKey == null) {
+            return 1;
+        }
+        return comparator.compare(deserialize(lastKey), literal);
     }
 
     protected int compareKeys(Object left, Object right) {
@@ -263,7 +276,7 @@ public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<Glo
                 .collect(Collectors.toList());
     }
 
-    protected static byte[] prefixUpperBound(byte[] prefix) {
+    public static byte[] prefixUpperBound(byte[] prefix) {
         for (int i = prefix.length - 1; i >= 0; i--) {
             int unsignedByte = prefix[i] & 0xFF;
             if (unsignedByte != 0xFF) {

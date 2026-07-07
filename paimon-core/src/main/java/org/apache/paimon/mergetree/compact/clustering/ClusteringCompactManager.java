@@ -184,7 +184,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
         }
         taskFuture =
                 executor.submit(
-                        new CompactTask(metricsReporter) {
+                        new CompactTask(metricsReporter, "") {
                             @Override
                             protected CompactResult doCompact() throws Exception {
                                 return compact(fullCompaction);

@@ -54,10 +54,6 @@ class TestParseAddColumnComment(unittest.TestCase):
         d = parse_add_column_comment("__BLOB_VIEW_FIELD; view")
         self.assertEqual(d.option_key, CoreOptions.BLOB_VIEW_FIELD.key())
 
-    def test_blob_external_storage_field(self):
-        d = parse_add_column_comment("__BLOB_EXTERNAL_STORAGE_FIELD; ext")
-        self.assertEqual(d.option_key, CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key())
-
     def test_vector_field(self):
         d = parse_add_column_comment("__VECTOR_FIELD;128; embedding")
         self.assertEqual(d.option_key, CoreOptions.VECTOR_FIELD.key())
@@ -116,14 +112,6 @@ class TestApplyAddColumnDirective(unittest.TestCase):
         self.assertEqual(result.type.length, 128)
         self.assertEqual(result.comment, "emb")
         self.assertEqual(opts[CoreOptions.VECTOR_FIELD.key()], "emb")
-
-    def test_external_storage_registers_both(self):
-        opts = {}
-        apply_add_column_directive(
-            "__BLOB_EXTERNAL_STORAGE_FIELD", "vid", AtomicType("BYTES"), opts
-        )
-        self.assertEqual(opts[CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()], "vid")
-        self.assertEqual(opts[CoreOptions.BLOB_DESCRIPTOR_FIELD.key()], "vid")
 
     def test_blob_rejects_non_binary(self):
         with self.assertRaises(ValueError):

@@ -97,6 +97,17 @@ class PredicateTest(unittest.TestCase):
             predicate_builder.equal('f2', 'a')
         self.assertEqual(str(e.exception), "The field f2 is not in field list ['f0', 'f1'].")
 
+    def test_exclude_predicate_with_fields(self):
+        from pypaimon.read.push_down_utils import exclude_predicate_with_fields
+        pb = self.catalog.get_table('default.test_append').new_read_builder().new_predicate_builder()
+        f0 = pb.is_null('f0')
+        f1 = pb.is_null('f1')
+
+        self.assertIsNone(exclude_predicate_with_fields(f0, {'f0'}))
+        self.assertIs(exclude_predicate_with_fields(f1, {'f0'}), f1)
+        self.assertIs(exclude_predicate_with_fields(pb.and_predicates([f0, f1]), {'f0'}), f1)
+        self.assertIsNone(exclude_predicate_with_fields(pb.or_predicates([f0, f1]), {'f0'}))
+
     def test_append_with_duplicate(self):
         pa_schema = pa.schema([
             ('f0', pa.int64()),

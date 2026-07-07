@@ -19,11 +19,13 @@
 HybridSearchRankerTest so the weighted_score ranker stays consistent across
 languages (per-route min-max normalization before weighting)."""
 
+import math
 import unittest
 
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.table.source.hybrid_search_builder import (
-    HybridSearchBuilderImpl, HybridSearchRoute, HybridSearchRouteResult)
+    HybridSearchBuilderImpl, HybridSearchRoute, HybridSearchRouteResult,
+    MRR_RANKER)
 
 
 def _route_result(weight, id_to_scores):
@@ -80,6 +82,37 @@ class HybridSearchRankerTest(unittest.TestCase):
 
         # Rank-based fusion respects the 5x vector weight: rowId 1 wins.
         self.assertGreater(getter(1), getter(2))
+
+    def test_mrr_favors_rows_with_strong_ranks_across_routes(self):
+        first = _route_result(1.0, {1: 0.9, 2: 0.8})
+        second = _route_result(2.0, {2: 0.7, 3: 0.6})
+        builder = _builder(2).with_ranker(MRR_RANKER)
+        builder._routes = [first.route, second.route]
+
+        ranked = builder.rank([first, second])
+        getter = ranked.score_getter()
+
+        self.assertEqual({1, 2}, set(ranked.results()))
+        self.assertNotIn(3, set(ranked.results()))
+        self.assertAlmostEqual(getter(2), 2.5, places=6)
+        self.assertAlmostEqual(getter(1), 1.0, places=6)
+        self.assertGreater(getter(2), getter(1))
+
+    def test_route_rejects_non_finite_weight(self):
+        for weight in (math.nan, math.inf, -math.inf):
+            with self.subTest(weight=weight):
+                with self.assertRaisesRegex(
+                        ValueError, "Weight must be finite and positive"):
+                    HybridSearchRoute.vector_route(
+                        "f", [1.0], 10, weight=weight)
+
+        with self.assertRaisesRegex(
+                ValueError, "Weight must be finite and positive"):
+            HybridSearchRoute.full_text_route(
+                "content",
+                '{"match":{"column":"content","terms":"paimon lake"}}',
+                10,
+                weight=math.inf)
 
 
 if __name__ == "__main__":

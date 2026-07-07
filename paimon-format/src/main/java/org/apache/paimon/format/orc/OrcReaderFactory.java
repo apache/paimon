@@ -24,8 +24,10 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
+import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
@@ -54,7 +56,10 @@ import org.apache.orc.impl.RecordReaderImpl;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
@@ -104,7 +109,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         Pool<OrcReaderBatch> poolOfBatches =
                 createPoolOfBatches(context.filePath(), poolSize, context.fileIO());
 
-        RecordReader orcReader =
+        OrcRecordReader orcReader =
                 createRecordReader(
                         hadoopConfig,
                         schema,
@@ -153,7 +158,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
-            final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
+            final VectorizedRowBatch orcBatch =
+                    createBatchWrapper(schema, Math.max(1, batchSize / numBatches));
             final OrcReaderBatch batch =
                     createReaderBatch(filePath, orcBatch, pool.recycler(), fileIO);
             pool.add(batch);
@@ -224,12 +230,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * batch is addressed by the starting row number of the batch, plus the number of records to be
      * skipped before.
      */
-    private static final class OrcVectorizedReader implements FileRecordReader<InternalRow> {
+    private static final class OrcVectorizedReader
+            implements FileRecordReader<InternalRow>, SupportsReaderFieldMetadata {
 
-        private final RecordReader orcReader;
+        private final OrcRecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
 
-        private OrcVectorizedReader(final RecordReader orcReader, final Pool<OrcReaderBatch> pool) {
+        private OrcVectorizedReader(
+                final OrcRecordReader orcReader, final Pool<OrcReaderBatch> pool) {
             this.orcReader = checkNotNull(orcReader, "orcReader");
             this.pool = checkNotNull(pool, "pool");
         }
@@ -240,8 +248,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
-            long rowNumber = orcReader.getRowNumber();
-            if (!nextBatch(orcReader, orcVectorBatch)) {
+            long rowNumber = orcReader.recordReader.getRowNumber();
+            if (!nextBatch(orcReader.recordReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
@@ -250,8 +258,36 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
 
         @Override
+        public Map<String, Map<String, String>> readFieldMetadata() {
+            org.apache.orc.Reader fileReader = orcReader.fileReader;
+            if (!fileReader
+                    .getMetadataKeys()
+                    .contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
+                return Collections.emptyMap();
+            }
+            String encodedSchema =
+                    StandardCharsets.UTF_8
+                            .decode(
+                                    fileReader
+                                            .getMetadataValue(
+                                                    FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
+                                            .duplicate())
+                            .toString();
+            return FormatMetadataUtils.readFieldMetadata(
+                    FormatMetadataUtils.decodeMetadata(
+                                    Collections.singletonMap(
+                                            FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                            encodedSchema))
+                            .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
+        }
+
+        @Override
         public void close() throws IOException {
-            orcReader.close();
+            try {
+                orcReader.recordReader.close();
+            } finally {
+                orcReader.fileReader.close();
+            }
         }
 
         private OrcReaderBatch getCachedEntry() throws IOException {
@@ -264,7 +300,18 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private static RecordReader createRecordReader(
+    private static final class OrcRecordReader {
+
+        private final org.apache.orc.Reader fileReader;
+        private final RecordReader recordReader;
+
+        private OrcRecordReader(org.apache.orc.Reader fileReader, RecordReader recordReader) {
+            this.fileReader = fileReader;
+            this.recordReader = recordReader;
+        }
+    }
+
+    private static OrcRecordReader createRecordReader(
             org.apache.hadoop.conf.Configuration conf,
             TypeDescription schema,
             List<OrcFilters.Predicate> conjunctPredicates,
@@ -288,8 +335,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
                             .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
-                            .tolerateMissingSchema(
-                                    OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
+                            .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf))
+                            .isSchemaEvolutionCaseAware(
+                                    OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.getBoolean(conf));
             if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled && selection == null) {
                 // row group filter push down will make row number change incorrect
                 // so deletion vectors mode and bitmap index cannot work with row group push down
@@ -313,7 +361,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             // assign ids
             schema.getId();
 
-            return orcRowsReader;
+            return new OrcRecordReader(orcReader, orcRowsReader);
         } catch (IOException e) {
             // exception happened, we need to close the reader
             IOUtils.closeQuietly(orcReader);

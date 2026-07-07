@@ -20,9 +20,13 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
+import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
@@ -157,21 +161,55 @@ public class CatalogUtils {
 
         TableType tableType = options.get(CoreOptions.TYPE);
         if (tableType.equals(TableType.FORMAT_TABLE)) {
-            checkArgument(
-                    options.get(PRIMARY_KEY) == null,
-                    "Cannot define %s for format table.",
-                    PRIMARY_KEY.key());
-            if (dataTokenEnabled && options.get(PATH) == null) {
-                checkArgument(
-                        options.get(FORMAT_TABLE_IMPLEMENTATION)
-                                != CoreOptions.FormatTableImplementation.ENGINE,
-                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
-                        FORMAT_TABLE_IMPLEMENTATION.key(),
-                        PATH.key());
-            }
+            validateFormatTableOptions(options, dataTokenEnabled);
         }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
+        }
+    }
+
+    private static void validateFormatTableOptions(Options options, boolean dataTokenEnabled) {
+        checkArgument(
+                options.get(PRIMARY_KEY) == null,
+                "Cannot define %s for format table.",
+                PRIMARY_KEY.key());
+        if (dataTokenEnabled && options.get(PATH) == null) {
+            checkArgument(
+                    options.get(FORMAT_TABLE_IMPLEMENTATION)
+                            != CoreOptions.FormatTableImplementation.ENGINE,
+                    "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                    FORMAT_TABLE_IMPLEMENTATION.key(),
+                    PATH.key());
+        }
+
+        String format = options.get(CoreOptions.FILE_FORMAT);
+        if ("csv".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(CsvOptions.FIELD_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.FIELD_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.LINE_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.QUOTE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.QUOTE_CHARACTER.key());
+            checkArgument(
+                    !options.get(CsvOptions.ESCAPE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.ESCAPE_CHARACTER.key());
+        } else if ("json".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(JsonOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    JsonOptions.LINE_DELIMITER.key());
+        } else if ("text".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(TextOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    TextOptions.LINE_DELIMITER.key());
         }
     }
 
@@ -328,7 +366,12 @@ public class CatalogUtils {
                 return AllPartitionsTable.fromPartitions(
                         toAllPartitions(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
-                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+                Options catalogOptions = Options.fromMap(catalog.options());
+                if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+                    throw new Catalog.TableNotExistException(
+                            Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+                }
+                return new CatalogOptionsTable(catalogOptions);
             default:
                 throw new Catalog.TableNotExistException(
                         Identifier.create(SYSTEM_DATABASE_NAME, tableName));

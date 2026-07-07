@@ -67,12 +67,15 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
+                ProcedureParameter.optional("dry_run", DataTypes.BooleanType),
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty()),
+                        new StructField(
+                                "dropped_file_count", DataTypes.LongType, true, Metadata.empty())
                     });
 
     protected DropGlobalIndexProcedure(TableCatalog tableCatalog) {
@@ -103,10 +106,9 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 (args.isNullAt(3) || StringUtils.isNullOrWhitespaceOnly(args.getString(3)))
                         ? null
                         : args.getString(3);
+        boolean dryRun = !args.isNullAt(4) && args.getBoolean(4);
 
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
-
-        LOG.info("Starting to drop index for table " + tableIdent + " WHERE: " + finalWhere);
+        LOG.info("Starting to drop index for table {} with partitions: {}", tableIdent, partitions);
 
         List<String> indexColumns =
                 Arrays.stream(column.split(","))
@@ -138,11 +140,8 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                         .collect(Collectors.toList());
                         DataSourceV2Relation relation = createRelation(tableIdent);
                         PartitionPredicate partitionPredicate =
-                                SparkProcedureUtils.convertToPartitionPredicate(
-                                        finalWhere,
-                                        table.schema().logicalPartitionType(),
-                                        spark(),
-                                        relation);
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
 
                         Snapshot snapshot =
                                 t.latestSnapshot()
@@ -171,6 +170,18 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         LOG.info(
                                 "Waiting for global index to be deleted size: "
                                         + waitDelete.size());
+
+                        // Dry run: report how many would be dropped, commit nothing.
+                        if (dryRun) {
+                            return new InternalRow[] {
+                                newInternalRow(true, (long) waitDelete.size())
+                            };
+                        }
+
+                        // Nothing matched: avoid committing an empty change.
+                        if (waitDelete.isEmpty()) {
+                            return new InternalRow[] {newInternalRow(true, 0L)};
+                        }
 
                         Map<BinaryRow, List<IndexFileMeta>> deleteEntries =
                                 waitDelete.stream()
@@ -202,7 +213,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                             commit.commit(commitMessages);
                         }
 
-                        return new InternalRow[] {newInternalRow(true)};
+                        return new InternalRow[] {newInternalRow(true, (long) waitDelete.size())};
                     } catch (Exception e) {
                         throw new RuntimeException(
                                 String.format(

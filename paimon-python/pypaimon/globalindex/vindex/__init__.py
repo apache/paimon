@@ -15,4 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""paimon-vindex based global index readers."""
+"""paimon-vindex based global index readers and writers."""
+
+from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
+    VINDEX_IDENTIFIERS,
+    VindexVectorGlobalIndexReader,
+)
+from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+    VindexVectorIndexWriter,
+)
+
+__all__ = [
+    'VINDEX_IDENTIFIERS',
+    'VindexVectorGlobalIndexReader',
+    'VindexVectorIndexWriter',
+]

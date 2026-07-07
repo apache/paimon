@@ -16,6 +16,7 @@
 # under the License.
 
 import datetime
+import json
 import os
 import sys
 import unittest
@@ -42,6 +43,17 @@ def get_file_format_params():
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]
+
+
+def match_query(terms, operator=None):
+    body = {"query": terms}
+    if operator is not None:
+        body["operator"] = operator
+    return json.dumps({"match": body}, separators=(",", ":"))
+
+
+def boolean_query(queries):
+    return json.dumps({"boolean": {"queries": queries}}, separators=(",", ":"))
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -447,6 +459,27 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_partial_append_does_not_trigger_index_action()
         if sys.version_info[:2] >= (3, 7):
             self._test_index_manifest_inherited_after_write()
+
+    def test_read_btree_raw_fallback(self):
+        table = self.catalog.get_table('default.test_btree_raw_fallback')
+        fast_builder = table.new_read_builder()
+        fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
+        fast_builder.with_filter(fast_predicate)
+        fast_result = fast_builder.new_read().to_arrow(
+            fast_builder.new_scan().plan().splits())
+        self.assertEqual(0, fast_result.num_rows)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        read_builder = full_table.new_read_builder()
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().equal('k', 'k4'))
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'k': ['k4'],
+            'v': ['v4'],
+        })
+        self.assertEqual(expected, actual)
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -1024,20 +1057,19 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(result.column('label').to_pylist(), ['first', 'second', 'third'])
         print("test_py_write_multi_vector_dedicated_file: wrote 3 rows with 2 vector columns")
 
-    def test_read_tantivy_full_text_index(self):
-        """Test reading a Tantivy full-text index built by Java."""
-        table = self.catalog.get_table('default.test_tantivy_fulltext')
+    def test_read_native_full_text_index(self):
+        """Test reading a Native full-text index built by Java."""
+        table = self.catalog.get_table('default.test_native_fulltext')
 
         # Use FullTextSearchBuilder to search
         builder = table.new_full_text_search_builder()
-        builder.with_text_column('content')
-        builder.with_query_text('paimon')
+        builder.with_query('content', match_query('paimon'))
         builder.with_limit(10)
 
         result = builder.execute_local()
         # Row 0, 2, 4 mention "paimon"
         row_ids = sorted(list(result.results()))
-        print(f"Tantivy full-text search for 'paimon': row_ids={row_ids}")
+        print(f"Native full-text search for 'paimon': row_ids={row_ids}")
         self.assertEqual(row_ids, [0, 2, 4])
 
         # Read matching rows using withGlobalIndexResult
@@ -1051,15 +1083,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids = pa_table.column('id').to_pylist()
         self.assertEqual(ids, [0, 2, 4])
 
-        # Search for "tantivy" - only row 1
+        # Search for "native" - only row 1
         builder2 = table.new_full_text_search_builder()
-        builder2.with_text_column('content')
-        builder2.with_query_text('tantivy')
+        builder2.with_query('content', match_query('native'))
         builder2.with_limit(10)
 
         result2 = builder2.execute_local()
         row_ids2 = sorted(list(result2.results()))
-        print(f"Tantivy full-text search for 'tantivy': row_ids={row_ids2}")
+        print(f"Native full-text search for 'native': row_ids={row_ids2}")
         self.assertEqual(row_ids2, [1])
 
         # Read matching rows
@@ -1072,13 +1103,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "full-text search" - rows 1, 3
         builder3 = table.new_full_text_search_builder()
-        builder3.with_text_column('content')
-        builder3.with_query_text('full-text search')
+        builder3.with_query('content', match_query('full-text search'))
         builder3.with_limit(10)
 
         result3 = builder3.execute_local()
         row_ids3 = sorted(list(result3.results()))
-        print(f"Tantivy full-text search for 'full-text search': row_ids={row_ids3}")
+        print(f"Native full-text search for 'full-text search': row_ids={row_ids3}")
         self.assertIn(1, row_ids3)
         self.assertIn(3, row_ids3)
 
@@ -1092,17 +1122,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn(1, ids3)
         self.assertIn(3, ids3)
 
-        ngram_table = self.catalog.get_table('default.test_tantivy_fulltext_ngram')
+        ngram_table = self.catalog.get_table('default.test_native_fulltext_ngram')
 
         # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
         ngram_builder = ngram_table.new_full_text_search_builder()
-        ngram_builder.with_text_column('content')
-        ngram_builder.with_query_text('中文')
+        ngram_builder.with_query('content', match_query('中文'))
         ngram_builder.with_limit(10)
 
         ngram_result = ngram_builder.execute_local()
         ngram_row_ids = sorted(list(ngram_result.results()))
-        print(f"Tantivy ngram search for '中文': row_ids={ngram_row_ids}")
+        print(f"Native full-text ngram search for '中文': row_ids={ngram_row_ids}")
         self.assertEqual(ngram_row_ids, [0, 4])
 
         ngram_read_builder = ngram_table.new_read_builder()
@@ -1115,48 +1144,50 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
 
         fragment_builder = ngram_table.new_full_text_search_builder()
-        fragment_builder.with_text_column('content')
-        fragment_builder.with_query_text('片段')
+        fragment_builder.with_query('content', match_query('片段'))
         fragment_builder.with_limit(10)
 
         fragment_result = fragment_builder.execute_local()
         fragment_row_ids = sorted(list(fragment_result.results()))
-        print(f"Tantivy ngram search for '片段': row_ids={fragment_row_ids}")
+        print(f"Native full-text ngram search for '片段': row_ids={fragment_row_ids}")
         self.assertEqual(fragment_row_ids, [4])
 
         ngram_and_builder = ngram_table.new_full_text_search_builder()
-        ngram_and_builder.with_text_column('content')
-        ngram_and_builder.with_query_text('中文 片段')
-        ngram_and_builder.with_query_operator('and')
+        ngram_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('片段'))],
+            ]))
         ngram_and_builder.with_limit(10)
 
         ngram_and_result = ngram_and_builder.execute_local()
         ngram_and_row_ids = sorted(list(ngram_and_result.results()))
-        print(f"Tantivy ngram AND search for '中文 片段': row_ids={ngram_and_row_ids}")
+        print(
+            "Native full-text ngram boolean search for "
+            f"'中文' AND '片段': row_ids={ngram_and_row_ids}")
         self.assertEqual(ngram_and_row_ids, [4])
 
-        simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
+        simple_table = self.catalog.get_table('default.test_native_fulltext_simple')
         simple_builder = simple_table.new_full_text_search_builder()
-        simple_builder.with_text_column('content')
-        simple_builder.with_query_text('running')
+        simple_builder.with_query('content', match_query('search'))
         simple_builder.with_limit(10)
 
         simple_result = simple_builder.execute_local()
         simple_row_ids = sorted(list(simple_result.results()))
-        print(f"Tantivy simple stemmed search for 'running': row_ids={simple_row_ids}")
+        print(f"Native full-text simple search for 'search': row_ids={simple_row_ids}")
         self.assertEqual(simple_row_ids, [0, 1, 2])
 
-        jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')
+        jieba_table = self.catalog.get_table('default.test_native_fulltext_jieba')
 
         # Search for Chinese words using the jieba tokenizer metadata written by Java.
         jieba_builder = jieba_table.new_full_text_search_builder()
-        jieba_builder.with_text_column('content')
-        jieba_builder.with_query_text('售货员')
+        jieba_builder.with_query('content', match_query('售货员'))
         jieba_builder.with_limit(10)
 
         jieba_result = jieba_builder.execute_local()
         jieba_row_ids = sorted(list(jieba_result.results()))
-        print(f"Tantivy jieba search for '售货员': row_ids={jieba_row_ids}")
+        print(f"Native full-text jieba search for '售货员': row_ids={jieba_row_ids}")
         self.assertEqual(jieba_row_ids, [0])
 
         jieba_read_builder = jieba_table.new_read_builder()
@@ -1169,24 +1200,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['张华在百货公司当售货员'])
 
         jieba_phrase_builder = jieba_table.new_full_text_search_builder()
-        jieba_phrase_builder.with_text_column('content')
-        jieba_phrase_builder.with_query_text('自然')
+        jieba_phrase_builder.with_query('content', match_query('自然'))
         jieba_phrase_builder.with_limit(10)
 
         jieba_phrase_result = jieba_phrase_builder.execute_local()
         jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
-        print(f"Tantivy jieba search for '自然': row_ids={jieba_phrase_row_ids}")
+        print(f"Native full-text jieba search for '自然': row_ids={jieba_phrase_row_ids}")
         self.assertEqual(jieba_phrase_row_ids, [3])
 
         jieba_and_builder = jieba_table.new_full_text_search_builder()
-        jieba_and_builder.with_text_column('content')
-        jieba_and_builder.with_query_text('中文 自然')
-        jieba_and_builder.with_query_operator('and')
+        jieba_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('自然'))],
+            ]))
         jieba_and_builder.with_limit(10)
 
         jieba_and_result = jieba_and_builder.execute_local()
         jieba_and_row_ids = sorted(list(jieba_and_result.results()))
-        print(f"Tantivy jieba AND search for '中文 自然': row_ids={jieba_and_row_ids}")
+        print(
+            "Native full-text jieba boolean search for "
+            f"'中文' AND '自然': row_ids={jieba_and_row_ids}")
         self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
@@ -1252,6 +1287,47 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids = pa_table.column('id').to_pylist()
         print(f"paimon-vindex vector search matched rows: ids={ids}")
         self.assertIn(0, ids)
+
+    def test_read_vindex_vector_raw_fallback(self):
+        """Test raw fallback for a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table(
+            'default.test_vindex_vector_raw_fallback')
+        fast_result = (table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        fast_ids = sorted(list(fast_result.results()))
+        print(
+            "paimon-vindex fast-mode vector search matched rows: "
+            f"ids={fast_ids}")
+        self.assertNotIn(3, fast_ids)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        full_result = (full_table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        row_ids = sorted(list(full_result.results()))
+        print(
+            "paimon-vindex full-mode vector search matched rows: "
+            f"ids={row_ids}")
+        self.assertEqual([3], row_ids)
+
+        read_builder = full_table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(full_result)
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(scan.plan().splits())
+        self.assertEqual(pa_table.num_rows, 1)
+        self.assertEqual([3], pa_table.column('id').to_pylist())
 
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java
@@ -1421,6 +1497,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertEqual(result.column('f0')[i].as_py(), i)
             self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
             self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    def test_read_data_evolution_deletion_vector_table(self):
+        """Read a data evolution table with deletion vectors and blob files written by Java."""
+        table = self.catalog.get_table('default.data_evolution_dv_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+        result = table_sort_by(result, 'f0')
+
+        expected_ids = [0, 2, 3, 11, 13, 14]
+        self.assertEqual(result.num_rows, len(expected_ids))
+        self.assertEqual(result.column('f0').to_pylist(), expected_ids)
+        self.assertEqual(
+            result.column('f1').to_pylist(),
+            [f'name-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f2').to_pylist(),
+            [f'base-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f3').to_pylist(),
+            [bytes([i]) for i in expected_ids])
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_data_evolution_table(self, file_format):

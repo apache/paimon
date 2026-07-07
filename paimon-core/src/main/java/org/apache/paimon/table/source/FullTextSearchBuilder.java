@@ -35,14 +35,8 @@ public interface FullTextSearchBuilder extends Serializable {
     /** The top k results to return. */
     FullTextSearchBuilder withLimit(int limit);
 
-    /** The text column to search. */
-    FullTextSearchBuilder withTextColumn(String name);
-
-    /** The query text to search. */
-    FullTextSearchBuilder withQueryText(String queryText);
-
-    /** The default query operator. Supported values are 'or' and 'and'. */
-    FullTextSearchBuilder withQueryOperator(String queryOperator);
+    /** The full-text query string to search against the given field. */
+    FullTextSearchBuilder withQuery(String fieldName, String query);
 
     /** Create full-text scan to scan index files. */
     FullTextScan newFullTextScan();

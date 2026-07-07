@@ -41,6 +41,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RecordWriter;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -57,6 +59,7 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
@@ -66,6 +69,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -342,7 +346,7 @@ public class CDCSourceSplitReaderTest {
         List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
-        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, input1.size()));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, false, input1.size(), 1L));
 
         RecordsWithSplitIds<BulkFormat.RecordIterator<Event>> records = reader.fetch();
         assertRecords(records, null, "id1", input1.size(), Collections.emptyList());
@@ -354,6 +358,95 @@ public class CDCSourceSplitReaderTest {
                 "id1",
                 input1.size(),
                 input2.stream().map(t -> t.f1).collect(Collectors.toList()));
+
+        reader.close();
+    }
+
+    @Test
+    public void testRestoreWithPartialSchemaChangeEventsSkipsEmittedEvents() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
+        CDCSourceSplitReader reader =
+                createReader(rw.createReadWithKey(), multipleSchemaChangeEvents());
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, false, 0L, 1L));
+
+        RecordsWithSplitIds<BulkFormat.RecordIterator<Event>> records = reader.fetch();
+        assertThat(readEventTypes(records, "id1"))
+                .containsExactly(
+                        SchemaChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class);
+
+        reader.close();
+    }
+
+    @Test
+    public void testRestoreWithAllSchemaChangeEventsSkippedReadsDataRows() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
+        CDCSourceSplitReader reader =
+                createReader(rw.createReadWithKey(), multipleSchemaChangeEvents());
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, false, 0L, 2L));
+
+        RecordsWithSplitIds<BulkFormat.RecordIterator<Event>> records = reader.fetch();
+        assertThat(readEventTypes(records, "id1"))
+                .containsExactly(
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class);
+
+        reader.close();
+    }
+
+    @Test
+    public void testRestoreWithInvalidSchemaChangeEventSkipCountFails() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
+        CDCSourceSplitReader reader = createReader(rw.createReadWithKey(), schemaChangeEvents());
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, false, 0L, 2L));
+
+        assertThatThrownBy(reader::fetch)
+                .hasMessageContaining("Invalid schema change event skip count 2");
+
+        reader.close();
+    }
+
+    @Test
+    public void testRestoreFromLegacySplitWithDataProgressSkipsSchemaChangeEvents()
+            throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
+        CDCSourceSplitReader reader = createReader(rw.createReadWithKey(), schemaChangeEvents());
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        TableAwareFileStoreSourceSplit split = newSourceSplit("id1", row(1), 0, files, 1L);
+        assignSplit(reader, legacySplit(split));
+
+        RecordsWithSplitIds<BulkFormat.RecordIterator<Event>> records = reader.fetch();
+        assertThat(readEventTypes(records, "id1"))
+                .containsExactly(
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class,
+                        DataChangeEvent.class);
 
         reader.close();
     }
@@ -672,6 +765,26 @@ public class CDCSourceSplitReaderTest {
                                                         .BIGINT())))));
     }
 
+    private List<SchemaChangeEvent> multipleSchemaChangeEvents() {
+        return Arrays.asList(
+                new AddColumnEvent(
+                        TableId.tableId(DATABASE, TABLE),
+                        Collections.singletonList(
+                                AddColumnEvent.last(
+                                        Column.physicalColumn(
+                                                "extra_1",
+                                                org.apache.flink.cdc.common.types.DataTypes
+                                                        .BIGINT())))),
+                new AddColumnEvent(
+                        TableId.tableId(DATABASE, TABLE),
+                        Collections.singletonList(
+                                AddColumnEvent.last(
+                                        Column.physicalColumn(
+                                                "extra_2",
+                                                org.apache.flink.cdc.common.types.DataTypes
+                                                        .BIGINT())))));
+    }
+
     private List<Tuple2<Long, Long>> kvs() {
         return kvs(0);
     }
@@ -739,6 +852,17 @@ public class CDCSourceSplitReaderTest {
             List<DataFileMeta> files,
             boolean isIncremental,
             long recordsToSkip) {
+        return newSourceSplit(id, partition, bucket, files, isIncremental, recordsToSkip, 0L);
+    }
+
+    public static TableAwareFileStoreSourceSplit newSourceSplit(
+            String id,
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean isIncremental,
+            long recordsToSkip,
+            long schemaChangeEventsToSkip) {
         DataSplit split =
                 DataSplit.builder()
                         .withSnapshot(1)
@@ -750,7 +874,26 @@ public class CDCSourceSplitReaderTest {
                         .withBucketPath("/temp/" + bucket) // no used
                         .build();
         return new TableAwareFileStoreSourceSplit(
-                id, split, recordsToSkip, Identifier.create(DATABASE, TABLE), 1L, 1L);
+                id,
+                split,
+                recordsToSkip,
+                Identifier.create(DATABASE, TABLE),
+                1L,
+                1L,
+                schemaChangeEventsToSkip);
+    }
+
+    private TableAwareFileStoreSourceSplit legacySplit(TableAwareFileStoreSourceSplit split)
+            throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        view.writeUTF(split.splitId());
+        InstantiationUtil.serializeObject(view, split.split());
+        view.writeLong(split.recordsToSkip());
+        view.writeUTF(JsonSerdeUtil.toJson(split.getIdentifier()));
+        view.writeLong(split.getLastSchemaId() == null ? -1L : split.getLastSchemaId());
+        view.writeLong(split.getSchemaId());
+        return new TableAwareFileStoreSourceSplit.Serializer().deserialize(1, out.toByteArray());
     }
 
     private static class TestCDCSourceSplitReader extends CDCSourceSplitReader {

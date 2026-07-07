@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -1560,6 +1561,63 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(1, 1001), Row.of(2, 2000));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = LookupCacheMode.class,
+            names = {"FULL", "MEMORY"})
+    public void testLookupBlobAsDescriptorOnNormalBlobTable(LookupCacheMode mode) throws Exception {
+        // Test that lookup.blob-as-descriptor works correctly even when the table was NOT
+        // written with blob-as-descriptor=true. Previously this would fail with
+        // "Blob data can not convert to descriptor" because BlobFormatReader returned BlobData
+        // which cannot be converted to a descriptor. Blob tables cannot define primary keys
+        // (row-tracking requirement), so use an append-only table with id as the lookup key.
+        sql(
+                "CREATE TABLE BLOB_DIM (id INT, name STRING, picture BYTES) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', "
+                        + "'blob-field'='picture', "
+                        + "'lookup.blob-as-descriptor'='true', "
+                        + "'lookup.cache'='%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        // Write raw blob data (NOT as descriptor) — this is the normal write path.
+        sql("INSERT INTO BLOB_DIM VALUES (1, 'cat', X'48656C6C6F'), (2, 'dog', X'576F726C64')");
+
+        // Lookup join with lookup.blob-as-descriptor=true.
+        // The fix forces the reader to use blob-as-descriptor mode so that BlobFormatReader
+        // returns BlobRef (which supports toDescriptor()) instead of BlobData.
+        String query =
+                "SELECT T.i, D.name, D.picture FROM T LEFT JOIN BLOB_DIM "
+                        + "for system_time as of T.proctime AS D ON T.i = D.id";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+
+        // With lookup.blob-as-descriptor=true, the BLOB fields should be returned as
+        // serialized BlobDescriptor bytes (not the original raw data).
+        assertThat(result).hasSize(3);
+
+        // Verify non-blob fields are correct
+        assertThat(result.stream().map(r -> r.getField(1)))
+                .containsExactlyInAnyOrder("cat", "dog", null);
+
+        // For matched rows, the picture field should contain valid BlobDescriptor bytes
+        for (Row row : result) {
+            if (row.getField(1) != null) {
+                byte[] descriptorBytes = (byte[]) row.getField(2);
+                assertThat(descriptorBytes).isNotNull();
+                // Verify it's a valid BlobDescriptor by deserializing
+                BlobDescriptor descriptor = BlobDescriptor.deserialize(descriptorBytes);
+                assertThat(descriptor.uri()).isNotEmpty();
+                assertThat(descriptor.length()).isGreaterThan(0);
+            }
+        }
 
         iterator.close();
     }

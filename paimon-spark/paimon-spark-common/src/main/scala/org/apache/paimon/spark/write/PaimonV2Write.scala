@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions.ChangelogProducer
+import org.apache.paimon.Snapshot
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.commands.SchemaEvolutionHelper
@@ -41,7 +42,8 @@ class PaimonV2Write(
     overwritePartitions: Option[Map[String, String]],
     copyOnWriteScan: Option[PaimonCopyOnWriteScan],
     dataSchema: StructType,
-    options: Options
+    options: Options,
+    operationType: Option[Snapshot.Operation] = None
 ) extends Write
   with RequiresDistributionAndOrdering
   with SchemaEvolutionHelper
@@ -69,7 +71,8 @@ class PaimonV2Write(
       writeSchema,
       dataSchema,
       overwritePartitions,
-      copyOnWriteScan)
+      copyOnWriteScan,
+      operationType)
   }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {

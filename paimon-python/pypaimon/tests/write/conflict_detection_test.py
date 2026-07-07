@@ -19,6 +19,9 @@ import unittest
 from dataclasses import dataclass
 from typing import List
 
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -203,6 +206,52 @@ class TestCheckRowIdExistence(unittest.TestCase):
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=None))
+
+
+class TestOverwriteConflictDetection(unittest.TestCase):
+
+    def _make_detection(self):
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=None,
+            manifest_list_manager=None,
+            table=None,
+            commit_scanner=None,
+        )
+
+    def test_deleted_files_trigger_overwrite_commit(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0),
+            _make_entry("f2", kind=1),
+        ]
+        self.assertTrue(detection.should_be_overwrite_commit(entries, []))
+
+    def test_deletion_vector_index_files_trigger_overwrite_commit(self):
+        detection = self._make_detection()
+        index_entry = IndexManifestEntry(
+            kind=0,
+            partition=_EMPTY_PARTITION,
+            bucket=0,
+            index_file=IndexFileMeta(
+                index_type=IndexManifestFile.DELETION_VECTORS_INDEX,
+                file_name="dv",
+                file_size=1,
+                row_count=1,
+            ),
+        )
+        self.assertTrue(detection.should_be_overwrite_commit([], [index_entry]))
+
+    def test_delete_entry_missing_from_base_conflicts(self):
+        detection = self._make_detection()
+        result = detection.check_conflicts(
+            latest_snapshot=None,
+            base_entries=[],
+            delta_entries=[_make_entry("missing", kind=1)],
+            commit_kind="OVERWRITE",
+        )
+        self.assertIsNotNone(result)
+        self.assertIn("File deletion conflicts", str(result))
 
 
 class _FakeSnapshot:

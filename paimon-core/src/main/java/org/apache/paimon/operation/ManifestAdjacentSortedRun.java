@@ -26,15 +26,13 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * A {@code ManifestAdjacentSortedRun} is a list of {@link ManifestFileMeta}s sorted by a single
- * partition field (the configured manifest sort field). The intervals {@code
- * [partitionStats.minValues[k], partitionStats.maxValues[k]]} of these manifests do not overlap on
- * field {@code k}, where {@code k} is the configured sort field index.
+ * A {@code ManifestAdjacentSortedRun} is a list of {@link ManifestFileMeta}s sorted by manifest
+ * sort key. The sort-key intervals of these manifests do not overlap.
  *
- * <p><b>Boundary Equality:</b> Files with boundary-touching intervals (min == previous.max) are
- * considered non-overlapping and can be placed in the same SortedRun. This reduces the number of
- * runs and improves compaction efficiency. However, such files may be separated into different
- * Sections during splitIntoSections to avoid merge-sort overhead.
+ * <p><b>Boundary Equality:</b> Partition-field sorting treats boundary-touching intervals (min ==
+ * previous.max) as non-overlapping, so they can be placed in the same SortedRun. This reduces the
+ * number of runs and improves compaction efficiency. RowID sorting treats row-id ranges as
+ * inclusive, so boundary-touching row-id ranges are considered overlapping.
  */
 public class ManifestAdjacentSortedRun {
 

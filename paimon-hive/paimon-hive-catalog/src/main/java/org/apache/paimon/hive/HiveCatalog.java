@@ -305,6 +305,27 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    protected boolean tableExists(Identifier identifier) {
+        try {
+            boolean inHms =
+                    clients()
+                            .run(
+                                    client ->
+                                            client.tableExists(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName()));
+            return inHms || super.tableExists(identifier);
+        } catch (TException e) {
+            throw new RuntimeException(
+                    "Cannot determine if table " + identifier.getFullName() + " exists.", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                    "Interrupted in call to tableExists " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
         try {
             Database database = convertToHiveDatabase(name, properties);

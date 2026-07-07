@@ -257,7 +257,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 boolean forceRewriteAllFiles,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
-            super(metricsReporter);
+            super(metricsReporter, "");
             this.dvMaintainer = dvMaintainer;
             this.toCompact = new LinkedList<>(inputs);
             this.compactionFileSize = compactionFileSize;
@@ -326,7 +326,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 List<DataFileMeta> toCompact,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
-            super(metricsReporter);
+            super(metricsReporter, "");
             this.dvMaintainer = dvMaintainer;
             this.toCompact = toCompact;
             this.rewriter = rewriter;

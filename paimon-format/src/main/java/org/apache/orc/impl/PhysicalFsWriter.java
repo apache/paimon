@@ -110,7 +110,7 @@ public class PhysicalFsWriter implements PhysicalWriter {
                 opts,
                 encryption);
         this.path = path;
-        LOG.info(
+        LOG.debug(
                 "ORC writer created for path: {} with stripeSize: {} blockSize: {}"
                         + " compression: {}",
                 path,
@@ -539,7 +539,7 @@ public class PhysicalFsWriter implements PhysicalWriter {
         // space in the block
         if (length < blockSize && length > availBlockSpace && addBlockPadding) {
             byte[] pad = new byte[(int) Math.min(HDFS_BUFFER_SIZE, availBlockSpace)];
-            LOG.info("Padding ORC by {} bytes while merging", availBlockSpace);
+            LOG.debug("Padding ORC by {} bytes while merging", availBlockSpace);
             start += availBlockSpace;
             while (availBlockSpace > 0) {
                 int writeLen = (int) Math.min(availBlockSpace, pad.length);

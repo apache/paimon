@@ -75,18 +75,6 @@ under the License.
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
-            <td><h5>blob-external-storage-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') whose raw data will be written to external storage at write time. The external storage path is configured via 'blob-external-storage-path'. Orphan file cleanup is not applied to that path.</td>
-        </tr>
-        <tr>
-            <td><h5>blob-external-storage-path</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>The external storage path where raw BLOB data from fields configured by 'blob-external-storage-field' is written at write time. Orphan file cleanup is not applied to this path.</td>
-        </tr>
-        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -105,10 +93,16 @@ under the License.
             <td>Whether to resolve blob-view-field values from upstream tables at read time. Set to false to preserve BlobViewStruct references when forwarding blob view values to another blob-view table.</td>
         </tr>
         <tr>
+            <td><h5>blob-write-null-on-fetch-failure</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced resource cannot be fetched during Flink writes (e.g. invalid URI or HTTP errors other than 404). HTTP 404 is handled by 'blob-write-null-on-missing-file'. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
             <td><h5>blob-write-null-on-missing-file</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to write NULL for a descriptor BLOB value when the referenced file does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>
@@ -405,6 +399,12 @@ under the License.
             <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
         </tr>
         <tr>
+            <td><h5>compaction.skip-expired-partitions</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip compacting partitions that are already expired according to 'partition.expiration-time'. Only effective when 'partition.expiration-time' is set and 'partition.expiration-strategy' is 'values-time'. Note: even when this option is enabled, expired partitions may still be deleted during the compaction commit phase as a side effect of partition expiration triggered by committing the remaining active partitions.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.small-file-ratio</h5></td>
             <td style="word-wrap: break-word;">0.7</td>
             <td>Double</td>
@@ -481,6 +481,24 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to generate row-store sidecar files for normal data files on data evolution tables. The sidecar files are used to accelerate sparse row-id reads.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selected-rows</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Long</td>
+            <td>Maximum selected row count for reading a row-store sidecar file. The sidecar is used only when the selected rows are no more than this value and the selected row ratio is no more than data-evolution.row-sidecar.max-selection-ratio.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selection-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
@@ -838,6 +856,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>When need to lookup, commit will wait for compaction by lookup.</td>
         </tr>
         <tr>
+            <td><h5>lookup.blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, the lookup join stores only the BlobDescriptor (a lightweight reference containing file URI, offset, and length) for BLOB fields instead of the full blob bytes. This dramatically reduces local disk and memory usage for tables with large BLOB columns (e.g., images, videos). The downstream consumer receives the serialized BlobDescriptor bytes and can resolve the actual blob content on demand.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -910,6 +934,24 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.max-rewrite-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.partition-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -938,24 +980,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">30</td>
             <td>Integer</td>
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.<br />Note: when 'manifest-sort.enabled' is true, this minimum-count gate is only applied to the trailing sub-segment of a section that exceeds 'manifest-sort.max-rewrite-size'. Small under-budget sections are sorted and rewritten directly, so two small manifest files may be merged into one even when their count is below this threshold and full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.partition-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.max-rewrite-size</h5></td>
-            <td style="word-wrap: break-word;">256 mb</td>
-            <td>MemorySize</td>
-            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
@@ -1300,6 +1324,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The parallelism of scanning manifest files, default value is the size of cpu processor. Note: Scale-up this parameter will increase memory usage while scanning manifest files. We can consider downsize it when we encounter an out of memory exception while scanning</td>
+        </tr>
+        <tr>
+            <td><h5>scan.bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
         </tr>
         <tr>
             <td><h5>scan.max-splits-per-task</h5></td>
@@ -1663,6 +1693,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to process distributed vector search.</td>
         </tr>
         <tr>
+            <td><h5>vector-search.lateral-join.batch-size</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>The batch size for lateral vector search. Each batch executes vector topK search and table lookup for multiple query vectors.</td>
+        </tr>
+        <tr>
             <td><h5>vector.file.format</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1729,12 +1765,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
         </tr>
         <tr>
-            <td><h5>write.sequence-number-init-mode</h5></td>
-            <td style="word-wrap: break-word;">scan</td>
-            <td><p>Enum</p></td>
-            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>write.batch-memory</h5></td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
@@ -1745,6 +1775,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
             <td>Write batch size for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>write.sequence-number-init-mode</h5></td>
+            <td style="word-wrap: break-word;">scan</td>
+            <td><p>Enum</p></td>
+            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>

@@ -37,7 +37,9 @@ public class FieldNestedPartialUpdateAggFactory implements FieldAggregatorFactor
     public FieldNestedPartialUpdateAgg create(
             DataType fieldType, CoreOptions options, String field) {
         return createFieldNestedPartialUpdateAgg(
-                fieldType, options.fieldNestedUpdateAggNestedKey(field));
+                fieldType,
+                options.fieldNestedUpdateAggNestedKey(field),
+                options.fieldNestedUpdateAggNestedKeyNullStrategy(field));
     }
 
     @Override
@@ -46,13 +48,16 @@ public class FieldNestedPartialUpdateAggFactory implements FieldAggregatorFactor
     }
 
     private FieldNestedPartialUpdateAgg createFieldNestedPartialUpdateAgg(
-            DataType fieldType, List<String> nestedKey) {
+            DataType fieldType,
+            List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy) {
         checkArgument(!nestedKey.isEmpty());
         String typeErrorMsg =
                 "Data type for nested table column must be 'Array<Row>' but was '%s'.";
         checkArgument(fieldType instanceof ArrayType, typeErrorMsg, fieldType);
         ArrayType arrayType = (ArrayType) fieldType;
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
-        return new FieldNestedPartialUpdateAgg(identifier(), arrayType, nestedKey);
+        return new FieldNestedPartialUpdateAgg(
+                identifier(), arrayType, nestedKey, nestedKeyNullStrategy);
     }
 }

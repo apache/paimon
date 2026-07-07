@@ -32,6 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -143,19 +144,68 @@ public class SparkMultimodalITCase {
                                 "select gid, sid, embs from my_db1.vector_test where date = '20260420' and embs is not null;")
                         .collectAsList();
         assertThat(rows).hasSize(8);
+        Map<Long, Long> baseRowIds =
+                spark.sql("select gid, _row_id from my_db1.vector_test where date = '20260420'")
+                        .collectAsList().stream()
+                        .collect(Collectors.toMap(row -> row.getLong(0), row -> row.getLong(1)));
+        assertThat(baseRowIds).hasSize(8);
         rows =
                 spark.sql(
                                 "select gid, sid,  embs from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5)  where date = '20260420'")
                         .collectAsList();
         assertThat(rows).hasSize(5);
+
+        // **vector search with row id */
+        String vectorSearchWithRowIdSql =
+                "select gid, sid,  embs, _row_id AS _row_id "
+                        + "from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5) "
+                        + "where date = '20260420'";
+        Dataset<Row> df = spark.sql(vectorSearchWithRowIdSql);
+        assertThat(df.columns()).hasSize(4);
+        assertThat(df.columns()).contains("_row_id");
+        rows = df.collectAsList();
+        assertThat(rows).hasSize(5);
+        assertThat(rows.stream().noneMatch(row -> row.isNullAt(3))).isTrue();
+        assertThat(
+                        rows.stream()
+                                .allMatch(
+                                        row ->
+                                                baseRowIds
+                                                        .get(row.getLong(0))
+                                                        .equals(row.getLong(3))))
+                .isTrue();
+
+        // **vector search with row id and score */
+        String vectorSearchWithRowIdAndScoreSql =
+                "select gid, sid,  embs, _row_id AS _row_id, __paimon_search_score "
+                        + "from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5) "
+                        + "where date = '20260420'";
+        df = spark.sql(vectorSearchWithRowIdAndScoreSql);
+        assertThat(df.columns()).hasSize(5);
+        assertThat(df.columns()).contains("_row_id", "__paimon_search_score");
+        rows = df.collectAsList();
+        assertThat(rows).hasSize(5);
+        assertThat(rows.stream().allMatch(row -> !row.isNullAt(3) && !row.isNullAt(4))).isTrue();
+        assertThat(
+                        rows.stream()
+                                .allMatch(
+                                        row ->
+                                                baseRowIds
+                                                        .get(row.getLong(0))
+                                                        .equals(row.getLong(3))))
+                .isTrue();
+
+        // **vector search with score */
         String vectorSearchSql =
                 "select gid, sid,  embs, __paimon_search_score "
                         + "from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5) "
                         + "where date = '20260420'";
-        Dataset<Row> df = spark.sql(vectorSearchSql);
+        df = spark.sql(vectorSearchSql);
         assertThat(df.columns()).hasSize(4);
         rows = df.collectAsList();
         assertThat(rows).hasSize(5);
+
+        // ** distribute vector search */
         spark.sql("SET `spark.paimon.vector-search.distribute.enabled`=`true`");
         spark.sql("SET `spark.paimon.global-index.thread-num`=`1`");
         List<Row> compareRows = spark.sql(vectorSearchSql).collectAsList();
@@ -168,6 +218,44 @@ public class SparkMultimodalITCase {
                         rows.stream()
                                 .map(row -> Pair.of(row.getLong(0), row.getString(1)))
                                 .collect(Collectors.toList()));
+        spark.close();
+
+        // ** lateral vector search */
+        spark = builder.getOrCreate();
+        spark.sql("SET `spark.paimon.vector-search.distribute.enabled`=`false`");
+        rows =
+                spark.sql(
+                                "SELECT q.gid AS query_gid, q.embs AS query_embs, "
+                                        + "r.gid AS result_gid, r._row_id AS result_row_id "
+                                        + "FROM my_db1.vector_test AS q, "
+                                        + "LATERAL (SELECT gid, _row_id "
+                                        + "FROM vector_search('my_db1.vector_test', 'embs', q.embs, 5)) AS r "
+                                        + "WHERE q.`date` = '20260420';")
+                        .collectAsList();
+        assertThat(rows).hasSize(40);
+        assertThat(rows.stream().noneMatch(row -> row.isNullAt(3))).isTrue();
+        assertThat(
+                        rows.stream()
+                                .allMatch(
+                                        row ->
+                                                baseRowIds
+                                                        .get(row.getLong(2))
+                                                        .equals(row.getLong(3))))
+                .isTrue();
+        assertThat(
+                        rows.stream()
+                                .collect(
+                                        Collectors.groupingBy(
+                                                row -> row.getLong(0), Collectors.counting())))
+                .hasSize(8)
+                .containsEntry(1L, 5L)
+                .containsEntry(2L, 5L)
+                .containsEntry(3L, 5L)
+                .containsEntry(4L, 5L)
+                .containsEntry(5L, 5L)
+                .containsEntry(6L, 5L)
+                .containsEntry(7L, 5L)
+                .containsEntry(8L, 5L);
         spark.close();
 
         spark = builder.getOrCreate();

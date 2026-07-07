@@ -22,9 +22,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
 import org.apache.paimon.flink.pipeline.cdc.source.enumerator.CDCCheckpoint.TableProgress;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.junit.jupiter.api.Test;
 
@@ -94,7 +94,15 @@ public class CDCCheckpointSerializerTest {
         CDCCheckpoint.Serializer serializer = new CDCCheckpoint.Serializer();
         CDCCheckpoint checkpoint = serializer.deserialize(1, version1Bytes);
 
-        assertThat(checkpoint.getSplits()).containsExactly(split);
+        TableAwareFileStoreSourceSplit restoredSplit = checkpoint.getSplits().iterator().next();
+        assertThat(restoredSplit.splitId()).isEqualTo(split.splitId());
+        assertThat(restoredSplit.split()).isEqualTo(split.split());
+        assertThat(restoredSplit.recordsToSkip()).isEqualTo(split.recordsToSkip());
+        assertThat(restoredSplit.getIdentifier()).isEqualTo(split.getIdentifier());
+        assertThat(restoredSplit.getLastSchemaId()).isEqualTo(split.getLastSchemaId());
+        assertThat(restoredSplit.getSchemaId()).isEqualTo(split.getSchemaId());
+        assertThat(restoredSplit.schemaChangeEventsToSkip()).isEqualTo(0L);
+        assertThat(restoredSplit.isLegacySchemaProgress()).isTrue();
         assertThat(checkpoint.getTableProgressMap())
                 .containsEntry(identifier, new TableProgress(3L, null));
     }
@@ -104,12 +112,10 @@ public class CDCCheckpointSerializerTest {
             throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
-        SimpleVersionedSerializer<TableAwareFileStoreSourceSplit> splitSerializer =
-                new TableAwareFileStoreSourceSplit.Serializer();
 
         view.writeInt(splits.size());
         for (TableAwareFileStoreSourceSplit split : splits) {
-            byte[] bytes = splitSerializer.serialize(split);
+            byte[] bytes = serializeSplitVersion1(split);
             view.writeInt(bytes.length);
             view.write(bytes);
         }
@@ -117,6 +123,18 @@ public class CDCCheckpointSerializerTest {
         view.writeInt(1);
         view.writeUTF(JsonSerdeUtil.toJson(identifier));
         view.writeLong(nextSnapshotId);
+        return out.toByteArray();
+    }
+
+    private byte[] serializeSplitVersion1(TableAwareFileStoreSourceSplit split) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        view.writeUTF(split.splitId());
+        InstantiationUtil.serializeObject(view, split.split());
+        view.writeLong(split.recordsToSkip());
+        view.writeUTF(JsonSerdeUtil.toJson(split.getIdentifier()));
+        view.writeLong(split.getLastSchemaId() == null ? -1L : split.getLastSchemaId());
+        view.writeLong(split.getSchemaId());
         return out.toByteArray();
     }
 }

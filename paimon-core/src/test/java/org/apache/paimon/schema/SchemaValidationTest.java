@@ -211,6 +211,109 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testMapStorageLayout() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(
+                                2, "codes", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")));
+
+        options.put("fields.metrics.map.storage-layout", "default");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")));
+
+        options.put("fields.nonexist.map.storage-layout", "shared-shredding");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("Field nonexist can not be found in table schema.");
+
+        options.remove("fields.nonexist.map.storage-layout");
+        options.put("fields.id.map.storage-layout", "default");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'id' is configured with map.storage-layout but its type is not MAP.");
+
+        options.remove("fields.id.map.storage-layout");
+        options.put("fields.codes.map.storage-layout", "shared-shredding");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.");
+
+        options.remove("fields.codes.map.storage-layout");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        options.put("fields.metrics.map.shared-shredding.max-columns", "0");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+    }
+
+    @Test
     public void testChainTableAllowsNonDeduplicateMergeEngine() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
@@ -339,7 +442,7 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options,
                                                 "")))
-                .hasMessage("The vector-store columns can not be part of partition keys.");
+                .hasMessage("The type VectorType in partition field f1 is unsupported");
     }
 
     @Test
@@ -366,6 +469,33 @@ class SchemaValidationTest {
                                                 "")))
                 .hasMessage(
                         "Data evolution config must enabled for table with vector-store file format.");
+    }
+
+    @Test
+    public void testVectorTypeCanNotBeKey() {
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        vectorTypeSchema(emptyList(), singletonList("f1"), null)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in primary key field %s is unsupported", "VectorType", "f1");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        vectorTypeSchema(singletonList("f1"), emptyList(), null)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("The type %s in partition field %s is unsupported", "VectorType", "f1");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        vectorTypeSchema(
+                                                emptyList(), emptyList(), singletonList("f1"))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in upsert key field %s is unsupported", "VectorType", "f1");
     }
 
     @Test
@@ -717,6 +847,65 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options3,
                                                 "")));
+
+        // Test 4: data evolution tables can sort manifests by RowID without partition keys
+        Map<String, String> options4 = new HashMap<>();
+        options4.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options4.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options4.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options4.put(BUCKET.key(), String.valueOf(-1));
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options4,
+                                                "")));
+
+        // Test 5: data evolution tables should still validate configured partition field
+        Map<String, String> options5 = new HashMap<>();
+        options5.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options5.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
+        options5.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options5.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options5.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options5,
+                                                "")))
+                .hasMessageContaining("is not a partition field");
+
+        // Test 6: data evolution non-partition tables cannot configure a partition field
+        Map<String, String> options6 = new HashMap<>();
+        options6.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options6.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
+        options6.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options6.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options6.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options6,
+                                                "")))
+                .hasMessageContaining("is not a partition field");
     }
 
     @Test
@@ -850,5 +1039,19 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    private TableSchema vectorTypeSchema(
+            List<String> partitionKeys, List<String> primaryKeys, List<String> upsertKeys) {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        if (upsertKeys != null) {
+            options.put(CoreOptions.UPSERT_KEY.key(), String.join(",", upsertKeys));
+        }
+        return new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
     }
 }
