@@ -391,7 +391,9 @@ class Blob(ABC):
         return BlobView(view_struct)
 
     @staticmethod
-    def from_bytes(data: Optional[bytes], file_io=None, allow_blob_data: bool = True) -> Optional['Blob']:
+    def from_bytes(
+            data: Optional[bytes], file_io=None, uri_reader_factory=None, allow_blob_data: bool = True,
+    ) -> Optional['Blob']:
         if data is None:
             return None
         if not isinstance(data, (bytes, bytearray)):
@@ -405,10 +407,13 @@ class Blob(ABC):
                 "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
             )
         if is_descriptor:
-            if file_io is None:
-                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
             descriptor = BlobDescriptor.deserialize(data)
-            uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
+            if uri_reader_factory is None:
+                if file_io is None:
+                    raise ValueError("file_io is required to resolve BlobDescriptor bytes")
+                uri_reader = UriReader.from_file(file_io)
+            else:
+                uri_reader = uri_reader_factory.create(descriptor.uri)
             return BlobRef(uri_reader, descriptor)
         return BlobData(data)
 

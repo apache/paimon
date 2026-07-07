@@ -156,6 +156,67 @@ class BlobTest(unittest.TestCase):
             self.assertIsInstance(blob, BlobRef)
             self.assertEqual(blob.to_data(), data)
 
+    def test_from_bytes_descriptor_uses_explicit_uri_reader_factory(self):
+        data = b"factory blob content"
+        descriptor = BlobDescriptor("custom://bucket/blob.bin", 0, len(data))
+
+        class RecordingUriReader:
+            def __init__(self):
+                self.opened_uris = []
+
+            def new_input_stream(self, uri):
+                self.opened_uris.append(uri)
+                return io.BytesIO(data)
+
+        class RecordingFactory:
+            def __init__(self, reader):
+                self.reader = reader
+                self.created_uris = []
+
+            def create(self, uri):
+                self.created_uris.append(uri)
+                return self.reader
+
+        class FactoryFileIO:
+            def __init__(self, factory):
+                self.uri_reader_factory = factory
+
+            def new_input_stream(self, path):
+                raise AssertionError("from_bytes should use the explicit uri_reader_factory")
+
+        reader = RecordingUriReader()
+        factory = RecordingFactory(reader)
+        blob = Blob.from_bytes(
+            descriptor.serialize(), FactoryFileIO(factory), uri_reader_factory=factory)
+
+        self.assertEqual(blob.to_data(), data)
+        self.assertEqual(factory.created_uris, [descriptor.uri])
+        self.assertEqual(reader.opened_uris, [descriptor.uri])
+
+    def test_from_bytes_descriptor_can_force_file_io_reader(self):
+        data = b"file backed blob content"
+        descriptor = BlobDescriptor("file-backed/blob.bin", 0, len(data))
+
+        class FailingFactory:
+            def create(self, uri):
+                raise AssertionError("Explicit uri_reader_factory=None should skip factory")
+
+        class FileBackedIO:
+            def __init__(self):
+                self.uri_reader_factory = FailingFactory()
+                self.opened_paths = []
+
+            def new_input_stream(self, path):
+                self.opened_paths.append(path)
+                return io.BytesIO(data)
+
+        file_io = FileBackedIO()
+        blob = Blob.from_bytes(
+            descriptor.serialize(), file_io, uri_reader_factory=None)
+
+        self.assertEqual(blob.to_data(), data)
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+
     def test_from_bytes_descriptor_without_file_io_raises(self):
         descriptor = BlobDescriptor("/tmp/fake", 0, 10)
         serialized = descriptor.serialize()
