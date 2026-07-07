@@ -431,25 +431,6 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         while (p2Iter.hasNext()) {
             p2Entries.add(p2Iter.next());
         }
-        // Diagnostic: dump every manifest entry in p2 so we can see what each
-        // file is stamped with (FileKind, bucket, totalBuckets, file name,
-        // snapshot/sequence info via the file meta).
-        System.out.println("=== p2 manifest entries (" + p2Entries.size() + " total) ===");
-        for (int i = 0; i < p2Entries.size(); i++) {
-            ManifestEntry entry = p2Entries.get(i);
-            System.out.printf(
-                    "  [%d] kind=%s level=%d bucket=%d totalBuckets=%d file=%s "
-                            + "minSeq=%d maxSeq=%d rowCount=%d%n",
-                    i,
-                    entry.kind(),
-                    entry.level(),
-                    entry.bucket(),
-                    entry.totalBuckets(),
-                    entry.file().fileName(),
-                    entry.file().minSequenceNumber(),
-                    entry.file().maxSequenceNumber(),
-                    entry.file().rowCount());
-        }
         for (ManifestEntry entry : p2Entries) {
             assertThat(entry.totalBuckets())
                     .as(

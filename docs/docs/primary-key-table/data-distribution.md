@@ -24,7 +24,7 @@ under the License.
 
 # Data Distribution
 
-A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree](./overview#lsm-trees).
+A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree](./#lsm-trees).
 
 ## Fixed Bucket
 
