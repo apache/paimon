@@ -66,8 +66,6 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private static final Logger LOG =
             LoggerFactory.getLogger(CommittingWriteOperatorCoordinator.class);
 
-    private static final long NO_WATERMARK = Long.MIN_VALUE;
-
     private final OperatorCoordinator.Context context;
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
     private final boolean streamingCheckpointEnabled;
@@ -78,6 +76,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final ListSerializer<Committable> committableSerializer;
     private final CoordinatorStateSerializer stateSerializer;
     private final ExecutorService commitExecutor;
+    private final SimpleWatermarkValve watermarkValve;
 
     // Populated by resetToCheckpoint and consumed by start. Plain fields are sufficient: both
     // callbacks run on the same scheduler thread in order.
@@ -107,6 +106,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         this.commitExecutor =
                 Executors.newSingleThreadExecutor(
                         new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context));
+        this.watermarkValve = new SimpleWatermarkValve(parallelism);
         this.state = State.CREATED;
     }
 
@@ -164,7 +164,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                             SimpleVersionedSerialization.writeVersionAndSerialize(
                                     stateSerializer,
                                     new CoordinatorState(
-                                            commitUser, stateStore.getSerializedStates()));
+                                            commitUser,
+                                            watermarkValve.getCurrentWatermark(),
+                                            stateStore.getSerializedStates()));
                     result.complete(checkpointData);
                 },
                 result,
@@ -178,8 +180,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 () -> {
                     if (event instanceof CommittableEvent) {
                         handleCommittableEvent(subtask, (CommittableEvent) event);
+                    } else if (event instanceof WatermarkEvent) {
+                        handleWatermarkEvent(subtask, (WatermarkEvent) event);
                     } else {
-                        // TODO: watermark handling
                         // TODO: end input handling
                         throw new UnsupportedOperationException("Unsupported event type: " + event);
                     }
@@ -207,7 +210,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     commitUpToCheckpoint(
                             checkpointId,
                             pollManifestCommittablesForCheckpoint(
-                                    checkpointId, subtaskCommittables, committer, NO_WATERMARK),
+                                    checkpointId,
+                                    subtaskCommittables,
+                                    committer,
+                                    watermarkValve.getCurrentWatermark()),
                             committables -> {
                                 try {
                                     committer.commit(committables);
@@ -312,6 +318,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
     }
 
+    private void handleWatermarkEvent(int subtask, WatermarkEvent event) {
+        watermarkValve.updateSubtaskWatermark(subtask, event.getWatermark());
+    }
+
     private boolean alignCommittables(long checkpointId) {
         for (WriterCommittables committables : subtaskCommittables) {
             if (committables == null || committables.getMaxCheckpointId() < checkpointId) {
@@ -328,7 +338,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             commitUpToCheckpoint(
                     checkpointId,
                     pollManifestCommittablesForCheckpoint(
-                            checkpointId, subtaskCommittables, committer, NO_WATERMARK),
+                            checkpointId,
+                            subtaskCommittables,
+                            committer,
+                            watermarkValve.getCurrentWatermark()),
                     committables -> {
                         int numCommitted = committer.filterAndCommit(committables, true, true);
                         if (numCommitted > 0) {
@@ -389,7 +402,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         if (committables.isEmpty() && committer.forceCreatingSnapshot()) {
             committables =
                     Collections.singletonList(
-                            committer.combine(checkpointId, NO_WATERMARK, Collections.emptyList()));
+                            committer.combine(
+                                    checkpointId,
+                                    watermarkValve.getCurrentWatermark(),
+                                    Collections.emptyList()));
         }
         commitAction.accept(committables);
     }
@@ -402,6 +418,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     SimpleVersionedSerialization.readVersionAndDeSerialize(
                             stateSerializer, checkpointData);
             commitUser = coordinatorState.getCommitUser();
+            watermarkValve.reset(coordinatorState.getWatermark());
             stateStore = new MemoryBackendStateStore(coordinatorState.getCommitterStates());
         }
     }

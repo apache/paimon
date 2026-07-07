@@ -133,6 +133,31 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
+    public void testWatermarkCommit() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        coordinator.handleEventFromOperator(0, 0, new WatermarkEvent(1024L));
+        coordinator.notifyCheckpointComplete(1);
+        coordinator.waitProcessAllActions();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+
+        // Long.MAX_VALUE watermark is ignored, so the committed watermark stays at 1024
+        coordinator.handleEventFromOperator(0, 0, event(false, committable(table, 2, 2)));
+        coordinator.handleEventFromOperator(0, 0, new WatermarkEvent(Long.MAX_VALUE));
+        coordinator.notifyCheckpointComplete(2);
+        coordinator.waitProcessAllActions();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
     public void testRestoringAlignsBeforeRunning() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 2);
@@ -921,7 +946,9 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         return SimpleVersionedSerialization.writeVersionAndSerialize(
                 new CoordinatorStateSerializer(),
                 new CoordinatorState(
-                        commitUser, new MemoryBackendStateStore().getSerializedStates()));
+                        commitUser,
+                        Long.MIN_VALUE,
+                        new MemoryBackendStateStore().getSerializedStates()));
     }
 
     private class TestingContext implements OperatorCoordinator.Context {
