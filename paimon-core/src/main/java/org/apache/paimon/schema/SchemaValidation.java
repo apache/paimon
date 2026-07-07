@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
+import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
@@ -649,7 +650,7 @@ public class SchemaValidation {
                 continue;
             }
 
-            if (((MapType) fieldType).getKeyType().getTypeRoot() != DataTypeRoot.VARCHAR) {
+            if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Column '%s' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.",
