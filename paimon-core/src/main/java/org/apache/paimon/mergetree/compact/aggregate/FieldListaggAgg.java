@@ -56,8 +56,11 @@ public class FieldListaggAgg extends FieldAggregator {
         }
         // ordered by type root definition
 
-        BinaryString mergeFieldSD =
-                accumulator != null ? (BinaryString) accumulator : BinaryString.EMPTY_UTF8;
+        if (accumulator == null || StringUtils.isBlank(accumulator.toString())) {
+            return inputField;
+        }
+
+        BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
         if (distinct) {
@@ -69,9 +72,7 @@ public class FieldListaggAgg extends FieldAggregator {
             }
 
             List<BinaryString> result = new ArrayList<>();
-            if (mergeFieldSD.getSizeInBytes() > 0) {
-                result.add(mergeFieldSD);
-            }
+            result.add(mergeFieldSD);
             for (BinaryString str :
                     splitByWholeSeparatorPreserveAllTokens(inFieldSD, delimiterBinaryString)) {
                 if (StringUtils.isBlank(str.toString()) || existingTokens.contains(str)) {
@@ -79,9 +80,7 @@ public class FieldListaggAgg extends FieldAggregator {
                 }
 
                 existingTokens.add(str);
-                if (!result.isEmpty()) {
-                    result.add(delimiterBinaryString);
-                }
+                result.add(delimiterBinaryString);
                 result.add(str);
             }
 

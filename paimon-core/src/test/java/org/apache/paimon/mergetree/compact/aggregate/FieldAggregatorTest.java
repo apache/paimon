@@ -480,6 +480,24 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggFirstNonBlankValueWithoutLeadingDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+
+        BinaryString accumulator = null;
+        accumulator = (BinaryString) fieldListaggAgg.agg(accumulator, BinaryString.fromString(" "));
+        accumulator =
+                (BinaryString)
+                        fieldListaggAgg.agg(accumulator, BinaryString.fromString("first line"));
+
+        assertThat(accumulator.toString()).isEqualTo("first line");
+    }
+
+    @Test
     public void testFieldMaxAgg() {
         FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
