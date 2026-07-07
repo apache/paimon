@@ -45,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
@@ -56,9 +57,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -350,6 +353,8 @@ public class SchemaValidation {
 
         validateMergeFunctionFactory(schema);
 
+        validateMapStorageLayout(schema, options);
+
         validateFileIndex(schema);
 
         validateRowTracking(schema, options);
@@ -364,7 +369,6 @@ public class SchemaValidation {
 
         validateManifestSort(schema, options);
 
-        validateMapStorageLayout(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -621,6 +625,7 @@ public class SchemaValidation {
             fieldMap.put(field.name(), field);
         }
 
+        boolean hasSharedShredding = false;
         for (String key : options.toMap().keySet()) {
             if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
                 continue;
@@ -650,6 +655,7 @@ public class SchemaValidation {
                 continue;
             }
 
+            hasSharedShredding = true;
             if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
                         String.format(
@@ -657,6 +663,117 @@ public class SchemaValidation {
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);
+        }
+
+        if (hasSharedShredding) {
+            validateMapSharedShreddingFileFormats(options);
+            validateMapSharedShreddingCompressions(options);
+            validateUnsupportedTypesWithMapSharedShredding(schema);
+            if (!schema.primaryKeys().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently only supports append-only tables.");
+            }
+            if (options.bucket() != -1 && !options.writeOnly()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+            }
+        }
+    }
+
+    private static void validateUnsupportedTypesWithMapSharedShredding(TableSchema schema) {
+        RowType rowType = new RowType(schema.fields());
+        if (containsType(rowType, type -> type instanceof VariantType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with Variant fields.");
+        }
+        if (containsType(rowType, type -> type.is(DataTypeRoot.BLOB))) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with BLOB fields.");
+        }
+        if (containsType(rowType, type -> type instanceof MultisetType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        }
+        if (containsType(rowType, type -> type instanceof VectorType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with VECTOR fields.");
+        }
+    }
+
+    private static boolean containsType(DataType dataType, Predicate<DataType> predicate) {
+        if (predicate.test(dataType)) {
+            return true;
+        }
+        if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                if (containsType(field.type(), predicate)) {
+                    return true;
+                }
+            }
+        } else if (dataType instanceof ArrayType) {
+            return containsType(((ArrayType) dataType).getElementType(), predicate);
+        } else if (dataType instanceof MultisetType) {
+            return containsType(((MultisetType) dataType).getElementType(), predicate);
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            return containsType(mapType.getKeyType(), predicate)
+                    || containsType(mapType.getValueType(), predicate);
+        } else if (dataType instanceof VectorType) {
+            return containsType(((VectorType) dataType).getElementType(), predicate);
+        }
+        return false;
+    }
+
+    private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.FILE_FORMAT.key(), options.fileFormatString());
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            validateMapSharedShreddingFileFormat(
+                    CoreOptions.FILE_FORMAT_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
+    }
+
+    private static void validateMapSharedShreddingCompressions(CoreOptions options) {
+        validateMapSharedShreddingCompression(
+                CoreOptions.FILE_COMPRESSION.key(), options.fileCompression());
+        for (Map.Entry<Integer, String> entry : options.fileCompressionPerLevel().entrySet()) {
+            validateMapSharedShreddingCompression(
+                    CoreOptions.FILE_COMPRESSION_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingCompression(
+                CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), options.changelogFileCompression());
+    }
+
+    private static void validateMapSharedShreddingCompression(
+            String optionKey, String compression) {
+        if (StringUtils.isEmpty(compression)) {
+            return;
+        }
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        if (!"none".equals(normalized) && !"lz4".equals(normalized) && !"zstd".equals(normalized)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports none/lz4/zstd compression, but %s is %s.",
+                            optionKey, compression));
+        }
+    }
+
+    private static void validateMapSharedShreddingFileFormat(String optionKey, String format) {
+        if (StringUtils.isEmpty(format)) {
+            return;
+        }
+        if (!CoreOptions.FILE_FORMAT_PARQUET.equals(format)
+                && !CoreOptions.FILE_FORMAT_ORC.equals(format)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports parquet/orc file formats, but %s is %s.",
+                            optionKey, format));
         }
     }
 
@@ -700,6 +817,11 @@ public class SchemaValidation {
                                 + "Only CHAR/VARCHAR/STRING is supported.",
                         columnName,
                         keyType);
+                checkArgument(
+                        options.mapStorageLayout(columnName) != MapStorageLayout.SHARED_SHREDDING,
+                        "Column '%s' is configured with map.storage-layout=shared-shredding, "
+                                + "which does not support nested file index.",
+                        columnName);
             }
 
             for (String indexType : entry.getValue().keySet()) {

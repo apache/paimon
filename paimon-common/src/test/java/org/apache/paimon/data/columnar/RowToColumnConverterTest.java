@@ -39,6 +39,7 @@ import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -234,6 +235,39 @@ public class RowToColumnConverterTest {
     }
 
     @Test
+    public void testConvertCharType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.CHAR(10)));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row1 = GenericRow.of(BinaryString.fromString("hello"));
+        GenericRow row2 = GenericRow.of(BinaryString.fromString("world"));
+
+        HeapBytesVector bytesVector = new HeapBytesVector(2);
+        WritableColumnVector[] vectors = new WritableColumnVector[] {bytesVector};
+
+        converter.convert(row1, vectors);
+        converter.convert(row2, vectors);
+
+        assertThat(new String(bytesVector.getBytes(0).getBytes())).isEqualTo("hello");
+        assertThat(new String(bytesVector.getBytes(1).getBytes())).isEqualTo("world");
+    }
+
+    @Test
+    public void testElementConverterAppendFromObjectAndColumnVector() {
+        RowToColumnConverter.ElementConverter converter =
+                RowToColumnConverter.createElementConverter(DataTypes.STRING());
+        HeapBytesVector sourceVector = new HeapBytesVector(1);
+        sourceVector.appendByteArray("from-vector".getBytes(), 0, "from-vector".length());
+
+        HeapBytesVector targetVector = new HeapBytesVector(2);
+        converter.append(BinaryString.fromString("from-object"), targetVector);
+        converter.append(sourceVector, 0, targetVector);
+
+        assertThat(new String(targetVector.getBytes(0).getBytes())).isEqualTo("from-object");
+        assertThat(new String(targetVector.getBytes(1).getBytes())).isEqualTo("from-vector");
+    }
+
+    @Test
     public void testConvertBinaryType() {
         RowType rowType = RowType.of(new DataField(0, "f", new BinaryType(5)));
         RowToColumnConverter converter = new RowToColumnConverter(rowType);
@@ -249,6 +283,23 @@ public class RowToColumnConverterTest {
 
         assertThat(new String(bytesVector.getBytes(0).getBytes())).isEqualTo("hello");
         assertThat(new String(bytesVector.getBytes(1).getBytes())).isEqualTo("world");
+    }
+
+    @Test
+    public void testConvertVariantType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VARIANT()));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+        GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
+
+        HeapRowVector rowVector =
+                new HeapRowVector(1, new HeapBytesVector(1), new HeapBytesVector(1));
+        WritableColumnVector[] vectors = new WritableColumnVector[] {rowVector};
+
+        converter.convert(GenericRow.of(variant), vectors);
+
+        assertThat(rowVector.isNullAt(0)).isFalse();
+        assertThat(rowVector.getRow(0).getBinary(0)).isEqualTo(variant.value());
+        assertThat(rowVector.getRow(0).getBinary(1)).isEqualTo(variant.metadata());
     }
 
     @Test
