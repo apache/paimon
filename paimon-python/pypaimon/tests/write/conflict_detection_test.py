@@ -137,6 +137,13 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=200))
 
+    def test_no_conflict_when_vector_file_range_is_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.vector.0", kind=0, first_row_id=20, row_count=10)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
     def test_conflict_when_blob_file_range_is_not_covered(self):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
@@ -206,6 +213,57 @@ class TestCheckRowIdExistence(unittest.TestCase):
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=None))
+
+
+class TestCheckRowIdRangeConflicts(unittest.TestCase):
+
+    def _make_detection(self):
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=None,
+            manifest_list_manager=None,
+            table=None,
+            commit_scanner=None,
+        )
+
+    def test_reports_dedicated_file_spanning_data_files(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=2),
+            _make_entry("f2", kind=0, first_row_id=2, row_count=2),
+            _make_entry("p1.blob", kind=0, first_row_id=0, row_count=4),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNotNone(result)
+        self.assertIn("dedicated file", str(result))
+        self.assertIn("p1.blob", str(result))
+        self.assertIn("spans multiple data file ranges", str(result))
+        self.assertIn("f1", str(result))
+        self.assertIn("f2", str(result))
+
+    def test_allows_adjacent_data_files(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=2),
+            _make_entry("f2", kind=0, first_row_id=2, row_count=2),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNone(result)
+
+    def test_allows_dedicated_file_covered_by_one_data_file(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=4),
+            _make_entry("p1.blob", kind=0, first_row_id=1, row_count=2),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNone(result)
 
 
 class TestOverwriteConflictDetection(unittest.TestCase):
