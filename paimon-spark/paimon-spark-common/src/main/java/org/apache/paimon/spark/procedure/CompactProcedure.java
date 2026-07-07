@@ -24,9 +24,9 @@ import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -581,8 +581,7 @@ public class CompactProcedure extends BaseProcedure {
                                         messageSerializerser.getVersion(), serializedMessage));
                     }
                     messages.addAll(
-                            new DataEvolutionCompactDeletionVectorRewriter(table)
-                                    .rewriteDeletionVectors(messages));
+                            new DataEvolutionCompactionCommitPreparation(table).prepare(messages));
                     commit.commit(messages);
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);

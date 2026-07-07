@@ -24,7 +24,6 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -83,6 +82,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
+import static org.apache.paimon.utils.DataEvolutionUtils.toDeletionFiles;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
@@ -679,7 +679,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     Pair<BinaryRow, Integer> partitionBucket = entry;
                     if (remainingBuckets.contains(entry)) {
                         Map<String, DeletionFile> deletionFiles =
-                                toDeletionFiles(partitionBucket, indexFileMetas);
+                                toDeletionFiles(
+                                        indexFileHandler,
+                                        partitionBucket.getLeft(),
+                                        partitionBucket.getRight(),
+                                        indexFileMetas);
                         result.put(partitionBucket, deletionFiles);
                         if (dvMetaCache != null) {
                             dvMetaCache.put(
@@ -694,7 +698,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 partitionBucket.getLeft(),
                                 partitionBucket.getRight(),
                                 deletionFileNumber(indexFileMetas),
-                                () -> toDeletionFiles(partitionBucket, indexFileMetas));
+                                () ->
+                                        toDeletionFiles(
+                                                indexFileHandler,
+                                                partitionBucket.getLeft(),
+                                                partitionBucket.getRight(),
+                                                indexFileMetas));
                     }
                 });
         return result;
@@ -709,29 +718,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return count;
-    }
-
-    private Map<String, DeletionFile> toDeletionFiles(
-            Pair<BinaryRow, Integer> partitionBucket, List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
-        DeletionVectorsIndexFile dvIndex =
-                indexFileHandler.dvIndex(partitionBucket.getLeft(), partitionBucket.getRight());
-        for (IndexFileMeta indexFile : fileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
-            String dvFilePath = dvIndex.path(indexFile).toString();
-            if (dvRanges != null && !dvRanges.isEmpty()) {
-                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
-                    deletionFiles.put(
-                            dvMeta.dataFileName(),
-                            new DeletionFile(
-                                    dvFilePath,
-                                    dvMeta.offset(),
-                                    dvMeta.length(),
-                                    dvMeta.cardinality()));
-                }
-            }
-        }
-        return deletionFiles;
     }
 
     /**

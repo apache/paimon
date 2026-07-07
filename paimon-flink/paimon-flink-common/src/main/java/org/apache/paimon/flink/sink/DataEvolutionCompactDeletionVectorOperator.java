@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -65,8 +65,7 @@ public class DataEvolutionCompactDeletionVectorOperator
             messages.add(committable.commitMessage());
         }
         for (CommitMessage message :
-                new DataEvolutionCompactDeletionVectorRewriter(table)
-                        .rewriteDeletionVectors(messages)) {
+                new DataEvolutionCompactionCommitPreparation(table).prepare(messages)) {
             toCommit.add(new Committable(toCommit.get(0).checkpointId(), message));
         }
         return toCommit;

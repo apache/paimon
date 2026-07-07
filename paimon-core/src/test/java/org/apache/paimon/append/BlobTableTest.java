@@ -82,6 +82,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactTask.TaskType.BLOB;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
@@ -220,7 +221,7 @@ public class BlobTableTest extends TableTestBase {
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, true, false);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
@@ -1154,7 +1155,7 @@ public class BlobTableTest extends TableTestBase {
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, true, false);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
@@ -1180,7 +1181,7 @@ public class BlobTableTest extends TableTestBase {
         } catch (EndOfScanException e) {
             tasks2 = Collections.emptyList();
         }
-        assertThat(tasks2.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isFalse();
+        assertThat(tasks2.stream().anyMatch(task -> task.type() == BLOB)).isFalse();
     }
 
     @Test

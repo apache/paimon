@@ -20,8 +20,8 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -360,6 +360,148 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testCompactMaterializesDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+        List<String> oldAnchorFiles = new ArrayList<>(anchorFilesByRange(table).values());
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(
+                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        List<String> expectedRows = expectedRows("updated", FULL_RANGE);
+        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("updated", FULL_RANGE));
+        assertThat(readProjectedBlobValues(table.newReadBuilder().withProjection(new int[] {3})))
+                .containsExactlyElementsOf(expectedBlobValues(FULL_RANGE));
+
+        List<Range> materializedRanges = normalFileRowRanges(table);
+        assertThat(materializedRanges).containsExactly(new Range(15, 24));
+        // blobs should be compacted to a single range too.
+        assertBlobFileRowRanges(table, Collections.singletonList(new Range(15, 24)));
+        DataSplit materializedSplit = planDataSplit(table, materializedRanges.get(0));
+        assertDeletionFileRanges(materializedSplit);
+        assertThat(materializedSplit.mergedRowCount()).hasValue(10L);
+        assertThat(
+                        readRows(
+                                table.newReadBuilder()
+                                        .withRowRanges(
+                                                Collections.singletonList(
+                                                        materializedRanges.get(0)))))
+                .containsExactlyElementsOf(expectedRows);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+        assertThat(liveDeletionVectorDataFileNames(table))
+                .doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @Test
+    public void testMaterializeCompactionUsesRemainingSizeForLargeDeletedRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeRowsWithLargeFirstRange(table);
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(FIRST_RANGE, 1, 2, 3, 4)));
+
+        Map<Range, List<DataFileMeta>> normalFilesByRange = normalFilesByRange(table);
+        List<DataFileMeta> firstRangeFiles = normalFilesByRange.get(FIRST_RANGE);
+        List<DataFileMeta> secondRangeFiles = normalFilesByRange.get(new Range(5, 9));
+        long firstRangeWeight = fileWeight(firstRangeFiles);
+        long estimatedFirstRangeWeight = estimatedFileWeight(firstRangeFiles, 1D / 5);
+        long targetFileSize =
+                estimatedFirstRangeWeight + Math.max(1L, fileWeight(secondRangeFiles) / 2);
+        assertThat(targetFileSize).isLessThan(firstRangeWeight);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), targetFileSize + " B");
+        dynamicOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
+        dynamicOptions.put(
+                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        // The compacted rows are assigned new row-tracking ids, while f0 keeps original values.
+        assertThat(normalFileRowRanges(table))
+                .containsExactly(new Range(10, 14), new Range(15, 20));
+        assertBlobFileRowRanges(
+                table,
+                Arrays.asList(
+                        new Range(10, 10),
+                        new Range(11, 11),
+                        new Range(12, 12),
+                        new Range(13, 13),
+                        new Range(14, 14),
+                        new Range(15, 20)));
+        assertThat(readF0Values(table.newReadBuilder()))
+                .containsExactly(0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testMaterializeCompactionMergesSmallFilesWithInterleavedDeletionVectors()
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(
+                table,
+                Arrays.asList(new DvSpec(FIRST_RANGE, 1), new DvSpec(new Range(10, 14), 12)));
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(
+                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        Range materializedRange = new Range(15, 27);
+        assertThat(normalFileRowRanges(table)).containsExactly(materializedRange);
+        assertBlobFileRowRanges(table, Collections.singletonList(materializedRange));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRowsExcluding("updated", FULL_RANGE, 1, 12));
+        DataSplit split = planDataSplit(table, materializedRange);
+        assertDeletionFileRanges(split);
+        assertThat(split.mergedRowCount()).hasValue(13L);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testMaterializeCompactionHandlesFullyDeletedRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(FIRST_RANGE, 0, 1, 2, 3, 4)));
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(
+                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        Range materializedRange = new Range(15, 24);
+        assertThat(normalFileRowRanges(table)).containsExactly(materializedRange);
+        assertBlobFileRowRanges(table, Collections.singletonList(materializedRange));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(
+                        expectedRowsExcluding("updated", FULL_RANGE, 0, 1, 2, 3, 4));
+        DataSplit split = planDataSplit(table, materializedRange);
+        assertDeletionFileRanges(split);
+        assertThat(split.mergedRowCount()).hasValue(10L);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
     public void testBlobCompactKeepsDeletionVectors() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -413,6 +555,35 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         }
     }
 
+    private void writeRowsWithLargeFirstRange(FileStoreTable table) throws Exception {
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(
+                            GenericRow.of(
+                                    rowId,
+                                    BinaryString.fromString(
+                                            batch == 0 ? largeString(rowId) : "name-" + rowId),
+                                    BinaryString.fromString("base-" + rowId),
+                                    new BlobData(new byte[] {(byte) rowId})));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+    }
+
+    private static String largeString(int rowId) {
+        StringBuilder builder = new StringBuilder(32 * 1024);
+        long value = rowId + 17L;
+        for (int i = 0; i < 32 * 1024; i++) {
+            value = value * 1103515245 + 12345;
+            builder.append((char) ('a' + ((value >>> 16) % 26)));
+        }
+        return builder.toString();
+    }
+
     private void updateStructuredColumn(FileStoreTable table) throws Exception {
         RowType writeType = table.rowType().project(Collections.singletonList("f2"));
         for (int batch = 0; batch < 3; batch++) {
@@ -446,8 +617,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(commitMessages).isNotEmpty();
 
         commitMessages.addAll(
-                new DataEvolutionCompactDeletionVectorRewriter(table)
-                        .rewriteDeletionVectors(commitMessages));
+                new DataEvolutionCompactionCommitPreparation(table).prepare(commitMessages));
         commitDefault(commitMessages);
     }
 
@@ -705,6 +875,16 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         return readRows(readBuilder, readBuilder.newScan().plan());
     }
 
+    private static List<Integer> readF0Values(ReadBuilder readBuilder) throws IOException {
+        List<Integer> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> values.add(row.getInt(0)));
+        }
+        Collections.sort(values);
+        return values;
+    }
+
     private static List<String> readProjectedStrings(ReadBuilder readBuilder) throws IOException {
         List<String> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -753,17 +933,63 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private static void assertRegularFileRowRanges(
             List<DataFileMeta> dataFiles, List<Range> expected) {
-        List<Range> actual =
-                dataFiles.stream()
+        assertThat(normalFileRowRanges(dataFiles)).isEqualTo(expected);
+    }
+
+    private static List<Range> normalFileRowRanges(FileStoreTable table) {
+        return normalFileRowRanges(
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()));
+    }
+
+    private static Map<Range, List<DataFileMeta>> normalFilesByRange(FileStoreTable table) {
+        List<DataFileMeta> normalFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
                         .filter(DataEvolutionDeletionVectorTest::isNormalFile)
-                        .map(DataFileMeta::nonNullRowIdRange)
-                        .sorted(Comparator.comparingLong(range -> range.from))
                         .collect(Collectors.toList());
-        assertThat(actual).isEqualTo(expected);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        Map<Range, List<DataFileMeta>> result = new HashMap<>();
+        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(normalFiles)) {
+            DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
+            result.put(anchor.nonNullRowIdRange(), group);
+        }
+        return result;
+    }
+
+    private static List<Range> normalFileRowRanges(List<DataFileMeta> dataFiles) {
+        return dataFiles.stream()
+                .filter(DataEvolutionDeletionVectorTest::isNormalFile)
+                .map(DataFileMeta::nonNullRowIdRange)
+                .sorted(Comparator.comparingLong(range -> range.from))
+                .collect(Collectors.toList());
+    }
+
+    private static long fileWeight(List<DataFileMeta> files) {
+        return estimatedFileWeight(files, 1D);
+    }
+
+    private static long estimatedFileWeight(List<DataFileMeta> files, double remainingRatio) {
+        long weight = 0L;
+        for (DataFileMeta file : files) {
+            weight += Math.max((long) Math.ceil(file.fileSize() * remainingRatio), 1L);
+        }
+        return weight;
     }
 
     private static void assertFirstBlobFileRowRanges(
             FileStoreTable table, List<Range> expectedFirstRanges, int expectedCount) {
+        List<Range> actual = blobFileRowRanges(table);
+        assertThat(actual).hasSize(expectedCount);
+        assertThat(actual.subList(0, expectedFirstRanges.size())).isEqualTo(expectedFirstRanges);
+    }
+
+    private static void assertBlobFileRowRanges(FileStoreTable table, List<Range> expected) {
+        assertThat(blobFileRowRanges(table)).isEqualTo(expected);
+    }
+
+    private static List<Range> blobFileRowRanges(FileStoreTable table) {
         List<Range> actual =
                 table.store().newScan().plan().files().stream()
                         .map(ManifestEntry::file)
@@ -771,8 +997,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         .map(DataFileMeta::nonNullRowIdRange)
                         .sorted(Comparator.comparingLong(range -> range.from))
                         .collect(Collectors.toList());
-        assertThat(actual).hasSize(expectedCount);
-        assertThat(actual.subList(0, expectedFirstRanges.size())).isEqualTo(expectedFirstRanges);
+        return actual;
     }
 
     private static Range splitRowRange(DataSplit split) {

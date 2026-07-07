@@ -2427,6 +2427,17 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS =
+            key("data-evolution.compaction.materialize-deletions")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to physically apply deletions during compaction. For data-evolution tables, "
+                                    + "enabling this triggers full-column compaction (including blobs and vectors), "
+                                    + "row-id reassignment, and global index invalidation. "
+                                    + "Set to true only when physical deletion is required. "
+                                    + "If the goal is merely to merge small files with a low deletion ratio, keep this disabled.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -3925,6 +3936,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorBitmap64() {
         return options.get(DELETION_VECTOR_BITMAP64);
+    }
+
+    public boolean dataEvolutionCompactionMaterializeDeletions() {
+        return options.get(DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS);
     }
 
     public FileIndexOptions indexColumnsOptions() {
