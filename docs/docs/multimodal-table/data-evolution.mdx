@@ -227,7 +227,11 @@ together with row tracking and Data Evolution:
 Deleting rows with deletion vectors does not physically remove the original
 data immediately. If a table has many deleted rows, run compaction to
 materialize the deletions; otherwise, the deleted data still consumes storage
-space and may reduce read efficiency.
+space and may reduce read efficiency. Set
+`data-evolution.compaction.materialize-deletions=true` for compaction to rewrite
+all column files in the compacted range, remove the materialized deletion
+vectors, and make the remaining rows use new row IDs. This also drops global
+indexes for the affected partitions because row IDs change.
 
 :::
 
@@ -243,6 +247,15 @@ Spark SQL supports `DELETE FROM` for Data Evolution tables:
 
 ```sql
 DELETE FROM target_table WHERE id = 1;
+```
+
+To physically remove deleted rows during compaction:
+
+```sql
+CALL sys.compact(
+    table => 'target_table',
+    options => 'data-evolution.compaction.materialize-deletions=true'
+);
 ```
 
 Spark SQL also supports delete actions in `MERGE INTO`:

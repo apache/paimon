@@ -584,145 +584,120 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution deletion: non-materialized compact after delete and merge") {
-    withTable("t") {
-      withTempView("s") {
-        sql("""
-              |CREATE TABLE t (id INT, b INT, c INT)
-              |TBLPROPERTIES (
-              |  'row-tracking.enabled' = 'true',
-              |  'data-evolution.enabled' = 'true',
-              |  'deletion-vectors.enabled' = 'true')
-              |""".stripMargin)
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
-        sql("DELETE FROM t WHERE id IN (1, 6)")
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("DELETE FROM t WHERE id IN (1, 6)")
 
-        sql("""
-              |CREATE OR REPLACE TEMP VIEW s AS
-              |SELECT * FROM VALUES
-              |  (1, 100),
-              |  (2, 200),
-              |  (6, 600),
-              |  (7, 700)
-              |AS s(id, b)
-              |""".stripMargin)
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.b = s.b
-              |""".stripMargin)
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (2, 200), (6, 600), (7, 700)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
 
-        compactDataEvolutionTable(materializeDeletions = false)
+      compactDataEvolutionTable(materializeDeletions = false)
 
-        checkAnswer(
-          sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
-          Seq(
-            Row(0, 0, 0, 0L),
-            Row(2, 200, 2, 2L),
-            Row(3, 3, 3, 3L),
-            Row(4, 4, 4, 4L),
-            Row(5, 5, 5, 5L),
-            Row(7, 700, 7, 7L),
-            Row(8, 8, 8, 8L),
-            Row(9, 9, 9, 9L)
-          )
+      checkAnswer(
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0, 0L),
+          Row(2, 200, 2, 2L),
+          Row(3, 3, 3, 3L),
+          Row(4, 4, 4, 4L),
+          Row(5, 5, 5, 5L),
+          Row(7, 700, 7, 7L),
+          Row(8, 8, 8, 8L),
+          Row(9, 9, 9, 9L)
         )
-      }
+      )
     }
   }
 
   test("Data Evolution deletion: materialized compact after delete and merge") {
-    withTable("t") {
-      withTempView("s") {
-        sql("""
-              |CREATE TABLE t (id INT, b INT, c INT)
-              |TBLPROPERTIES (
-              |  'row-tracking.enabled' = 'true',
-              |  'data-evolution.enabled' = 'true',
-              |  'deletion-vectors.enabled' = 'true')
-              |""".stripMargin)
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
-        sql("DELETE FROM t WHERE id IN (1, 6)")
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("DELETE FROM t WHERE id IN (1, 6)")
 
-        sql("""
-              |CREATE OR REPLACE TEMP VIEW s AS
-              |SELECT * FROM VALUES
-              |  (1, 100),
-              |  (2, 200),
-              |  (6, 600),
-              |  (7, 700)
-              |AS s(id, b)
-              |""".stripMargin)
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.b = s.b
-              |""".stripMargin)
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (2, 200), (6, 600), (7, 700)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
 
-        compactDataEvolutionTable(materializeDeletions = true)
+      compactDataEvolutionTable(materializeDeletions = true)
 
-        checkAnswer(
-          sql("SELECT id, b, c FROM t ORDER BY id"),
-          Seq(
-            Row(0, 0, 0),
-            Row(2, 200, 2),
-            Row(3, 3, 3),
-            Row(4, 4, 4),
-            Row(5, 5, 5),
-            Row(7, 700, 7),
-            Row(8, 8, 8),
-            Row(9, 9, 9))
-        )
-      }
+      checkAnswer(
+        sql("SELECT id, b, c FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0),
+          Row(2, 200, 2),
+          Row(3, 3, 3),
+          Row(4, 4, 4),
+          Row(5, 5, 5),
+          Row(7, 700, 7),
+          Row(8, 8, 8),
+          Row(9, 9, 9))
+      )
     }
   }
 
   test("Data Evolution deletion: materialized compact drops global index after merge") {
-    withTable("t") {
-      withTempView("s") {
-        sql("""
-              |CREATE TABLE t (id INT, name STRING, b INT)
-              |TBLPROPERTIES (
-              |  'row-tracking.enabled' = 'true',
-              |  'data-evolution.enabled' = 'true',
-              |  'deletion-vectors.enabled' = 'true',
-              |  'global-index.search-mode' = 'full',
-              |  'btree-index.records-per-range' = '1000')
-              |""".stripMargin)
-        sql("""
-              |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, concat('name-', id), id AS b
-              |FROM range(0, 5)
-              |""".stripMargin)
-        sql("""
-              |CREATE OR REPLACE TEMP VIEW s AS
-              |SELECT * FROM VALUES
-              |  (1, 100),
-              |  (3, 300)
-              |AS s(id, b)
-              |""".stripMargin)
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.b = s.b
-              |""".stripMargin)
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, name STRING, b INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'global-index.search-mode' = 'full',
+            |  'btree-index.records-per-range' = '1000')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, concat('name-', id), id AS b
+            |FROM range(0, 5)
+            |""".stripMargin)
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (3, 300)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
 
-        sql(
-          "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
-            "index_type => 'btree')")
-        assert(btreeIndexEntryCount("t") > 0)
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      assert(btreeIndexEntryCount("t") > 0)
 
-        sql("DELETE FROM t WHERE id IN (2, 4)")
-        compactDataEvolutionTable(materializeDeletions = true)
+      sql("DELETE FROM t WHERE id IN (2, 4)")
+      compactDataEvolutionTable(materializeDeletions = true)
 
-        checkAnswer(
-          sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
-          Seq(Row(1, "name-1", 100)))
-        assert(btreeIndexEntryCount("t") == 0)
-      }
+      checkAnswer(
+        sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
+        Seq(Row(1, "name-1", 100)))
+      assert(btreeIndexEntryCount("t") == 0)
     }
   }
 
