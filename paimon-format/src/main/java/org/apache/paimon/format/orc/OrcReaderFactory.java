@@ -24,16 +24,11 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
-import org.apache.paimon.data.shredding.MapSharedShreddingReadPlanFactory;
-import org.apache.paimon.data.shredding.ShreddingReadPlan;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
-import org.apache.paimon.format.shredding.ShreddingFormatReader;
-import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
-import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
@@ -104,52 +99,27 @@ public class OrcReaderFactory implements FormatReaderFactory {
     // ------------------------------------------------------------------------
 
     @Override
-    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+    public OrcVectorizedReader createReader(FormatReaderFactory.Context context)
             throws IOException {
         int poolSize =
                 context instanceof OrcFormatReaderContext
                         ? ((OrcFormatReaderContext) context).poolSize()
                         : 1;
-        org.apache.orc.Reader fileReader =
-                createReader(
-                        hadoopConfig, context.fileIO(), context.filePath(), context.selection());
-        try {
-            ShreddingReadPlan readPlan =
-                    ShreddingReadPlanFactories.createReadPlan(
-                            tableType,
-                            readFieldMetadata(fileReader),
-                            null,
-                            shreddingReadPlanFactories(tableType));
-            RowType physicalReadType = readPlan.physicalRowType();
-            TypeDescription physicalReadSchema =
-                    readPlan.isIdentity() ? schema : convertToOrcSchema(physicalReadType);
-            Pool<OrcReaderBatch> poolOfBatches =
-                    createPoolOfBatches(
-                            context.filePath(),
-                            poolSize,
-                            context.fileIO(),
-                            physicalReadSchema,
-                            physicalReadType);
+        Pool<OrcReaderBatch> poolOfBatches =
+                createPoolOfBatches(context.filePath(), poolSize, context.fileIO());
 
-            OrcRecordReader orcReader =
-                    createRecordReader(
-                            hadoopConfig,
-                            fileReader,
-                            physicalReadSchema,
-                            conjunctPredicates,
-                            0,
-                            context.fileSize(),
-                            context.selection(),
-                            deletionVectorsEnabled);
-            OrcVectorizedReader orcVectorizedReader =
-                    new OrcVectorizedReader(orcReader, poolOfBatches);
-            return readPlan.isIdentity()
-                    ? orcVectorizedReader
-                    : new ShreddingFormatReader(orcVectorizedReader, readPlan);
-        } catch (IOException | RuntimeException e) {
-            IOUtils.closeQuietly(fileReader);
-            throw e;
-        }
+        OrcRecordReader orcReader =
+                createRecordReader(
+                        hadoopConfig,
+                        schema,
+                        conjunctPredicates,
+                        context.fileIO(),
+                        context.filePath(),
+                        0,
+                        context.fileSize(),
+                        context.selection(),
+                        deletionVectorsEnabled);
+        return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
     /**
@@ -162,20 +132,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
             VectorizedRowBatch orcBatch,
             Pool.Recycler<OrcReaderBatch> recycler,
             FileIO fileIO) {
-        return createReaderBatch(filePath, orcBatch, recycler, fileIO, tableType);
-    }
-
-    private OrcReaderBatch createReaderBatch(
-            Path filePath,
-            VectorizedRowBatch orcBatch,
-            Pool.Recycler<OrcReaderBatch> recycler,
-            FileIO fileIO,
-            RowType readType) {
-        List<String> tableFieldNames = readType.getFieldNames();
-        List<DataType> tableFieldTypes = readType.getFieldTypes();
+        List<String> tableFieldNames = tableType.getFieldNames();
+        List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
         // create and initialize the row batch
-        ColumnVector[] vectors = new ColumnVector[readType.getFieldCount()];
+        ColumnVector[] vectors = new ColumnVector[tableType.getFieldCount()];
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
@@ -192,30 +153,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
     // ------------------------------------------------------------------------
 
-    private static List<ShreddingReadPlanFactory> shreddingReadPlanFactories(RowType readType) {
-        return Collections.<ShreddingReadPlanFactory>singletonList(
-                new MapSharedShreddingReadPlanFactory(readType));
-    }
-
-    // ------------------------------------------------------------------------
-
     private Pool<OrcReaderBatch> createPoolOfBatches(Path filePath, int numBatches, FileIO fileIO) {
-        return createPoolOfBatches(filePath, numBatches, fileIO, schema, tableType);
-    }
-
-    private Pool<OrcReaderBatch> createPoolOfBatches(
-            Path filePath,
-            int numBatches,
-            FileIO fileIO,
-            TypeDescription readSchema,
-            RowType readType) {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch =
-                    createBatchWrapper(readSchema, Math.max(1, batchSize / numBatches));
+                    createBatchWrapper(schema, Math.max(1, batchSize / numBatches));
             final OrcReaderBatch batch =
-                    createReaderBatch(filePath, orcBatch, pool.recycler(), fileIO, readType);
+                    createReaderBatch(filePath, orcBatch, pool.recycler(), fileIO);
             pool.add(batch);
         }
 
@@ -353,33 +298,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, selection);
         try {
-            return createRecordReader(
-                    conf,
-                    orcReader,
-                    schema,
-                    conjunctPredicates,
-                    splitStart,
-                    splitLength,
-                    selection,
-                    deletionVectorsEnabled);
-        } catch (IOException | RuntimeException e) {
-            // exception happened, we need to close the reader
-            IOUtils.closeQuietly(orcReader);
-            throw e;
-        }
-    }
-
-    private static OrcRecordReader createRecordReader(
-            org.apache.hadoop.conf.Configuration conf,
-            org.apache.orc.Reader orcReader,
-            TypeDescription schema,
-            List<OrcFilters.Predicate> conjunctPredicates,
-            long splitStart,
-            long splitLength,
-            @Nullable RoaringBitmap32 selection,
-            boolean deletionVectorsEnabled)
-            throws IOException {
-        try {
             // get offset and length for the stripes that start in the split
             Pair<Long, Long> offsetAndLength =
                     getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
@@ -425,27 +343,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
     }
 
-    public static Map<String, Map<String, String>> readFieldMetadata(
-            org.apache.orc.Reader fileReader) {
-        if (!fileReader.getMetadataKeys().contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
-            return Collections.emptyMap();
-        }
-        String encodedSchema =
-                StandardCharsets.UTF_8
-                        .decode(
-                                fileReader
-                                        .getMetadataValue(
-                                                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
-                                        .duplicate())
-                        .toString();
-        return FormatMetadataUtils.readFieldMetadata(
-                FormatMetadataUtils.decodeMetadata(
-                                Collections.singletonMap(
-                                        FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
-                                        encodedSchema))
-                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
-    }
-
     private static VectorizedRowBatch createBatchWrapper(TypeDescription schema, int batchSize) {
         return schema.createRowBatch(batchSize);
     }
@@ -475,6 +372,27 @@ public class OrcReaderFactory implements FormatReaderFactory {
         } else {
             return Pair.of(0L, 0L);
         }
+    }
+
+    public static Map<String, Map<String, String>> readFieldMetadata(
+            org.apache.orc.Reader fileReader) {
+        if (!fileReader.getMetadataKeys().contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
+            return Collections.emptyMap();
+        }
+        String encodedSchema =
+                StandardCharsets.UTF_8
+                        .decode(
+                                fileReader
+                                        .getMetadataValue(
+                                                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
+                                        .duplicate())
+                        .toString();
+        return FormatMetadataUtils.readFieldMetadata(
+                FormatMetadataUtils.decodeMetadata(
+                                Collections.singletonMap(
+                                        FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                        encodedSchema))
+                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
     }
 
     public static org.apache.orc.Reader createReader(

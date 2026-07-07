@@ -39,12 +39,10 @@ import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
-import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
@@ -236,24 +234,6 @@ public class RowToColumnConverterTest {
     }
 
     @Test
-    public void testConvertCharType() {
-        RowType rowType = RowType.of(new DataField(0, "f", new CharType(5)));
-        RowToColumnConverter converter = new RowToColumnConverter(rowType);
-
-        GenericRow row1 = GenericRow.of(BinaryString.fromString("a"));
-        GenericRow row2 = GenericRow.of(BinaryString.fromString("bb"));
-
-        HeapBytesVector bytesVector = new HeapBytesVector(2);
-        WritableColumnVector[] vectors = new WritableColumnVector[] {bytesVector};
-
-        converter.convert(row1, vectors);
-        converter.convert(row2, vectors);
-
-        assertThat(new String(bytesVector.getBytes(0).getBytes())).isEqualTo("a");
-        assertThat(new String(bytesVector.getBytes(1).getBytes())).isEqualTo("bb");
-    }
-
-    @Test
     public void testConvertBinaryType() {
         RowType rowType = RowType.of(new DataField(0, "f", new BinaryType(5)));
         RowToColumnConverter converter = new RowToColumnConverter(rowType);
@@ -364,34 +344,6 @@ public class RowToColumnConverterTest {
 
         assertThat(intVector.getInt(0)).isEqualTo(12345);
         assertThat(intVector.getInt(1)).isEqualTo(67890);
-    }
-
-    @Test
-    public void testConvertVariantType() {
-        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VARIANT()));
-        RowToColumnConverter converter = new RowToColumnConverter(rowType);
-
-        GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
-        GenericRow row1 = GenericRow.of(variant);
-        GenericRow row2 = GenericRow.of((Object) null);
-
-        HeapBytesVector valueVector = new HeapBytesVector(2);
-        HeapBytesVector metadataVector = new HeapBytesVector(2);
-        HeapRowVector variantVector = new HeapRowVector(2, valueVector, metadataVector);
-        WritableColumnVector[] vectors = new WritableColumnVector[] {variantVector};
-
-        converter.convert(row1, vectors);
-        converter.convert(row2, vectors);
-
-        assertThat(variantVector.getElementsAppended()).isEqualTo(2);
-        assertThat(valueVector.getElementsAppended()).isEqualTo(2);
-        assertThat(metadataVector.getElementsAppended()).isEqualTo(2);
-        assertThat(valueVector.getBytes(0).getBytes()).isEqualTo(variant.value());
-        assertThat(metadataVector.getBytes(0).getBytes()).isEqualTo(variant.metadata());
-        assertThat(variantVector.isNullAt(0)).isFalse();
-        assertThat(variantVector.isNullAt(1)).isTrue();
-        assertThat(valueVector.isNullAt(1)).isTrue();
-        assertThat(metadataVector.isNullAt(1)).isTrue();
     }
 
     @Test

@@ -361,8 +361,7 @@ public class KeyValueFileReadWriteTest {
                         false,
                         options.dataEvolutionEnabled(),
                         null,
-                        BlobFileContext.create(schema, options),
-                        null);
+                        BlobFileContext.create(schema, options));
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

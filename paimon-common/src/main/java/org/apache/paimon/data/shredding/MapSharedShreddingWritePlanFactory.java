@@ -24,7 +24,7 @@ import org.apache.paimon.types.RowType;
 
 import java.util.List;
 
-/** Creates MAP shared-shredding write plans from the cross-file context. */
+/** Creates per-file shared-shredding MAP write plans. */
 public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFactory {
 
     private final RowType logicalRowType;

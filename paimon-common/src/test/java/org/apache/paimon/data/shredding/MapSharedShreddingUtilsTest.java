@@ -30,7 +30,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -205,30 +204,26 @@ class MapSharedShreddingUtilsTest {
                 new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, overflowSet, 3, 2);
 
         String expectedDict = "{\"age\":0,\"name\":1}";
-        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
+        for (String compression : Arrays.<String>asList(null, "none", "NONE")) {
             Map<String, String> metadata = new HashMap<>();
-            MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
+            MapSharedShreddingUtils.serializeMetadata(original, compression, metadata);
 
             assertThat(MapSharedShreddingUtils.hasShreddingMetadata(metadata)).isTrue();
             assertThat(metadata.get(MapShreddingDefine.STORAGE_LAYOUT))
                     .isEqualTo("shared-shredding");
             assertThat(metadata.get(MapSharedShreddingDefine.VERSION)).isEqualTo("1");
-            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION))
-                    .isEqualTo(expectedCompression(compression));
             assertThat(metadata.get(MapSharedShreddingDefine.NUM_COLUMNS)).isEqualTo("3");
             assertThat(metadata.get(MapSharedShreddingDefine.MAX_ROW_WIDTH)).isEqualTo("2");
+
+            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT)).isEqualTo(expectedDict);
             assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE))
                     .isEqualTo(String.valueOf(expectedDict.length()));
             assertThat(metadata.get(MapSharedShreddingDefine.FIELD_COLUMNS))
                     .isEqualTo("{\"0\":[0],\"1\":[1,2]}");
             assertThat(metadata.get(MapSharedShreddingDefine.OVERFLOW_SET)).isEqualTo("[1,5]");
-            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata)).isEqualTo(original);
+            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata, compression))
+                    .isEqualTo(original);
         }
-
-        Map<String, String> metadata = new HashMap<>();
-        MapSharedShreddingUtils.serializeMetadata(original, metadata, "zstd");
-        metadata.remove(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION);
-        assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata)).isEqualTo(original);
     }
 
     @Test
@@ -248,12 +243,11 @@ class MapSharedShreddingUtilsTest {
         MapSharedShreddingFieldMeta original =
                 new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, overflowSet, 6, 3);
 
-        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
+        for (String compression : Arrays.asList("none", "lz4", "zstd")) {
             Map<String, String> metadata = new HashMap<>();
-            MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
-            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION))
-                    .isEqualTo(expectedCompression(compression));
-            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata)).isEqualTo(original);
+            MapSharedShreddingUtils.serializeMetadata(original, compression, metadata);
+            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata, compression))
+                    .isEqualTo(original);
         }
     }
 
@@ -263,61 +257,35 @@ class MapSharedShreddingUtilsTest {
                 new MapSharedShreddingFieldMeta(
                         new TreeMap<>(), new TreeMap<>(), new HashSet<>(), 0, 0);
 
-        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
+        for (String compression : Arrays.asList("none", "lz4", "zstd")) {
             Map<String, String> metadata = new HashMap<>();
-            MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
-            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION))
-                    .isEqualTo(expectedCompression(compression));
-            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata)).isEqualTo(original);
+            MapSharedShreddingUtils.serializeMetadata(original, compression, metadata);
+            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata, compression))
+                    .isEqualTo(original);
         }
     }
 
     @Test
-    void testUnknownMetadataCompressionFailsFast() {
-        Map<String, Integer> nameToId = new TreeMap<>();
-        nameToId.put("age", 0);
-        Map<Integer, List<Integer>> fieldToColumns = new TreeMap<>();
-        fieldToColumns.put(0, Arrays.asList(0));
-        MapSharedShreddingFieldMeta original =
-                new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, new HashSet<>(), 1, 1);
-
-        assertThatThrownBy(
-                        () ->
-                                MapSharedShreddingUtils.serializeMetadata(
-                                        original, new HashMap<>(), "snappy"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Unsupported shared-shredding field dictionary compression: snappy");
-
-        Map<String, String> metadata = new HashMap<>();
-        MapSharedShreddingUtils.serializeMetadata(original, metadata, "zstd");
-        metadata.put(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, "snappy");
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(metadata))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Unsupported shared-shredding field dictionary compression: snappy");
-    }
-
-    @Test
     void testDeserializeMetadataErrors() {
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(null))
+        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(null, "none"))
                 .hasMessageContaining("metadata is null or storage layout is not shared-shredding");
 
         Map<String, String> missingLayout = new HashMap<>();
         missingLayout.put("some_key", "some_value");
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(missingLayout))
+        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(missingLayout, "none"))
                 .hasMessageContaining("metadata is null or storage layout is not shared-shredding");
 
         Map<String, String> metadata = new HashMap<>();
         metadata.put(MapShreddingDefine.STORAGE_LAYOUT, "default");
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(metadata))
+        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(metadata, "none"))
                 .hasMessageContaining("metadata is null or storage layout is not shared-shredding");
 
         Map<String, String> missingVersion = new HashMap<>();
         missingVersion.put(
                 MapShreddingDefine.STORAGE_LAYOUT,
                 MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(missingVersion))
+        assertThatThrownBy(
+                        () -> MapSharedShreddingUtils.deserializeMetadata(missingVersion, "none"))
                 .hasMessageContaining(
                         "missing shredding metadata key: paimon.map.shared-shredding.version");
 
@@ -328,7 +296,7 @@ class MapSharedShreddingUtilsTest {
         wrongVersion.put(MapSharedShreddingDefine.VERSION, "999");
         wrongVersion.put(MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE, "2");
         wrongVersion.put(MapSharedShreddingDefine.FIELD_DICT, "{}");
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(wrongVersion))
+        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(wrongVersion, "none"))
                 .hasMessageContaining("unsupported shared-shredding metadata version: 999");
 
         Map<String, String> missingFieldDict = new HashMap<>();
@@ -337,7 +305,8 @@ class MapSharedShreddingUtilsTest {
                 MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
         missingFieldDict.put(MapSharedShreddingDefine.VERSION, "1");
         missingFieldDict.put(MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE, "2");
-        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(missingFieldDict))
+        assertThatThrownBy(
+                        () -> MapSharedShreddingUtils.deserializeMetadata(missingFieldDict, "none"))
                 .hasMessageContaining(
                         "missing shredding metadata key: paimon.map.shared-shredding.field-dict");
     }
@@ -363,11 +332,5 @@ class MapSharedShreddingUtilsTest {
         assertThat(MapSharedShreddingDefine.physicalColumnName(0)).isEqualTo("__col_0");
         assertThat(MapSharedShreddingDefine.physicalColumnName(1)).isEqualTo("__col_1");
         assertThat(MapSharedShreddingDefine.physicalColumnName(99)).isEqualTo("__col_99");
-    }
-
-    private static String expectedCompression(String compression) {
-        return compression == null || "none".equalsIgnoreCase(compression)
-                ? "none"
-                : compression.toLowerCase(Locale.ROOT);
     }
 }
