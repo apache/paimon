@@ -233,17 +233,31 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withFilter(Predicate predicate) {
+        return withFilter(predicate, predicate);
+    }
+
+    @Override
+    public SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate) {
         Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                 splitPartitionPredicatesAndDataPredicates(
                         predicate, tableSchema.logicalRowType(), tableSchema.partitionKeys());
-        if (pair.getLeft().isPresent()) {
-            scan.withPartitionFilter(pair.getLeft().get());
-        }
         if (!pair.getRight().isEmpty()) {
             this.hasNonPartitionFilter = true;
-            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
-        scan.withCompleteFilter(predicate);
+
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pushdownPair =
+                splitPartitionPredicatesAndDataPredicates(
+                        pushdownPredicate,
+                        tableSchema.logicalRowType(),
+                        tableSchema.partitionKeys());
+        if (pushdownPair.getLeft().isPresent()) {
+            scan.withPartitionFilter(pushdownPair.getLeft().get());
+        }
+        if (!pushdownPair.getRight().isEmpty()) {
+            this.hasNonPartitionFilter = true;
+            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pushdownPair.getRight()));
+        }
+        scan.withCompleteFilter(pushdownPredicate);
         return this;
     }
 

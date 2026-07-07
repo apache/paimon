@@ -75,6 +75,15 @@ public interface SnapshotReader {
 
     SnapshotReader withFilter(Predicate predicate);
 
+    /**
+     * Applies a full read-time filter and an optional scan-pruning filter.
+     *
+     * <p>{@code predicate} is used to determine whether the reader has a non-partition filter which
+     * must still be evaluated at read time. {@code pushdownPredicate} is the only predicate used
+     * for scan pruning such as partition, stats, and bucket pruning.
+     */
+    SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate);
+
     SnapshotReader withPartitionFilter(Map<String, String> partitionSpec);
 
     SnapshotReader withPartitionFilter(Predicate predicate);

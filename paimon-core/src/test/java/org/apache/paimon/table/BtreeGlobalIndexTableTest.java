@@ -134,6 +134,27 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMixedRowIdOrSkipsGlobalIndexScan() throws Exception {
+        write(10L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        PredicateBuilder builder =
+                new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
+        int rowIdIndex = table.rowType().getFieldCount();
+        Predicate predicate =
+                PredicateBuilder.or(
+                        builder.equal(rowIdIndex, 1L),
+                        builder.equal(1, BinaryString.fromString("a7")));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+
+        assertThat(splits).isNotEmpty();
+        assertThat(splits).allMatch(split -> split instanceof DataSplit);
+    }
+
+    @Test
     public void testBTreeGlobalIndexSearchModeControlsUnindexedData() throws Exception {
         write(500L);
         createIndex("f1");
