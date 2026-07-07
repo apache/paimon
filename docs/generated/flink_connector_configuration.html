@@ -273,6 +273,12 @@ under the License.
             <td>Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size according to the weight, the actual memory used depends on the running environment.</td>
         </tr>
         <tr>
+            <td><h5>sink.key-only-deletes.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, a primary-key table sink advertises the FLIP-510 key-only (partial) deletes capability, allowing the Flink planner to drop the upstream ChangelogNormalize node when the source produces deletes by key. This changes the execution plan and requires Flink 2.1+; it has no effect on Flink 1.x. Disabled by default.</td>
+        </tr>
+        <tr>
             <td><h5>sink.managed.writer-buffer-memory</h5></td>
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
