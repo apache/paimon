@@ -1287,6 +1287,7 @@ class DataEvolutionSplitRead(SplitRead):
                         self.row_ranges,
                         CoreOptions.blob_as_descriptor(self.table.options),
                         deletion_vector=deletion_vector,
+                        batch_size=batch_size,
                     )
                 else:
                     # Create concatenated reader for multiple files
