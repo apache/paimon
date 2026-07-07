@@ -372,7 +372,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
+                        .key(),
+                "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -424,7 +426,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         dynamicOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), targetFileSize + " B");
         dynamicOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
         dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
+                        .key(),
+                "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -459,7 +463,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
+                        .key(),
+                "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();
@@ -486,7 +492,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         dynamicOptions.put(
-                CoreOptions.DATA_EVOLUTION_COMPACTION_MATERIALIZE_DELETIONS.key(), "true");
+                CoreOptions.DATA_EVOLUTION_COMPACTION_REASSIGN_ROW_ID_AND_MATERIALIZE_DELETIONS
+                        .key(),
+                "true");
         compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
 
         table = getTableDefault();

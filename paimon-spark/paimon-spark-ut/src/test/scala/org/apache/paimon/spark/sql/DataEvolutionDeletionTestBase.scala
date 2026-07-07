@@ -605,7 +605,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(materializeDeletions = false)
+      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = false)
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -645,7 +645,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(materializeDeletions = true)
+      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = true)
 
       checkAnswer(
         sql("SELECT id, b, c FROM t ORDER BY id"),
@@ -692,7 +692,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       assert(btreeIndexEntryCount("t") > 0)
 
       sql("DELETE FROM t WHERE id IN (2, 4)")
-      compactDataEvolutionTable(materializeDeletions = true)
+      compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions = true)
 
       checkAnswer(
         sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
@@ -701,10 +701,10 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  private def compactDataEvolutionTable(materializeDeletions: Boolean): Unit = {
+  private def compactDataEvolutionTable(reassignRowIdAndMaterializeDeletions: Boolean): Unit = {
     val materializeOption =
-      if (materializeDeletions) {
-        ",data-evolution.compaction.materialize-deletions=true"
+      if (reassignRowIdAndMaterializeDeletions) {
+        ",data-evolution.compaction.reassign-row-id-and-materialize-deletions=true"
       } else {
         ""
       }
