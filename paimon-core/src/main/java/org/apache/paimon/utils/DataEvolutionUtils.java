@@ -18,20 +18,11 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
-import org.apache.paimon.index.DeletionVectorMeta;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.table.source.DeletionFile;
 
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -40,7 +31,7 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Util class for Deletion Vectors. */
+/** Util class for data evolution. */
 public class DataEvolutionUtils {
 
     /**
@@ -86,31 +77,5 @@ public class DataEvolutionUtils {
                 "Data evolution compact files",
                 merged);
         return merged.get(0);
-    }
-
-    /** Convert deletion-vector index file metas to anchor-file deletion file metadata. */
-    public static Map<String, DeletionFile> toDeletionFiles(
-            IndexFileHandler indexFileHandler,
-            BinaryRow partition,
-            int bucket,
-            List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
-        DeletionVectorsIndexFile dvIndex = indexFileHandler.dvIndex(partition, bucket);
-        for (IndexFileMeta indexFile : fileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
-            String dvFilePath = dvIndex.path(indexFile).toString();
-            if (dvRanges != null && !dvRanges.isEmpty()) {
-                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
-                    deletionFiles.put(
-                            dvMeta.dataFileName(),
-                            new DeletionFile(
-                                    dvFilePath,
-                                    dvMeta.offset(),
-                                    dvMeta.length(),
-                                    dvMeta.cardinality()));
-                }
-            }
-        }
-        return deletionFiles;
     }
 }

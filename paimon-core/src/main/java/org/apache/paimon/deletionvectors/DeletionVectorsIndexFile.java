@@ -102,6 +102,27 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
+    /** Converts deletion-vector index file metas to data-file deletion file metadata. */
+    public Map<String, DeletionFile> toDeletionFiles(List<IndexFileMeta> fileMetas) {
+        Map<String, DeletionFile> deletionFiles = new HashMap<>();
+        for (IndexFileMeta indexFile : fileMetas) {
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            String dvFilePath = path(indexFile).toString();
+            if (dvRanges != null && !dvRanges.isEmpty()) {
+                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
+                    deletionFiles.put(
+                            dvMeta.dataFileName(),
+                            new DeletionFile(
+                                    dvFilePath,
+                                    dvMeta.offset(),
+                                    dvMeta.length(),
+                                    dvMeta.cardinality()));
+                }
+            }
+        }
+        return deletionFiles;
+    }
+
     /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
     public Map<String, DeletionVector> readDeletionVector(
             Map<String, DeletionFile> dataFileToDeletionFiles) {

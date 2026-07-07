@@ -82,7 +82,6 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
-import static org.apache.paimon.utils.DataEvolutionUtils.toDeletionFiles;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
@@ -679,11 +678,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     Pair<BinaryRow, Integer> partitionBucket = entry;
                     if (remainingBuckets.contains(entry)) {
                         Map<String, DeletionFile> deletionFiles =
-                                toDeletionFiles(
-                                        indexFileHandler,
-                                        partitionBucket.getLeft(),
-                                        partitionBucket.getRight(),
-                                        indexFileMetas);
+                                indexFileHandler
+                                        .dvIndex(
+                                                partitionBucket.getLeft(),
+                                                partitionBucket.getRight())
+                                        .toDeletionFiles(indexFileMetas);
                         result.put(partitionBucket, deletionFiles);
                         if (dvMetaCache != null) {
                             dvMetaCache.put(
@@ -699,11 +698,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 partitionBucket.getRight(),
                                 deletionFileNumber(indexFileMetas),
                                 () ->
-                                        toDeletionFiles(
-                                                indexFileHandler,
-                                                partitionBucket.getLeft(),
-                                                partitionBucket.getRight(),
-                                                indexFileMetas));
+                                        indexFileHandler
+                                                .dvIndex(
+                                                        partitionBucket.getLeft(),
+                                                        partitionBucket.getRight())
+                                                .toDeletionFiles(indexFileMetas));
                     }
                 });
         return result;

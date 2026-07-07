@@ -62,7 +62,6 @@ import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
-import static org.apache.paimon.utils.DataEvolutionUtils.toDeletionFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
@@ -544,7 +543,7 @@ public class DataEvolutionCompactCoordinator {
             List<IndexFileMeta> indexFiles =
                     indexFileHandler.scan(
                             snapshot, DELETION_VECTORS_INDEX, partition, UNAWARE_BUCKET);
-            return toDeletionFiles(indexFileHandler, partition, UNAWARE_BUCKET, indexFiles);
+            return indexFileHandler.dvIndex(partition, UNAWARE_BUCKET).toDeletionFiles(indexFiles);
         }
 
         private List<List<DataFileMeta>> blobFileGroupsToCompact(List<DataFileMeta> blobFiles) {
