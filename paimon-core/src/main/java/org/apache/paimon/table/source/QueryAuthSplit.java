@@ -35,7 +35,7 @@ import java.util.OptionalLong;
 /** A wrapper class for {@link Split} that adds query authorization information. */
 public class QueryAuthSplit implements Split {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private Split split;
     @Nullable private TableQueryAuthResult authResult;
