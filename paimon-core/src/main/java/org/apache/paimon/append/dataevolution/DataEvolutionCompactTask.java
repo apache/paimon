@@ -65,6 +65,7 @@ import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Data evolution table compaction task. */
@@ -96,6 +97,8 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
     }
 
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
+        CoreOptions options = table.coreOptions();
+
         if (blobTask) {
             return doCompactBlobFiles(table, commitUser);
         }
@@ -103,8 +106,6 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             // TODO: support vector-store file compaction
             throw new UnsupportedOperationException("Vector-store task is not supported");
         }
-
-        CoreOptions options = table.coreOptions();
 
         Set<String> fieldsInDedicatedFile =
                 SetUtils.union(
@@ -177,12 +178,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         compactAfter.add(dataFileMeta);
 
         CompactIncrement compactIncrement =
-                new CompactIncrement(
-                        compactBefore,
-                        compactAfter,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList());
+                new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
     }
@@ -244,12 +240,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         checkSameRowRange(sortedCompactBefore, compactAfter);
 
         CompactIncrement compactIncrement =
-                new CompactIncrement(
-                        sortedCompactBefore,
-                        compactAfter,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList());
+                new CompactIncrement(sortedCompactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
     }
@@ -324,19 +315,6 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
                 "Field %s in latest schema is not a blob file field.",
                 field.name());
         return field;
-    }
-
-    private Range checkContiguousRowRange(List<DataFileMeta> files) {
-        checkArgument(!files.isEmpty(), "%s should not be empty.", "Blob compact files");
-        List<Range> ranges =
-                files.stream().map(DataFileMeta::nonNullRowIdRange).collect(Collectors.toList());
-        List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
-        checkArgument(
-                merged.size() == 1,
-                "%s should have a contiguous row range, but got %s.",
-                "Blob compact files",
-                merged);
-        return merged.get(0);
     }
 
     private void checkSameRowRange(

@@ -36,7 +36,6 @@ import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.RowDataChannelComputer;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
@@ -45,6 +44,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
@@ -66,10 +66,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -291,6 +291,13 @@ public class CompactAction extends TableActionBase {
 
         Options options = new Options(table.options());
         int defaultBucketNum = options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+        Optional<Long> targetRowNumPerBucket =
+                options.getOptional(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
+        Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
+        Map<BinaryRow, Long> postponeRowCounts =
+                targetRowNumPerBucket.isPresent()
+                        ? PostponeUtils.getPostponeRowCounts(table)
+                        : Collections.emptyMap();
 
         // change bucket to a positive value, so we can scan files from the bucket = -2 directory
         Map<String, String> bucketOptions = new HashMap<>(table.options());
@@ -322,16 +329,13 @@ public class CompactAction extends TableActionBase {
         String commitUser = CoreOptions.createCommitUser(options);
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
         for (BinaryRow partition : partitions) {
-            int bucketNum = defaultBucketNum;
-
-            Iterator<ManifestEntry> it =
-                    table.newSnapshotReader()
-                            .withPartitionFilter(Collections.singletonList(partition))
-                            .onlyReadRealBuckets()
-                            .readFileIterator();
-            if (it.hasNext()) {
-                bucketNum = it.next().totalBuckets();
-            }
+            int bucketNum =
+                    PostponeUtils.determineBucketNum(
+                            partition,
+                            knownNumBuckets,
+                            targetRowNumPerBucket,
+                            postponeRowCounts,
+                            defaultBucketNum);
 
             bucketOptions = new HashMap<>(table.options());
             bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));

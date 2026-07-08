@@ -20,6 +20,7 @@ import warnings
 from datetime import timedelta
 from enum import Enum
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -214,7 +215,7 @@ class CoreOptions:
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
         .string_type()
-        .default_value(FILE_FORMAT_ORC)
+        .default_value(FILE_FORMAT_PARQUET)
         .with_description("Specify the message format of data files.")
     )
 
@@ -260,6 +261,23 @@ class CoreOptions:
         .memory_type()
         .no_default_value()
         .with_description("Define the data block size.")
+    )
+
+    MOSAIC_STATS_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("mosaic.stats-columns")
+        .string_type()
+        .default_value("")
+        .with_description(
+            "Comma-separated list of column names to collect statistics for. "
+            "Empty means no statistics collection."
+        )
+    )
+
+    MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("mosaic.num-buckets")
+        .int_type()
+        .no_default_value()
+        .with_description("Number of column buckets for parallel IO.")
     )
 
     METADATA_STATS_MODE: ConfigOption[str] = (
@@ -646,6 +664,16 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Global index root directory. If not set, global index files are "
+            "stored under the table index directory."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -654,6 +682,13 @@ class CoreOptions:
             "The maximum number of concurrent threads for global index I/O. "
             "Defaults to 32 for optimal I/O parallelism."
         )
+    )
+
+    GLOBAL_INDEX_ROW_COUNT_PER_SHARD: ConfigOption[int] = (
+        ConfigOptions.key("global-index.row-count-per-shard")
+        .long_type()
+        .default_value(100000)
+        .with_description("Row count per shard for global index.")
     )
 
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
@@ -675,12 +710,60 @@ class CoreOptions:
         )
     )
 
+    BTREE_INDEX_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("btree-index.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(64))
+        .with_description("The block size to use for BTree global indexes.")
+    )
+
+    SORTED_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("sorted-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description("The expected number of records per sorted global index file.")
+    )
+
+    BTREE_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("btree-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description(
+            "The expected number of records per BTree global index file."
+        )
+    )
+
     BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("bitmap-index.fallback-scan-max-size")
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description(
             "The maximum total bitmap global index file size to allow fallback dictionary scans."
+        )
+    )
+
+    BITMAP_INDEX_DICTIONARY_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("bitmap-index.dictionary-block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(16))
+        .with_description(
+            "The target dictionary block size for bitmap global indexes."
+        )
+    )
+
+    BITMAP_INDEX_COMPRESSION: ConfigOption[str] = (
+        ConfigOptions.key("bitmap-index.compression")
+        .string_type()
+        .default_value("none")
+        .with_description("Compression algorithm for bitmap global index blocks.")
+    )
+
+    BITMAP_INDEX_COMPRESSION_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("bitmap-index.compression-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Compression level for bitmap global index block compression."
         )
     )
 
@@ -873,6 +956,19 @@ class CoreOptions:
 
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
+
+    def mosaic_stats_columns(self, default=None):
+        value = self.options.get(CoreOptions.MOSAIC_STATS_COLUMNS, default)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [column.strip() for column in value.split(",") if column.strip()]
+        if isinstance(value, (list, set, tuple)):
+            return [str(column).strip() for column in value if str(column).strip()]
+        return []
+
+    def mosaic_num_buckets(self, default=None):
+        return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
 
     def metadata_stats_enabled(self, default=None):
         return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
@@ -1149,18 +1245,51 @@ class CoreOptions:
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
+    def global_index_external_path(self, default=None):
+        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        if not urlparse(value).scheme:
+            raise ValueError("scheme should not be null: %s" % value)
+        return value
+
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def global_index_row_count_per_shard(self) -> int:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
 
     def btree_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
             CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
 
+    def btree_index_block_size(self) -> int:
+        return self.options.get(CoreOptions.BTREE_INDEX_BLOCK_SIZE).get_bytes()
+
+    def sorted_index_records_per_range(self) -> int:
+        if self.options.contains(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE):
+            return self.options.get(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE)
+        return self.options.get(CoreOptions.BTREE_INDEX_RECORDS_PER_RANGE)
+
     def bitmap_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
             CoreOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
+
+    def bitmap_index_dictionary_block_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE
+        ).get_bytes()
+
+    def bitmap_index_compression(self) -> str:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION)
+
+    def bitmap_index_compression_level(self) -> int:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION_LEVEL)
 
     def local_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)

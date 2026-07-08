@@ -183,6 +183,12 @@ public class CatalogOptions {
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
 
+    public static final ConfigOption<Boolean> CATALOG_OPTIONS_TABLE_ENABLED =
+            ConfigOptions.key("catalog-options-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to support the sys.catalog_options table.");
+
     public static final ConfigOption<Boolean> RESOLVING_FILE_IO_ENABLED =
             ConfigOptions.key("resolving-file-io.enabled")
                     .booleanType()

@@ -278,6 +278,84 @@ to avoid potential name conflict.
 
 :::
 
+## Run with Flink Kubernetes Operator
+
+When submitting a MySQL CDC action with [Apache Flink Kubernetes Operator](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-stable/),
+put the Paimon action jar in a Flink image and pass the same action arguments through `job.args`.
+Do not run `<FLINK_HOME>/bin/flink run` inside the container. The operator submits the jar from `job.jarURI`.
+
+Build a Flink image which contains the Paimon bundled jar, the MySQL CDC dependencies, and the Paimon action jar.
+For example:
+
+```dockerfile
+# Use a Flink base image which matches your Flink Kubernetes Operator and Paimon bundled jar version.
+FROM flink:<flink-version>
+
+COPY jars/paimon-flink-@@FLINK_VERSION@@-@@VERSION@@.jar /opt/flink/lib/
+COPY jars/flink-sql-connector-mysql-cdc-3.5.0.jar /opt/flink/lib/
+COPY jars/mysql-connector-java-8.0.27.jar /opt/flink/lib/
+COPY jars/paimon-flink-action-@@VERSION@@.jar /opt/flink/usrlib/
+```
+
+The following `FlinkDeployment` starts a `mysql_sync_database` action. Use `mysql_sync_table` and add the `--table`
+argument if you want to synchronize into one Paimon table.
+
+```yaml
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: paimon-mysql-cdc
+spec:
+  image: <registry>/flink-paimon-mysql-cdc:latest
+  flinkVersion: v1_20
+  serviceAccount: flink
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "4"
+    state.checkpoints.dir: hdfs:///path/to/checkpoints
+    state.savepoints.dir: hdfs:///path/to/savepoints
+  jobManager:
+    resource:
+      memory: "2048m"
+      cpu: 1
+  taskManager:
+    resource:
+      memory: "4096m"
+      cpu: 2
+  job:
+    jarURI: local:///opt/flink/usrlib/paimon-flink-action-@@VERSION@@.jar
+    entryClass: org.apache.paimon.flink.action.FlinkActions
+    args:
+      - mysql_sync_database
+      - --warehouse
+      - hdfs:///path/to/warehouse
+      - --database
+      - test_db
+      - --mysql_conf
+      - hostname=mysql.default.svc.cluster.local
+      - --mysql_conf
+      - username=root
+      - --mysql_conf
+      - password=123456
+      - --mysql_conf
+      - database-name=source_db
+      - --catalog_conf
+      - metastore=hive
+      - --catalog_conf
+      - uri=thrift://hive-metastore:9083
+      - --table_conf
+      - bucket=4
+      - --table_conf
+      - changelog-producer=input
+      - --table_conf
+      - sink.parallelism=4
+    parallelism: 4
+    upgradeMode: savepoint
+```
+
+If you use Hive catalog or a Hadoop-compatible filesystem, also make sure the image or pod mounts contain the required
+Hadoop, Hive, and filesystem configuration files. In production, pass sensitive values such as the MySQL password through
+Kubernetes Secrets instead of writing them directly in the manifest.
+
 ## FAQ
 
 1. Chinese characters in records ingested from MySQL are garbled.

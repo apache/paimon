@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -39,6 +41,7 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.columnar.writable.WritableLongVector;
 import org.apache.paimon.data.columnar.writable.WritableShortVector;
 import org.apache.paimon.data.columnar.writable.WritableTimestampVector;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -88,6 +91,237 @@ public class RowToColumnConverter {
         }
     }
 
+    /** Create a reusable element converter for materializing column vectors. */
+    public static ElementConverter createElementConverter(DataType type) {
+        return new ElementConverter(TypeConverter.getConverterForType(type));
+    }
+
+    /** Converts one element into a writable column vector. */
+    public static class ElementConverter implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final TypeConverter converter;
+
+        private ElementConverter(TypeConverter converter) {
+            this.converter = converter;
+        }
+
+        public void append(DataGetters getters, int pos, WritableColumnVector vector) {
+            converter.append(getters, pos, vector);
+        }
+
+        public void append(ColumnVector source, int rowId, WritableColumnVector vector) {
+            converter.append(new ColumnVectorDataGetters(source, rowId), 0, vector);
+        }
+
+        public void append(Object value, WritableColumnVector vector) {
+            converter.append(new ObjectDataGetters(value), 0, vector);
+        }
+    }
+
+    private static class ColumnVectorDataGetters implements DataGetters {
+
+        private final ColumnVector vector;
+        private final int rowId;
+
+        private ColumnVectorDataGetters(ColumnVector vector, int rowId) {
+            this.vector = vector;
+            this.rowId = rowId;
+        }
+
+        @Override
+        public boolean isNullAt(int pos) {
+            return vector.isNullAt(rowId);
+        }
+
+        @Override
+        public boolean getBoolean(int pos) {
+            return ((BooleanColumnVector) vector).getBoolean(rowId);
+        }
+
+        @Override
+        public byte getByte(int pos) {
+            return ((ByteColumnVector) vector).getByte(rowId);
+        }
+
+        @Override
+        public short getShort(int pos) {
+            return ((ShortColumnVector) vector).getShort(rowId);
+        }
+
+        @Override
+        public int getInt(int pos) {
+            return ((IntColumnVector) vector).getInt(rowId);
+        }
+
+        @Override
+        public long getLong(int pos) {
+            return ((LongColumnVector) vector).getLong(rowId);
+        }
+
+        @Override
+        public float getFloat(int pos) {
+            return ((FloatColumnVector) vector).getFloat(rowId);
+        }
+
+        @Override
+        public double getDouble(int pos) {
+            return ((DoubleColumnVector) vector).getDouble(rowId);
+        }
+
+        @Override
+        public BinaryString getString(int pos) {
+            BytesColumnVector.Bytes bytes = ((BytesColumnVector) vector).getBytes(rowId);
+            return BinaryString.fromBytes(bytes.data, bytes.offset, bytes.len);
+        }
+
+        @Override
+        public Decimal getDecimal(int pos, int precision, int scale) {
+            return ((DecimalColumnVector) vector).getDecimal(rowId, precision, scale);
+        }
+
+        @Override
+        public Timestamp getTimestamp(int pos, int precision) {
+            return ((TimestampColumnVector) vector).getTimestamp(rowId, precision);
+        }
+
+        @Override
+        public byte[] getBinary(int pos) {
+            return ((BytesColumnVector) vector).getBytes(rowId).getBytes();
+        }
+
+        @Override
+        public Variant getVariant(int pos) {
+            InternalRow row = getRow(pos, 2);
+            return new GenericVariant(row.getBinary(0), row.getBinary(1));
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InternalArray getArray(int pos) {
+            return ((ArrayColumnVector) vector).getArray(rowId);
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            return ((VecColumnVector) vector).getVector(rowId);
+        }
+
+        @Override
+        public InternalMap getMap(int pos) {
+            return ((MapColumnVector) vector).getMap(rowId);
+        }
+
+        @Override
+        public InternalRow getRow(int pos, int numFields) {
+            return ((RowColumnVector) vector).getRow(rowId);
+        }
+    }
+
+    private static class ObjectDataGetters implements DataGetters {
+
+        private final Object value;
+
+        private ObjectDataGetters(Object value) {
+            this.value = value;
+        }
+
+        @Override
+        public boolean isNullAt(int pos) {
+            return value == null;
+        }
+
+        @Override
+        public boolean getBoolean(int pos) {
+            return (Boolean) value;
+        }
+
+        @Override
+        public byte getByte(int pos) {
+            return (Byte) value;
+        }
+
+        @Override
+        public short getShort(int pos) {
+            return (Short) value;
+        }
+
+        @Override
+        public int getInt(int pos) {
+            return (Integer) value;
+        }
+
+        @Override
+        public long getLong(int pos) {
+            return (Long) value;
+        }
+
+        @Override
+        public float getFloat(int pos) {
+            return (Float) value;
+        }
+
+        @Override
+        public double getDouble(int pos) {
+            return (Double) value;
+        }
+
+        @Override
+        public BinaryString getString(int pos) {
+            return (BinaryString) value;
+        }
+
+        @Override
+        public Decimal getDecimal(int pos, int precision, int scale) {
+            return (Decimal) value;
+        }
+
+        @Override
+        public Timestamp getTimestamp(int pos, int precision) {
+            return (Timestamp) value;
+        }
+
+        @Override
+        public byte[] getBinary(int pos) {
+            return (byte[]) value;
+        }
+
+        @Override
+        public Variant getVariant(int pos) {
+            return (Variant) value;
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            return (Blob) value;
+        }
+
+        @Override
+        public InternalArray getArray(int pos) {
+            return (InternalArray) value;
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            return (InternalVector) value;
+        }
+
+        @Override
+        public InternalMap getMap(int pos) {
+            return (InternalMap) value;
+        }
+
+        @Override
+        public InternalRow getRow(int pos, int numFields) {
+            return (InternalRow) value;
+        }
+    }
+
     private interface TypeConverter extends Serializable {
 
         void append(DataGetters row, int column, WritableColumnVector cv);
@@ -107,20 +341,12 @@ public class RowToColumnConverter {
 
             @Override
             public TypeConverter visit(CharType charType) {
-                return createConverter(
-                        charType.isNullable(),
-                        (row, column, cv) ->
-                                ((WritableByteVector) cv).appendByte(row.getByte(column)));
+                return stringConverter(charType.isNullable());
             }
 
             @Override
             public TypeConverter visit(VarCharType varCharType) {
-                return createConverter(
-                        varCharType.isNullable(),
-                        (row, column, cv) -> {
-                            byte[] bytes = row.getString(column).toBytes();
-                            ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
-                        });
+                return stringConverter(varCharType.isNullable());
             }
 
             @Override
@@ -246,6 +472,7 @@ public class RowToColumnConverter {
                 return createConverter(
                         variantType.isNullable(),
                         (row, column, cv) -> {
+                            ((HeapRowVector) cv).appendRow();
                             WritableBytesVector valueVector =
                                     (WritableBytesVector) cv.getChildren()[0];
                             WritableBytesVector metaDataVector =
@@ -379,6 +606,15 @@ public class RowToColumnConverter {
                         nullable,
                         (row, column, cv) -> {
                             byte[] bytes = row.getBinary(column);
+                            ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
+                        });
+            }
+
+            private static TypeConverter stringConverter(boolean nullable) {
+                return createConverter(
+                        nullable,
+                        (row, column, cv) -> {
+                            byte[] bytes = row.getString(column).toBytes();
                             ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
                         });
             }

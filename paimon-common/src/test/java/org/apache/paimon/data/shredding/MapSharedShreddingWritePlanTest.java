@@ -65,8 +65,10 @@ class MapSharedShreddingWritePlanTest {
 
         Map<String, Map<String, String>> fieldMetadata = writePlan.fieldMetadata("none");
         assertThat(fieldMetadata).containsOnlyKeys("tags");
+        assertThat(fieldMetadata.get("tags"))
+                .containsEntry(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, "none");
         MapSharedShreddingFieldMeta fieldMeta =
-                MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get("tags"), "none");
+                MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get("tags"));
         assertThat(fieldMeta.nameToId()).containsEntry("a", 0).containsEntry("b", 1);
         assertThat(fieldMeta.numColumns()).isEqualTo(4);
         assertThat(fieldMeta.maxRowWidth()).isEqualTo(3);

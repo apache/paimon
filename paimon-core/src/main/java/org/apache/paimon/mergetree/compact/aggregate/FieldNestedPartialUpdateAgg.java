@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
@@ -29,6 +30,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,8 +49,13 @@ public class FieldNestedPartialUpdateAgg extends FieldAggregator {
     private final int nestedFields;
     private final Projection keyProjection;
     private final FieldGetter[] fieldGetters;
+    private final CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy;
 
-    public FieldNestedPartialUpdateAgg(String name, ArrayType dataType, List<String> nestedKey) {
+    public FieldNestedPartialUpdateAgg(
+            String name,
+            ArrayType dataType,
+            List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy) {
         super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
@@ -58,25 +65,34 @@ public class FieldNestedPartialUpdateAgg extends FieldAggregator {
         for (int i = 0; i < nestedFields; i++) {
             fieldGetters[i] = InternalRow.createFieldGetter(nestedType.getTypeAt(i), i);
         }
+        this.nestedKeyNullStrategy = nestedKeyNullStrategy;
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null || inputField == null) {
-            return accumulator == null ? inputField : accumulator;
+        if (inputField == null) {
+            return accumulator;
         }
 
-        InternalArray acc = (InternalArray) accumulator;
         InternalArray input = (InternalArray) inputField;
 
-        List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
-        addNonNullRows(acc, rows);
+        List<InternalRow> rows;
+        if (accumulator == null) {
+            rows = new ArrayList<>(input.size());
+        } else {
+            InternalArray acc = (InternalArray) accumulator;
+            rows = new ArrayList<>(acc.size() + input.size());
+            addNonNullRows(acc, rows);
+        }
         addNonNullRows(input, rows);
 
         if (keyProjection != null) {
             Map<BinaryRow, GenericRow> map = new HashMap<>();
             for (InternalRow row : rows) {
                 BinaryRow key = keyProjection.apply(row).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
                 GenericRow toUpdate = map.computeIfAbsent(key, k -> new GenericRow(nestedFields));
                 partialUpdate(toUpdate, row);
             }
@@ -103,6 +119,29 @@ public class FieldNestedPartialUpdateAgg extends FieldAggregator {
             if (field != null) {
                 toUpdate.setField(i, field);
             }
+        }
+    }
+
+    private boolean applyNestedKeyNullStrategy(BinaryRow key) {
+        if (!key.anyNull()) {
+            // The nested-key satisfies primary key semantics.
+            return true;
+        }
+        switch (nestedKeyNullStrategy) {
+            case MERGE:
+                // Preserve the previous behavior.
+                return true;
+            case IGNORE:
+                return false;
+            case ERROR:
+                throw new IllegalArgumentException(
+                        "Nested key contains null values. Primary key fields must not be null.");
+            default:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Unsupported nested-key-null-strategy '%s'. Supported values are: %s.",
+                                nestedKeyNullStrategy,
+                                Arrays.toString(CoreOptions.NestedKeyNullStrategy.values())));
         }
     }
 }

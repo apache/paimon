@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_utils import row_values_to_arrow_table
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
@@ -64,6 +65,27 @@ class FileStoreWrite:
             self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
         writer = self.data_writers[key]
         writer.write(data)
+
+    def write_row(self, partition: Tuple, bucket: int, row, values_by_name: dict):
+        key = (partition, bucket)
+        if key not in self.data_writers:
+            self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
+        writer = self.data_writers[key]
+        if hasattr(writer, 'write_row'):
+            writer.write_row(row)
+            return
+
+        column_names = (
+            self.write_cols
+            if self.write_cols is not None
+            else list(self.table.field_names)
+        )
+        data = row_values_to_arrow_table(
+            values_by_name,
+            self.table.table_schema.fields,
+            column_names,
+        )
+        writer.write(data.to_batches()[0])
 
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         def max_seq_number():

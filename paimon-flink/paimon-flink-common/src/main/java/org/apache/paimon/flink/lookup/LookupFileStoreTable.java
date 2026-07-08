@@ -26,10 +26,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.DelegatedFileStoreTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.utils.ChainTableUtils;
 
 import java.util.HashSet;
 import java.util.List;
@@ -46,6 +49,20 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
 
     private final LookupStreamScanMode lookupScanMode;
 
+    /**
+     * Creates a {@link LookupFileStoreTable} for the given table. For chain tables, validates
+     * constraints before returning.
+     */
+    public static LookupFileStoreTable create(FileStoreTable table, List<String> joinKeys) {
+        if (table instanceof FallbackReadFileStoreTable
+                && ((FallbackReadFileStoreTable) table).other() instanceof ChainGroupReadTable) {
+            ChainGroupReadTable chainGroupReadTable =
+                    (ChainGroupReadTable) ((FallbackReadFileStoreTable) table).other();
+            validateChainTableConstraints(table, chainGroupReadTable, joinKeys);
+        }
+        return new LookupFileStoreTable(table, joinKeys);
+    }
+
     public LookupFileStoreTable(FileStoreTable wrapped, List<String> joinKeys) {
         super(wrapped);
         this.lookupScanMode = lookupStreamScanMode(wrapped, joinKeys);
@@ -58,6 +75,10 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
+        if (wrapped instanceof FallbackReadFileStoreTable
+                && ((FallbackReadFileStoreTable) wrapped).other() instanceof ChainGroupReadTable) {
+            return wrapped.newRead();
+        }
         switch (lookupScanMode) {
             case CHANGELOG:
             case FILE_MONITOR:
@@ -73,6 +94,10 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
+        if (wrapped instanceof FallbackReadFileStoreTable
+                && ((FallbackReadFileStoreTable) wrapped).other() instanceof ChainGroupReadTable) {
+            return wrapped.newStreamScan();
+        }
         return new LookupDataTableScan(wrapped, wrapped.newSnapshotReader(), lookupScanMode);
     }
 
@@ -113,6 +138,34 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
             return LookupStreamScanMode.COMPACT_DELTA_MONITOR;
         } else {
             return LookupStreamScanMode.CHANGELOG;
+        }
+    }
+
+    private static void validateChainTableConstraints(
+            FileStoreTable table, ChainGroupReadTable chainGroupReadTable, List<String> joinKeys) {
+        // Validate merge engine early — before scan creation — for better error messages.
+        // The same validation is also in ChainTableStreamScan constructor as a safety net.
+        ChainTableUtils.validateChainTableForIncrementalRead(chainGroupReadTable);
+
+        List<String> partitionKeys = table.schema().partitionKeys();
+        for (String joinKey : joinKeys) {
+            if (partitionKeys.contains(joinKey)) {
+                throw new UnsupportedOperationException(
+                        "Chain table lookup join does not support partition keys in join condition. "
+                                + "Partition keys: "
+                                + partitionKeys
+                                + ", join keys: "
+                                + joinKeys);
+            }
+        }
+        Options options = Options.fromMap(table.options());
+        FlinkConnectorOptions.LookupCacheMode cacheMode = options.get(LOOKUP_CACHE_MODE);
+        if (cacheMode != FlinkConnectorOptions.LookupCacheMode.AUTO
+                && cacheMode != FlinkConnectorOptions.LookupCacheMode.FULL) {
+            throw new UnsupportedOperationException(
+                    "Chain table lookup join does not support cache mode "
+                            + cacheMode
+                            + ". Please use AUTO or FULL.");
         }
     }
 

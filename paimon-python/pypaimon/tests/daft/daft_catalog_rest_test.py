@@ -243,12 +243,13 @@ class DaftRestReadTest(RESTBaseTest):
         captured = {}
         original_init = PaimonDataSource.__init__
 
-        def spy_init(_self, table, storage_config, catalog_options):
+        def spy_init(_self, table, storage_config, catalog_options, **kwargs):
             captured["catalog_options"] = dict(catalog_options)
             return original_init(
                 _self, table,
                 storage_config=storage_config,
                 catalog_options=catalog_options,
+                **kwargs,
             )
 
         with patch.object(PaimonDataSource, "__init__", spy_init):

@@ -93,10 +93,16 @@ under the License.
             <td>Whether to resolve blob-view-field values from upstream tables at read time. Set to false to preserve BlobViewStruct references when forwarding blob view values to another blob-view table.</td>
         </tr>
         <tr>
+            <td><h5>blob-write-null-on-fetch-failure</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced resource cannot be fetched during Flink writes (e.g. invalid URI or HTTP errors other than 404). HTTP 404 is handled by 'blob-write-null-on-missing-file'. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
             <td><h5>blob-write-null-on-missing-file</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to write NULL for a descriptor BLOB value when the referenced file does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>
@@ -465,6 +471,18 @@ under the License.
             <td>Whether enable data evolution for row tracking table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merge-into.file-pruning</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.merge-into.source-persist</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.row-sidecar.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -481,18 +499,6 @@ under the License.
             <td style="word-wrap: break-word;">0.05</td>
             <td>Double</td>
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.merge-into.file-pruning</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.merge-into.source-persist</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
@@ -848,6 +854,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>When need to lookup, commit will wait for compaction by lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, the lookup join stores only the BlobDescriptor (a lightweight reference containing file URI, offset, and length) for BLOB fields instead of the full blob bytes. This dramatically reduces local disk and memory usage for tables with large BLOB columns (e.g., images, videos). The downstream consumer receives the serialized BlobDescriptor bytes and can resolve the actual blob content on demand.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
@@ -1206,6 +1218,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
         </tr>
         <tr>
+            <td><h5>postpone.target-row-num-per-bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Target row number per bucket for partitions compacted from postpone bucket files for the first time.</td>
+        </tr>
+        <tr>
             <td><h5>primary-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1312,6 +1330,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The parallelism of scanning manifest files, default value is the size of cpu processor. Note: Scale-up this parameter will increase memory usage while scanning manifest files. We can consider downsize it when we encounter an out of memory exception while scanning</td>
+        </tr>
+        <tr>
+            <td><h5>scan.bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
         </tr>
         <tr>
             <td><h5>scan.max-splits-per-task</h5></td>

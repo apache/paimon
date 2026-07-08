@@ -23,7 +23,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
-from pypaimon.deletionvectors import ApplyDeletionVectorReader
+from pypaimon.deletionvectors import (
+    ApplyDeletionVectorReader,
+    PositionMappedDeletionVector,
+)
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -68,6 +71,7 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -120,6 +124,7 @@ class SplitRead(ABC):
         self.value_arity = len(read_type)
         self.nested_name_paths = nested_name_paths
         self.limit = limit
+        self._blob_parallelism = 1
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
         # flags to merge functions that enforce NOT-NULL on every add().
@@ -197,7 +202,11 @@ class SplitRead(ABC):
                              read_fields: List[str], row_tracking_enabled: bool,
                              row_ranges: Optional[List[Range]] = None,
                              shard_range: Optional[Tuple[int, int]] = None) -> RecordBatchReader:
-        (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
+        (
+            read_file_fields,
+            read_arrow_predicate,
+            read_paimon_predicate,
+        ) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
         file_path = file.external_path if file.external_path else file.file_path
@@ -280,10 +289,12 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+            blob_parallelism = getattr(self, '_blob_parallelism', 1)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
-                                             row_indices=row_indices)
+                                             row_indices=row_indices,
+                                             blob_parallelism=blob_parallelism)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -309,8 +320,13 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on Mosaic files")
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            row_group_predicate = (
+                read_paimon_predicate
+                if file.schema_id == self.table.table_schema.id else None
+            )
             format_reader = FormatMosaicReader(self.table.file_io, file_path, ordered_read_fields,
-                                               read_arrow_predicate, batch_size=batch_size)
+                                               read_arrow_predicate, batch_size=batch_size,
+                                               row_group_predicate=row_group_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             ordered_nested_paths = (
@@ -483,7 +499,11 @@ class SplitRead(ABC):
             ]
             read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
             read_arrow_predicate = read_predicate.to_arrow() if read_predicate else None
-            self.schema_id_2_fields[key] = (read_file_fields, read_arrow_predicate)
+            self.schema_id_2_fields[key] = (
+                read_file_fields,
+                read_arrow_predicate,
+                read_predicate,
+            )
         return self.schema_id_2_fields[key]
 
     @abstractmethod
@@ -999,9 +1019,11 @@ class DataEvolutionSplitRead(SplitRead):
                 self.table.options))
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
+            blob_parallelism = getattr(self, '_blob_parallelism', 1)
             reader = BlobInlineConvertReader(
                 reader, self.table,
-                prescan_reader_factory=lambda names: self._create_prescan_reader(names))
+                prescan_reader_factory=lambda names: self._create_prescan_reader(names),
+                blob_parallelism=blob_parallelism)
 
         return reader
 
@@ -1009,19 +1031,22 @@ class DataEvolutionSplitRead(SplitRead):
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
         files = self.split.files
         suppliers = []
+        self._genarate_deletion_file_readers()
 
         # Split files by row ID
         split_by_row_id = self._split_by_row_id(files)
 
         for need_merge_files in split_by_row_id:
+            deletion_vector = self._read_deletion_vector(need_merge_files)
             if len(need_merge_files) == 1 or not self.read_fields:
                 # No need to merge fields, just create a single file reader
                 suppliers.append(
-                    lambda f=need_merge_files[0]: self._create_file_reader(f, self._get_final_read_data_fields())
+                    lambda f=need_merge_files[0], dv=deletion_vector: self._create_file_reader(
+                        f, self._get_final_read_data_fields(), dv)
                 )
             else:
                 suppliers.append(
-                    lambda files=need_merge_files: self._create_union_reader(files)
+                    lambda files=need_merge_files, dv=deletion_vector: self._create_union_reader(files, dv)
                 )
 
         merge_reader = ConcatBatchReader(
@@ -1042,6 +1067,51 @@ class DataEvolutionSplitRead(SplitRead):
             reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader
+
+    def _read_deletion_vector(self, need_merge_files: List[DataFileMeta]):
+        if not getattr(self, "deletion_file_readers", None):
+            return None
+
+        anchor = retrieve_anchor_file(need_merge_files)
+        dv_factory = self.deletion_file_readers.get(anchor.file_name)
+        if dv_factory is None:
+            return None
+
+        deletion_vector = dv_factory()
+        if deletion_vector is None:
+            return None
+
+        return anchor.row_id_range(), deletion_vector
+
+    def _apply_deletion_vector(self, reader, reader_range: Range, deletion_vector):
+        if reader is None or deletion_vector is None:
+            return reader
+
+        dv_range, dv = deletion_vector
+        if dv.is_empty():
+            return reader
+
+        if dv_range.from_ > reader_range.from_ or dv_range.to < reader_range.to:
+            raise ValueError(
+                f"Deletion vector range {dv_range} should contain reader range {reader_range}."
+            )
+
+        mapped_dv = PositionMappedDeletionVector(
+            dv,
+            reader_range.from_ - dv_range.from_,
+            self._selected_local_positions(reader_range),
+        )
+        return ApplyDeletionVectorReader(reader, mapped_dv)
+
+    def _selected_local_positions(self, reader_range: Range) -> Optional[List[int]]:
+        if self.row_ranges is None:
+            return None
+        selected = Range.and_([reader_range], self.row_ranges)
+        return [
+            row_id - reader_range.from_
+            for row_range in selected
+            for row_id in range(row_range.from_, row_range.to + 1)
+        ]
 
     def _create_prescan_reader(self, field_names):
         """Create a prescan reader by constructing a new DataEvolutionSplitRead
@@ -1116,7 +1186,7 @@ class DataEvolutionSplitRead(SplitRead):
 
         return split_by_row_id
 
-    def _create_union_reader(self, need_merge_files: List[DataFileMeta]) -> RecordReader:
+    def _create_union_reader(self, need_merge_files: List[DataFileMeta], deletion_vector=None) -> RecordReader:
         """Create a DataEvolutionFileReader for merging multiple files."""
         # Split field bunches
         fields_files = self._split_field_bunches(need_merge_files)
@@ -1187,10 +1257,13 @@ class DataEvolutionSplitRead(SplitRead):
                 table_fields = self.read_fields
                 self.read_fields = read_fields  # create reader based on read_fields
                 batch_size = self.table.options.read_batch_size()
-                # Create reader for this bunch
+                # DataEvolutionMergeReader aligns fields by row ordinal, so every
+                # non-empty bunch reader created below must return the same row-id
+                # sequence. Keep row_ranges and the group-level deletion vector
+                # applied uniformly across normal, blob, and vector bunches.
                 if len(bunch.files()) == 1:
                     suppliers = [lambda r=self._create_file_reader(
-                        bunch.files()[0], read_field_names
+                        bunch.files()[0], read_field_names, deletion_vector
                     ): r]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 elif DataFileMeta.is_blob_file(first_file.file_name):
@@ -1213,12 +1286,14 @@ class DataEvolutionSplitRead(SplitRead):
                         ).field(0).type,
                         self.row_ranges,
                         CoreOptions.blob_as_descriptor(self.table.options),
+                        deletion_vector=deletion_vector,
                     )
                 else:
                     # Create concatenated reader for multiple files
                     suppliers = [
                         partial(self._create_file_reader, file=file,
-                                read_fields=read_field_names) for file in bunch.files()
+                                read_fields=read_field_names,
+                                deletion_vector=deletion_vector) for file in bunch.files()
                     ]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 self.read_fields = table_fields
@@ -1232,14 +1307,16 @@ class DataEvolutionSplitRead(SplitRead):
         output_schema = PyarrowFieldParser.from_paimon_schema(all_read_fields)
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
-    def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
+    def _create_file_reader(
+            self, file: DataFileMeta, read_fields: [str], deletion_vector=None) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
-        return self.file_reader_supplier(
+        reader = self.file_reader_supplier(
             file=file,
             for_merge_read=False,
             read_fields=read_fields,
             row_tracking_enabled=True,
             row_ranges=self.row_ranges)
+        return self._apply_deletion_vector(reader, file.row_id_range(), deletion_vector)
 
     def _create_raw_blob_file_reader(
             self, file: DataFileMeta, read_fields: [str]) -> Optional[FormatBlobReader]:
@@ -1254,6 +1331,7 @@ class DataEvolutionSplitRead(SplitRead):
                 return None
 
         file_path = file.external_path if file.external_path else file.file_path
+        blob_parallelism = getattr(self, '_blob_parallelism', 1)
         return FormatBlobReader(
             self.table.file_io,
             file_path,
@@ -1263,6 +1341,7 @@ class DataEvolutionSplitRead(SplitRead):
             CoreOptions.blob_as_descriptor(self.table.options),
             batch_size=self.table.options.read_batch_size(),
             row_indices=row_indices,
+            blob_parallelism=blob_parallelism,
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

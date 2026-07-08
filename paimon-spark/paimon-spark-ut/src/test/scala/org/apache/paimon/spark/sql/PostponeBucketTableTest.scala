@@ -292,6 +292,47 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone partition bucket table: compact with target row num per bucket") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.target-row-num-per-bucket' = '200',
+            |  'postpone.batch-write-fixed-bucket' = 'false'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(4) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |CASE WHEN id < 100 THEN 0 ELSE 1 END AS pt
+            |FROM range (0, 550)
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(0)))
+      checkAnswer(sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"), Seq(Row(-2)))
+
+      sql("CALL sys.compact(table => 't')")
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(550)))
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}' ORDER BY bucket"),
+        Seq(Row(0))
+      )
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{1}' ORDER BY bucket"),
+        Seq(Row(0), Row(1), Row(2))
+      )
+    }
+  }
+
   test("Postpone bucket table: skip clustering in writing phase") {
     withTable("t") {
       sql("""

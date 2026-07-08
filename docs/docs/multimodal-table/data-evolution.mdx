@@ -1,0 +1,360 @@
+---
+title: "Data Evolution"
+sidebar_position: 6
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.
+See the License for the specific language governing
+permissions and limitations under the License.
+-->
+
+# Data Evolution
+
+## Overview
+
+Paimon supports schema evolution, allowing you to add, modify, or delete column
+schema. Data Evolution mode extends this for append tables by allowing partial
+column updates without rewriting entire data files. Updated column data is
+written to new files and merged with the original data during reads.
+
+Data Evolution mode offers the following advantages:
+
+- **Efficient partial-column updates**: update a subset of columns and avoid the
+  I/O cost of rewriting untouched columns.
+- **Reduced file rewrites**: append new column data to dedicated files when
+  backfilling or evolving data.
+- **Delete support**: record row deletions with deletion vectors without
+  rewriting existing column files.
+- **Optimized reads**: merge original and updated column files at read time.
+
+To enable Data Evolution, create an append table with both
+`row-tracking.enabled` and `data-evolution.enabled` set to `true`.
+
+<Tabs groupId="data-evolution-create-table">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
+```
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE TABLE target_table (id INT, b INT, c INT) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
+```
+
+</TabItem>
+
+<TabItem value="python-api" label="Python API">
+
+```python
+import pyarrow as pa
+
+from pypaimon import CatalogFactory, Schema
+
+catalog_options = {"warehouse": "/path/to/warehouse"}
+catalog = CatalogFactory.create(catalog_options)
+catalog.create_database("default", True)
+
+pa_schema = pa.schema([
+    ("id", pa.int32()),
+    ("b", pa.int32()),
+    ("c", pa.int32()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={
+        "row-tracking.enabled": "true",
+        "data-evolution.enabled": "true",
+    },
+)
+catalog.create_table("default.target_table", schema, False)
+
+table = catalog.get_table("default.target_table")
+builder = table.new_batch_write_builder()
+write = builder.new_write()
+commit = builder.new_commit()
+write.write_arrow(pa.Table.from_pydict(
+    {"id": [1, 2], "b": [1, 2], "c": [1, 2]},
+    schema=pa_schema,
+))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+## Partial Updates
+
+You can update selected columns with Spark SQL `UPDATE` or `MERGE INTO`, the
+Flink `data_evolution_merge_into` procedure, or the PyPaimon table update API.
+Only the updated column files are written; untouched columns remain in their
+original files.
+
+<Tabs groupId="data-evolution-partial-update">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+UPDATE target_table SET b = b + 10 WHERE id = 1;
+
+CREATE TABLE source_table (id INT, b INT);
+INSERT INTO source_table VALUES (1, 11), (2, 22);
+
+MERGE INTO target_table AS t
+USING source_table AS s
+ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET t.b = s.b;
+
+SELECT * FROM target_table;
++----+----+----+
+| id | b  | c  |
++----+----+----+
+| 1  | 11 | 1  |
+| 2  | 22 | 2  |
++----+----+----+
+```
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Flink does not currently support `MERGE INTO` syntax. Use the
+`data_evolution_merge_into` procedure instead:
+
+```sql
+CREATE TABLE source_table (id INT, b INT);
+INSERT INTO source_table VALUES (1, 11), (2, 22);
+
+CALL sys.data_evolution_merge_into(
+    'default.target_table',
+    '',
+    '',
+    'source_table',
+    'source_table.id=target_table.id',
+    'b=source_table.b',
+    2
+);
+
+SELECT * FROM target_table;
++----+----+----+
+| id | b  | c  |
++----+----+----+
+| 1  | 11 | 1  |
+| 2  | 22 | 2  |
++----+----+----+
+```
+
+</TabItem>
+
+<TabItem value="python-api" label="Python API">
+
+PyPaimon exposes an UPDATE-like table update API. It accepts a `Predicate`
+for the `WHERE` condition and literal assignments for the `SET` clause.
+
+```python
+table = catalog.get_table("default.target_table")
+
+builder = table.new_batch_write_builder()
+table_update = builder.new_update()
+predicate = table_update.new_predicate_builder().is_in("id", [1, 2])
+
+messages = table_update.update_by_predicate(predicate, {"b": 100})
+
+commit = builder.new_commit()
+commit.commit(messages)
+commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+Notes:
+
+- Spark SQL supports standalone `UPDATE` statements for Data Evolution tables.
+- Concurrent Spark SQL `UPDATE` statements that update the same data file and
+  columns may be retried automatically. Configure retry attempts with
+  `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
+  retry wait time with
+  `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
+- In Spark SQL, `MERGE INTO` supports `WHEN NOT MATCHED BY SOURCE` for delete
+  actions on Data Evolution tables.
+- The Flink `data_evolution_merge_into` procedure currently supports updating
+  or inserting columns, but not inserting new rows.
+
+## Deletes
+
+Data Evolution tables can use deletion vectors to record deleted rows without
+rewriting existing column files. To write deletes, enable deletion vectors
+together with row tracking and Data Evolution:
+
+:::warning
+
+Deleting rows with deletion vectors does not physically remove the original
+data immediately. If a table has many deleted rows, run compaction to
+materialize the deletions; otherwise, the deleted data still consumes storage
+space and may reduce read efficiency.
+
+:::
+
+```sql
+CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'deletion-vectors.enabled' = 'true'
+);
+```
+
+Spark SQL supports `DELETE FROM` for Data Evolution tables:
+
+```sql
+DELETE FROM target_table WHERE id = 1;
+```
+
+Spark SQL also supports delete actions in `MERGE INTO`:
+
+```sql
+CREATE TABLE source_table (id INT, op STRING);
+INSERT INTO source_table VALUES (2, 'delete'), (3, 'update');
+
+MERGE INTO target_table AS t
+USING source_table AS s
+ON t.id = s.id
+WHEN MATCHED AND s.op = 'delete' THEN DELETE
+WHEN MATCHED AND s.op = 'update' THEN UPDATE SET t.b = t.b + 10
+WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
+```
+
+The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later. Currently,
+only Spark supports writing deletes for Data Evolution tables.
+
+## Self Updates
+
+Self updates transform existing column values in place. In Flink SQL, create a
+temporary source view from the `$row_tracking` system table and join by
+`_ROW_ID`. In PyPaimon, use the shard scan + rewrite workflow to read existing
+values and write the derived columns back.
+
+<Tabs groupId="data-evolution-self-update">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE TEMPORARY VIEW source_view AS
+SELECT _ROW_ID, b + c AS b
+FROM default.target_table$row_tracking;
+
+CALL sys.data_evolution_merge_into(
+    'default.target_table',
+    'TempT',
+    '',
+    'source_view',
+    'TempT._ROW_ID=source_view._ROW_ID',
+    'b=source_view.b',
+    2
+);
+```
+
+</TabItem>
+
+<TabItem value="python-api" label="Python API">
+
+```python
+import pyarrow as pa
+
+table = catalog.get_table("default.target_table")
+
+builder = table.new_batch_write_builder()
+table_update = builder.new_update()
+table_update.with_read_projection(["b", "c"])
+table_update.with_update_type(["b"])
+
+updater = table_update.new_shard_updator(0, 1)
+reader = updater.arrow_reader()
+for batch in iter(reader.read_next_batch, None):
+    b = batch.column("b").to_pylist()
+    c = batch.column("c").to_pylist()
+    updater.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+        {"b": [bi + ci for bi, ci in zip(b, c)]},
+        schema=pa.schema([("b", pa.int32())]),
+    ))
+
+messages = updater.prepare_commit()
+commit = builder.new_commit()
+commit.commit(messages)
+commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+Self-update notes:
+
+- The source and target table name cannot be the same in the Flink procedure.
+  Create a temporary view as the source.
+- Use `view._ROW_ID = source._ROW_ID` to identify the self-merge pattern in
+  Flink.
+- `_ROW_ID` is only available via the `$row_tracking` system table in SQL.
+- Self-merge only supports `WHEN MATCHED THEN UPDATE` semantics.
+
+## File Group Spec
+
+Through the row-id metadata, files are organized into file groups.
+
+When writing, the Data Evolution update path writes only the specified updated
+columns to new files. The original data files remain unchanged.
+
+When reading, Paimon reads both the original data files and the new files
+containing updated column data, then merges files with the same `first row id`
+to present a unified view of the table.
+
+After writing, files in `target_table` are organized as below:
+
+![](/img/data-evolution.png)
+
+When reading, files with the same `first row id` are merged:
+
+![](/img/data-evolution2.png)
+
+The advantages of this mode are:
+
+- Avoid rewriting the whole file when updating partial columns, reducing I/O
+  cost.
+- Keep read performance efficient through optimized merge processing.
+- Use disk space more efficiently because only updated columns are written to
+  new files.

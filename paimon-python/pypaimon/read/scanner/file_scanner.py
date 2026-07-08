@@ -33,6 +33,7 @@ from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           exclude_predicate_with_fields,
                                            remove_row_id_filter,
                                            trim_and_transform_predicate)
 from pypaimon.read.scan_stats import ScanStats
@@ -51,6 +52,7 @@ from pypaimon.read.scanner.primary_key_table_split_generator import \
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
 
 
@@ -220,7 +222,18 @@ class FileScanner:
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
-        self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
+        row_ranges = (
+            _row_ranges_from_predicate(predicate) if predicate else None
+        )
+        if predicate and row_ranges is not None:
+            self.predicate_for_stats = remove_row_id_filter(predicate)
+        else:
+            self.predicate_for_stats = predicate
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, {SpecialFields.ROW_ID.name})
+        # Partition columns aren't in data files, so skip them for value-stats pruning.
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, set(self.table.partition_keys))
         self.limit = limit
 
         self.snapshot_manager = table.snapshot_manager()
@@ -445,17 +458,19 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
-        # Disable early_record_filter when scan_stats is active (explain mode)
-        # so that all entries flow through _filter_manifest_entry for accurate
-        # funnel counting.
+        # Disable both early filters in explain mode (scan_stats) so all entries
+        # flow through _filter_manifest_entry for accurate funnel counting.
         early_row_filter = None if self.scan_stats is not None \
             else _build_early_row_range_filter(row_ranges)
+        partition_filter = None if self.scan_stats is not None \
+            else self.partition_key_predicate
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
+            partition_filter=partition_filter,
         )
 
     def _build_early_bucket_filter(self):
@@ -564,6 +579,8 @@ class FileScanner:
         through to the reader unchanged.
         """
         if self.limit is None:
+            return splits
+        if self.data_evolution and self.deletion_vectors_enabled:
             return splits
         if self._has_non_partition_filter():
             return splits

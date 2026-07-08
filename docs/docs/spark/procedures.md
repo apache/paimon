@@ -539,9 +539,9 @@ This section introduce all available spark procedures about paimon.
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'tag', index_type => 'bitmap', options => 'sorted-index.records-per-range=1000000')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')<br/><br/>
-         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
-         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=jieba')<br/><br/>
-         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'full-text', options => 'full-text.tokenizer=ngram,full-text.ngram.min-gram=2,full-text.ngram.max-gram=2')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'full-text', options => 'full-text.tokenizer=jieba')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'full-text', options => 'full-text.tokenizer=simple,full-text.stem=true,full-text.remove-stop-words=true')
       </td>
    </tr>
    <tr>

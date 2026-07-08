@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
@@ -36,6 +38,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil
 import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
@@ -53,6 +56,8 @@ import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{BooleanType, StructType}
 
+import java.util.{HashMap => JHashMap}
+
 import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
@@ -67,27 +72,54 @@ case class MergeIntoPaimonDataEvolutionTable(
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
-  extends PaimonLeafRunnableCommand
-  with WithFileStoreTable
-  with ExpressionHelper
+  extends PaimonRowLevelCommand
   with Logging {
 
-  private lazy val writer = PaimonSparkWriter(table)
-
   assert(
-    notMatchedBySourceActions.isEmpty,
-    "notMatchedBySourceActions is not supported in MergeIntoPaimonDataEvolutionTable.")
-  assert(
-    matchedActions.forall(x => x.isInstanceOf[UpdateAction]),
-    "Only SET clause is supported in MergeIntoPaimonDataEvolutionTable for SQL: WHEN MATCHED.")
+    matchedActions.forall {
+      case _: UpdateAction | _: DeleteAction => true
+      case _ => false
+    },
+    "Only SET and DELETE clauses are supported in MergeIntoPaimonDataEvolutionTable for SQL: " +
+      "WHEN MATCHED."
+  )
   assert(
     notMatchedActions.forall(x => x.isInstanceOf[InsertAction]),
     "Only INSERT clause is supported in MergeIntoPaimonDataEvolutionTable for SQL: WHEN NOT MATCHED."
   )
+  assert(
+    notMatchedBySourceActions.forall(x => x.isInstanceOf[DeleteAction]),
+    "Only DELETE clause is supported in MergeIntoPaimonDataEvolutionTable for SQL: WHEN NOT " +
+      "MATCHED BY SOURCE."
+  )
 
   import MergeIntoPaimonDataEvolutionTable._
 
-  override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+  private lazy val originalTargetRelation: DataSourceV2Relation =
+    PaimonRelation.getPaimonRelation(targetTable)
+
+  private lazy val matchedUpdateScanTarget: (SparkTable, DataSourceV2Relation) =
+    if (matchedActions.nonEmpty) {
+      withMatchedUpdateScanOptions(v2Table, originalTargetRelation)
+    } else {
+      (v2Table, originalTargetRelation)
+    }
+
+  private lazy val targetSparkTable: SparkTable = matchedUpdateScanTarget._1
+
+  override lazy val table: FileStoreTable = targetSparkTable.getTable.asInstanceOf[FileStoreTable]
+
+  private lazy val hasTargetSideDeleteActions: Boolean =
+    matchedActions.exists(_.isInstanceOf[DeleteAction]) ||
+      notMatchedBySourceActions.exists(_.isInstanceOf[DeleteAction])
+
+  private lazy val hasMatchedDeleteActions: Boolean =
+    matchedActions.exists(_.isInstanceOf[DeleteAction])
+
+  assert(
+    !hasTargetSideDeleteActions || table.coreOptions().deletionVectorsEnabled(),
+    "MERGE INTO DELETE on DataEvolution table requires deletion-vectors.enabled=true."
+  )
 
   private val updateColumns: Set[AttributeReference] = {
     val columns = mutable.Set[AttributeReference]()
@@ -99,6 +131,7 @@ case class MergeIntoPaimonDataEvolutionTable(
               columns += assignmentKeyAttribute(assignment)
             }
           }
+        case _ =>
       }
     }
     columns.toSet
@@ -121,7 +154,9 @@ case class MergeIntoPaimonDataEvolutionTable(
   private lazy val isSelfMergeOnRowId: Boolean = {
     if (!isPaimonTable(sourceTable)) {
       false
-    } else if (!targetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)) {
+    } else if (
+      !originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
+    ) {
       false
     } else {
       matchedCondition match {
@@ -135,14 +170,13 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   assert(
     !(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
-    "Self-Merge on _ROW_ID only supports WHEN MATCHED THEN UPDATE. WHEN NOT MATCHED and WHEN " +
-      "NOT MATCHED BY SOURCE are not supported."
+    "Self-Merge on _ROW_ID only supports WHEN MATCHED actions. WHEN NOT MATCHED and " +
+      "WHEN NOT MATCHED BY SOURCE are not supported."
   )
 
-  private lazy val targetRelation: DataSourceV2Relation =
-    PaimonRelation.getPaimonRelation(targetTable)
+  private lazy val targetRelation: DataSourceV2Relation = matchedUpdateScanTarget._2
 
-  lazy val tableSchema: StructType = v2Table.schema
+  lazy val tableSchema: StructType = targetSparkTable.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
@@ -152,7 +186,11 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     val snapshotReader = table.newSnapshotReader()
+    if (readSnapshot != null) {
+      snapshotReader.withSnapshot(readSnapshot)
+    }
     pushDownMergePartitionFilter(snapshotReader)
     val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
@@ -195,7 +233,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val persistSourceDss: Option[Dataset[Row]] =
       if (
         table.coreOptions().dataEvolutionMergeIntoSourcePersist()
-        && (matchedActions.nonEmpty || notMatchedActions.nonEmpty)
+        && (matchedActions.nonEmpty || notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)
       ) {
         val dss = createDataset(sparkSession, sourceTable)
         dss.persist()
@@ -204,28 +242,42 @@ case class MergeIntoPaimonDataEvolutionTable(
         None
       }
 
+    var targetActionCleanup = () => ()
     try {
-      // step 1: find the related data splits, make it target file plan
-      val dataSplits: Seq[DataSplit] = targetRelatedSplits(
+      // step 1: find the related data splits for matched / insert actions.
+      lazy val matchedOrInsertDataSplits: Seq[DataSplit] = targetRelatedSplits(
         sparkSession,
         tableSplits,
         firstRowIds,
         firstRowIdToBlobFirstRowIds,
         persistSourceDss)
-      val touchedFileTargetRelation =
-        createNewScanPlan(dataSplits, targetRelation)
+      lazy val touchedFileTargetRelation =
+        createNewScanPlan(matchedOrInsertDataSplits, targetRelation)
 
-      // step 2: invoke update action
-      val updateCommit =
+      // step 2: invoke target-side action
+      val matchedResult =
         if (matchedActions.nonEmpty) {
-          val updateResult = updateActionInvoke(
-            dataSplits,
+          val result = targetActionInvoke(
+            matchedOrInsertDataSplits,
             sparkSession,
             touchedFileTargetRelation,
             firstRowIds,
             persistSourceDss)
-          checkUpdateResult(updateResult)
-        } else Nil
+          targetActionCleanup = result.cleanup
+          result
+        } else {
+          TargetActionResult(Nil, None, () => ())
+        }
+      val notMatchedBySourceDvs =
+        if (notMatchedBySourceActions.nonEmpty) {
+          notMatchedBySourceDeletionVectors(sparkSession, readSnapshot, persistSourceDss)
+        } else None
+
+      // Merge deletion vectors generated from NMBS and matched conditions
+      // These two statement branch could generate deletion vectors for same files!
+      val deleteCommit = persistMergedDeletionVectors(
+        Seq(matchedResult.deletionVectors, notMatchedBySourceDvs).flatten,
+        readSnapshot)
 
       // step 3: invoke insert action
       val insertCommit =
@@ -233,11 +285,14 @@ case class MergeIntoPaimonDataEvolutionTable(
           insertActionInvoke(sparkSession, touchedFileTargetRelation, persistSourceDss)
         else Nil
 
-      if (plan.snapshotId() != null) {
-        writer.rowIdCheckConflict(plan.snapshotId())
+      if (readSnapshot != null) {
+        writer.rowIdCheckConflict(readSnapshot.id())
       }
-      writer.commit(updateCommit ++ insertCommit, Snapshot.Operation.MERGE)
+      writer.commit(
+        matchedResult.commitMessages ++ deleteCommit ++ insertCommit,
+        Snapshot.Operation.MERGE)
     } finally {
+      targetActionCleanup()
       if (persistSourceDss.isDefined) {
         persistSourceDss.get.unpersist(blocking = false)
       }
@@ -331,12 +386,21 @@ case class MergeIntoPaimonDataEvolutionTable(
       .map(_.get())
   }
 
-  private def updateActionInvoke(
+  private case class TargetActionResult(
+      commitMessages: Seq[CommitMessage],
+      deletionVectors: Option[Dataset[SparkDeletionVector]],
+      cleanup: () => Unit)
+
+  private def targetActionInvoke(
       dataSplits: Seq[DataSplit],
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
       firstRowIds: immutable.IndexedSeq[Long],
-      persistSourceDss: Option[Dataset[Row]]): Seq[CommitMessage] = {
+      persistSourceDss: Option[Dataset[Row]]): TargetActionResult = {
+    if (dataSplits.isEmpty) {
+      return TargetActionResult(Nil, None, () => ())
+    }
+
     val conditionFields = extractFields(matchedCondition)
     val allFields = mutable.SortedSet.empty[AttributeReference](
       (o1, o2) => {
@@ -385,27 +449,37 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobMarkerAttributes = rawBlobUpdateColumns.map(
       attr =>
         AttributeReference(rawBlobMarkerNamesByColumn(attr.name), BooleanType, nullable = false)())
-    val mergeOutput = updateColumnsSorted ++ metadataColumns ++ rawBlobMarkerAttributes
+    val deletedAttribute =
+      AttributeReference(MERGE_DELETED_NAME, BooleanType, nullable = false)()
+    // Row metadata, _FIRST_ROW_ID added by addFirstRowId, and the delete marker.
+    val fixedMergeOutputColumnCount = metadataColumns.size + 2
+    val mergeOutput = (updateColumnsSorted ++ metadataColumns ++ rawBlobMarkerAttributes) :+
+      deletedAttribute
 
-    val realUpdateActions = matchedActions
-      .map(s => s.asInstanceOf[UpdateAction])
-      .map(
-        update =>
-          UpdateAction.apply(
-            update.condition,
-            update.assignments.filter(
-              a => updateColumnsSorted.contains(assignmentKeyAttribute(a)))))
+    val targetMatchedActions = matchedActions.map {
+      case update: UpdateAction =>
+        UpdateAction.apply(
+          update.condition,
+          update.assignments.filter(a => updateColumnsSorted.contains(assignmentKeyAttribute(a))))
+      case delete: DeleteAction => delete
+      case other =>
+        throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
+    }
 
     // All fields are composed by:
     // 1. Match condition fields
-    // 2. For each update action, the condition fields and the assignment value fields
+    // 2. For each target-side action, the condition fields and the assignment value fields
     // 3. All updated fields exclude raw blob fields
-    for (action <- realUpdateActions) {
+    for (action <- targetMatchedActions) {
       action.condition.foreach(condition => allFields ++= extractFields(condition))
-      for (assignment <- action.assignments) {
-        if (isModifiedAssignment(assignment)) {
-          allFields ++= extractFields(assignment.value)
-        }
+      action match {
+        case update: UpdateAction =>
+          for (assignment <- update.assignments) {
+            if (isModifiedAssignment(assignment)) {
+              allFields ++= extractFields(assignment.value)
+            }
+          }
+        case _ =>
       }
     }
     allFields ++= updateColumnsSorted.filterNot(isRawBlobUpdateColumn)
@@ -450,11 +524,11 @@ case class MergeIntoPaimonDataEvolutionTable(
             TrueLiteral
           }
       }
-      updatedColumns ++ metadata ++ markers
+      updatedColumns ++ metadata ++ markers :+ FalseLiteral
     }
 
     // the output projection for target table copy
-    def copyOutput: Seq[Expression] = {
+    def copyOutput(deleted: Boolean): Seq[Expression] = {
       val copiedColumns = updateColumnsSorted.map {
         attr =>
           if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
@@ -463,22 +537,45 @@ case class MergeIntoPaimonDataEvolutionTable(
             attr
           }
       }
-      copiedColumns ++ metadataColumns ++ rawBlobUpdateColumns.map(_ => TrueLiteral)
+      val deletedLiteral = if (deleted) TrueLiteral else FalseLiteral
+      copiedColumns ++ metadataColumns ++ rawBlobUpdateColumns.map(_ => TrueLiteral) :+
+        deletedLiteral
     }
 
     def reorderPartialWriteColumns(dataset: Dataset[Row]): Dataset[Row] = {
-      if (rawBlobMarkerAttributes.isEmpty) {
-        dataset
-      } else {
-        val columns =
-          updateColumnsSorted.map(attr => quotedColumn(attr.name)) ++
-            Seq(quotedColumn(ROW_ID_NAME), quotedColumn(FIRST_ROW_ID_NAME)) ++
-            rawBlobMarkerAttributes.map(attr => quotedColumn(attr.name))
-        dataset.select(columns: _*)
+      val columns =
+        updateColumnsSorted.map(attr => quotedColumn(attr.name)) ++
+          Seq(quotedColumn(ROW_ID_NAME), quotedColumn(FIRST_ROW_ID_NAME)) ++
+          rawBlobMarkerAttributes.map(attr => quotedColumn(attr.name))
+      dataset.select(columns: _*)
+    }
+
+    val keepCopyInstructions = Seq(
+      SparkShimLoader.shim
+        .mergeRowsKeepCopy(TrueLiteral, copyOutput(deleted = false))
+        .asInstanceOf[MergeRows.Instruction])
+
+    def matchedActionInstruction(action: MergeAction): MergeRows.Instruction = {
+      action match {
+        case update: UpdateAction =>
+          SparkShimLoader.shim
+            .mergeRowsKeepUpdate(
+              update.condition.getOrElse(TrueLiteral),
+              updateOutput(update, modifiedRawBlobNames(update)))
+            .asInstanceOf[MergeRows.Instruction]
+        case DeleteAction(condition) =>
+          SparkShimLoader.shim
+            .mergeRowsKeepUpdate(condition.getOrElse(TrueLiteral), copyOutput(deleted = true))
+            .asInstanceOf[MergeRows.Instruction]
+        case other =>
+          throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
       }
     }
 
-    val toWrite = if (isSelfMergeOnRowId) {
+    def matchedActionInstructions(actions: Seq[MergeAction]): Seq[MergeRows.Instruction] =
+      actions.map(matchedActionInstruction) ++ keepCopyInstructions
+
+    val targetActionOutput: Dataset[Row] = if (isSelfMergeOnRowId) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.
@@ -514,47 +611,34 @@ case class MergeIntoPaimonDataEvolutionTable(
         }
       }
 
-      val rawBlobModifiedByAction = realUpdateActions.map(modifiedRawBlobNames)
-
-      val rewrittenUpdateActions: Seq[UpdateAction] = realUpdateActions.map {
-        ua =>
-          val newCond = ua.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
-          val newAssignments = ua.assignments.map {
+      val rewrittenMatchedActions: Seq[MergeAction] = targetMatchedActions.map {
+        case action: UpdateAction =>
+          val newCond = action.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
+          val newAssignments = action.assignments.map {
             a => Assignment(a.key, rewriteSourceToTarget(a.value, sourceToTarget))
           }
-          ua.copy(condition = newCond, assignments = newAssignments)
+          action.copy(condition = newCond, assignments = newAssignments)
+        case DeleteAction(condition) =>
+          DeleteAction(condition.map(c => rewriteSourceToTarget(c, sourceToTarget)))
+        case other =>
+          throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
       }
 
       val mergeRows = MergeRows(
         isSourceRowPresent = TrueLiteral,
         isTargetRowPresent = TrueLiteral,
-        matchedInstructions = rewrittenUpdateActions
-          .zip(rawBlobModifiedByAction)
-          .map {
-            case (action, rawBlobModified) =>
-              SparkShimLoader.shim
-                .mergeRowsKeepUpdate(
-                  action.condition.getOrElse(TrueLiteral),
-                  updateOutput(action, rawBlobModified))
-                .asInstanceOf[MergeRows.Instruction]
-          } ++ Seq(
-          SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
-            .asInstanceOf[MergeRows.Instruction]),
+        matchedInstructions = matchedActionInstructions(rewrittenMatchedActions),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(
-          SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
-            .asInstanceOf[MergeRows.Instruction]),
+        notMatchedBySourceInstructions = keepCopyInstructions,
         checkCardinality = false,
         output = mergeOutput,
         child = readPlan
       )
 
-      val withFirstRowId = reorderPartialWriteColumns(
-        addFirstRowId(sparkSession, mergeRows, firstRowIds))
-      assert(
-        withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2 + rawBlobUpdateColumns.size)
+      val withFirstRowId = addFirstRowId(sparkSession, mergeRows, firstRowIds)
+      val expectedOutputColumnCount =
+        updateColumnsSorted.size + fixedMergeOutputColumnCount + rawBlobUpdateColumns.size
+      assert(withFirstRowId.schema.fields.length == expectedOutputColumnCount)
       withFirstRowId
     } else {
       val allReadFieldsOnTarget = allFields.filter(
@@ -578,44 +662,163 @@ case class MergeIntoPaimonDataEvolutionTable(
         Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
       val rowFromSourceAttr = attribute(ROW_FROM_SOURCE, joinPlan)
       val rowFromTargetAttr = attribute(ROW_FROM_TARGET, joinPlan)
+
       val mergeRows = MergeRows(
         isSourceRowPresent = rowFromSourceAttr,
         isTargetRowPresent = rowFromTargetAttr,
-        matchedInstructions = realUpdateActions
-          .map(
-            action => {
-              SparkShimLoader.shim
-                .mergeRowsKeepUpdate(
-                  action.condition.getOrElse(TrueLiteral),
-                  updateOutput(action, modifiedRawBlobNames(action)))
-                .asInstanceOf[MergeRows.Instruction]
-            }) ++ Seq(
-          SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
-            .asInstanceOf[MergeRows.Instruction]),
+        matchedInstructions = matchedActionInstructions(targetMatchedActions),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(
-          SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
-            .asInstanceOf[MergeRows.Instruction]).toSeq,
+        notMatchedBySourceInstructions = keepCopyInstructions,
         checkCardinality = false,
         output = mergeOutput,
         child = joinPlan
       )
-      val withFirstRowId = reorderPartialWriteColumns(
-        addFirstRowId(sparkSession, mergeRows, firstRowIds))
-      assert(
-        withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2 + rawBlobUpdateColumns.size)
+      val withFirstRowId = addFirstRowId(sparkSession, mergeRows, firstRowIds)
+      val expectedOutputColumnCount =
+        updateColumnsSorted.size + fixedMergeOutputColumnCount + rawBlobUpdateColumns.size
+      assert(withFirstRowId.schema.fields.length == expectedOutputColumnCount)
       withFirstRowId
         .repartition(col(FIRST_ROW_ID_NAME))
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
-    val writer = DataEvolutionPaimonWriter(table, dataSplits)
-    writer.writePartialFields(
-      toWrite,
-      updateColumnsSorted.map(_.name),
-      rawBlobUpdateColumns.map(attr => attr.name -> rawBlobMarkerNamesByColumn(attr.name)).toMap)
+    val writePartialFields = updateColumnsSorted.nonEmpty
+    val shouldPersistOutput = writePartialFields && hasMatchedDeleteActions
+    val output: Dataset[Row] =
+      if (shouldPersistOutput) targetActionOutput.persist()
+      else targetActionOutput
+    var success = false
+    try {
+      val updateCommit =
+        if (writePartialFields) {
+          val dataEvolutionWriter = DataEvolutionPaimonWriter(table, dataSplits)
+          val partialCommit = dataEvolutionWriter.writePartialFields(
+            reorderPartialWriteColumns(output),
+            updateColumnsSorted.map(_.name),
+            rawBlobUpdateColumns
+              .map(attr => attr.name -> rawBlobMarkerNamesByColumn(attr.name))
+              .toMap
+          )
+          checkUpdateResult(partialCommit)
+        } else {
+          Nil
+        }
+
+      val deletionVectors =
+        if (hasMatchedDeleteActions) {
+          val dataFilePathToMeta = candidateFileMap(dataSplits)
+          Some(
+            collectDataEvolutionDeletionVectors(
+              dataSplits,
+              dataFilePathToMeta,
+              output.filter(quotedColumn(MERGE_DELETED_NAME)).select(quotedColumn(ROW_ID_NAME)),
+              sparkSession))
+        } else {
+          None
+        }
+
+      success = true
+      TargetActionResult(
+        updateCommit,
+        deletionVectors,
+        if (shouldPersistOutput) () => output.unpersist(blocking = false) else () => ())
+    } finally {
+      if (!success && shouldPersistOutput) {
+        output.unpersist(blocking = false)
+      }
+    }
+  }
+
+  private def notMatchedBySourceDeletionVectors(
+      sparkSession: SparkSession,
+      readSnapshot: Snapshot,
+      persistSourceDss: Option[Dataset[Row]]): Option[Dataset[SparkDeletionVector]] = {
+    // Do not reuse tableSplits here because they may have been pruned by the MERGE ON
+    // partition filter. NOT MATCHED BY SOURCE must scan target rows independently.
+    val snapshotReader = table.newSnapshotReader()
+    if (readSnapshot != null) {
+      snapshotReader.withSnapshot(readSnapshot)
+    }
+    if (table.coreOptions().manifestDeleteFileDropStats()) {
+      snapshotReader.dropStats()
+    }
+    val dataSplits =
+      snapshotReader.read().splits().asScala.collect { case split: DataSplit => split }.toSeq
+    if (dataSplits.isEmpty) {
+      return None
+    }
+
+    val rowIdMetadataColumn = (targetRelation.output ++ targetRelation.metadataOutput)
+      .filter(attr => attr.name.equals(ROW_ID_NAME))
+      .groupBy(_.exprId)
+      .map { case (_, attrs) => attrs.head }
+      .head
+
+    // No need to project source/target, spark optimizer will take care of it
+    val deleteCondition = notMatchedBySourceDeleteCondition
+    val targetReadPlan = createNewScanPlan(dataSplits, targetRelation)
+      .copy(output = targetRelation.output :+ rowIdMetadataColumn)
+    val targetFilteredPlan =
+      if (deleteCondition == TrueLiteral) targetReadPlan
+      else Filter(deleteCondition, targetReadPlan)
+    val sourceChild = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
+    val antiJoinPlan =
+      Join(targetFilteredPlan, sourceChild, LeftAnti, Some(matchedCondition), JoinHint.NONE)
+    val deletePlan = Project(Seq(rowIdMetadataColumn), antiJoinPlan)
+
+    val dataFilePathToMeta = candidateFileMap(dataSplits)
+    val deletionVectors = collectDataEvolutionDeletionVectors(
+      dataSplits,
+      dataFilePathToMeta,
+      createDataset(sparkSession, deletePlan).select(quotedColumn(ROW_ID_NAME)),
+      sparkSession)
+    Some(deletionVectors)
+  }
+
+  private def persistMergedDeletionVectors(
+      deletionVectorDatasets: Seq[Dataset[SparkDeletionVector]],
+      readSnapshot: Snapshot): Seq[CommitMessage] = {
+    if (deletionVectorDatasets.isEmpty) {
+      return Nil
+    }
+
+    val sparkSession = deletionVectorDatasets.head.sparkSession
+    import sparkSession.implicits._
+    val deletionVectors = deletionVectorDatasets
+      .reduce(_.union(_))
+      .groupByKey(_.dataFilePath)
+      .mapGroups {
+        (_, iter) =>
+          var first: SparkDeletionVector = null
+          var merged: DeletionVector = null
+          while (iter.hasNext) {
+            val current = iter.next()
+            val deletionVector = DeletionVector.deserializeFromBytes(current.deletionVector)
+            if (first == null) {
+              first = current
+              merged = deletionVector
+            } else {
+              merged.merge(deletionVector)
+            }
+          }
+
+          SparkDeletionVector(
+            first.bucketPath,
+            first.partition,
+            first.bucket,
+            first.dataFilePath,
+            DeletionVector.serializeToBytes(merged))
+      }
+
+    writer.persistDeletionVectors(deletionVectors, readSnapshot)
+  }
+
+  private def notMatchedBySourceDeleteCondition: Expression = {
+    if (notMatchedBySourceActions.exists(_.condition.isEmpty)) {
+      TrueLiteral
+    } else {
+      notMatchedBySourceActions.flatMap(_.condition).reduce(Or)
+    }
   }
 
   private def insertActionInvoke(
@@ -652,6 +855,8 @@ case class MergeIntoPaimonDataEvolutionTable(
                   else Literal(null))
             )
             .asInstanceOf[MergeRows.Instruction]
+        case other =>
+          throw new UnsupportedOperationException(s"Unsupported not matched action: $other.")
       }.toSeq,
       notMatchedBySourceInstructions = Nil,
       checkCardinality = false,
@@ -818,7 +1023,49 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_FROM_TARGET = "__row_from_target"
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
+  final private val MERGE_DELETED_NAME = "_PAIMON_MERGE_INTO_DELETED"
   final private val RAW_BLOB_PLACEHOLDER_MARKER_PREFIX = "__paimon_raw_blob_placeholder_"
+
+  private[commands] def withMatchedUpdateScanOptions(
+      v2Table: SparkTable,
+      relation: DataSourceV2Relation): (SparkTable, DataSourceV2Relation) = {
+    val table = v2Table.getTable.asInstanceOf[FileStoreTable]
+    val fullSearchMode = CoreOptions.GlobalIndexSearchMode.FULL.toString
+    Option(TimeTravelUtil.tryTravelOrLatest(table)) match {
+      case None =>
+        (v2Table, relation)
+      case Some(snapshot) =>
+        val configuredSnapshotId =
+          Option(table.options().get(CoreOptions.SCAN_SNAPSHOT_ID.key()))
+        val snapshotId = snapshot.id().toString
+        if (
+          configuredSnapshotId.contains(snapshotId) &&
+          fullSearchMode.equalsIgnoreCase(
+            table.options().get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key()))
+        ) {
+          (v2Table, relation)
+        } else {
+          val dynamicOptions = new JHashMap[String, String]()
+          timeTravelOptionKeys.foreach(dynamicOptions.put(_, null))
+          dynamicOptions.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), fullSearchMode)
+          dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId)
+
+          val scanTable = SparkTable.of(table.copy(dynamicOptions))
+          val scanRelation =
+            SparkShimLoader.shim.copyDataSourceV2Relation(relation, scanTable, relation.output)
+          (scanTable, scanRelation)
+        }
+    }
+  }
+
+  private def timeTravelOptionKeys: Seq[String] = Seq(
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_WATERMARK.key(),
+    CoreOptions.SCAN_TIMESTAMP.key(),
+    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+    CoreOptions.SCAN_VERSION.key()
+  )
 
   private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
     !sameAttributeReference(assignment.key, assignment.value)

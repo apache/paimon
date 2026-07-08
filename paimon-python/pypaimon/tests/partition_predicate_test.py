@@ -19,6 +19,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -93,6 +96,15 @@ def _manifest_entry(partition_values):
         bucket=0,
         total_buckets=1,
         file=Mock(),
+    )
+
+
+def _index_manifest_entry(partition_values, index_type):
+    return IndexManifestEntry(
+        kind=0,
+        partition=GenericRow(partition_values, PARTITION_FIELDS),
+        bucket=0,
+        index_file=IndexFileMeta(index_type, 'index-file', 1, 0),
     )
 
 
@@ -305,6 +317,19 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
         self.assertTrue(pred.test(GenericRow(['2024-01-15', 'us-east-1'], PARTITION_FIELDS)))
         self.assertTrue(pred.test(GenericRow(['2024-01-16', 'us-west-2'], PARTITION_FIELDS)))
         self.assertFalse(pred.test(GenericRow(['2024-01-17', 'eu-west-1'], PARTITION_FIELDS)))
+
+    def test_filter_includes_deletion_vector_index_partitions(self):
+        scanner = self._scanner()
+        pred = scanner._build_partition_filter_from_changes(
+            [],
+            [_index_manifest_entry(
+                ['2024-01-15', 'us-east-1'],
+                IndexManifestFile.DELETION_VECTORS_INDEX,
+            )],
+        )
+
+        self.assertTrue(pred.test(GenericRow(['2024-01-15', 'us-east-1'], PARTITION_FIELDS)))
+        self.assertFalse(pred.test(GenericRow(['2024-01-16', 'us-west-2'], PARTITION_FIELDS)))
 
     def test_filter_handles_null_partition_values(self):
         scanner = self._scanner()

@@ -129,6 +129,22 @@ public class ChainSplit implements Split {
         return Objects.hash(logicalPartition, dataFiles);
     }
 
+    @Override
+    public String toString() {
+        return "{"
+                + "partition=hash-"
+                + logicalPartition.hashCode()
+                + ", files="
+                + (dataFiles == null ? 0 : dataFiles.size())
+                + ", branches="
+                + fileBranchMapping.size()
+                + ", bucketPaths="
+                + fileBucketPathMapping.size()
+                + '}'
+                + "@"
+                + Integer.toHexString(hashCode());
+    }
+
     private void writeObject(ObjectOutputStream out) throws IOException {
         serialize(new DataOutputViewStreamWrapper(out));
     }

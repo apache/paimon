@@ -538,6 +538,149 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteFetchFailureDescriptorWritesNull() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE fetch_failure_blob_table (id INT, data STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-as-descriptor'='true',"
+                        + " 'blob-write-null-on-fetch-failure'='true')");
+
+        batchSql(
+                "INSERT INTO fetch_failure_blob_table VALUES"
+                        + " (1, 'invalid-uri', sys.path_to_descriptor('https://img.alicdn.com/imgextra/##1304008055350781673'))");
+
+        List<Row> result = batchSql("SELECT * FROM fetch_failure_blob_table");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("invalid-uri");
+        assertThat(result.get(0).getField(2)).isNull();
+    }
+
+    @Test
+    public void testWriteHttpBadRequestWritesNullWithFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/bad_request_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 400);
+            httpServer.enqueueResponse("", 400);
+
+            tEnv.executeSql(
+                    "CREATE TABLE bad_request_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO bad_request_blob_table VALUES"
+                            + " (1, 'bad-request', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM bad_request_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("bad-request");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testWriteHttpRateLimitWritesNullWithFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/rate_limit_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 420);
+            httpServer.enqueueResponse("", 420);
+
+            tEnv.executeSql(
+                    "CREATE TABLE rate_limit_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO rate_limit_blob_table VALUES"
+                            + " (1, 'rate-limit', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM rate_limit_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("rate-limit");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testWriteInvalidUriWritesNullWithMissingFileAndFetchFailure() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE combined_null_blob_table (id INT, data STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-as-descriptor'='true',"
+                        + " 'blob-write-null-on-missing-file'='true',"
+                        + " 'blob-write-null-on-fetch-failure'='true')");
+
+        batchSql(
+                "INSERT INTO combined_null_blob_table VALUES"
+                        + " (1, 'invalid-uri', sys.path_to_descriptor('https://img.alicdn.com/imgextra/##1304008055350781673'))");
+
+        List<Row> result = batchSql("SELECT * FROM combined_null_blob_table");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("invalid-uri");
+        assertThat(result.get(0).getField(2)).isNull();
+    }
+
+    @Test
+    public void testWriteHttpBadRequestWritesNullWithMissingFileAndFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/combined_bad_request_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 400);
+            httpServer.enqueueResponse("", 400);
+
+            tEnv.executeSql(
+                    "CREATE TABLE combined_bad_request_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO combined_bad_request_blob_table VALUES"
+                            + " (1, 'bad-request', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM combined_bad_request_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("bad-request");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
     public void testBlobTypeSchemaEquals() throws Exception {
         // Step 1: Create a Paimon table with blob field via Flink SQL
         tEnv.executeSql(
@@ -579,6 +722,89 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
         // Step 5: Assert that schemaEquals considers them equal
         assertThat(AbstractFlinkTableFactory.schemaEquals(convertedRowType, flinkRowType)).isTrue();
+    }
+
+    @Test
+    public void testBlobDescriptorFieldStreamingWriteWithShuffle() throws Exception {
+        // Verifies that blob-descriptor-field works when shuffle serialization occurs
+        // in streaming mode. When source and sink have different parallelism, Flink
+        // inserts a REBALANCE that serializes InternalRow to BinaryRow via
+        // InternalRowTypeSerializer. writeBlob() must preserve the BlobDescriptor so
+        // that BlobDescriptorWriter can serialize it at the sink.
+
+        byte[] blobData = "multimodal-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/multimodal_blob_stream";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        sEnv.executeSql(
+                "CREATE TABLE multimodal_assets_metadata ("
+                        + "id STRING, "
+                        + "source_uri STRING, "
+                        + "media_content BYTES, "
+                        + "dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'blob-field'='media_content',"
+                        + "'blob-descriptor-field'='media_content'"
+                        + ")");
+
+        // Streaming INSERT with sys.path_to_descriptor
+        // The /*+ OPTIONS('sink.parallelism' = '2') */ hint forces a shuffle
+        // from the source (parallelism 1 for VALUES) to the sink (parallelism 2).
+        // After fix, writeBlob() preserves BlobDescriptor through the shuffle.
+        sEnv.getConfig().set("table.dml-sync", "true");
+        sEnv.executeSql(
+                        "INSERT INTO multimodal_assets_metadata "
+                                + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                                + "VALUES ('test-id', 'test-uri', "
+                                + "sys.path_to_descriptor('"
+                                + uri
+                                + "'), '2025-07-07')")
+                .await();
+    }
+
+    @Test
+    public void testBlobDescriptorFieldBatchWriteWithShuffle() throws Exception {
+        // Same as streaming test but in batch mode.
+        // Verifies that blob-descriptor-field works when shuffle serialization
+        // occurs in batch mode.
+
+        byte[] blobData = "batch-multimodal-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/multimodal_blob_batch";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                "CREATE TABLE batch_multimodal_metadata ("
+                        + "id STRING, "
+                        + "source_uri STRING, "
+                        + "media_content BYTES, "
+                        + "dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'blob-field'='media_content',"
+                        + "'blob-descriptor-field'='media_content'"
+                        + ")");
+
+        // Batch INSERT with sys.path_to_descriptor
+        // The /*+ OPTIONS('sink.parallelism' = '2') */ hint forces a shuffle,
+        // same as streaming mode.
+        batchSql(
+                "INSERT INTO batch_multimodal_metadata "
+                        + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                        + "VALUES ('test-id', 'test-uri', "
+                        + "sys.path_to_descriptor('"
+                        + uri
+                        + "'), '2025-07-07')");
     }
 
     private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();

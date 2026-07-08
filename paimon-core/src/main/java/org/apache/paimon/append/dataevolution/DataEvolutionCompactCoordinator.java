@@ -78,6 +78,7 @@ public class DataEvolutionCompactCoordinator {
             boolean compactBlob,
             boolean compactVector) {
         CoreOptions options = table.coreOptions();
+
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();

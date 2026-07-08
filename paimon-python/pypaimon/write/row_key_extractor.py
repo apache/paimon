@@ -19,7 +19,7 @@ import math
 import random
 import struct
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pyarrow as pa
 
@@ -90,6 +90,15 @@ class RowKeyExtractor(ABC):
         buckets = self._extract_buckets_batch(data)
         return partitions, buckets
 
+    def extract_partition_bucket_row(
+            self, values_by_name: Dict[str, Any]) -> Tuple[Tuple, int]:
+        partition = tuple(
+            values_by_name[self.table_schema.fields[i].name]
+            for i in self.partition_indices
+        )
+        bucket = self._extract_bucket_row(values_by_name)
+        return partition, bucket
+
     def _get_field_indices(self, field_names: List[str]) -> List[int]:
         if not field_names:
             return []
@@ -112,6 +121,10 @@ class RowKeyExtractor(ABC):
     @abstractmethod
     def _extract_buckets_batch(self, table: pa.RecordBatch) -> List[int]:
         """Extract bucket numbers for all rows. Must be implemented by subclasses."""
+
+    @abstractmethod
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        """Extract bucket number for a single row."""
 
 
 class FixedBucketRowKeyExtractor(RowKeyExtractor):
@@ -141,6 +154,14 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
             for row_idx in range(data.num_rows)
         ]
 
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        return _bucket_from_hash(
+            self._binary_row_hash_code(
+                tuple(values_by_name[name] for name in self.bucket_keys)
+            ),
+            self.num_buckets,
+        )
+
     def _binary_row_hash_code(self, row_values: Tuple) -> int:
         row = GenericRow(list(row_values), self._bucket_key_fields, RowKind.INSERT)
         serialized = GenericRowSerializer.to_bytes(row)
@@ -159,6 +180,9 @@ class UnawareBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         return [0] * data.num_rows
+
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        return 0
 
 
 _SHORT_MAX_VALUE = 32767
@@ -311,6 +335,22 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 self._assigner.assign(partitions[row_idx], key_hash))
         return buckets
 
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        key_hash = _hash_bytes_by_words(
+            GenericRowSerializer.to_bytes(
+                GenericRow(
+                    [values_by_name[name] for name in self.bucket_keys],
+                    self._bucket_key_fields,
+                    RowKind.INSERT,
+                )
+            )[4:]
+        )
+        partition = tuple(
+            values_by_name[self.table_schema.fields[i].name]
+            for i in self.partition_indices
+        )
+        return self._assigner.assign(partition, key_hash)
+
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
     """Extractor for unaware bucket mode (bucket = -1, no primary keys)."""
@@ -323,3 +363,6 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         return [BucketMode.POSTPONE_BUCKET.value] * data.num_rows
+
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        return BucketMode.POSTPONE_BUCKET.value

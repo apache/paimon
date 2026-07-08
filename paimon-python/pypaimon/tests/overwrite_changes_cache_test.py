@@ -86,8 +86,8 @@ class OverwriteChangesCacheTest(unittest.TestCase):
 
         # --- count provider full scans and delta probes (class-level spies) ---
         counts = {'full_scan': 0, 'probe': 0}
-        orig_full = OverwriteChangesProvider._full_scan
-        orig_probe = OverwriteChangesProvider._read_delta_entries
+        orig_full = OverwriteChangesProvider._full_scan_manifest_entries
+        orig_probe = OverwriteChangesProvider._read_delta_manifest_entries
 
         def spy_full(self, *a, **k):
             counts['full_scan'] += 1
@@ -111,14 +111,14 @@ class OverwriteChangesCacheTest(unittest.TestCase):
             return orig_cas(snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
-        OverwriteChangesProvider._full_scan = spy_full
-        OverwriteChangesProvider._read_delta_entries = spy_probe
+        OverwriteChangesProvider._full_scan_manifest_entries = spy_full
+        OverwriteChangesProvider._read_delta_manifest_entries = spy_probe
         try:
             c.commit(messages)
             c.close()
         finally:
-            OverwriteChangesProvider._full_scan = orig_full
-            OverwriteChangesProvider._read_delta_entries = orig_probe
+            OverwriteChangesProvider._full_scan_manifest_entries = orig_full
+            OverwriteChangesProvider._read_delta_manifest_entries = orig_probe
 
         # Harness sanity: we really did force K conflicts and then converged.
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
@@ -160,8 +160,8 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         fsc = c.file_store_commit
 
         counts = {'full_scan': 0, 'probe': 0}
-        orig_full = OverwriteChangesProvider._full_scan
-        orig_probe = OverwriteChangesProvider._read_delta_entries
+        orig_full = OverwriteChangesProvider._full_scan_manifest_entries
+        orig_probe = OverwriteChangesProvider._read_delta_manifest_entries
 
         def spy_full(self, *a, **k):
             counts['full_scan'] += 1
@@ -182,14 +182,14 @@ class OverwriteChangesCacheTest(unittest.TestCase):
             return orig_cas(snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
-        OverwriteChangesProvider._full_scan = spy_full
-        OverwriteChangesProvider._read_delta_entries = spy_probe
+        OverwriteChangesProvider._full_scan_manifest_entries = spy_full
+        OverwriteChangesProvider._read_delta_manifest_entries = spy_probe
         try:
             c.commit(messages)
             c.close()
         finally:
-            OverwriteChangesProvider._full_scan = orig_full
-            OverwriteChangesProvider._read_delta_entries = orig_probe
+            OverwriteChangesProvider._full_scan_manifest_entries = orig_full
+            OverwriteChangesProvider._read_delta_manifest_entries = orig_probe
 
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
 

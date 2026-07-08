@@ -24,19 +24,29 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -66,6 +76,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -79,7 +91,9 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -95,7 +109,9 @@ import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexOptions.BITMAP_INDEX_COMPRESSION;
 import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_COMPRESSION;
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Mixed language overwrite test for Java and Python interoperability. */
@@ -1656,6 +1672,53 @@ public class JavaPyE2ETest {
         }
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testDataEvolutionDeletionVectorWrite() throws Exception {
+        Identifier identifier = identifier("data_evolution_dv_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .column("f3", DataTypes.BLOB())
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(TARGET_FILE_SIZE.key(), "128 MB")
+                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b")
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(
+                            GenericRow.of(
+                                    rowId,
+                                    BinaryString.fromString("name-" + rowId),
+                                    BinaryString.fromString("base-" + rowId),
+                                    new BlobData(new byte[] {(byte) rowId})));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        commitDeletionVectors(
+                table,
+                Arrays.asList(
+                        new E2eDvSpec(new Range(0, 4), 1, 4),
+                        new E2eDvSpec(new Range(5, 9), 5, 6, 7, 8, 9),
+                        new E2eDvSpec(new Range(10, 14), 10, 12)));
+
+        LOG.info("data_evolution_dv_test: written 15 rows with deletion vectors");
+    }
+
     /** Read data evolution tables written by Python. */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
@@ -1673,6 +1736,75 @@ public class JavaPyE2ETest {
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
             assertThat(res).hasSize(5);
             LOG.info("data_evolution_test_py_{}: read {} rows", format, res.size());
+        }
+    }
+
+    private void commitDeletionVectors(FileStoreTable table, List<E2eDvSpec> deletionVectorSpecs)
+            throws Exception {
+        BaseAppendDeleteFileMaintainer maintainer =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                        table.store().newIndexFileHandler(),
+                        table.latestSnapshot().get(),
+                        BinaryRow.EMPTY_ROW);
+        Map<Range, String> anchorFiles = anchorFilesByRange(table);
+
+        for (E2eDvSpec spec : deletionVectorSpecs) {
+            DeletionVector deletionVector = new BitmapDeletionVector();
+            for (long rowId : spec.deletedRowIds) {
+                deletionVector.delete(rowId - spec.range.from);
+            }
+            maintainer.notifyNewDeletionVector(anchorFiles.get(spec.range), deletionVector);
+        }
+
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+        for (IndexManifestEntry entry : maintainer.persist()) {
+            if (entry.kind() == FileKind.ADD) {
+                newIndexFiles.add(entry.indexFile());
+            } else if (entry.kind() == FileKind.DELETE) {
+                deletedIndexFiles.add(entry.indexFile());
+            }
+        }
+
+        table.newBatchWriteBuilder()
+                .newCommit()
+                .commit(
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        BinaryRow.EMPTY_ROW,
+                                        UNAWARE_BUCKET,
+                                        null,
+                                        new DataIncrement(
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                newIndexFiles,
+                                                deletedIndexFiles),
+                                        CompactIncrement.emptyIncrement())));
+    }
+
+    private Map<Range, String> anchorFilesByRange(FileStoreTable table) {
+        List<DataFileMeta> dataFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        Map<Range, String> result = new HashMap<>();
+        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(dataFiles)) {
+            DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
+            result.put(anchor.nonNullRowIdRange(), anchor.fileName());
+        }
+        return result;
+    }
+
+    private static class E2eDvSpec {
+
+        private final Range range;
+        private final long[] deletedRowIds;
+
+        private E2eDvSpec(Range range, long... deletedRowIds) {
+            this.range = range;
+            this.deletedRowIds = deletedRowIds;
         }
     }
 

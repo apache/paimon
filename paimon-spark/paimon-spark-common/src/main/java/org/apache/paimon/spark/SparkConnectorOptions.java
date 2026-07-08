@@ -32,6 +32,13 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to verify SparkSession is initialized with required configurations.");
 
+    public static final ConfigOption<Boolean> LEGACY_TIMESTAMP_MAPPING =
+            key("legacy-timestamp-mapping.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
@@ -66,6 +73,23 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
+
+    public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
+            key("write.data-evolution.update-conflict-retry.max-attempts")
+                    .intType()
+                    .defaultValue(20)
+                    .withDescription(
+                            "Maximum attempts for Spark V1 UPDATE on data-evolution tables when "
+                                    + "concurrent partial-column updates conflict on the same row-id "
+                                    + "range and update columns. Values less than 2 disable retry.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS =
+            key("write.data-evolution.update-conflict-retry.wait-ms")
+                    .longType()
+                    .defaultValue(10L)
+                    .withDescription(
+                            "Wait time in milliseconds between retry attempts for Spark V1 UPDATE "
+                                    + "on data-evolution tables after row-id range update conflicts.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")

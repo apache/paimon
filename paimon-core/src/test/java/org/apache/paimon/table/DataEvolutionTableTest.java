@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -514,6 +515,84 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         predicate = predicateBuilder.notEqual(2, BinaryString.fromString("c"));
         readBuilder.withFilter(predicate);
         assertThat(readBuilder.newScan().plan().splits().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testMixedRowIdOrFilterDoesNotPruneByUnsafeStatsResidual() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("a")));
+            write.write(GenericRow.of(2, BinaryString.fromString("b")));
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(6, BinaryString.fromString("c")));
+            write.write(GenericRow.of(7, BinaryString.fromString("d")));
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, 2L);
+            commit.commit(commitables);
+        }
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowTypeWithRowId(schema));
+        int rowIdIndex = schema.rowType().getFieldCount();
+        Predicate topLevelMixedOr =
+                PredicateBuilder.or(
+                        predicateBuilder.equal(rowIdIndex, 1L), predicateBuilder.greaterThan(0, 5));
+        assertThat(plannedFirstRowIds(table, topLevelMixedOr)).isEqualTo(Arrays.asList(0L, 2L));
+
+        Predicate nestedMixedOr =
+                PredicateBuilder.and(
+                        predicateBuilder.between(rowIdIndex, 0L, 10L),
+                        PredicateBuilder.or(
+                                predicateBuilder.equal(rowIdIndex, 1L),
+                                predicateBuilder.greaterThan(0, 5)));
+        assertThat(plannedFirstRowIds(table, nestedMixedOr)).isEqualTo(Arrays.asList(0L, 2L));
+    }
+
+    @Test
+    public void testMixedRowIdOrFilterDisablesUnsafeLimitPushDown() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("a")));
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(60, BinaryString.fromString("b")));
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, 1L);
+            commit.commit(commitables);
+        }
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowTypeWithRowId(schema));
+        int rowIdIndex = schema.rowType().getFieldCount();
+        Predicate predicate =
+                PredicateBuilder.or(
+                        predicateBuilder.equal(rowIdIndex, 999L),
+                        predicateBuilder.greaterThan(0, 50));
+
+        TableScan.Plan plan =
+                table.newReadBuilder().withFilter(predicate).withLimit(1).newScan().plan();
+        assertThat(plannedFirstRowIds(plan)).isEqualTo(Arrays.asList(0L, 1L));
     }
 
     @Test
@@ -1985,6 +2064,29 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                                         ? ((DataSplit) s).dataFiles().size()
                                         : ((IndexedSplit) s).dataSplit().dataFiles().size())
                 .sum();
+    }
+
+    private static List<Long> plannedFirstRowIds(FileStoreTable table, Predicate filter) {
+        return plannedFirstRowIds(table.newReadBuilder().withFilter(filter).newScan().plan());
+    }
+
+    private static List<Long> plannedFirstRowIds(TableScan.Plan plan) {
+        return plan.splits().stream()
+                .flatMap(
+                        split ->
+                                (split instanceof DataSplit
+                                                ? ((DataSplit) split).dataFiles()
+                                                : ((IndexedSplit) split).dataSplit().dataFiles())
+                                        .stream())
+                .map(DataFileMeta::firstRowId)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private static RowType rowTypeWithRowId(Schema schema) {
+        List<DataField> fields = new ArrayList<>(schema.rowType().getFields());
+        fields.add(SpecialFields.ROW_ID);
+        return new RowType(fields);
     }
 
     private static long countMatchingRows(ReadBuilder rb) throws Exception {

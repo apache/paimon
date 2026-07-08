@@ -30,6 +30,7 @@ from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
 )
+from pypaimon.table.source import global_index_live_row_filter
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -81,9 +82,37 @@ class AbstractVectorSearchReadImpl:
 
     def _pre_filters(self, splits):
         # type: (list) -> List[RoaringBitmap64]
-        """Evaluate scalar indexes and return one include bitmap per index split."""
-        if self._filter is None:
+        """Evaluate live-row/scalar filters and return one bitmap per index split."""
+        if not splits:
             return []
+
+        live_rows = global_index_live_row_filter.live_rows(
+            self._table, self._partition_filter)
+        matched_rows = self._scalar_matched_rows(splits)
+        if live_rows is None and matched_rows is None:
+            return []
+
+        include_row_ids = []
+        has_filter = False
+        for split in splits:
+            split_range = Range(split.row_range_start, split.row_range_end)
+            include = _bitmap_of_range(split_range)
+            if live_rows is not None:
+                include = RoaringBitmap64.and_(include, live_rows)
+            if matched_rows is not None:
+                include = RoaringBitmap64.and_(include, matched_rows)
+
+            if include.cardinality() == split_range.count():
+                include_row_ids.append(None)
+            else:
+                include_row_ids.append(include)
+                has_filter = True
+        return include_row_ids if has_filter else []
+
+    def _scalar_matched_rows(self, splits):
+        """Evaluate scalar indexes and return matching global row ids."""
+        if self._filter is None:
+            return None
 
         # Collect scalar index files across splits, deduplicated by file name.
         seen = set()
@@ -96,7 +125,7 @@ class AbstractVectorSearchReadImpl:
                 scalar_files.append(index_file)
 
         if not scalar_files:
-            return _empty_bitmaps(len(splits))
+            return RoaringBitmap64()
 
         from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
         scanner = GlobalIndexScanner.create(
@@ -105,21 +134,14 @@ class AbstractVectorSearchReadImpl:
             partition_filter=self._partition_filter,
         )
         if scanner is None:
-            return _empty_bitmaps(len(splits))
+            return RoaringBitmap64()
         try:
             result = scanner.scan(self._filter)
             if result is None:
-                return _empty_bitmaps(len(splits))
-            matched_rows = result.results()
+                return RoaringBitmap64()
+            return result.results()
         finally:
             scanner.close()
-
-        include_row_ids = []
-        for split in splits:
-            split_rows = _bitmap_of_range(
-                Range(split.row_range_start, split.row_range_end))
-            include_row_ids.append(RoaringBitmap64.and_(matched_rows, split_rows))
-        return include_row_ids
 
     def _pre_filter(self, splits):
         # Backwards-compatible helper used by older tests/callers.
@@ -127,8 +149,11 @@ class AbstractVectorSearchReadImpl:
         if not pre_filters:
             return None
         merged = RoaringBitmap64()
-        for bitmap in pre_filters:
-            merged = RoaringBitmap64.or_(merged, bitmap)
+        for split, bitmap in zip(splits, pre_filters):
+            if bitmap is None:
+                merged.add_range(split.row_range_start, split.row_range_end)
+            else:
+                merged = RoaringBitmap64.or_(merged, bitmap)
         return merged
 
     def _raw_pre_filter(self, splits):

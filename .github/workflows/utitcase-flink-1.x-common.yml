@@ -19,6 +19,12 @@ name: UTCase and ITCase Flink 1.x Common
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'paimon-python/**'
+      - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
   pull_request:
     paths-ignore:
       - 'docs/**'

@@ -48,6 +48,37 @@ def pread(stream, length: int, offset: int) -> bytes:
     return os.pread(stream.fileno(), length, offset)
 
 
+# Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
+# merged read at SPAN so threads stay busy and memory stays bounded.
+_COALESCE_GAP = 1 << 20
+_COALESCE_SPAN = 8 << 20
+
+
+def _coalesce_ranges(items, max_gap, max_span):
+    """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
+    ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
+    from collections import defaultdict
+    by_path = defaultdict(list)
+    for it in items:
+        by_path[it[1]].append(it)
+    spans = []
+    for path, group in by_path.items():
+        group.sort(key=lambda x: x[2])
+        cur, start, end = [], None, None
+        for idx, _, off, length in group:
+            stop = off + length
+            if cur and off - end <= max_gap and stop - start <= max_span:
+                cur.append((idx, off, length))
+                end = max(end, stop)
+            else:
+                if cur:
+                    spans.append((path, start, end - start, cur))
+                cur, start, end = [(idx, off, length)], off, stop
+        if cur:
+            spans.append((path, start, end - start, cur))
+    return spans
+
+
 class FileIO(ABC):
     """
     File IO interface to read and write files.
@@ -131,6 +162,89 @@ class FileIO(ABC):
                 raise ValueError(f"The path '{path}' should be a directory.")
         else:
             self.mkdirs(path)
+
+    def read_file_range(self, path, offset, length):
+        """Read a byte range. Thread-safe. ``length < 0`` = read to EOF (pread
+        can't express that, so seek + read)."""
+        stream = self.new_input_stream(path)
+        try:
+            if length >= 0 and supports_pread(stream):
+                return pread(stream, length, offset)
+            stream.seek(offset)
+            return stream.read() if length < 0 else stream.read(length)
+        finally:
+            stream.close()
+
+    def read_ranges_coalesced(self, ranges, parallelism,
+                              max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
+        """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
+        bytes in the same order. Same-file nearby ranges are merged into one read
+        to cut round trips, then sliced; reads run on a thread pool. Negative
+        length (read to EOF) is read on its own, never merged.
+
+        A failed read propagates and aborts the whole batch (unlike a per-row
+        ``file.open()`` loop that fails one row at a time).
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        # Threads write disjoint results[idx]; safe under the GIL (no list resize).
+        results: List[Optional[bytes]] = [None] * len(ranges)
+        coalescible, singletons = [], []
+        for i, r in enumerate(ranges):
+            # None path/offset/length => null blob, leave result None.
+            if r is None or r[0] is None or r[1] is None or r[2] is None:
+                continue
+            path, offset, length = r
+            if length < 0:  # unknown length => read to EOF, never coalesced
+                singletons.append((i, path, offset, length))
+            else:
+                coalescible.append((i, path, offset, length))
+
+        spans = _coalesce_ranges(coalescible, max_gap, max_span)
+
+        def _run(task):
+            kind, payload = task
+            if kind == "span":
+                path, span_off, span_len, members = payload
+                buf = self.read_file_range(path, span_off, span_len)
+                for idx, off, length in members:
+                    s = off - span_off
+                    results[idx] = buf[s:s + length]
+            else:
+                idx, path, off, length = payload
+                results[idx] = self.read_file_range(path, off, length)
+
+        tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
+        if not tasks:
+            return results
+        workers = max(1, min(parallelism, len(tasks)))
+        with ThreadPoolExecutor(workers) as pool:
+            list(pool.map(_run, tasks))
+        return results
+
+    def read_blobs_concurrent(self, blobs, parallelism):
+        """Read a list of Blobs concurrently, coalescing same-file ranged reads.
+
+        ``BlobRef`` values expose a file range and are coalesced; in-memory
+        ``BlobData`` values are returned directly.
+        """
+        from pypaimon.table.row.blob import BlobRef
+        results: List[Optional[bytes]] = [None] * len(blobs)
+        ranges: List[Optional[tuple]] = [None] * len(blobs)
+        inmem = []
+        for i, b in enumerate(blobs):
+            if b is None:
+                continue
+            if isinstance(b, BlobRef):
+                d = b.to_descriptor()
+                ranges[i] = (d.uri, d.offset, d.length)
+            else:
+                inmem.append((i, b))
+        for i, v in enumerate(self.read_ranges_coalesced(ranges, parallelism)):
+            if v is not None:
+                results[i] = v
+        for idx, b in inmem:
+            results[idx] = b.to_data()
+        return results
 
     def read_file_utf8(self, path: str) -> str:
         with self.new_input_stream(path) as input_stream:

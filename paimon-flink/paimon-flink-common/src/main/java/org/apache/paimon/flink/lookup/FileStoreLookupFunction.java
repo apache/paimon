@@ -30,6 +30,8 @@ import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
@@ -196,7 +198,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 joinKeys);
 
         LOG.info("Creating lookup table for {}.", table.name());
-        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+        boolean isChainTable =
+                table instanceof FallbackReadFileStoreTable
+                        && ((FallbackReadFileStoreTable) table).other()
+                                instanceof ChainGroupReadTable;
+        if (!isChainTable
+                && options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(table)) {
                 this.lookupTable =
@@ -403,7 +410,21 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             return false;
         }
 
-        Long latestSnapshotId = ((FileStoreTable) table).snapshotManager().latestSnapshotId();
+        boolean isChainTable =
+                table instanceof FallbackReadFileStoreTable
+                        && ((FallbackReadFileStoreTable) table).other()
+                                instanceof ChainGroupReadTable;
+        // For chain tables, use the delta branch's snapshot manager:
+        //   table.other() = ChainGroupReadTable, .other() = delta branch table.
+        Long latestSnapshotId =
+                isChainTable
+                        ? ((FallbackReadFileStoreTable)
+                                        ((FallbackReadFileStoreTable) table).other())
+                                .other()
+                                .snapshotManager()
+                                .latestSnapshotId()
+                        : table.snapshotManager().latestSnapshotId();
+
         Long nextSnapshotId = lookupTable.nextSnapshotId();
         if (latestSnapshotId == null || nextSnapshotId == null) {
             return false;

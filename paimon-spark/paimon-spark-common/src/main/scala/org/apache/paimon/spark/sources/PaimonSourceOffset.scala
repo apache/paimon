@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark.sources
 
-import org.apache.paimon.spark.util.JsonUtils
 import org.apache.paimon.table.source.snapshot.StartingContext
+import org.apache.paimon.utils.JsonSerdeUtil
 
 import org.apache.spark.sql.connector.read.streaming.Offset
 
@@ -38,7 +38,11 @@ case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boole
   with Comparable[PaimonSourceOffset] {
 
   override def json(): String = {
-    JsonUtils.toJson(this)
+    val node = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.createObjectNode()
+    node.put(PaimonSourceOffset.FIELD_SNAPSHOT_ID, snapshotId)
+    node.put(PaimonSourceOffset.FIELD_INDEX, index)
+    node.put(PaimonSourceOffset.FIELD_SCAN_SNAPSHOT, scanSnapshot)
+    node.toString
   }
 
   override def compareTo(o: PaimonSourceOffset): Int = {
@@ -58,6 +62,10 @@ object PaimonSourceOffset {
   //  index of the init offset, for we filter offset by (startOffset, endOffset]
   val INIT_OFFSET_INDEX: Long = -1L
 
+  private val FIELD_SNAPSHOT_ID = "snapshotId"
+  private val FIELD_INDEX = "index"
+  private val FIELD_SCAN_SNAPSHOT = "scanSnapshot"
+
   def apply(version: Long, index: Long, scanSnapshot: Boolean): PaimonSourceOffset = {
     new PaimonSourceOffset(
       version,
@@ -69,7 +77,12 @@ object PaimonSourceOffset {
   def apply(offset: Any): PaimonSourceOffset = {
     offset match {
       case o: PaimonSourceOffset => o
-      case json: String => JsonUtils.fromJson[PaimonSourceOffset](json)
+      case json: String =>
+        val node = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(json)
+        PaimonSourceOffset(
+          node.get(FIELD_SNAPSHOT_ID).asLong(),
+          node.get(FIELD_INDEX).asLong(),
+          node.get(FIELD_SCAN_SNAPSHOT).asBoolean())
       case sc: StartingContext =>
         PaimonSourceOffset(sc.getSnapshotId, INIT_OFFSET_INDEX, sc.getScanFullSnapshot)
       case _ => throw new IllegalArgumentException(s"Can't parse $offset to PaimonSourceOffset.")

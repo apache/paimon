@@ -139,25 +139,17 @@ class FileStoreCommit:
             self.table.identifier,
             len(commit_messages),
         )
-        commit_entries = []
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        commit_entries = self._collect_manifest_entries(commit_messages)
         changelog_entries = self._collect_changelog_entries(commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
                     len(commit_entries), len(changelog_entries))
 
         index_deletes = []
+        index_adds = []
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
+            index_adds.extend(msg.index_adds)
 
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
@@ -183,13 +175,16 @@ class FileStoreCommit:
         commit_kind = "APPEND"
         detect_conflicts = False
         allow_rollback = False
-        if self.conflict_detection.should_be_overwrite_commit():
+        if self.conflict_detection.should_be_overwrite_commit(
+                commit_entries, index_adds + index_deletes):
             commit_kind = "OVERWRITE"
             detect_conflicts = True
             allow_rollback = True
         if self.conflict_detection.has_row_id_check_from_snapshot():
             detect_conflicts = True
             allow_rollback = True
+        if self.conflict_detection.has_global_index_additions(index_adds):
+            detect_conflicts = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
@@ -197,7 +192,8 @@ class FileStoreCommit:
                          changelog_entries=changelog_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback,
-                         index_deletes=index_deletes)
+                         index_deletes=index_deletes,
+                         index_adds=index_adds)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -265,6 +261,12 @@ class FileStoreCommit:
 
         partition_filter = predicate_builder.or_predicates(partition_predicates)
 
+        self.drop_by_partition_filter(partition_filter, commit_identifier)
+
+    def drop_by_partition_filter(self, partition_filter, commit_identifier: int) -> None:
+        if partition_filter is None:
+            raise RuntimeError("Failed to build partition filter.")
+
         provider = self._overwrite_changes_provider(partition_filter, [])
         self._try_commit(
             commit_kind="OVERWRITE",
@@ -286,7 +288,8 @@ class FileStoreCommit:
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
-                    detect_conflicts=False, allow_rollback=False, index_deletes=None, changelog_entries=None):
+                    detect_conflicts=False, allow_rollback=False, index_deletes=None,
+                    index_adds=None, changelog_entries=None):
 
         retry_count = 0
         retry_result = None
@@ -297,7 +300,7 @@ class FileStoreCommit:
 
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
-            if not commit_entries and not index_deletes:
+            if not commit_entries and not index_deletes and not index_adds:
                 break
 
             result = self._try_commit_once(
@@ -310,6 +313,7 @@ class FileStoreCommit:
                 detect_conflicts=detect_conflicts,
                 allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
+                index_adds=index_adds,
             )
 
             if result.is_success():
@@ -364,7 +368,8 @@ class FileStoreCommit:
                          latest_snapshot: Optional[Snapshot],
                          detect_conflicts: bool = False,
                          allow_rollback: bool = False,
-                         index_deletes=None) -> CommitResult:
+                         index_deletes=None,
+                         index_adds=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
@@ -378,6 +383,7 @@ class FileStoreCommit:
         new_index_manifest = None
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
+        index_entries = (index_deletes or []) + (index_adds or [])
 
         # Base entries for conflict detection. On retry, reuse the previous
         # attempt's base + read only the incremental changes (mirrors Java).
@@ -388,7 +394,10 @@ class FileStoreCommit:
                     and retry_result.latest_snapshot is not None
                     and retry_result.base_data_files is not None):
                 incremental = self.commit_scanner.read_incremental_changes(
-                    retry_result.latest_snapshot, latest_snapshot, commit_entries)
+                    retry_result.latest_snapshot,
+                    latest_snapshot,
+                    commit_entries,
+                    index_entries)
             if incremental is not None:
                 base_data_files = list(retry_result.base_data_files)
                 if incremental:
@@ -398,10 +407,15 @@ class FileStoreCommit:
                 # First attempt, or incremental could not be built (missing
                 # snapshot): scan the changed partitions in full.
                 base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
-                    latest_snapshot, commit_entries)
+                    latest_snapshot, commit_entries, index_entries)
 
             conflict_exception = self.conflict_detection.check_conflicts(
-                latest_snapshot, base_data_files, commit_entries, commit_kind)
+                latest_snapshot,
+                base_data_files,
+                commit_entries,
+                commit_kind,
+                index_entries,
+            )
 
             if conflict_exception is not None:
                 if allow_rollback and self.rollback is not None:
@@ -463,14 +477,12 @@ class FileStoreCommit:
                     delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
-            index_manifest = None
-            if latest_snapshot and commit_kind == "APPEND":
-                index_manifest = latest_snapshot.index_manifest
-            if index_deletes:
+            index_manifest = latest_snapshot.index_manifest if latest_snapshot else None
+            if index_deletes or index_adds:
                 from pypaimon.manifest.index_manifest_file import IndexManifestFile
                 previous_index_manifest = index_manifest
-                index_manifest = IndexManifestFile(self.table).combine_deletes(
-                    previous_index_manifest, index_deletes)
+                index_manifest = IndexManifestFile(self.table).combine_changes(
+                    previous_index_manifest, index_adds or [], index_deletes or [])
                 if index_manifest != previous_index_manifest:
                     new_index_manifest = index_manifest
 
@@ -647,6 +659,28 @@ class FileStoreCommit:
                 ))
         return changelog_entries
 
+    def _collect_manifest_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        commit_entries = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.new_files:
+                commit_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file,
+                ))
+            for file in msg.deleted_files:
+                commit_entries.append(ManifestEntry(
+                    kind=1,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file,
+                ))
+        return commit_entries
+
     def _clean_up_reuse_tmp_manifests(
             self,
             delta_manifest_list: Optional[str],
@@ -696,6 +730,19 @@ class FileStoreCommit:
                 except Exception as e:
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
+            for entry in message.index_adds:
+                try:
+                    file_name = entry.index_file.file_name
+                    index_path = (
+                        entry.index_file.external_path
+                        or self.table.path_factory()
+                        .global_index_path_factory()
+                        .to_path(file_name)
+                    )
+                    self.table.file_io.delete_quietly(index_path)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to clean up index file {entry.index_file.file_name} during abort: {e}")
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

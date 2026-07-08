@@ -61,6 +61,7 @@ object PaimonMetadataColumn {
   val PATH_AND_INDEX_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
   val PARTITION_AND_BUCKET_META_COLUMNS: Seq[String] = Seq(PARTITION_COLUMN, BUCKET_COLUMN)
   val ROW_TRACKING_META_COLUMNS: Seq[String] = Seq(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN)
+  val VECTOR_SEARCH_META_COLUMN_NAMES: Seq[String] = Seq(ROW_ID_COLUMN, SEARCH_SCORE_COLUMN)
 
   val SUPPORTED_METADATA_COLUMNS: Seq[String] = Seq(
     ROW_INDEX_COLUMN,
@@ -91,6 +92,8 @@ object PaimonMetadataColumn {
       preserveOnUpdate = false)
   val SEARCH_SCORE: PaimonMetadataColumn =
     PaimonMetadataColumn(Integer.MAX_VALUE - 106, SEARCH_SCORE_COLUMN, FloatType)
+
+  val VECTOR_SEARCH_META_COLUMNS: Seq[PaimonMetadataColumn] = Seq(ROW_ID, SEARCH_SCORE)
 
   def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
 

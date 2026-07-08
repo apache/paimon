@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
@@ -42,6 +43,7 @@ import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
@@ -287,8 +289,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         return restCatalog.tableExists(icebergTableIdentifier);
     }
 
-    private void createDatabase() {
-        restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
+    @VisibleForTesting
+    void createDatabase() {
+        try {
+            restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
+        } catch (AlreadyExistsException e) {
+            // Benign check-then-act race: another commit created the namespace concurrently.
+            LOG.info(
+                    "Namespace {} already exists, created concurrently by another commit.",
+                    icebergDatabaseName);
+        }
     }
 
     private Table createTable(TableMetadata newMetadata) {

@@ -35,7 +35,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -67,26 +66,25 @@ class RawFullTextReadImpl {
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
-    private final FullTextQuery query;
+    private final DataField textColumn;
     private final IndexSearch indexSearch;
 
     RawFullTextReadImpl(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             int limit,
-            FullTextQuery query,
+            DataField textColumn,
             IndexSearch indexSearch) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.query = query;
+        this.textColumn = textColumn;
         this.indexSearch = indexSearch;
     }
 
     ScoredGlobalIndexResult withRawSearch(
             ScoredGlobalIndexResult indexedResult,
             List<Range> rawRowRanges,
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             ExecutorService executor) {
         rawRowRanges = Range.sortAndMergeOverlap(rawRowRanges, true);
@@ -94,14 +92,12 @@ class RawFullTextReadImpl {
             return indexedResult;
         }
 
-        ScoredGlobalIndexResult rawResult =
-                readRawSearch(rawRowRanges, fieldsByName, splitsByColumn, executor);
+        ScoredGlobalIndexResult rawResult = readRawSearch(rawRowRanges, splitsByColumn, executor);
         return overrideWithRawSearch(indexedResult, rawRowRanges, rawResult);
     }
 
     private ScoredGlobalIndexResult readRawSearch(
             List<Range> rawRowRanges,
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             ExecutorService executor) {
         RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
@@ -109,7 +105,7 @@ class RawFullTextReadImpl {
         ReadBuilder readBuilder = rawReadBuilder(readType);
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         Map<String, RawFullTextIndex> rawIndexes =
-                createRawFullTextIndexes(fieldsByName, splitsByColumn, readType, rawRowRanges);
+                createRawFullTextIndexes(splitsByColumn, readType, rawRowRanges);
 
         try {
             try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
@@ -137,8 +133,6 @@ class RawFullTextReadImpl {
 
             return indexSearch
                     .eval(
-                            query,
-                            fieldsByName,
                             rawSplitsByColumn,
                             new RawFullTextIndexPathFactory(rawIndexes),
                             m ->
@@ -173,7 +167,6 @@ class RawFullTextReadImpl {
     }
 
     private Map<String, RawFullTextIndex> createRawFullTextIndexes(
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             RowType readType,
             List<Range> rawRowRanges) {
@@ -181,40 +174,34 @@ class RawFullTextReadImpl {
         long rowRangeStart = rawRowRanges.get(0).from;
         long rowRangeEnd = rawRowRanges.get(rawRowRanges.size() - 1).to;
         String fallbackIndexType = firstIndexType(splitsByColumn);
-        for (String column : query.columns()) {
-            if (rawIndexes.containsKey(column)) {
-                continue;
+        String column = textColumn.name();
+        String indexType = indexType(column, splitsByColumn);
+        if (indexType == null) {
+            indexType = checkNotNull(fallbackIndexType);
+        }
+        GlobalIndexer globalIndexer =
+                GlobalIndexerFactoryUtils.load(indexType).create(textColumn, rawSearchOptions());
+        try {
+            RawFullTextIndexFileWriter fileWriter = new RawFullTextIndexFileWriter(column);
+            GlobalIndexWriter indexWriter = globalIndexer.createWriter(fileWriter);
+            if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
+                throw new IllegalArgumentException(
+                        "Full-text raw search requires a single-column global index writer.");
             }
-            DataField textColumn = checkNotNull(fieldsByName.get(column));
-            String indexType = indexType(column, splitsByColumn);
-            if (indexType == null) {
-                indexType = checkNotNull(fallbackIndexType);
-            }
-            GlobalIndexer globalIndexer =
-                    GlobalIndexerFactoryUtils.load(indexType)
-                            .create(textColumn, rawSearchOptions());
-            try {
-                RawFullTextIndexFileWriter fileWriter = new RawFullTextIndexFileWriter(column);
-                GlobalIndexWriter indexWriter = globalIndexer.createWriter(fileWriter);
-                if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
-                    throw new IllegalArgumentException(
-                            "Full-text raw search requires a single-column global index writer.");
-                }
-                rawIndexes.put(
-                        column,
-                        new RawFullTextIndex(
-                                column,
-                                readColumnIndex(textColumn, readType),
-                                indexType,
-                                textColumn.id(),
-                                rowRangeStart,
-                                rowRangeEnd,
-                                (GlobalIndexSingleColumnWriter) indexWriter,
-                                fileWriter));
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Failed to create raw full-text index writer for column: " + column, e);
-            }
+            rawIndexes.put(
+                    column,
+                    new RawFullTextIndex(
+                            column,
+                            readColumnIndex(textColumn, readType),
+                            indexType,
+                            textColumn.id(),
+                            rowRangeStart,
+                            rowRangeEnd,
+                            (GlobalIndexSingleColumnWriter) indexWriter,
+                            fileWriter));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to create raw full-text index writer for column: " + column, e);
         }
         return rawIndexes;
     }
@@ -265,15 +252,13 @@ class RawFullTextReadImpl {
 
     private Options rawSearchOptions() {
         Options options = new Options(table.coreOptions().toConfiguration().toMap());
-        options.setString("tantivy.searcher-pool.max-size", "0");
+        options.setString("full-text.searcher-pool.max-size", "0");
         return options;
     }
 
     interface IndexSearch {
 
         ScoredGlobalIndexResult eval(
-                FullTextQuery query,
-                Map<String, DataField> fieldsByName,
                 Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
                 IndexPathFactory indexPathFactory,
                 GlobalIndexFileReader indexFileReader,

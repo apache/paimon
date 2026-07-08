@@ -198,7 +198,9 @@ public class DedicatedFormatRollingFileWriter
                                     statsDenseStore,
                                     blobTargetFileSize,
                                     context.blobConsumer(),
-                                    context.blobInlineFields());
+                                    context.blobInlineFields(),
+                                    context.writeNullOnMissingFile(),
+                                    context.writeNullOnFetchFailure());
         } else {
             this.blobWriterFactory = null;
         }

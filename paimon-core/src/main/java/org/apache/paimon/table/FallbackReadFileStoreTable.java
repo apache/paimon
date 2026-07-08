@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
@@ -270,8 +271,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final Split split;
-        private final boolean isFallback;
+        private Split split;
+        private boolean isFallback;
 
         public FallbackSplitImpl(Split split, boolean isFallback) {
             this.split = split;
@@ -296,6 +297,31 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public OptionalLong mergedRowCount() {
             return split.mergedRowCount();
+        }
+
+        private void writeObject(ObjectOutputStream out) throws IOException {
+            serialize(new DataOutputViewStreamWrapper(out));
+        }
+
+        private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+            assign(deserialize(new DataInputViewStreamWrapper(in)));
+        }
+
+        private void assign(FallbackSplitImpl other) {
+            this.split = other.split;
+            this.isFallback = other.isFallback;
+        }
+
+        public void serialize(DataOutputView out) throws IOException {
+            SplitSerializer.serialize(this, out);
+        }
+
+        public static FallbackSplitImpl deserialize(DataInputView in) throws IOException {
+            Split split = SplitSerializer.deserialize(in);
+            if (!(split instanceof FallbackSplitImpl)) {
+                throw new IOException("Deserialized split is not a FallbackSplitImpl: " + split);
+            }
+            return (FallbackSplitImpl) split;
         }
     }
 

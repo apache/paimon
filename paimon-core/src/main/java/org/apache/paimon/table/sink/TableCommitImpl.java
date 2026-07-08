@@ -32,6 +32,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
@@ -217,6 +218,21 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void compactManifests() {
         commit.compactManifest();
+    }
+
+    public boolean rollbackToAsLatest(Tag targetTag) {
+        checkCommitted();
+        boolean success = commit.rollbackToAsLatest(targetTag.trimToSnapshot());
+        if (success) {
+            // Skip automatic expiration for the rollback path. rollback_to_as_latest promises not
+            // to
+            // delete snapshots or tags whose snapshot id is larger than the target snapshot, but
+            // the newly committed latest snapshot would otherwise let expiration (e.g. a low
+            // snapshot.num-retained.max) immediately remove the rolled-back snapshot and the later
+            // snapshots/tags it is meant to preserve.
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, false);
+        }
+        return success;
     }
 
     private void checkCommitted() {

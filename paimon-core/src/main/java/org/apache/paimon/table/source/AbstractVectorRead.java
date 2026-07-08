@@ -120,8 +120,38 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
+        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
+
+        List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
+        boolean hasFilter = false;
+        for (IndexVectorSearchSplit split : splits) {
+            Range splitRange = new Range(split.rowRangeStart(), split.rowRangeEnd());
+            RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
+
+            RoaringNavigableMap64 include = new RoaringNavigableMap64();
+            include.or(splitRows);
+            if (liveRows != null) {
+                include.and(liveRows);
+            }
+            if (matchedRows != null) {
+                include.and(matchedRows);
+            }
+
+            if (include.getLongCardinality() == splitRange.count()) {
+                includeRowIds.add(null);
+            } else {
+                includeRowIds.add(include);
+                hasFilter = true;
+            }
+        }
+        return hasFilter ? includeRowIds : Collections.emptyList();
+    }
+
+    @Nullable
+    private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
-            return Collections.emptyList();
+            return null;
         }
 
         Set<IndexFileMeta> scalarIndexFiles =
@@ -133,39 +163,18 @@ public abstract class AbstractVectorRead implements Serializable {
         Optional<GlobalIndexScanner> optionalScanner =
                 GlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
-            return emptyPreFilters(splits.size());
+            return new RoaringNavigableMap64();
         }
 
-        RoaringNavigableMap64 matchedRows;
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (!result.isPresent()) {
-                return emptyPreFilters(splits.size());
+                return new RoaringNavigableMap64();
             }
-            matchedRows = result.get().results();
+            return result.get().results();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
-        List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
-        for (IndexVectorSearchSplit split : splits) {
-            Range splitRange = new Range(split.rowRangeStart(), split.rowRangeEnd());
-            RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
-
-            RoaringNavigableMap64 include = new RoaringNavigableMap64();
-            include.or(matchedRows);
-            include.and(splitRows);
-            includeRowIds.add(include);
-        }
-        return includeRowIds;
-    }
-
-    private List<RoaringNavigableMap64> emptyPreFilters(int size) {
-        List<RoaringNavigableMap64> preFilters = new ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            preFilters.add(new RoaringNavigableMap64());
-        }
-        return preFilters;
     }
 
     @Nullable

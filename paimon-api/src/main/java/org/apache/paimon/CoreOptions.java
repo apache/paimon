@@ -80,6 +80,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy";
+
     public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
 
     public static final String COUNT_LIMIT = "count-limit";
@@ -634,6 +636,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Max split size should be cached for one task while scanning. "
                                     + "If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.");
+
+    public static final ConfigOption<Integer> SCAN_BUCKET =
+            key("scan.bucket")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify a single bucket to scan. This option filters manifest entries "
+                                    + "and only plans splits for the given bucket. It is only supported "
+                                    + "for fixed-bucket primary key tables (bucket > 0). It cannot be used "
+                                    + "with postpone bucket tables.");
 
     @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
@@ -1421,6 +1433,19 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
+
+    public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOB_DESCRIPTOR =
+            key("lookup.blob-as-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, the lookup join stores only the BlobDescriptor "
+                                    + "(a lightweight reference containing file URI, offset, and length) "
+                                    + "for BLOB fields instead of the full blob bytes. This dramatically "
+                                    + "reduces local disk and memory usage for tables with large BLOB "
+                                    + "columns (e.g., images, videos). The downstream consumer receives "
+                                    + "the serialized BlobDescriptor bytes and can resolve the actual "
+                                    + "blob content on demand.");
 
     public static final ConfigOption<Double> LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO =
             key("lookup.cache.high-priority-pool-ratio")
@@ -2527,8 +2552,20 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to write NULL for a descriptor BLOB value when the "
-                                    + "referenced file does not exist during Flink writes. When "
-                                    + "false, the write fails when the descriptor is read.");
+                                    + "referenced file or HTTP resource does not exist during Flink "
+                                    + "writes. When false, the write fails when the descriptor is "
+                                    + "read.");
+
+    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_FETCH_FAILURE =
+            key("blob-write-null-on-fetch-failure")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write NULL for a descriptor BLOB value when the "
+                                    + "referenced resource cannot be fetched during Flink writes "
+                                    + "(e.g. invalid URI or HTTP errors other than 404). "
+                                    + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
+                                    + "When false, the write fails when the descriptor is read.");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
@@ -2555,6 +2592,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
+
+    public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
+            key("postpone.target-row-num-per-bucket")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -2918,6 +2962,13 @@ public class CoreOptions implements Serializable {
             return Collections.emptyList();
         }
         return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public NestedKeyNullStrategy fieldNestedUpdateAggNestedKeyNullStrategy(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY_NULL_STRATEGY)
+                        .enumType(NestedKeyNullStrategy.class)
+                        .defaultValue(NestedKeyNullStrategy.MERGE));
     }
 
     public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
@@ -3532,6 +3583,10 @@ public class CoreOptions implements Serializable {
         return options.get(SCAN_MANIFEST_PARALLELISM);
     }
 
+    public Integer scanBucket() {
+        return options.get(SCAN_BUCKET);
+    }
+
     public Duration streamingReadDelay() {
         return options.get(STREAMING_READ_SNAPSHOT_DELAY);
     }
@@ -4096,6 +4151,10 @@ public class CoreOptions implements Serializable {
         return options.get(BLOB_WRITE_NULL_ON_MISSING_FILE);
     }
 
+    public boolean blobWriteNullOnFetchFailure() {
+        return options.get(BLOB_WRITE_NULL_ON_FETCH_FAILURE);
+    }
+
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
     }
@@ -4106,6 +4165,10 @@ public class CoreOptions implements Serializable {
 
     public int postponeDefaultBucketNum() {
         return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
+    }
+
+    public Optional<Long> postponeTargetRowNumPerBucket() {
+        return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
     }
 
     public long globalIndexRowCountPerShard() {
@@ -5003,6 +5066,39 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+    }
+
+    /** Strategy for handling rows whose nested-key contains null values. */
+    public enum NestedKeyNullStrategy implements DescribedEnum {
+        MERGE(
+                "merge",
+                "Merge rows even if the nested-key contains null values, without enforcing primary key semantics."),
+
+        IGNORE(
+                "ignore",
+                "Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics."),
+
+        ERROR(
+                "error",
+                "Throw an exception if the nested-key contains null values, because primary key fields must not be null.");
+
+        private final String value;
+        private final String description;
+
+        NestedKeyNullStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @Override
+        public String toString() {
+            return value;
         }
     }
 }
