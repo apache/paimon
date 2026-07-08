@@ -40,6 +40,13 @@ import scala.collection.mutable
  */
 object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
 
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    plan
+  }
+}
+
+abstract class PushDownMapSelectedKeysBase extends Rule[LogicalPlan] {
+
   override def apply(plan: LogicalPlan): LogicalPlan = plan.transform {
     case project @ Project(projectList, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
@@ -100,9 +107,14 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     val rewrittenScan = scan.copy(pushedMapSelectedKeys = pushedMapSelectedKeys)
     val rewrittenOutput =
       relation.output.map(attr => attrToRewritten.getOrElse(attr.exprId, attr))
-    val rewrittenRelation = relation.copy(scan = rewrittenScan, output = rewrittenOutput)
+    val rewrittenRelation = copyDataSourceV2ScanRelation(relation, rewrittenScan, rewrittenOutput)
     Some(project.copy(projectList = rewrittenProjectList, child = rewrittenRelation))
   }
+
+  protected def copyDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: PaimonScan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation
 
   private def collectCandidates(
       projectList: Seq[NamedExpression],
