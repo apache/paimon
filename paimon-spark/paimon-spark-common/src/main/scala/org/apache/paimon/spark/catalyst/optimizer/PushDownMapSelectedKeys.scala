@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeRef
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
-import org.apache.spark.sql.types.{DataType, MapType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{MapType, StringType, StructField, StructType}
 
 import scala.collection.mutable
 
@@ -60,16 +60,19 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     }
 
     val outputByExprId = relation.output.map(a => a.exprId -> a).toMap
-    val selectedMaps = mutable.LinkedHashMap.empty[MapPath, SelectedMap]
+    val selectedMaps = mutable.LinkedHashMap.empty[ExprId, SelectedMap]
     candidates.foreach {
       candidate =>
         outputByExprId.get(candidate.rootExprId).foreach {
           root =>
-            val path = MapPath(root.exprId, candidate.path)
             val selectedMap =
               selectedMaps.getOrElseUpdate(
-                path,
-                SelectedMap(root, candidate.path, candidate.mapType, mutable.ArrayBuffer.empty))
+                root.exprId,
+                SelectedMap(
+                  root,
+                  candidate.fieldName,
+                  candidate.mapType,
+                  mutable.ArrayBuffer.empty))
             if (!selectedMap.keys.contains(candidate.key)) {
               selectedMap.keys.append(candidate.key)
             }
@@ -79,24 +82,20 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
       return None
     }
 
-    val selectedByPath = selectedMaps.toMap
-    val selectedByRoot = selectedMaps.values.toSeq.groupBy(_.root.exprId)
-    val attrToRewritten = selectedByRoot.map {
-      case (exprId, selections) =>
-        val root = selections.head.root
-        exprId -> root
-          .withDataType(rewriteSparkType(root.dataType, root.name, selections))
-          .asInstanceOf[AttributeReference]
+    val selectedByExprId = selectedMaps.toMap
+    val attrToRewritten = selectedByExprId.map {
+      case (exprId, selected) =>
+        exprId -> selected.root.withDataType(selected.structType).asInstanceOf[AttributeReference]
     }
 
-    val rewriteState = RewriteState(selectedByPath, attrToRewritten)
+    val rewriteState = RewriteState(selectedByExprId, attrToRewritten)
     val rewrittenProjectList = projectList.map(rewriteExpression(_, rewriteState))
     if (rewriteState.failed) {
       return None
     }
 
     val pushedMapSelectedKeys = scan.pushedMapSelectedKeys ++ selectedMaps.values.map {
-      selected => selected.path.head -> selected.keys.toSeq
+      selected => selected.fieldName -> selected.keys.toSeq
     }.toMap
     val rewrittenScan = scan.copy(pushedMapSelectedKeys = pushedMapSelectedKeys)
     val rewrittenOutput =
@@ -114,7 +113,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
         expr.foreach {
           case mapKeyValueAccess(access) if canPushDown(scan, access) =>
             candidates.append(
-              MapKeyCandidate(access.root.exprId, access.path, access.mapType, access.key))
+              MapKeyCandidate(access.root.exprId, access.fieldName, access.mapType, access.key))
           case _ =>
         }
     }
@@ -127,14 +126,14 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     expression match {
       case alias: Alias =>
         alias.child match {
-          case mapKeyValueAccess(access) if state.selectedByPath.contains(access.mapPath) =>
+          case mapKeyValueAccess(access) if state.selectedByExprId.contains(access.root.exprId) =>
             rewriteMapKeyAccess(access, state) match {
               case Some(rewritten) =>
                 alias.withNewChildren(Seq(rewritten)).asInstanceOf[NamedExpression]
               case None => expression
             }
           case _ =>
-            if (hasSelectedPathReference(alias, state)) {
+            if (hasSelectedMapReference(alias, state)) {
               state.failed = true
             }
             expression
@@ -143,7 +142,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
         state.failed = true
         expression
       case _ =>
-        if (hasSelectedPathReference(expression, state)) {
+        if (hasSelectedMapReference(expression, state)) {
           state.failed = true
         }
         expression
@@ -151,22 +150,20 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
   }
 
   private def rewriteMapKeyAccess(access: MapKeyAccess, state: RewriteState): Option[Expression] = {
-    val selected = state.selectedByPath(access.mapPath)
+    val selected = state.selectedByExprId(access.root.exprId)
     val ordinal = selected.keys.indexOf(access.key)
     if (ordinal < 0) {
       state.failed = true
       None
     } else {
-      buildPathExpression(state.attrToRewritten(access.root.exprId), access.path).map {
-        selectedMapRow => GetStructField(selectedMapRow, ordinal, Some(access.key))
-      }
+      Some(GetStructField(state.attrToRewritten(access.root.exprId), ordinal, Some(access.key)))
     }
   }
 
-  private def hasSelectedPathReference(expression: Expression, state: RewriteState): Boolean = {
+  private def hasSelectedMapReference(expression: Expression, state: RewriteState): Boolean = {
     var found = false
     expression.foreach {
-      case mapFieldReference(access) if state.selectedByPath.contains(access.mapPath) =>
+      case mapFieldReference(access) if state.selectedByExprId.contains(access.root.exprId) =>
         found = true
       case _ =>
     }
@@ -174,15 +171,15 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
   }
 
   private def canPushDown(scan: PaimonScan, access: MapKeyAccess): Boolean = {
-    if (access.path.length != 1 || !canEncodeKey(access.key)) {
+    if (!canEncodeKey(access.key)) {
       return false
     }
 
     access.mapType match {
       case MapType(StringType, _, _) =>
-        fieldType(scan.table.rowType(), access.path.head) match {
+        fieldType(scan.table.rowType(), access.fieldName) match {
           case Some(mapType: org.apache.paimon.types.MapType) if isStringKeyMap(mapType) =>
-            CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.path.head) ==
+            CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.fieldName) ==
               MapStorageLayout.SHARED_SHREDDING
           case _ => false
         }
@@ -216,8 +213,13 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
 
   private object mapFieldReference {
     def unapply(expression: Expression): Option[MapKeyAccess] = {
-      toFieldPath(expression).collect {
-        case (root, path, mapType: MapType) => MapKeyAccess(root, path, mapType, "")
+      expression match {
+        case attr: Attribute =>
+          attr.dataType match {
+            case mapType: MapType => Some(MapKeyAccess(attr, attr.name, mapType, ""))
+            case _ => None
+          }
+        case _ => None
       }
     }
   }
@@ -231,20 +233,6 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     }
   }
 
-  private def toFieldPath(expression: Expression): Option[(Attribute, Seq[String], DataType)] = {
-    expression match {
-      case attr: Attribute => Some((attr, Seq(attr.name), attr.dataType))
-      case GetStructField(child, ordinal, name) =>
-        toFieldPath(child).flatMap {
-          case (root, path, childType: StructType) if ordinal < childType.fields.length =>
-            val field = childType.fields(ordinal)
-            Some((root, path :+ name.getOrElse(field.name), field.dataType))
-          case _ => None
-        }
-      case _ => None
-    }
-  }
-
   private def fieldType(
       rowType: org.apache.paimon.types.RowType,
       fieldName: String): Option[org.apache.paimon.types.DataType] = {
@@ -255,41 +243,17 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
     }
   }
 
-  private def rewriteSparkType(
-      dataType: DataType,
-      fieldName: String,
-      selections: Seq[SelectedMap]): DataType = {
-    selections.find(_.path == Seq(fieldName)) match {
-      case Some(selected) => selected.structType
-      case None => dataType
-    }
-  }
-
-  private def buildPathExpression(
-      root: AttributeReference,
-      path: Seq[String]): Option[Expression] = {
-    if (path == Seq(root.name)) Some(root) else None
-  }
-
   private case class MapKeyCandidate(
       rootExprId: ExprId,
-      path: Seq[String],
+      fieldName: String,
       mapType: MapType,
       key: String)
 
-  private case class MapPath(rootExprId: ExprId, path: Seq[String])
-
-  private case class MapKeyAccess(
-      root: Attribute,
-      path: Seq[String],
-      mapType: MapType,
-      key: String) {
-    def mapPath: MapPath = MapPath(root.exprId, path)
-  }
+  private case class MapKeyAccess(root: Attribute, fieldName: String, mapType: MapType, key: String)
 
   private case class SelectedMap(
       root: Attribute,
-      path: Seq[String],
+      fieldName: String,
       mapType: MapType,
       keys: mutable.ArrayBuffer[String]) {
     def structType: StructType = {
@@ -302,12 +266,12 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
   }
 
   private case class RewriteState(
-      selectedByPath: Map[MapPath, SelectedMap],
+      selectedByExprId: Map[ExprId, SelectedMap],
       attrToRewritten: Map[ExprId, AttributeReference]) {
     var failed: Boolean = false
 
     def hasRootSelection(exprId: ExprId): Boolean = {
-      selectedByPath.keys.exists(_.rootExprId == exprId)
+      selectedByExprId.contains(exprId)
     }
   }
 }
