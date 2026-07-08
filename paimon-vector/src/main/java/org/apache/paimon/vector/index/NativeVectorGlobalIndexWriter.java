@@ -24,6 +24,8 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.VectorIndexTrainer;
+import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.index.vector.VectorIndexWriter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -62,11 +64,15 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
     private static final int ADD_BATCH_SIZE = 10000;
+    private static final int TRAIN_BATCH_SIZE = 4096;
+    static final int MAX_FLOAT_ARRAY_LENGTH = Integer.MAX_VALUE - 8;
+    private static final long TRAIN_MEMORY_WARNING_BYTES = 4L * 1024 * 1024 * 1024;
 
     private final GlobalIndexFileWriter fileWriter;
     private final String identifier;
     private final Map<String, String> nativeOptions;
     private final int dim;
+    private final double trainSampleRatio;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -84,11 +90,34 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             DataType fieldType,
             Map<String, String> options,
             String identifier) {
+        this(
+                fileWriter,
+                fieldType,
+                options,
+                identifier,
+                NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_SAMPLE_RATIO);
+    }
+
+    public NativeVectorGlobalIndexWriter(
+            GlobalIndexFileWriter fileWriter,
+            DataType fieldType,
+            Map<String, String> options,
+            String identifier,
+            double trainSampleRatio) {
         this.fileWriter = fileWriter;
         this.identifier = identifier;
         validateFieldType(fieldType);
         this.nativeOptions = options;
         this.dim = Integer.parseInt(options.get("dimension"));
+        if (Double.isNaN(trainSampleRatio)
+                || Double.isInfinite(trainSampleRatio)
+                || trainSampleRatio <= 0
+                || trainSampleRatio > 1) {
+            throw new IllegalArgumentException(
+                    "trainSampleRatio must be greater than 0 and less than or equal to 1: "
+                            + trainSampleRatio);
+        }
+        this.trainSampleRatio = trainSampleRatio;
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
@@ -224,12 +253,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         long buildStart = System.currentTimeMillis();
 
         NativeVectorIndexLoader.loadJni();
-        try (VectorIndexWriter writer = new VectorIndexWriter(nativeOptions)) {
-
-            // Phase 1: Train
-            long phaseStart = System.currentTimeMillis();
-            LOG.info("{} train phase started", identifier);
-            trainFromTempFile(writer);
+        // Phase 1: Train
+        long phaseStart = System.currentTimeMillis();
+        LOG.info("{} train phase started", identifier);
+        try (VectorIndexTraining training = trainFromTempFile();
+                VectorIndexWriter writer = new VectorIndexWriter(training)) {
             LOG.info(
                     "{} train phase done in {} ms",
                     identifier,
@@ -271,31 +299,66 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         return FILE_NAME_PREFIX + "-" + identifier;
     }
 
-    private void trainFromTempFile(VectorIndexWriter writer) throws IOException {
-        int trainCount = (int) count;
-        float[] trainData = new float[trainCount * dim];
+    private VectorIndexTraining trainFromTempFile() throws IOException {
+        int trainCount = trainingVectorCount(count, trainSampleRatio);
+        int trainBatchSize = vectorBatchSize(TRAIN_BATCH_SIZE, dim);
+        float[] batchVectors = new float[trainBatchSize * dim];
+        logTrainingMemoryEstimate(trainCount);
 
-        try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
+        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(nativeOptions);
+                RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
             ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
             readBuf.order(ByteOrder.nativeOrder());
             readBuf.limit(0);
 
-            for (int i = 0; i < trainCount; i++) {
+            long selected = 0;
+            long nextSampleIndex = 0;
+            int batchCount = 0;
+
+            for (long recordIndex = 0;
+                    recordIndex < count && selected < trainCount;
+                    recordIndex++) {
                 ensureAvailable(readBuf, channel, recordSizeInBytes);
                 readBuf.getLong(); // skip rowId
-                for (int d = 0; d < dim; d++) {
-                    trainData[i * dim + d] = readBuf.getFloat();
+                if (recordIndex == nextSampleIndex) {
+                    for (int d = 0; d < dim; d++) {
+                        batchVectors[batchCount * dim + d] = readBuf.getFloat();
+                    }
+                    selected++;
+                    batchCount++;
+                    if (batchCount == trainBatchSize) {
+                        trainer.addTrainingVectors(batchVectors, batchCount);
+                        batchCount = 0;
+                    }
+                    if (selected < trainCount) {
+                        nextSampleIndex = sampleIndex(selected, count, trainCount);
+                    }
+                } else {
+                    readBuf.position(readBuf.position() + dim * Float.BYTES);
                 }
             }
-        }
 
-        writer.train(trainData, trainCount);
+            if (batchCount > 0) {
+                trainer.addTrainingVectors(
+                        Arrays.copyOf(batchVectors, batchCount * dim), batchCount);
+            }
+            if (selected != trainCount) {
+                throw new IOException(
+                        "Expected to select "
+                                + trainCount
+                                + " training vectors, but selected "
+                                + selected);
+            }
+
+            return trainer.finishTraining();
+        }
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {
-        long[] batchIds = new long[ADD_BATCH_SIZE];
-        float[] batchVectors = new float[ADD_BATCH_SIZE * dim];
+        int addBatchSize = vectorBatchSize(ADD_BATCH_SIZE, dim);
+        long[] batchIds = new long[addBatchSize];
+        float[] batchVectors = new float[addBatchSize * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
@@ -307,7 +370,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             int lastLoggedPercent = -1;
 
             while (remaining > 0) {
-                int thisBatch = (int) Math.min(ADD_BATCH_SIZE, remaining);
+                int thisBatch = (int) Math.min(addBatchSize, remaining);
                 for (int i = 0; i < thisBatch; i++) {
                     ensureAvailable(readBuf, channel, recordSizeInBytes);
                     batchIds[i] = readBuf.getLong();
@@ -315,7 +378,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                         batchVectors[i * dim + d] = readBuf.getFloat();
                     }
                 }
-                if (thisBatch == ADD_BATCH_SIZE) {
+                if (thisBatch == addBatchSize) {
                     writer.addVectors(batchIds, batchVectors, thisBatch);
                 } else {
                     writer.addVectors(
@@ -384,6 +447,85 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                             + bufferCapacity);
         }
         return (int) recordSize;
+    }
+
+    static int trainingVectorCount(long vectorCount, double trainSampleRatio) {
+        if (vectorCount <= 0) {
+            return 0;
+        }
+        if (Double.isNaN(trainSampleRatio)
+                || Double.isInfinite(trainSampleRatio)
+                || trainSampleRatio <= 0
+                || trainSampleRatio > 1) {
+            throw new IllegalArgumentException(
+                    "trainSampleRatio must be greater than 0 and less than or equal to 1: "
+                            + trainSampleRatio);
+        }
+        long trainCount = (long) Math.ceil(vectorCount * trainSampleRatio);
+        trainCount = Math.max(1L, Math.min(vectorCount, trainCount));
+        if (trainCount > Integer.MAX_VALUE) {
+            throw new IllegalStateException(
+                    "Training vector count "
+                            + trainCount
+                            + " exceeds Java integer capacity. Reduce train.sample-ratio.");
+        }
+        return (int) trainCount;
+    }
+
+    static int vectorBatchSize(int requestedBatchSize, int dim) {
+        if (requestedBatchSize <= 0) {
+            throw new IllegalArgumentException(
+                    "requestedBatchSize must be a positive integer: " + requestedBatchSize);
+        }
+        if (dim <= 0) {
+            throw new IllegalArgumentException("dim must be a positive integer: " + dim);
+        }
+        int maxBatchSize = MAX_FLOAT_ARRAY_LENGTH / dim;
+        if (maxBatchSize <= 0) {
+            throw new IllegalStateException(
+                    "Vector dimension " + dim + " exceeds Java float array capacity");
+        }
+        return Math.min(requestedBatchSize, maxBatchSize);
+    }
+
+    private void logTrainingMemoryEstimate(int trainCount) {
+        long rawBytes = saturatedMultiply(saturatedMultiply(trainCount, dim), Float.BYTES);
+        long estimatedPeakBytes = saturatedMultiply(rawBytes, 2);
+        if (estimatedPeakBytes >= TRAIN_MEMORY_WARNING_BYTES) {
+            LOG.warn(
+                    "{} training uses {} samples out of {} vectors (dim={}). Estimated native "
+                            + "training peak is at least {} bytes (~{} GiB) before OPQ and "
+                            + "temporary buffers.",
+                    identifier,
+                    trainCount,
+                    count,
+                    dim,
+                    estimatedPeakBytes,
+                    String.format("%.2f", estimatedPeakBytes / 1024.0 / 1024.0 / 1024.0));
+        } else {
+            LOG.info(
+                    "{} training uses {} samples out of {} vectors (dim={})",
+                    identifier,
+                    trainCount,
+                    count,
+                    dim);
+        }
+    }
+
+    private static long saturatedMultiply(long left, long right) {
+        if (left == 0 || right == 0) {
+            return 0;
+        }
+        if (left > Long.MAX_VALUE / right) {
+            return Long.MAX_VALUE;
+        }
+        return left * right;
+    }
+
+    static long sampleIndex(long sampleOrdinal, long vectorCount, int trainCount) {
+        long quotient = vectorCount / trainCount;
+        long remainder = vectorCount % trainCount;
+        return sampleOrdinal * quotient + sampleOrdinal * remainder / trainCount;
     }
 
     @Override

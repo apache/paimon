@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Vector Index</name>
 
     <properties>
-        <paimon-vector-index-java.version>0.1.0</paimon-vector-index-java.version>
+        <paimon-vector-index-java.version>0.2.0</paimon-vector-index-java.version>
     </properties>
 
     <dependencies>
