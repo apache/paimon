@@ -352,9 +352,8 @@ def build_matched_update_ds(
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
     )
-    source_cols = list(source_ds.schema().names)
     source_cols = _resolve_source_projection(
-        clauses, source_on, source_cols,
+        clauses, source_on, source_ds.schema().names,
     )
     source_ds = source_ds.select_columns(source_cols)
     source_renamed = source_ds.rename_columns(
