@@ -72,6 +72,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -134,6 +135,43 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(rowIdsByPartition).containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L));
         assertThat(rowIdsByPartition).containsEntry("pt=b/", Arrays.asList(8L, 9L));
         assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(10L);
+    }
+
+    @Test
+    public void testReassignRetriesWithLatestNextRowIdAfterConcurrentAppend() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        assertThat(before.nextRowId()).isEqualTo(5L);
+
+        AtomicBoolean appended = new AtomicBoolean();
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                table,
+                                null,
+                                () -> {
+                                    if (appended.compareAndSet(false, true)) {
+                                        try {
+                                            writeOneRow(table, "c", 100);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-conflict-retry");
+
+        assertThat(appended).isTrue();
+        assertThat(result.reassigned).isTrue();
+        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.firstAssignedRowId).isEqualTo(6L);
+        assertThat(result.nextRowId).isEqualTo(11L);
+        assertThat(result.fileCount).isEqualTo(5L);
+        assertThat(result.rowCount).isEqualTo(5L);
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(6L, 7L, 8L))
+                .containsEntry("pt=b/", Arrays.asList(9L, 10L))
+                .containsEntry("pt=c/", Collections.singletonList(5L));
+        assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(11L);
     }
 
     @Test
