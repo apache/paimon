@@ -101,6 +101,36 @@ public class MultisetType extends DataType {
     }
 
     @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.equalsIgnoreFieldId(that.elementType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.isPrunedFrom(that.elementType);
+    }
+
+    @Override
     public int hashCode() {
         return Objects.hash(super.hashCode(), elementType);
     }
