@@ -35,6 +35,7 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
                                            remove_row_id_filter,
+                                           rewrite_predicate_indices,
                                            trim_and_transform_predicate)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.append_table_split_generator import \
@@ -247,7 +248,10 @@ class FileScanner:
             self.partition_key_predicate = trim_and_transform_predicate(
                 self.predicate, self.table.field_names, self.table.partition_keys)
         else:
-            self.partition_key_predicate = partition_predicate
+            # External predicate has full-schema leaf indices; rebind by name to
+            # the partition-only row layout, else IndexError / wrong pruning.
+            self.partition_key_predicate = rewrite_predicate_indices(
+                partition_predicate, self.table.partition_keys_fields)
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
