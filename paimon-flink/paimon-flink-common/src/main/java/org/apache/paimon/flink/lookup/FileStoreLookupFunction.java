@@ -92,6 +92,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
     @Nullable private final ShuffleStrategy strategy;
+    private final RowType projectedType;
 
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
@@ -156,6 +157,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (partitionLoader != null) {
             partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
+        this.projectedType = rowType.project(projectFields);
 
         this.predicate = predicate;
 
@@ -318,7 +320,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<RowData> rows = new ArrayList<>();
         List<InternalRow> lookupResults = lookupTable.get(key);
         for (InternalRow matchedRow : lookupResults) {
-            rows.add(new FlinkRowData(matchedRow));
+            rows.add(new FlinkRowData(matchedRow, projectedType));
         }
 
         if (LOG.isDebugEnabled()) {

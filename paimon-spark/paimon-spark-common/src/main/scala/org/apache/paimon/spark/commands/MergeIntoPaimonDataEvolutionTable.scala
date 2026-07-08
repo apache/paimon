@@ -39,8 +39,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.DataTypeRoot.BLOB
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{BlobType, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
@@ -426,7 +425,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .asScala
       .filter(
         field =>
-          field.`type`().is(BLOB) &&
+          BlobType.isBlobFileField(field.`type`()) &&
             !blobInlineFields.exists(inlineField => resolver(inlineField, field.name())))
       .map(_.name())
       .toSet
@@ -438,6 +437,29 @@ case class MergeIntoPaimonDataEvolutionTable(
     // The final output is composed by updated columns, metadata columns and blob marker columns.
     // Marker columns are used to mark whether a blob field should be written with placeholder
     val rawBlobUpdateColumns = updateColumnsSorted.filter(isRawBlobUpdateColumn)
+
+    def modifiedRawBlobNames(action: UpdateAction): Set[String] = {
+      action.assignments.flatMap {
+        assignment =>
+          if (isModifiedAssignment(assignment)) {
+            val key = assignmentKeyAttribute(assignment)
+            rawBlobUpdateColumns.find(_.sameRef(key)).map(_.name)
+          } else {
+            None
+          }
+      }.toSet
+    }
+
+    val modifiedRawBlobColumnNames = matchedActions
+      .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
+      .flatten
+      .toSet
+    if (modifiedRawBlobColumnNames.nonEmpty) {
+      throw new UnsupportedOperationException(
+        "Should not append/update raw-data BLOB or ARRAY<BLOB> column through MERGE INTO: " +
+          modifiedRawBlobColumnNames.toSeq.sorted.mkString(", "))
+    }
+
     val rawBlobMarkerNames =
       rawBlobMarkerNamesAvoiding(
         rawBlobUpdateColumns.size,
@@ -484,18 +506,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
     allFields ++= updateColumnsSorted.filterNot(isRawBlobUpdateColumn)
 
-    def modifiedRawBlobNames(action: UpdateAction): Set[String] = {
-      action.assignments.flatMap {
-        assignment =>
-          if (isModifiedAssignment(assignment)) {
-            val key = assignmentKeyAttribute(assignment)
-            rawBlobUpdateColumns.find(_.sameRef(key)).map(_.name)
-          } else {
-            None
-          }
-      }.toSet
-    }
-
     def assignmentValue(action: UpdateAction, attr: AttributeReference): Expression = {
       action.assignments
         .find(assignment => assignmentKeyAttribute(assignment).sameRef(attr))
@@ -504,26 +514,17 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     // the output projection for update from source table
-    def updateOutput(action: UpdateAction, rawBlobModified: Set[String]): Seq[Expression] = {
+    def updateOutput(action: UpdateAction): Seq[Expression] = {
       val updatedColumns = updateColumnsSorted.map {
         attr =>
-          if (
-            rawBlobUpdateColumns.exists(_.sameRef(attr)) && !rawBlobModified.contains(attr.name)
-          ) {
+          if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
             Literal(null, attr.dataType)
           } else {
             assignmentValue(action, attr)
           }
       }
       val metadata = metadataColumns.map(attr => assignmentValue(action, attr))
-      val markers = rawBlobUpdateColumns.map {
-        attr =>
-          if (rawBlobModified.contains(attr.name)) {
-            FalseLiteral
-          } else {
-            TrueLiteral
-          }
-      }
+      val markers = rawBlobUpdateColumns.map(_ => TrueLiteral)
       updatedColumns ++ metadata ++ markers :+ FalseLiteral
     }
 
@@ -559,9 +560,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case update: UpdateAction =>
           SparkShimLoader.shim
-            .mergeRowsKeepUpdate(
-              update.condition.getOrElse(TrueLiteral),
-              updateOutput(update, modifiedRawBlobNames(update)))
+            .mergeRowsKeepUpdate(update.condition.getOrElse(TrueLiteral), updateOutput(update))
             .asInstanceOf[MergeRows.Instruction]
         case DeleteAction(condition) =>
           SparkShimLoader.shim
