@@ -161,6 +161,41 @@ class TestFileScannerPartitionPredicate(unittest.TestCase):
         self.assertFalse(scanner._filter_manifest_entry(
             _manifest_entry(['2024-01-15', 'us-west-2'])))
 
+    def test_reordered_partition_keys_keep_matching_partition(self, *_):
+        # Partition keys reordered vs schema: 'region' is schema field 0 but
+        # partition-row field 1. Full-schema index 0 would silently test 'dt'
+        # (in-range wrong field) and DROP matching rows -> data loss. Rebind fixes it.
+        table_fields = [
+            DataField(0, 'region', AtomicType('STRING')),
+            DataField(1, 'dt', AtomicType('STRING')),
+            DataField(2, 'id', AtomicType('INT')),
+        ]
+        partition_fields = [
+            DataField(0, 'dt', AtomicType('STRING')),
+            DataField(1, 'region', AtomicType('STRING')),
+        ]
+        table = _mock_scanner_table()
+        table.field_names = ['region', 'dt', 'id']
+        table.fields = table_fields
+        table.partition_keys = ['dt', 'region']
+        table.partition_keys_fields = partition_fields
+        table.table_schema = Mock(id=0, fields=table_fields)
+
+        full_pred = PredicateBuilder(table_fields).equal('region', 'us-east-1')
+        self.assertEqual(full_pred.index, 0)
+        scanner = FileScanner(table, lambda: ([], None),
+                              predicate=None, partition_predicate=full_pred)
+        self.assertEqual(scanner.partition_key_predicate.index, 1)
+
+        def entry(vals):
+            return ManifestEntry(kind=0, partition=GenericRow(vals, partition_fields),
+                                 bucket=0, total_buckets=1, file=Mock())
+
+        # region matches -> MUST keep (guards against the silent drop)
+        self.assertTrue(scanner._filter_manifest_entry(entry(['2024-01-15', 'us-east-1'])))
+        # region differs (but dt equals the literal) -> MUST drop
+        self.assertFalse(scanner._filter_manifest_entry(entry(['us-east-1', 'us-west-2'])))
+
     def test_no_partition_predicate_derives_from_predicate(self, *_):
         full_pred = PredicateBuilder(TABLE_FIELDS).equal('dt', '2024-01-15')
         scanner = self._scanner(predicate=full_pred)
