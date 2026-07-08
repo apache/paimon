@@ -273,6 +273,10 @@ class BlobFallbackBatchReader(RecordBatchReader):
             self._deletion_vector_range, self._deletion_vector = deletion_vector
         self._returned = False
         self._batch_size = max(1, batch_size)
+        # TODO: This path still materializes all target row ids and per-file
+        # row_id_to_pos maps before the first batch. If large blob fallback
+        # reads need strict read.batch-size-bounded memory, replace these
+        # structures with range cursors and batch-window position lookup.
         self._target_row_ids: Optional[List[int]] = None
         self._position = 0
         self._file_states = [
