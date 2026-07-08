@@ -338,16 +338,10 @@ class BlobFallbackBatchReader(RecordBatchReader):
         )
 
     def _compute_target_row_ids(self) -> List[int]:
-        file_ranges = [
+        ranges = Range.sort_and_merge_overlap([
             file.row_id_range()
             for file, _ in self._file_reader_suppliers
-        ]
-        ranges = [
-            Range(
-                min(row_range.from_ for row_range in file_ranges),
-                max(row_range.to for row_range in file_ranges),
-            )
-        ]
+        ])
         if self._row_ranges is not None:
             ranges = Range.and_(ranges, self._row_ranges)
         return [

@@ -57,7 +57,8 @@ class _OneBatchReader(RecordBatchReader):
 
 class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
     def __init__(
-        self, files, values_by_file_name, row_ranges=None, deletion_vector=None
+        self, files, values_by_file_name, row_ranges=None, deletion_vector=None,
+        batch_size=1024
     ):
         super().__init__(
             [(file, lambda: None) for file in files],
@@ -66,6 +67,7 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
             row_ranges=row_ranges,
             blob_as_descriptor=False,
             deletion_vector=deletion_vector,
+            batch_size=batch_size,
         )
         self._values_by_file_name = values_by_file_name
 
@@ -213,6 +215,26 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             batch.column(0).to_pylist(),
         )
         self.assertIsNone(reader.read_arrow_batch())
+
+    def test_blob_fallback_batch_reader_does_not_eof_on_row_id_gap(self):
+        reader = _BlobFallbackBatchReaderForTest(
+            [
+                _file("blob-left.blob", 0, 1, 1),
+                _file("blob-right.blob", 2, 1, 1),
+            ],
+            {
+                "blob-left.blob": [BlobData(b"left")],
+                "blob-right.blob": [BlobData(b"right")],
+            },
+            row_ranges=[Range(0, 2)],
+            batch_size=1,
+        )
+
+        values = []
+        for batch in iter(reader.read_arrow_batch, None):
+            values.extend(batch.column(0).to_pylist())
+
+        self.assertEqual([b"left", b"right"], values)
 
     def test_data_evolution_merge_reader_aligns_blob_with_row_ranges_and_dv(self):
         row_ranges = [Range(1, 4)]
