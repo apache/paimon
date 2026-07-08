@@ -202,16 +202,20 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         source_col_names = set(full_target_field_names) | set(source_on_cols)
     else:
         source_snapshot_id = None
+        source_read_projection = None
         if isinstance(source, str):
-            source_snapshot = (
-                catalog.get_table(source)
-                .snapshot_manager()
-                .get_latest_snapshot()
+            source_table = catalog.get_table(source)
+            source_read_projection = _resolve_source_projection(
+                matched_specs + not_matched_specs,
+                source_on_cols,
+                source_table.field_names,
             )
+            source_snapshot = source_table.snapshot_manager().get_latest_snapshot()
             if source_snapshot is not None:
                 source_snapshot_id = source_snapshot.id
         source_ds = _normalize_source(
             source, catalog_options, source_snapshot_id=source_snapshot_id,
+            projection=source_read_projection,
         )
         _validate_source_on_cols(source_ds, source_on_cols)
         source_col_names = set(_source_schema_or_raise(source_ds).names)
@@ -586,6 +590,28 @@ def _resolve_target_projection(
     return [c for c in target_field_names if c in needed]
 
 
+def _resolve_source_projection(
+    clauses: List[_NormalizedClause],
+    source_on: Sequence[str],
+    source_field_names: Sequence[str],
+) -> list:
+    needed = set(source_on)
+    source_set = set(source_field_names)
+
+    for clause in clauses:
+        for value in clause.spec.values():
+            if isinstance(value, SourceColumnRef):
+                needed.add(value.column)
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import extract_columns
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in source_set:
+                    needed.add(col)
+
+    return [c for c in source_field_names if c in needed]
+
+
 def _normalize_set_spec(
     spec: SetSpec,
     target_field_names: Sequence[str],
@@ -660,6 +686,7 @@ def _normalize_source(
     source: Any,
     catalog_options: Dict[str, str],
     source_snapshot_id: Optional[int] = None,
+    projection: Optional[List[str]] = None,
 ):
     import ray.data
 
@@ -670,6 +697,8 @@ def _normalize_source(
         read_kwargs = {}
         if source_snapshot_id is not None:
             read_kwargs["snapshot_id"] = source_snapshot_id
+        if projection is not None:
+            read_kwargs["projection"] = projection
         return read_paimon(source, catalog_options, **read_kwargs)
     if isinstance(source, pa.Table):
         return ray.data.from_arrow(source)
