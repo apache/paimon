@@ -23,7 +23,11 @@ import pyarrow as pa
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 from pypaimon.table.row.generic_row import GenericRow, RowKind
 from pypaimon.table.row.blob import Blob, BlobConsumer, BlobData, BlobDescriptor
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import (
+    DataField,
+    PyarrowFieldParser,
+    is_array_blob_type,
+)
 
 
 class BlobFileWriter:
@@ -55,17 +59,16 @@ class BlobFileWriter:
         field_name = row_data.schema[0].name
         col_data = records_dict[field_name][0]
 
-        blob_data = self._to_blob(col_data)
-
-        self.write_blob(field_name, row_data.schema[0].type, blob_data)
+        self.write_blob(field_name, row_data.schema[0].type, col_data)
 
     def write_blob(self, field_name: str, arrow_type, blob_data):
-        blob_data = self._to_blob(blob_data)
+        field_type = PyarrowFieldParser.to_paimon_type(arrow_type, False)
+        blob_data = self._to_blob_file_value(blob_data, field_type)
         fields = [
             DataField(
                 0,
                 field_name,
-                PyarrowFieldParser.to_paimon_type(arrow_type, False),
+                field_type,
             )
         ]
         row = GenericRow([blob_data], fields, RowKind.INSERT)
@@ -73,6 +76,11 @@ class BlobFileWriter:
         # Write to blob format writer
         self.writer.add_element(row)
         self.row_count += 1
+
+    def _to_blob_file_value(self, col_data, field_type):
+        if is_array_blob_type(field_type):
+            return self._to_blob_array(col_data)
+        return self._to_blob(col_data)
 
     def _to_blob(self, col_data) -> Optional[Blob]:
         if col_data is Blob.PLACE_HOLDER:
@@ -101,6 +109,28 @@ class BlobFileWriter:
             "Blob field value must be bytes/blob or serialized BlobDescriptor bytes, "
             f"got {type(col_data)}."
         )
+
+    def _to_blob_array(self, col_data):
+        if col_data is Blob.ARRAY_PLACE_HOLDER:
+            return Blob.ARRAY_PLACE_HOLDER
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if col_data is None:
+            return None
+        if isinstance(col_data, (bytes, bytearray, str)) or not hasattr(col_data, '__iter__'):
+            raise ValueError(
+                "ARRAY<BLOB> field value must be a list or tuple, "
+                f"got {type(col_data)}."
+            )
+        result = []
+        for element in col_data:
+            if element is None:
+                result.append(None)
+                continue
+            if element is Blob.PLACE_HOLDER or element is Blob.ARRAY_PLACE_HOLDER:
+                raise ValueError("ARRAY<BLOB> elements do not support placeholders.")
+            result.append(self._to_blob(element))
+        return result
 
     @staticmethod
     def _deserialize_descriptor_or_none(raw: bytes):

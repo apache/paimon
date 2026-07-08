@@ -19,14 +19,14 @@ from typing import Any, Dict, Iterable, List
 
 import pyarrow as pa
 
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.vector import Vector
 
 
 def is_blob_field(field: DataField) -> bool:
-    return getattr(field.type, 'type', None) == 'BLOB'
+    return is_blob_file_field(field)
 
 
 def row_to_named_values(
@@ -68,12 +68,26 @@ def require_columns(
 def value_for_arrow(value: Any) -> Any:
     if isinstance(value, Vector):
         return value.to_list()
-    if isinstance(value, Blob):
+    if _contains_blob_value(value):
         raise ValueError(
             "Blob values cannot be converted to Arrow without materializing "
             "the stream. Use a Row-aware blob write path."
         )
     return value
+
+
+def _contains_blob_value(value: Any) -> bool:
+    if isinstance(value, Blob):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_contains_blob_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _contains_blob_value(item)
+            for pair in value.items()
+            for item in pair
+        )
+    return False
 
 
 def row_values_to_arrow_table(

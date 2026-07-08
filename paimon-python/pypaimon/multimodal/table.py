@@ -30,7 +30,7 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -375,7 +375,7 @@ class _MergeBuilder:
 def _blob_columns(table):
     return tuple(
         field.name for field in table.fields
-        if getattr(field.type, "type", None) == "BLOB"
+        if is_blob_type(field.type)
     )
 
 

@@ -1275,6 +1275,107 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             3: b'blob-3',
         })
 
+    def test_array_blob_column_write_read_and_update(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        self.catalog.create_table('test_db.array_blob_update_column', schema, False)
+        table = self.catalog.get_table('test_db.array_blob_update_column')
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payloads': pa.array(
+                [[b'blob-1a', None, b'blob-1b'], None, [b'blob-3']],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'blob-1a', None, b'blob-1b'],
+                2: None,
+                3: [b'blob-3'],
+            },
+        )
+
+        row_id_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits())
+        row_ids_by_id = {
+            row['id']: row['_ROW_ID']
+            for row in row_id_result.select(['id', '_ROW_ID']).to_pylist()
+        }
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['payloads'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids_by_id[2]], type=pa.int64()),
+            'payloads': pa.array([[b'updated-2']], type=array_blob_type),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+
+        update_files = [f for msg in update_messages for f in msg.new_files]
+        update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 2)
+        blob_fields = [field for field in table.fields if field.name == 'payloads']
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['payloads'],
+            full_fields=blob_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        update_blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertEqual(
+            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
+            1,
+        )
+
+        update_builder.new_commit().commit(update_messages)
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'blob-1a', None, b'blob-1b'],
+                2: [b'updated-2'],
+                3: [b'blob-3'],
+            },
+        )
+
     def test_blob_update_single_row_at_first_position(self):
         from pypaimon import Schema
 

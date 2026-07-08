@@ -19,6 +19,7 @@ import struct
 import zlib
 from typing import BinaryIO, List, Optional
 
+from pypaimon.schema.data_types import is_array_blob_type, is_blob_file_type
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
@@ -26,8 +27,11 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 class BlobFormatWriter:
     VERSION = 1
     MAGIC_NUMBER = 1481511375
+    ARRAY_VERSION = 1
+    ARRAY_MAGIC_NUMBER = 1094861634
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
+    ARRAY_NULL_ELEMENT_LENGTH = -1
     BUFFER_SIZE = 4096
     METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
@@ -45,6 +49,7 @@ class BlobFormatWriter:
             raise ValueError("BlobFormatWriter only supports one field")
 
         blob_field_name = row.fields[0].name
+        blob_field_type = row.fields[0].type
         blob_value = row.values[0]
         if blob_value is None:
             self.lengths.append(self.NULL_LENGTH)
@@ -52,12 +57,22 @@ class BlobFormatWriter:
                 self._blob_consumer(blob_field_name, None)
             return
 
-        if not isinstance(blob_value, Blob):
-            raise ValueError("Field must be Blob/BlobData instance")
+        if is_array_blob_type(blob_field_type):
+            if blob_value is Blob.ARRAY_PLACE_HOLDER:
+                self.lengths.append(self.PLACE_HOLDER_LENGTH)
+                return
+            self.add_blob_array(blob_field_name, blob_value)
+            return
 
         if blob_value is Blob.PLACE_HOLDER:
             self.lengths.append(self.PLACE_HOLDER_LENGTH)
             return
+
+        self.add_blob(blob_field_name, blob_value)
+
+    def add_blob(self, blob_field_name: str, blob_value: Blob) -> None:
+        if not isinstance(blob_value, Blob):
+            raise ValueError("Field must be Blob/BlobData instance")
 
         previous_pos = self.position
         crc32 = 0  # Initialize CRC32
@@ -66,24 +81,7 @@ class BlobFormatWriter:
         magic_bytes = struct.pack('<I', self.MAGIC_NUMBER)  # Little endian
         crc32 = self._write_with_crc(magic_bytes, crc32)
 
-        blob_pos = self.position
-
-        # Write blob data
-        if isinstance(blob_value, BlobData):
-            data = blob_value.to_data()
-            crc32 = self._write_with_crc(data, crc32)
-        else:
-            # Stream from BlobRef/Blob
-            stream = blob_value.new_input_stream()
-            try:
-                chunk = stream.read(self.BUFFER_SIZE)
-                while chunk:
-                    crc32 = self._write_with_crc(chunk, crc32)
-                    chunk = stream.read(self.BUFFER_SIZE)
-            finally:
-                stream.close()
-
-        blob_length = self.position - blob_pos
+        blob_pos, blob_length, crc32 = self._write_blob_data(blob_value, crc32)
 
         # Calculate total length including magic + data + metadata (length + CRC)
         bin_length = self.position - previous_pos + self.METADATA_SIZE
@@ -105,6 +103,68 @@ class BlobFormatWriter:
             if flush:
                 self.output_stream.flush()
 
+    def add_blob_array(self, blob_field_name: str, blob_values) -> None:
+        if isinstance(blob_values, (bytes, bytearray, str)) or not hasattr(blob_values, '__iter__'):
+            raise ValueError("ARRAY<BLOB> field value must be a list or tuple of Blob values")
+
+        blob_values = list(blob_values)
+        previous_pos = self.position
+        crc32 = 0
+
+        crc32 = self._write_with_crc(struct.pack('<I', self.MAGIC_NUMBER), crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', self.ARRAY_MAGIC_NUMBER), crc32)
+        crc32 = self._write_with_crc(struct.pack('<B', self.ARRAY_VERSION), crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', len(blob_values)), crc32)
+
+        element_lengths = []
+        flush = False
+        for blob_value in blob_values:
+            if blob_value is None:
+                element_lengths.append(self.ARRAY_NULL_ELEMENT_LENGTH)
+                continue
+            if not isinstance(blob_value, Blob):
+                raise ValueError("ARRAY<BLOB> elements must be Blob/BlobData instances or None")
+            if blob_value is Blob.PLACE_HOLDER or blob_value is Blob.ARRAY_PLACE_HOLDER:
+                raise ValueError("ARRAY<BLOB> elements do not support placeholders")
+
+            blob_pos, blob_length, crc32 = self._write_blob_data(blob_value, crc32)
+            element_lengths.append(blob_length)
+            if self._blob_consumer is not None:
+                descriptor = BlobDescriptor(self._file_path, blob_pos, blob_length)
+                flush = self._blob_consumer(blob_field_name, descriptor) or flush
+
+        element_index_bytes = DeltaVarintCompressor.compress(element_lengths)
+        crc32 = self._write_with_crc(element_index_bytes, crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', len(element_index_bytes)), crc32)
+
+        bin_length = self.position - previous_pos + self.METADATA_SIZE
+        self.lengths.append(bin_length)
+        self.output_stream.write(struct.pack('<Q', bin_length))
+        self.position += 8
+        self.output_stream.write(struct.pack('<I', crc32 & 0xffffffff))
+        self.position += 4
+
+        if flush:
+            self.output_stream.flush()
+
+    def _write_blob_data(self, blob_value: Blob, crc32: int):
+        blob_pos = self.position
+
+        if isinstance(blob_value, BlobData):
+            data = blob_value.to_data()
+            crc32 = self._write_with_crc(data, crc32)
+        else:
+            stream = blob_value.new_input_stream()
+            try:
+                chunk = stream.read(self.BUFFER_SIZE)
+                while chunk:
+                    crc32 = self._write_with_crc(chunk, crc32)
+                    chunk = stream.read(self.BUFFER_SIZE)
+            finally:
+                stream.close()
+
+        return blob_pos, self.position - blob_pos, crc32
+
     def _write_with_crc(self, data: bytes, crc32: int) -> int:
         crc32 = zlib.crc32(data, crc32)
         self.output_stream.write(data)
@@ -115,7 +175,7 @@ class BlobFormatWriter:
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.table.row.row_kind import RowKind
 
-        is_blob = hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB"
+        is_blob = is_blob_file_type(fields[0].type)
 
         if col_data is None:
             if not is_blob:
@@ -123,31 +183,59 @@ class BlobFormatWriter:
             self.lengths.append(self.NULL_LENGTH)
             return
 
-        if is_blob:
-            if hasattr(col_data, 'as_py'):
-                col_data = col_data.as_py()
-            if isinstance(col_data, str):
-                col_data = col_data.encode('utf-8')
-            if isinstance(col_data, bytearray):
-                col_data = bytes(col_data)
-
-            if isinstance(col_data, bytes):
-                if BlobDescriptor.is_blob_descriptor(col_data):
-                    descriptor = BlobDescriptor.deserialize(col_data)
-                    uri_reader = uri_reader_factory.create(descriptor.uri)
-                    blob_value = Blob.from_descriptor(uri_reader, descriptor)
-                else:
-                    blob_value = BlobData(col_data)
-            else:
-                raise RuntimeError(
-                    "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
-                )
-            row_values = [blob_value]
+        if is_array_blob_type(fields[0].type):
+            row_values = [self._to_blob_array(col_data, uri_reader_factory)]
+        elif is_blob:
+            row_values = [self._to_blob(col_data, uri_reader_factory)]
         else:
             row_values = [col_data]
 
         row = GenericRow(row_values, fields, RowKind.INSERT)
         self.add_element(row)
+
+    @staticmethod
+    def _to_blob(col_data, uri_reader_factory=None) -> Blob:
+        if col_data is Blob.PLACE_HOLDER:
+            return Blob.PLACE_HOLDER
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if isinstance(col_data, str):
+            col_data = col_data.encode('utf-8')
+        if isinstance(col_data, bytearray):
+            col_data = bytes(col_data)
+        if isinstance(col_data, Blob):
+            return col_data
+        if isinstance(col_data, bytes):
+            if BlobDescriptor.is_blob_descriptor(col_data):
+                if uri_reader_factory is None:
+                    raise RuntimeError("uri_reader_factory is required for BlobDescriptor bytes.")
+                descriptor = BlobDescriptor.deserialize(col_data)
+                uri_reader = uri_reader_factory.create(descriptor.uri)
+                return Blob.from_descriptor(uri_reader, descriptor)
+            return BlobData(col_data)
+        raise RuntimeError(
+            "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
+        )
+
+    @classmethod
+    def _to_blob_array(cls, col_data, uri_reader_factory=None):
+        if col_data is Blob.ARRAY_PLACE_HOLDER:
+            return Blob.ARRAY_PLACE_HOLDER
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if col_data is None:
+            return None
+        if isinstance(col_data, (bytes, bytearray, str)) or not hasattr(col_data, '__iter__'):
+            raise RuntimeError("ARRAY<BLOB> field value must be a list or tuple.")
+        result = []
+        for element in col_data:
+            if element is None:
+                result.append(None)
+                continue
+            if element is Blob.PLACE_HOLDER or element is Blob.ARRAY_PLACE_HOLDER:
+                raise RuntimeError("ARRAY<BLOB> elements do not support placeholders.")
+            result.append(cls._to_blob(element, uri_reader_factory))
+        return result
 
     def reach_target_size(self, target_size: int) -> bool:
         return self.position >= target_size

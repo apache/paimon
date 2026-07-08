@@ -32,7 +32,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.common.options import Options
 from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
@@ -1698,6 +1698,177 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=True
         )
 
+        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+            reader.read_arrow_batch()
+        reader.close()
+
+    def test_array_blob_write_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "array_blob.blob")
+
+        fields = [
+            DataField(
+                0,
+                "blob_array",
+                ArrayType(True, AtomicType("BLOB")),
+            )
+        ]
+        with open(blob_file_path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [[BlobData(b"hello"), None, BlobData(b"world")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+            writer.add_element(GenericRow([[]], fields, RowKind.INSERT))
+            writer.add_element(GenericRow(
+                [[BlobData(b"last")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.close()
+
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        batch = reader.read_arrow_batch()
+        self.assertEqual(batch.column(0).to_pylist(), [
+            [b"hello", None, b"world"],
+            None,
+            [],
+            [b"last"],
+        ])
+        reader.close()
+
+    def test_file_io_write_array_blob(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = Path(self.temp_dir) / "array_blob_file_io.blob"
+        blob_file_url = _to_url(blob_file_path)
+
+        arrow_type = pa.list_(pa.large_binary())
+        table = pa.table(
+            [pa.array([[b"one", None], None, [b"two"]], type=arrow_type)],
+            schema=pa.schema([pa.field("blob_array", arrow_type)]),
+        )
+        file_io.write_blob(blob_file_url, table)
+
+        fields = [
+            DataField(
+                0,
+                "blob_array",
+                ArrayType(True, AtomicType("BLOB")),
+            )
+        ]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(blob_file_path),
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        batch = reader.read_arrow_batch()
+        self.assertEqual(batch.column(0).to_pylist(), [
+            [b"one", None],
+            None,
+            [b"two"],
+        ])
+        reader.close()
+
+    def test_array_blob_read_as_descriptor(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "array_blob_desc.blob")
+
+        fields = [
+            DataField(
+                0,
+                "blob_array",
+                ArrayType(True, AtomicType("BLOB")),
+            )
+        ]
+        with open(blob_file_path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [[BlobData(b"hello"), None, BlobData(b"world")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.close()
+
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=True,
+        )
+        batch = reader.read_arrow_batch()
+        values = batch.column(0)[0].as_py()
+        self.assertEqual(len(values), 3)
+        desc0 = BlobDescriptor.deserialize(values[0])
+        self.assertEqual(desc0.uri, blob_file_path)
+        self.assertEqual(desc0.length, len(b"hello"))
+        self.assertIsNone(values[1])
+        desc2 = BlobDescriptor.deserialize(values[2])
+        self.assertEqual(desc2.uri, blob_file_path)
+        self.assertEqual(desc2.length, len(b"world"))
+        reader.close()
+
+    def test_array_blob_placeholder_write_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "array_placeholder.blob")
+
+        fields = [
+            DataField(
+                0,
+                "blob_array",
+                ArrayType(True, AtomicType("BLOB")),
+            )
+        ]
+        with open(blob_file_path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [[BlobData(b"hello")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.add_element(GenericRow(
+                [Blob.ARRAY_PLACE_HOLDER],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.close()
+
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        iterator = BlobRecordIterator(
+            file_io,
+            blob_file_path,
+            reader.blob_lengths,
+            reader.blob_offsets,
+            fields[0],
+        )
+        self.assertEqual(next(iterator).values[0][0].to_data(), b"hello")
+        self.assertIs(next(iterator).values[0], Blob.ARRAY_PLACE_HOLDER)
         with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
             reader.read_arrow_batch()
         reader.close()

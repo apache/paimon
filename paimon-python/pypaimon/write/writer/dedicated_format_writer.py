@@ -25,7 +25,12 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser,
+    VectorType,
+    is_blob_file_field,
+    is_blob_type,
+)
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.row_utils import (
@@ -75,6 +80,16 @@ class DedicatedFormatWriter(DataWriter):
             raise ValueError(
                 "Fields in 'blob-descriptor-field' must be blob fields in schema. "
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
+            )
+        inline_array_blob_fields = [
+            field.name
+            for field in self.table.table_schema.fields
+            if field.name in self.blob_inline_fields and not is_blob_type(field.type)
+        ]
+        if inline_array_blob_fields:
+            raise ValueError(
+                "ARRAY<BLOB> is only supported by 'blob-field'. "
+                f"Invalid inline blob fields: {sorted(inline_array_blob_fields)}"
             )
 
         # Blob fields that should still be written to `.blob` files.
@@ -162,12 +177,11 @@ class DedicatedFormatWriter(DataWriter):
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
-        blob_columns = []
-        for field in self.table.table_schema.fields:
-            type_str = str(field.type).lower()
-            if 'blob' in type_str:
-                blob_columns.append(field.name)
-
+        blob_columns = [
+            field.name
+            for field in self.table.table_schema.fields
+            if is_blob_file_field(field)
+        ]
         if len(blob_columns) == 0:
             raise ValueError("No blob field found in table schema.")
         return blob_columns

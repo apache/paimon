@@ -28,7 +28,9 @@ from pypaimon.schema.column_directive_utils import (
     remove_dropped_directive_options)
 from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
-                                        MapType, RowType, reassign_field_id)
+                                        MapType, RowType, is_array_blob_type,
+                                        is_blob_file_field, is_blob_file_type,
+                                        is_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
@@ -286,10 +288,10 @@ def _handle_drop_column(change: DropColumn, new_fields: List[DataField],
 
 
 def _get_type_root(data_type) -> str:
-    from pypaimon.schema.data_types import AtomicType, VectorType
+    from pypaimon.schema.data_types import VectorType
     if isinstance(data_type, VectorType):
         return 'VECTOR'
-    if isinstance(data_type, AtomicType) and data_type.type == 'BLOB':
+    if is_blob_file_type(data_type):
         return 'BLOB'
     return getattr(data_type, 'type', '')
 
@@ -340,9 +342,9 @@ def _assert_not_renaming_blob_column(
         return
     field_name = field_names[0]
     for field in new_fields:
-        if field.name == field_name and str(field.type) == 'BLOB':
+        if field.name == field_name and is_blob_file_field(field):
             raise ValueError(
-                f"Cannot rename BLOB column: [{field_name}]"
+                f"Cannot rename BLOB or ARRAY<BLOB> column: [{field_name}]"
             )
 
 
@@ -351,14 +353,13 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
     if options is None:
         options = {}
 
-    blob_field_names = {
-        field.name for field in fields
-        if getattr(field.type, 'type', None) == 'BLOB'
-    }
+    blob_field_names = {field.name for field in fields if is_blob_file_field(field)}
+    scalar_blob_field_names = {field.name for field in fields if is_blob_type(field.type)}
+    array_blob_field_names = {field.name for field in fields if is_array_blob_type(field.type)}
 
     if len(fields) <= len(blob_field_names):
         raise ValueError(
-            "Table with BLOB type column must have other normal columns."
+            "Table with BLOB or ARRAY<BLOB> type column must have other normal columns."
         )
 
     core_options = CoreOptions(Options(options))
@@ -367,7 +368,7 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
     for field in configured_blob_fields:
         if field not in blob_field_names:
             raise ValueError(
-                "Field '{}' in '{}' must be a BLOB field in table schema.".format(
+                "Field '{}' in '{}' must be a BLOB field or ARRAY<BLOB> field in table schema.".format(
                     field, CoreOptions.BLOB_FIELD.key()
                 )
             )
@@ -376,8 +377,15 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
     view_fields = core_options.blob_view_fields()
 
     all_inline_fields = descriptor_fields.union(view_fields)
-    non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
+    non_blob_inline_fields = all_inline_fields.difference(scalar_blob_field_names)
     if non_blob_inline_fields:
+        array_inline_fields = sorted(non_blob_inline_fields.intersection(array_blob_field_names))
+        if array_inline_fields:
+            raise ValueError(
+                "ARRAY<BLOB> is only supported by '{}'. Invalid inline blob fields: {}".format(
+                    CoreOptions.BLOB_FIELD.key(), array_inline_fields
+                )
+            )
         raise ValueError(
             "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
             "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
@@ -403,12 +411,13 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
 
         if missing_options:
             raise ValueError(
-                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                f"Schema contains BLOB or ARRAY<BLOB> type but is missing required options: "
+                f"{', '.join(missing_options)}. "
                 f"Please add these options to the schema."
             )
 
         if primary_keys:
-            raise ValueError("Blob type is not supported with primary key.")
+            raise ValueError("BLOB or ARRAY<BLOB> type is not supported with primary key.")
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
