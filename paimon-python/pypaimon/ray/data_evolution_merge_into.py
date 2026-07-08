@@ -26,6 +26,7 @@ import pyarrow as pa
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
+    _resolve_source_projection,
     build_matched_delete_ds,
     build_matched_update_ds,
     build_not_matched_insert_ds,
@@ -588,28 +589,6 @@ def _resolve_target_projection(
             if clause.condition is not None:
                 needed |= extract_target_columns(clause.condition) & target_set
     return [c for c in target_field_names if c in needed]
-
-
-def _resolve_source_projection(
-    clauses: List[_NormalizedClause],
-    source_on: Sequence[str],
-    source_field_names: Sequence[str],
-) -> list:
-    needed = set(source_on)
-    source_set = set(source_field_names)
-
-    for clause in clauses:
-        for value in clause.spec.values():
-            if isinstance(value, SourceColumnRef):
-                needed.add(value.column)
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
-            for ref in extract_columns(clause.condition):
-                prefix, col = ref.split(".", 1)
-                if prefix == "s" and col in source_set:
-                    needed.add(col)
-
-    return [c for c in source_field_names if c in needed]
 
 
 def _normalize_set_spec(

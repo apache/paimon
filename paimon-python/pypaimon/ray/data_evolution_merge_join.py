@@ -905,7 +905,10 @@ def build_not_matched_insert_ds(
     captured_field_names = list(target_field_names)
     out_schema = target_pa_schema
 
-    source_cols = list(source_ds.schema().names)
+    source_cols = _resolve_source_projection(
+        clauses, source_on, source_ds.schema().names,
+    )
+    source_ds = source_ds.select_columns(source_cols)
     source_renamed = source_ds.rename_columns(
         {c: f"s.{c}" for c in source_cols}
     )
