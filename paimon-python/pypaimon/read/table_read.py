@@ -227,6 +227,8 @@ class TableRead:
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
+                        if batch.num_rows == 0:
+                            continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
                         batch = self._project_batch_to_output(batch)
@@ -639,7 +641,7 @@ class TableRead:
 
     def _build_split_read(self, split: Split, read_type=None) -> SplitRead:
         effective_read_type = read_type if read_type is not None else self.read_type
-        scan_read_type = read_type if read_type is not None else self._scan_read_type
+        scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
         if self.table.is_primary_key_table and not split.raw_convertible:
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
@@ -676,7 +678,7 @@ class TableRead:
                         # user's requested (flat) columns in order.
                         outer_extract_name_paths = [
                             [f.name] for f in effective_read_type]
-            if outer_extract_name_paths is None and self._needs_output_projection():
+            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return MergeFileSplitRead(
                 table=self.table,
@@ -696,8 +698,7 @@ class TableRead:
                     "Nested-field projection on data-evolution tables is "
                     "not yet supported")
             outer_extract_name_paths = None
-            if self._needs_output_projection():
-                # Keep iterator output narrow inside DataEvolutionSplitRead.
+            if read_type is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return DataEvolutionSplitRead(
                 table=self.table,
@@ -724,9 +725,7 @@ class TableRead:
                 inner_read_type = self._with_predicate_extra_fields(
                     self._widen_to_top_level_for_merge())
                 outer_extract_name_paths = self.nested_name_paths
-            if outer_extract_name_paths is None and self._needs_output_projection():
-                # Split readers own the output projection for iterator reads;
-                # the TableRead Arrow projection below is a final guard.
+            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return RawFileSplitRead(
                 table=self.table,

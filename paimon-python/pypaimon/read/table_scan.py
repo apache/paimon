@@ -43,6 +43,8 @@ class TableScan:
         self.limit = limit
         self.partition_predicate = partition_predicate
         self._read_type = None
+        self._query_auth_fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
@@ -113,8 +115,7 @@ class TableScan:
         return Predicate(method=method, index=field_index, field=field_name, literals=literals)
 
     def _auth_query(self):
-        fn = self.table.catalog_environment.table_query_auth(
-            self.table.options, self.table.identifier)
+        fn = self._query_auth_fn
         if fn is None:
             return None
         select = [f.name for f in self._read_type] if self._read_type else None
@@ -126,6 +127,9 @@ class TableScan:
         Only used by :meth:`ReadBuilder.explain`; the regular read path
         keeps going through :meth:`plan`.
         """
+        auth_result = self._auth_query()
+        if auth_result is not None:
+            self._apply_auth_to_scanner(auth_result)
         return self.file_scanner.scan_with_stats()
 
     def _create_file_scanner(self) -> FileScanner:
@@ -236,7 +240,7 @@ class TableScan:
             self.table,
             all_manifests,
             self.predicate,
-            effective_limit,
+            self.limit,
             partition_predicate=self.partition_predicate,
         )
 

@@ -109,6 +109,8 @@ class AsyncStreamingTableScan:
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
         self._read_type = None
+        self._query_auth_fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -269,8 +271,7 @@ class AsyncStreamingTableScan:
             self._pending_consumer_snapshot = None
 
     def _apply_auth(self, plan) -> Plan:
-        fn = self.table.catalog_environment.table_query_auth(
-            self.table.options, self.table.identifier)
+        fn = self._query_auth_fn
         if fn is None:
             return plan
         select = [f.name for f in self._read_type] if self._read_type else None

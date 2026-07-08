@@ -43,7 +43,9 @@ def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
         read_builder = read_builder.with_partition_filter(partition_filter)
 
     rows = RoaringBitmap64()
-    for split in read_builder.new_scan().plan().splits():
+    scan = read_builder.new_scan()
+    scan._query_auth_fn = None
+    for split in scan.plan().splits():
         if isinstance(split, DataSplit):
             rows = _add_live_rows(table, rows, split)
     return rows

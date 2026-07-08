@@ -100,16 +100,12 @@ class BatchToRecordReaderAdapter(RecordReader):
 
     def __init__(self, inner: RecordBatchReader):
         self._inner = inner
-        self._file_io = getattr(inner, 'file_io', None)
-        self._blob_field_indices = getattr(inner, 'blob_field_indices', None)
-        self._vector_field_indices = getattr(inner, 'vector_field_indices', None)
 
     def read_batch(self):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
-        return _ArrowBatchIterator(
-            batch, self._file_io, self._blob_field_indices, self._vector_field_indices)
+        return _ArrowBatchIterator(batch)
 
     def close(self):
         self._inner.close()
