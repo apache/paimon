@@ -634,7 +634,7 @@ class TableRead:
             dataset = TorchDataset(self, splits)
             return dataset
 
-    def _create_split_read(self, split: Split, read_type=None, blob_parallelism: int = 1) -> SplitRead:
+    def _create_split_read(self, split: Split, blob_parallelism: int = 1, read_type=None) -> SplitRead:
         sr = self._build_split_read(split, read_type)
         sr._blob_parallelism = blob_parallelism
         return sr
@@ -823,8 +823,8 @@ class TableRead:
             effective_read_type = read_fields + extra_fields
 
         reader = self._create_split_read(
-            split, read_type=effective_read_type,
-            blob_parallelism=blob_parallelism).create_reader()
+            split, blob_parallelism=blob_parallelism,
+            read_type=effective_read_type).create_reader()
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):

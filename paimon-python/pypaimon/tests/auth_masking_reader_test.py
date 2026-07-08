@@ -45,7 +45,6 @@ class _FakeBatchReader(RecordBatchReader):
         pass
 
 
-
 class TestAuthMaskingReaderTransforms(unittest.TestCase):
 
     def setUp(self):
