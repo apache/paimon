@@ -145,6 +145,22 @@ class TestFileScannerPartitionPredicate(unittest.TestCase):
         self.assertFalse(scanner._filter_manifest_file(
             _manifest_file_meta(['2024-01-15', 'us-west-2'], ['2024-01-15', 'us-west-2'])))
 
+    def test_partition_predicate_drops_non_partition_leaves(self, *_):
+        # Mixed filter: keep+rebind the partition leaf ('region'), drop the
+        # non-partition leaf ('name') instead of raising.
+        builder = PredicateBuilder(TABLE_FIELDS)
+        mixed = builder.and_predicates([
+            builder.equal('region', 'us-east-1'),
+            builder.equal('name', 'foo'),
+        ])
+        scanner = self._scanner(partition_predicate=mixed)
+        self.assertEqual(scanner.partition_key_predicate.field, 'region')
+        self.assertEqual(scanner.partition_key_predicate.index, 1)
+        self.assertTrue(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-east-1'])))
+        self.assertFalse(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-west-2'])))
+
     def test_no_partition_predicate_derives_from_predicate(self, *_):
         full_pred = PredicateBuilder(TABLE_FIELDS).equal('dt', '2024-01-15')
         scanner = self._scanner(predicate=full_pred)
