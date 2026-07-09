@@ -210,9 +210,10 @@ public class BlobTableTest extends TableTestBase {
         assertArrayBlobRows(blob0, blob1, updatedBlob1, blob2);
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
