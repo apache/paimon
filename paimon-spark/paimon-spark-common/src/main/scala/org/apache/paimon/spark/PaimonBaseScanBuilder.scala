@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateVisitor, TopN, VectorSearch}
 import org.apache.paimon.predicate.FullTextSearch
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.types.RowType
@@ -81,12 +81,16 @@ abstract class PaimonBaseScanBuilder
       predicate =>
         converter.convert(predicate) match {
           case Some(paimonPredicate) =>
-            pushable.append(predicate)
-            if (paimonPredicate.visit(partitionPredicateVisitor)) {
-              pushablePartitionDataFilters.append(paimonPredicate)
-            } else {
-              pushableDataFilters.append(paimonPredicate)
+            if (shouldPostScanRowTrackingPredicate(paimonPredicate)) {
               postScan.append(predicate)
+            } else {
+              pushable.append(predicate)
+              if (paimonPredicate.visit(partitionPredicateVisitor)) {
+                pushablePartitionDataFilters.append(paimonPredicate)
+              } else {
+                pushableDataFilters.append(paimonPredicate)
+                postScan.append(predicate)
+              }
             }
           case None =>
             postScan.append(predicate)
@@ -112,6 +116,16 @@ abstract class PaimonBaseScanBuilder
       this.hasPostScanPredicates = true
     }
     postScan.toArray
+  }
+
+  private def shouldPostScanRowTrackingPredicate(predicate: Predicate): Boolean = {
+    coreOptions.rowTrackingEnabled() && !coreOptions.dataEvolutionEnabled() &&
+    PredicateVisitor
+      .collectFieldNames(predicate)
+      .asScala
+      .exists(
+        field =>
+          field == SpecialFields.ROW_ID.name() || field == SpecialFields.SEQUENCE_NUMBER.name())
   }
 
   override def pushedPredicates: Array[SparkPredicate] = {
