@@ -74,9 +74,10 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
     def _read_blob_values(self, state, batch_row_ids):
         values = self._values_by_file_name[state.file.file_name]
         return {
-            row_id: values[row_id - state.file.first_row_id]
-            for row_id in batch_row_ids
-            if row_id in state.row_id_to_pos
+            row_id: values[pos]
+            for pos, row_id in self._selected_positions_and_row_ids(
+                state.selected_ranges, batch_row_ids
+            )
         }
 
 
@@ -236,6 +237,32 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
 
         self.assertEqual([b"left", b"right"], values)
 
+    def test_blob_fallback_batch_reader_avoids_full_row_id_materialization(self):
+        class _LazyBlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
+            def _read_blob_values(self, state, batch_row_ids):
+                return {
+                    row_id: BlobData(str(row_id).encode("utf-8"))
+                    for row_id in batch_row_ids
+                }
+
+        reader = _LazyBlobFallbackBatchReaderForTest(
+            [(_file("large.blob", 0, 1_000_000, 1), lambda: None)],
+            "blob_col",
+            pa.binary(),
+            batch_size=2,
+        )
+        try:
+            self.assertNotIn("_target_row_ids", reader.__dict__)
+            for state in reader._file_states:
+                self.assertFalse(hasattr(state, "selected_row_ids"))
+                self.assertFalse(hasattr(state, "row_id_to_pos"))
+                self.assertFalse(hasattr(state, "reader_uses_selected_positions"))
+
+            batch = reader.read_arrow_batch()
+            self.assertEqual([b"0", b"1"], batch.column(0).to_pylist())
+        finally:
+            reader.close()
+
     def test_data_evolution_merge_reader_aligns_blob_with_row_ranges_and_dv(self):
         row_ranges = [Range(1, 4)]
         deletion_vector = BitmapDeletionVector()
@@ -257,20 +284,16 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             ],
             {
                 "blob-old.blob": [
-                    BlobData(b"old-0"),
                     BlobData(b"old-1"),
                     BlobData(b"old-2"),
                     BlobData(b"old-3"),
                     BlobData(b"old-4"),
-                    BlobData(b"old-5"),
                 ],
                 "blob-new.blob": [
-                    Blob.PLACE_HOLDER,
                     Blob.PLACE_HOLDER,
                     BlobData(b"new-2"),
                     BlobData(b"new-3"),
                     BlobData(b"new-4"),
-                    Blob.PLACE_HOLDER,
                 ],
             },
             row_ranges=row_ranges,
