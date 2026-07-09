@@ -120,8 +120,8 @@ All available procedures are listed below.
       <td>
          To compact databases. Arguments:
             <li>includingDatabases: to specify databases. You can use regular expression.</li>
-            <li>mode: compact mode. "divided": start a sink for each table, detecting the new table requires restarting the job;
-               "combined" (default): start a single combined sink for all tables, the new table will be automatically detected.
+            <li>mode: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job;
+               "combined": start a single combined sink for all tables, the new table will be automatically detected.
             </li>
             <li>includingTables: to specify tables. You can use regular expression.</li>
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
