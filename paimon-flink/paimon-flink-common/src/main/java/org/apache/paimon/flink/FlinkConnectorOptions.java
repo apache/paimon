@@ -486,6 +486,17 @@ public class FlinkConnectorOptions {
                             "Commit listener will be called after a successful commit. This option list custom commit "
                                     + "listener identifiers separated by comma.");
 
+    public static final ConfigOption<Boolean> SINK_COORDINATOR_COMMIT_ENABLED =
+            key("sink.coordinator-commit.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, run the Paimon committer inside the Flink JobManager via an "
+                                    + "OperatorCoordinator. This decouples commit from any single TaskManager "
+                                    + "subtask so that region failover does not have to restart the whole pipeline. "
+                                    + "Only supports unaware-bucket append tables in streaming mode with "
+                                    + "checkpointing enabled; unsupported configurations fail during sink planning.");
+
     public static final ConfigOption<Boolean> SINK_WRITER_COORDINATOR_ENABLED =
             key("sink.writer-coordinator.enabled")
                     .booleanType()
