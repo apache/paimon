@@ -39,7 +39,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.{BlobType, RowType}
+import org.apache.paimon.types.{BlobType, DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
@@ -419,7 +419,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     // Find raw blob update columns and avoid reading them from target table
     val blobInlineFields = table.coreOptions().blobInlineField().asScala.toSet
-    val rawBlobFieldNames = table
+    val rawBlobFields = table
       .rowType()
       .getFields
       .asScala
@@ -427,6 +427,11 @@ case class MergeIntoPaimonDataEvolutionTable(
         field =>
           BlobType.isBlobFileField(field.`type`()) &&
             !blobInlineFields.exists(inlineField => resolver(inlineField, field.name())))
+    val rawBlobFieldNames = rawBlobFields
+      .map(_.name())
+      .toSet
+    val rawArrayBlobFieldNames = rawBlobFields
+      .filter(_.`type`().getTypeRoot == DataTypeRoot.ARRAY)
       .map(_.name())
       .toSet
 
@@ -450,14 +455,15 @@ case class MergeIntoPaimonDataEvolutionTable(
       }.toSet
     }
 
-    val modifiedRawBlobColumnNames = matchedActions
+    val modifiedRawArrayBlobColumnNames = matchedActions
       .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
       .flatten
+      .filter(name => rawArrayBlobFieldNames.exists(arrayBlobName => resolver(arrayBlobName, name)))
       .toSet
-    if (modifiedRawBlobColumnNames.nonEmpty) {
+    if (modifiedRawArrayBlobColumnNames.nonEmpty) {
       throw new UnsupportedOperationException(
-        "Should not append/update raw-data BLOB or ARRAY<BLOB> column through MERGE INTO: " +
-          modifiedRawBlobColumnNames.toSeq.sorted.mkString(", "))
+        "Should not append/update raw-data ARRAY<BLOB> column through MERGE INTO: " +
+          modifiedRawArrayBlobColumnNames.toSeq.sorted.mkString(", "))
     }
 
     val rawBlobMarkerNames =
@@ -514,17 +520,26 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     // the output projection for update from source table
-    def updateOutput(action: UpdateAction): Seq[Expression] = {
+    def updateOutput(action: UpdateAction, rawBlobModified: Set[String]): Seq[Expression] = {
       val updatedColumns = updateColumnsSorted.map {
         attr =>
-          if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
+          if (
+            rawBlobUpdateColumns.exists(_.sameRef(attr)) && !rawBlobModified.contains(attr.name)
+          ) {
             Literal(null, attr.dataType)
           } else {
             assignmentValue(action, attr)
           }
       }
       val metadata = metadataColumns.map(attr => assignmentValue(action, attr))
-      val markers = rawBlobUpdateColumns.map(_ => TrueLiteral)
+      val markers = rawBlobUpdateColumns.map {
+        attr =>
+          if (rawBlobModified.contains(attr.name)) {
+            FalseLiteral
+          } else {
+            TrueLiteral
+          }
+      }
       updatedColumns ++ metadata ++ markers :+ FalseLiteral
     }
 
@@ -560,7 +575,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case update: UpdateAction =>
           SparkShimLoader.shim
-            .mergeRowsKeepUpdate(update.condition.getOrElse(TrueLiteral), updateOutput(update))
+            .mergeRowsKeepUpdate(
+              update.condition.getOrElse(TrueLiteral),
+              updateOutput(update, modifiedRawBlobNames(update)))
             .asInstanceOf[MergeRows.Instruction]
         case DeleteAction(condition) =>
           SparkShimLoader.shim

@@ -524,48 +524,6 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Blob: merge-into rejects updating raw-data BLOB column") {
-    withTable("s", "t") {
-      sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
-        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
-      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
-
-      sql("CREATE TABLE s (id INT, picture BINARY)")
-      sql("INSERT INTO s VALUES (1, X'4E4557')")
-
-      val e = intercept[UnsupportedOperationException] {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-              |""".stripMargin)
-      }
-      assert(e.getMessage.contains("raw-data BLOB"))
-    }
-  }
-
-  test("Blob: merge-into rejects updating raw-data array blob column") {
-    withTable("s", "t") {
-      sql("CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +
-        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
-      sql("INSERT INTO t VALUES (1, 'name1', array(X'48656C6C6F'))")
-
-      sql("CREATE TABLE s (id INT, pictures ARRAY<BINARY>)")
-      sql("INSERT INTO s VALUES (1, array(X'4E4557'))")
-
-      val e = intercept[UnsupportedOperationException] {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
-              |""".stripMargin)
-      }
-      assert(e.getMessage.contains("raw-data BLOB or ARRAY<BLOB>"))
-    }
-  }
-
   test("Blob: merge-into updates non-blob column on raw blob table with split blob files") {
     withTable("s", "t") {
       sql(

@@ -209,7 +209,11 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 continue;
             }
 
-            Blob blob = array.getBlob(i);
+            Blob blob = getArrayBlob(array, i);
+            if (blob == null) {
+                elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
+                continue;
+            }
             SeekableInputStream in = openBlobInputStream(blob, false);
             if (in == null) {
                 elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
@@ -234,6 +238,19 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
         if (flush) {
             out.flush();
+        }
+    }
+
+    @Nullable
+    private Blob getArrayBlob(InternalArray array, int pos) {
+        try {
+            return array.getBlob(pos);
+        } catch (RuntimeException e) {
+            if (shouldWriteNullOnFetchFailure(e)) {
+                logWriteNullOnFetchFailure(e, null);
+                return null;
+            }
+            throw e;
         }
     }
 

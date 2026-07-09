@@ -29,14 +29,7 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
   }
 
-  private def assertRawBlobUpdateRejected(update: => Unit): Unit = {
-    val e = intercept[UnsupportedOperationException] {
-      update
-    }
-    assert(e.getMessage.contains("raw-data BLOB or ARRAY<BLOB>"), e.getMessage)
-  }
-
-  test("Blob: merge-into rejects updating raw-data BLOB column") {
+  test("Blob: merge-into updates raw-data BLOB column") {
     withTable("s", "t") {
       sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
         "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
@@ -49,26 +42,45 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
       sql("CREATE TABLE s (id INT, picture BINARY)")
       sql("INSERT INTO s VALUES (1, X'4E4557')")
 
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, picture FROM t ORDER BY id"),
         Seq(
-          Row(1, Array[Byte](72, 101, 108, 108, 111)),
+          Row(1, Array[Byte](78, 69, 87)),
           Row(2, Array[Byte](89, 69)),
           Row(3, Array[Byte](65, 66, 67)))
       )
     }
   }
 
-  test("Blob: merge-into rejects updating raw-data BLOB column to null") {
+  test("Blob: merge-into rejects updating raw-data array blob column") {
+    withTable("s", "t") {
+      sql("CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql("INSERT INTO t VALUES (1, 'name1', array(X'48656C6C6F'))")
+
+      sql("CREATE TABLE s (id INT, pictures ARRAY<BINARY>)")
+      sql("INSERT INTO s VALUES (1, array(X'4E4557'))")
+
+      val e = intercept[UnsupportedOperationException] {
+        sql("""
+              |MERGE INTO t
+              |USING s
+              |ON t.id = s.id
+              |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
+              |""".stripMargin)
+      }
+      assert(e.getMessage.contains("raw-data ARRAY<BLOB>"))
+    }
+  }
+
+  test("Blob: merge-into updates raw-data BLOB column to null") {
     withTable("s", "s2", "t") {
       sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
         "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
@@ -80,39 +92,35 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
       sql("CREATE TABLE s (id INT, picture BINARY)")
       sql("INSERT INTO s VALUES (1, CAST(NULL AS BINARY))")
 
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, picture FROM t ORDER BY id"),
-        Seq(Row(1, Array[Byte](72, 101, 108, 108, 111)), Row(2, Array[Byte](89, 69)))
+        Seq(Row(1, null), Row(2, Array[Byte](89, 69)))
       )
 
       sql("CREATE TABLE s2 (id INT, picture BINARY)")
       sql("INSERT INTO s2 VALUES (2, X'4E4557')")
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING s2
-              |ON t.id = s2.id
-              |WHEN MATCHED THEN UPDATE SET t.picture = s2.picture
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s2
+            |ON t.id = s2.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s2.picture
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, picture FROM t ORDER BY id"),
-        Seq(Row(1, Array[Byte](72, 101, 108, 108, 111)), Row(2, Array[Byte](89, 69)))
+        Seq(Row(1, null), Row(2, Array[Byte](78, 69, 87)))
       )
     }
   }
 
-  test("Blob: merge-into rejects raw-data BLOB update when marker name collides") {
+  test("Blob: merge-into raw-data BLOB marker name does not collide with target column") {
     withTable("s", "t") {
       sql(
         "CREATE TABLE t (id INT, `__paimon_raw_blob_placeholder_0` STRING, picture BINARY) " +
@@ -123,25 +131,23 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
       sql("CREATE TABLE s (id INT, `__paimon_raw_blob_placeholder_0` STRING, picture BINARY)")
       sql("INSERT INTO s VALUES (1, 'new_marker_name', X'4E4557')")
 
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET
-              |  t.`__paimon_raw_blob_placeholder_0` = s.`__paimon_raw_blob_placeholder_0`,
-              |  t.picture = s.picture
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET
+            |  t.`__paimon_raw_blob_placeholder_0` = s.`__paimon_raw_blob_placeholder_0`,
+            |  t.picture = s.picture
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, `__paimon_raw_blob_placeholder_0`, picture FROM t ORDER BY id"),
-        Seq(Row(1, "old_marker_name", Array[Byte](1)), Row(2, "kept", Array[Byte](2)))
+        Seq(Row(1, "new_marker_name", Array[Byte](78, 69, 87)), Row(2, "kept", Array[Byte](2)))
       )
     }
   }
 
-  test("Blob: self merge rejects updating raw-data BLOB column") {
+  test("Blob: self merge updates raw-data BLOB column") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
         "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
@@ -151,27 +157,25 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
           "(2, 'name2', X'5945'), " +
           "(3, 'name3', X'414243')")
 
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING t AS source
-              |ON t._ROW_ID = source._ROW_ID
-              |WHEN MATCHED AND source.id = 1 THEN
-              |  UPDATE SET t.picture = unhex(concat(hex(source.picture), '01'))
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED AND source.id = 1 THEN
+            |  UPDATE SET t.picture = unhex(concat(hex(source.picture), '01'))
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, picture FROM t ORDER BY id"),
         Seq(
-          Row(1, Array[Byte](72, 101, 108, 108, 111)),
+          Row(1, Array[Byte](72, 101, 108, 108, 111, 1)),
           Row(2, Array[Byte](89, 69)),
           Row(3, Array[Byte](65, 66, 67)))
       )
     }
   }
 
-  test("Blob: merge-into rejects updating multiple raw-data BLOB columns with split blob files") {
+  test("Blob: merge-into updates multiple raw-data BLOB columns with split blob files") {
     withTable("s", "t") {
       def bytesHex(value: Int, length: Int): String = {
         Seq.fill(length)(f"$value%02X").mkString
@@ -230,26 +234,27 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
           s"(3, X'${bytesHex(13, 1)}', X'${bytesHex(43, 20)}'), " +
           s"(4, X'${bytesHex(14, 1)}', X'${bytesHex(44, 20)}')")
 
-      assertRawBlobUpdateRejected {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.pic1 = s.pic1, t.pic2 = s.pic2
-              |""".stripMargin)
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.pic1 = s.pic1, t.pic2 = s.pic2
+            |""".stripMargin)
 
       checkAnswer(
         sql("SELECT id, pic1, pic2 FROM t ORDER BY id"),
         Seq(
-          Row(1, bytes(1, 20), bytes(31, 20)),
-          Row(2, bytes(2, 20), bytes(32, 20)),
-          Row(3, bytes(3, 20), bytes(33, 20)),
-          Row(4, bytes(4, 20), bytes(34, 20)))
+          Row(1, bytes(11, 1), bytes(41, 20)),
+          Row(2, bytes(12, 1), bytes(42, 20)),
+          Row(3, bytes(13, 1), bytes(43, 20)),
+          Row(4, bytes(14, 1), bytes(44, 20)))
       )
 
-      assert(blobFileRanges("max_sequence_number = 1") == oldRanges)
-      assert(blobFileRanges("max_sequence_number > 1").isEmpty)
+      val updatedRanges = blobFileRanges("max_sequence_number > 1")
+      assert(updatedRanges("pic1") == Seq(0L -> 2L, 2L -> 2L))
+      assert(updatedRanges("pic2") == oneBlobPerFile)
+      assert(updatedRanges("pic1") != oldRanges("pic1"))
+      assert(updatedRanges("pic1") != updatedRanges("pic2"))
     }
   }
 
