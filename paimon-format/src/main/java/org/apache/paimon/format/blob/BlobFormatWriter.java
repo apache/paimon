@@ -32,7 +32,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.rest.HttpClientUtils;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
@@ -70,7 +69,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private final String blobFieldName;
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
-    private final DataType blobFieldType;
+    private final BlobElementWriter elementWriter;
     private final CRC32 crc32;
     private final byte[] tmpBuffer;
     private final LongArrayList lengths;
@@ -102,7 +101,10 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         this.blobFieldName = type.getFieldNames().get(0);
-        this.blobFieldType = type.getTypeAt(0);
+        this.elementWriter =
+                type.getTypeAt(0).getTypeRoot() == DataTypeRoot.ARRAY
+                        ? new ArrayBlobElementWriter()
+                        : new RawBlobElementWriter();
         this.crc32 = new CRC32();
         this.tmpBuffer = new byte[4096];
         this.lengths = new LongArrayList(16);
@@ -126,33 +128,49 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             return;
         }
 
-        if (blobFieldType.getTypeRoot() == DataTypeRoot.ARRAY) {
+        elementWriter.addElement(element);
+    }
+
+    private interface BlobElementWriter {
+        void addElement(InternalRow element) throws IOException;
+    }
+
+    private class RawBlobElementWriter implements BlobElementWriter {
+
+        @Override
+        public void addElement(InternalRow element) throws IOException {
+            Blob blob;
+            try {
+                blob = element.getBlob(0);
+            } catch (RuntimeException e) {
+                if (shouldWriteNullOnFetchFailure(e)) {
+                    logWriteNullOnFetchFailure(e, null);
+                    writeNullElement();
+                    return;
+                }
+                throw e;
+            }
+            if (blob == BlobPlaceholder.INSTANCE) {
+                lengths.add(PLACE_HOLDER_LENGTH);
+                return;
+            }
+
+            addBlob(blob);
+        }
+    }
+
+    private class ArrayBlobElementWriter implements BlobElementWriter {
+
+        @Override
+        public void addElement(InternalRow element) throws IOException {
             InternalArray array = element.getArray(0);
             if (array == BlobArrayPlaceholder.INSTANCE) {
                 lengths.add(PLACE_HOLDER_LENGTH);
-            } else {
-                addBlobArray(array);
-            }
-            return;
-        }
-
-        Blob blob;
-        try {
-            blob = element.getBlob(0);
-        } catch (RuntimeException e) {
-            if (shouldWriteNullOnFetchFailure(e)) {
-                logWriteNullOnFetchFailure(e, null);
-                writeNullElement();
                 return;
             }
-            throw e;
-        }
-        if (blob == BlobPlaceholder.INSTANCE) {
-            lengths.add(PLACE_HOLDER_LENGTH);
-            return;
-        }
 
-        addBlob(blob);
+            addBlobArray(array);
+        }
     }
 
     private void addBlob(Blob blob) throws IOException {
