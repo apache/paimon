@@ -140,6 +140,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source,
             self.catalog_options,
             snapshot_id=expected_snapshot_id,
+            projection=['id', 'name', 'age'],
         )
 
     def test_no_clause_raises(self):
@@ -2371,6 +2372,142 @@ class TargetProjectionTest(unittest.TestCase):
         )
         self.assertIn('age', cols)
         self.assertIn('id', cols)
+
+    def test_matched_source_projection_prunes_unneeded_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import (
+            LiteralValue,
+            SourceColumnRef,
+            TargetColumnRef,
+        )
+
+        cols = _resolve_source_projection(
+            [
+                self._clause(
+                    {
+                        'age': SourceColumnRef('id'),
+                        'name': TargetColumnRef('name'),
+                        'note': LiteralValue('literal'),
+                    },
+                    condition="s.status = 't.fake' AND s.score > t.score",
+                )
+            ],
+            ['uid'],
+            ['uid', 'id', 'name', 'status', 'score', 'payload'],
+        )
+        self.assertEqual(['uid', 'id', 'status', 'score'], cols)
+
+    def test_literal_update_source_projection_keeps_only_join_key(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import LiteralValue
+
+        cols = _resolve_source_projection(
+            [self._clause({'name': LiteralValue('updated')})],
+            ['id'],
+            ['id', 'name', 'age', 'payload'],
+        )
+        self.assertEqual(['id'], cols)
+
+    def test_matched_update_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import build_matched_update_ds
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        joined = Mock()
+        result = object()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+        joined.map_batches.return_value = result
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ):
+            out = build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=1,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
+
+    def test_not_matched_insert_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_not_matched_insert_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        result = object()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+        source_renamed.map_batches.return_value = result
+
+        out = build_not_matched_insert_ds(
+            target_identifier='default.target',
+            source_ds=source_ds,
+            target_on=['id'],
+            source_on=['id'],
+            clauses=[self._clause({'name': SourceColumnRef('name')})],
+            target_field_names=['id', 'name'],
+            target_pa_schema=pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+            ]),
+            catalog_options={'warehouse': '/tmp/warehouse'},
+            num_partitions=1,
+            target_empty=True,
+        )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
 
 
 class MergeConditionUnitTest(unittest.TestCase):
