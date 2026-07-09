@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -52,6 +53,42 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             boolean statsDenseStore,
             @Nullable List<String> writeCols,
             @Nullable FileFormat rowSidecarFormat) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                null,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                rowSidecarFormat);
+    }
+
+    public RowDataRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            @Nullable FormatWriterFactory writerFactory,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat) {
         super(
                 () -> {
                     Path dataPath = pathFactory.newPath();
@@ -61,8 +98,13 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                                     : new Path(dataPath.getParent(), dataPath.getName() + ".row");
                     return new RowDataFileWriter(
                             fileIO,
-                            RollingFileWriter.createFileWriterContext(
-                                    fileFormat, writeSchema, statsCollectors, fileCompression),
+                            new FileWriterContext(
+                                    writerFactory == null
+                                            ? fileFormat.createWriterFactory(writeSchema)
+                                            : writerFactory,
+                                    RollingFileWriter.createStatsProducer(
+                                            fileFormat, writeSchema, statsCollectors),
+                                    fileCompression),
                             dataPath,
                             writeSchema,
                             schemaId,

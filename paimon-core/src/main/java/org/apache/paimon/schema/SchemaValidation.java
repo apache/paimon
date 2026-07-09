@@ -657,7 +657,13 @@ public class SchemaValidation {
             if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
                         String.format(
-                                "Column '%s' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.",
+                                "Column '%s' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING NOT NULL, T>.",
+                                fieldName));
+            }
+            if (((MapType) fieldType).getKeyType().isNullable()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout=shared-shredding but its map key type is nullable.",
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);

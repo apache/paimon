@@ -217,7 +217,9 @@ class SchemaValidationTest {
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
                         new DataField(
-                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                                1,
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.INT())),
                         new DataField(
                                 2, "codes", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())));
 
@@ -295,10 +297,29 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining(
-                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.");
+                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING NOT NULL, T>.");
 
         options.remove("fields.codes.map.storage-layout");
         options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        List<DataField> nullableKeyFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                nullableKeyFields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'metrics' is configured with map.storage-layout=shared-shredding but its map key type is nullable.");
+
         options.put("fields.metrics.map.shared-shredding.max-columns", "0");
         assertThatThrownBy(
                         () ->
@@ -1261,7 +1282,8 @@ class SchemaValidationTest {
     private List<DataField> mapValueFields(DataType valueType) {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT()),
-                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), valueType)));
+                new DataField(
+                        1, "metrics", DataTypes.MAP(DataTypes.STRING().notNull(), valueType)));
     }
 
     private List<DataField> nestedMapValueFields(DataType valueType) {
@@ -1271,14 +1293,15 @@ class SchemaValidationTest {
                         1,
                         "metrics",
                         DataTypes.MAP(
-                                DataTypes.STRING(),
+                                DataTypes.STRING().notNull(),
                                 DataTypes.ROW(DataTypes.FIELD(0, "payload", valueType)))));
     }
 
     private List<DataField> topLevelPayloadFields(DataType payloadType) {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT()),
-                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                new DataField(
+                        1, "metrics", DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.INT())),
                 new DataField(2, "payload", payloadType));
     }
 
