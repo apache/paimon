@@ -85,14 +85,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             PositionOutputStream out,
             @Nullable BlobConsumer writeConsumer,
             RowType type,
-            boolean writeNullOnMissingFile) {
-        this(out, writeConsumer, type, writeNullOnMissingFile, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure) {
         this.out = out;
