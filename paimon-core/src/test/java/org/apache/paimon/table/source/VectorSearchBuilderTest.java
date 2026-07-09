@@ -48,6 +48,7 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -59,6 +60,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 
@@ -69,7 +71,9 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -582,6 +586,56 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(batchRefined).hasSize(2);
         assertThat(batchRefined.get(0).results()).containsExactly(0L);
         assertThat(batchRefined.get(1).results()).containsExactly(2L);
+    }
+
+    @Test
+    public void testRawRefineReadTypeContainsOnlyVectorAndRowId() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 1);
+
+        ExposingVectorRead read = new ExposingVectorRead(table, idFilter);
+
+        assertThat(read.rawReadType(false).getFieldNames())
+                .containsExactly(VECTOR_FIELD_NAME, SpecialFields.ROW_ID.name());
+        assertThat(read.rawReadType(true).getFieldNames())
+                .containsExactly(VECTOR_FIELD_NAME, "id", SpecialFields.ROW_ID.name());
+    }
+
+    @Test
+    public void testRawCandidateSearchScoresOnlyCandidateBitmap() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeVectors(table, new float[][] {{0.0f, 0.0f}, {10.0f, 0.0f}, {20.0f, 0.0f}});
+
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+        candidates.add(1L);
+
+        ExposingVectorRead read = new ExposingVectorRead(table, null);
+        ScoredGlobalIndexResult result =
+                read.rawCandidateSearch(
+                        Collections.singletonList(new Range(0, 2)),
+                        candidates,
+                        new float[] {0.0f, 0.0f});
+
+        assertThat(result.results()).containsExactly(1L);
+    }
+
+    @Test
+    public void testBatchRefineReadsUnionCandidatesOnceAndScoresPerQuery() {
+        RecordingBatchVectorRead read = new RecordingBatchVectorRead();
+
+        ScoredGlobalIndexResult[] reranked =
+                read.rerank(
+                        new ScoredGlobalIndexResult[] {
+                            scoredResult(1.0f, 0L, 2L), scoredResult(1.0f, 1L, 2L)
+                        });
+
+        assertThat(read.rawReadCount).isEqualTo(1);
+        assertThat(read.rawReadRanges).containsExactly(new Range(0, 2));
+        assertThat(read.rawCandidates).containsExactly(0L, 1L, 2L);
+        assertThat(reranked[0].results()).containsExactly(2L);
+        assertThat(reranked[1].results()).containsExactly(2L);
     }
 
     @Test
@@ -1353,6 +1407,85 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
         buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors);
+    }
+
+    private static class ExposingVectorRead extends VectorReadImpl {
+
+        private ExposingVectorRead(FileStoreTable table, Predicate filter) {
+            super(
+                    table,
+                    null,
+                    filter,
+                    1,
+                    table.rowType().getField(VECTOR_FIELD_NAME),
+                    new float[] {0.0f, 0.0f},
+                    null);
+        }
+
+        private RowType rawReadType(boolean includeFilter) {
+            return rawSearchReadType(includeFilter);
+        }
+
+        private ScoredGlobalIndexResult rawCandidateSearch(
+                List<Range> rawRowRanges, RoaringNavigableMap64 candidates, float[] queryVector) {
+            return readRawCandidateSearch(rawRowRanges, candidates, "l2", queryVector, false);
+        }
+    }
+
+    private static class RecordingBatchVectorRead extends BatchVectorReadImpl {
+
+        private int rawReadCount;
+        private List<Range> rawReadRanges;
+        private RoaringNavigableMap64 rawCandidates;
+        private final Map<Long, float[]> rawVectors = new HashMap<>();
+
+        private RecordingBatchVectorRead() {
+            super(
+                    null,
+                    null,
+                    null,
+                    1,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[][] {{0.0f}, {10.0f}},
+                    refineOptions());
+            rawVectors.put(0L, new float[] {10.0f});
+            rawVectors.put(1L, new float[] {0.0f});
+            rawVectors.put(2L, new float[] {5.0f});
+        }
+
+        private ScoredGlobalIndexResult[] rerank(ScoredGlobalIndexResult[] results) {
+            return maybeRerankIndexedBatchResults(results, "ivf-pq", null);
+        }
+
+        @Override
+        protected Map<Long, float[]> readRawVectors(
+                List<Range> rawRowRanges, RoaringNavigableMap64 candidates, boolean includeFilter) {
+            rawReadCount++;
+            rawReadRanges = rawRowRanges;
+            rawCandidates = candidates;
+            assertThat(includeFilter).isFalse();
+
+            Map<Long, float[]> result = new HashMap<>();
+            for (long rowId : candidates) {
+                result.put(rowId, rawVectors.get(rowId));
+            }
+            return result;
+        }
+    }
+
+    private static Map<String, String> refineOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("refine_factor", "2");
+        options.put("test.vector.metric", "l2");
+        return options;
+    }
+
+    private static ScoredGlobalIndexResult scoredResult(float score, long... rowIds) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (long rowId : rowIds) {
+            rows.add(rowId);
+        }
+        return ScoredGlobalIndexResult.create(rows, rowId -> score);
     }
 
     private void buildAndCommitIndex(FileStoreTable table, String fieldName, float[][] vectors)

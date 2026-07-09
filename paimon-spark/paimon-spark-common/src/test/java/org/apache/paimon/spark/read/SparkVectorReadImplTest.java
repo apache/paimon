@@ -195,22 +195,20 @@ public class SparkVectorReadImplTest {
         }
 
         @Override
-        protected ScoredGlobalIndexResult readRawSearch(
-                List<Range> rawRowRanges,
-                @Nullable RoaringNavigableMap64 preFilter,
+        protected ScoredGlobalIndexResult readRawRefineSearch(
+                RoaringNavigableMap64 candidates,
                 @Nullable GlobalIndexer globalIndexer,
                 float[] queryVector) {
             assertThat(globalIndexer).isInstanceOf(VectorGlobalIndexer.class);
             assertThat(((VectorGlobalIndexer) globalIndexer).metric()).isEqualTo("l2");
             assertThat(queryVector).containsExactly(0.0f);
-            assertThat(preFilter).isNotNull();
             rawSearchCandidateRows = new ArrayList<>();
-            for (long rowId : preFilter) {
+            for (long rowId : candidates) {
                 rawSearchCandidateRows.add(rowId);
             }
 
             RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-            for (long rowId : preFilter) {
+            for (long rowId : candidates) {
                 rows.add(rowId);
             }
             return ScoredGlobalIndexResult.create(

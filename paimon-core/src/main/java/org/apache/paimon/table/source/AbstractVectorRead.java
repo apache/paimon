@@ -38,6 +38,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -60,6 +61,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
@@ -78,6 +80,10 @@ public abstract class AbstractVectorRead implements Serializable {
     protected final int limit;
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
+
+    private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
+            Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
+                    .thenComparing((a, b) -> Long.compare(b[0], a[0]));
 
     protected AbstractVectorRead(
             FileStoreTable table,
@@ -316,11 +322,7 @@ public abstract class AbstractVectorRead implements Serializable {
             return result;
         }
         ScoredGlobalIndexResult candidates = result.topK(indexedSearchLimit(indexType));
-        return readRawSearch(
-                candidates.results().toRangeList(),
-                candidates.results(),
-                globalIndexer,
-                queryVector);
+        return readRawRefineSearch(candidates.results(), globalIndexer, queryVector);
     }
 
     protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
@@ -376,22 +378,103 @@ public abstract class AbstractVectorRead implements Serializable {
             @Nullable RoaringNavigableMap64 preFilter,
             String metric,
             float[] queryVector) {
-        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
-        if (preFilter != null) {
-            rawRowRanges =
-                    Range.and(
-                            Range.sortAndMergeOverlap(rawRowRanges, true),
-                            Range.sortAndMergeOverlap(preFilter.toRangeList(), true));
-        }
+        return readRawSearch(rawRowRanges, preFilter, null, metric, queryVector, true);
+    }
+
+    protected ScoredGlobalIndexResult readRawRefineSearch(
+            RoaringNavigableMap64 candidates,
+            @Nullable GlobalIndexer globalIndexer,
+            float[] queryVector) {
+        return readRawCandidateSearch(
+                candidates.toRangeList(),
+                candidates,
+                rawSearchMetric(globalIndexer),
+                queryVector,
+                false);
+    }
+
+    @Deprecated
+    protected ScoredGlobalIndexResult readRawRefineSearch(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 candidates,
+            @Nullable GlobalIndexer globalIndexer,
+            float[] queryVector) {
+        return readRawSearch(
+                rawRowRanges, null, candidates, rawSearchMetric(globalIndexer), queryVector, false);
+    }
+
+    protected ScoredGlobalIndexResult readRawCandidateSearch(
+            List<Range> rawRowRanges,
+            RoaringNavigableMap64 candidates,
+            String metric,
+            float[] queryVector,
+            boolean includeFilter) {
+        return readRawSearch(rawRowRanges, null, candidates, metric, queryVector, includeFilter);
+    }
+
+    private ScoredGlobalIndexResult readRawSearch(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 preFilter,
+            @Nullable RoaringNavigableMap64 scoreCandidates,
+            String metric,
+            float[] queryVector,
+            boolean includeFilter) {
+        RowType readType = rawSearchReadType(includeFilter);
+        rawRowRanges = filteredRawRowRanges(rawRowRanges, preFilter);
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         TableScan.Plan plan =
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
-        ReadBuilder readBuilder = newRawReadBuilder(readType, true);
-        RoaringNavigableMap64 resultBitmap = new RoaringNavigableMap64();
-        Map<Long, Float> scoreMap = new HashMap<>();
+        ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
+        int vectorIndex = readType.getFieldIndex(vectorColumn.name());
+        int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+        PriorityQueue<long[]> topKHeap =
+                new PriorityQueue<>(Math.max(1, limit + 1), WEAKEST_SCORE_FIRST);
+
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(plan)) {
+            reader.forEachRemaining(
+                    row -> {
+                        long rowId = row.getLong(rowIdIndex);
+                        if (scoreCandidates != null && !scoreCandidates.contains(rowId)) {
+                            return;
+                        }
+                        if (row.isNullAt(vectorIndex)) {
+                            return;
+                        }
+                        float[] stored = getVector(row, vectorIndex);
+                        checkVectorDimension(queryVector, stored);
+                        offerScore(
+                                topKHeap, limit, rowId, computeScore(queryVector, stored, metric));
+                    });
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read raw vectors for vector search.", e);
+        }
+
+        return scoredResult(topKHeap);
+    }
+
+    protected Map<Long, float[]> readRawVectors(
+            RoaringNavigableMap64 candidates, boolean includeFilter) {
+        return readRawVectors(candidates.toRangeList(), candidates, includeFilter);
+    }
+
+    protected Map<Long, float[]> readRawVectors(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 candidates,
+            boolean includeFilter) {
+        RowType readType = rawSearchReadType(includeFilter);
+        rawRowRanges = filteredRawRowRanges(rawRowRanges, null);
+        if (rawRowRanges.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        TableScan.Plan plan =
+                newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
+        ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
+        Map<Long, float[]> rawVectors = new HashMap<>();
         int vectorIndex = readType.getFieldIndex(vectorColumn.name());
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
 
@@ -399,25 +482,104 @@ public abstract class AbstractVectorRead implements Serializable {
                 readBuilder.newRead().executeFilter().createReader(plan)) {
             reader.forEachRemaining(
                     row -> {
+                        long rowId = row.getLong(rowIdIndex);
+                        if (candidates != null && !candidates.contains(rowId)) {
+                            return;
+                        }
                         if (row.isNullAt(vectorIndex)) {
                             return;
                         }
                         float[] stored = getVector(row, vectorIndex);
-                        if (stored.length != queryVector.length) {
-                            throw new IllegalArgumentException(
-                                    String.format(
-                                            "Query vector dimension mismatch: expected %d, got %d",
-                                            stored.length, queryVector.length));
-                        }
-                        long rowId = row.getLong(rowIdIndex);
-                        resultBitmap.add(rowId);
-                        scoreMap.put(rowId, computeScore(queryVector, stored, metric));
+                        rawVectors.put(rowId, stored);
                     });
         } catch (IOException e) {
             throw new RuntimeException("Failed to read raw vectors for vector search.", e);
         }
 
-        return ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get).topK(limit);
+        return rawVectors;
+    }
+
+    private List<Range> filteredRawRowRanges(
+            List<Range> rawRowRanges, @Nullable RoaringNavigableMap64 preFilter) {
+        if (preFilter == null) {
+            return rawRowRanges;
+        }
+        return Range.and(
+                Range.sortAndMergeOverlap(rawRowRanges, true),
+                Range.sortAndMergeOverlap(preFilter.toRangeList(), true));
+    }
+
+    protected ScoredGlobalIndexResult scoreRawVectors(
+            RoaringNavigableMap64 candidates,
+            Map<Long, float[]> rawVectors,
+            float[] queryVector,
+            String metric,
+            int topK) {
+        PriorityQueue<long[]> topKHeap =
+                new PriorityQueue<>(Math.max(1, topK + 1), WEAKEST_SCORE_FIRST);
+        for (long rowId : candidates) {
+            float[] stored = rawVectors.get(rowId);
+            if (stored == null) {
+                continue;
+            }
+            checkVectorDimension(queryVector, stored);
+            offerScore(topKHeap, topK, rowId, computeScore(queryVector, stored, metric));
+        }
+        return scoredResult(topKHeap);
+    }
+
+    private static void offerScore(
+            PriorityQueue<long[]> topKHeap, int topK, long rowId, float score) {
+        if (topK <= 0) {
+            return;
+        }
+        long[] entry = new long[] {rowId, Float.floatToRawIntBits(score)};
+        if (topKHeap.size() < topK) {
+            topKHeap.offer(entry);
+        } else if (WEAKEST_SCORE_FIRST.compare(entry, topKHeap.peek()) > 0) {
+            topKHeap.poll();
+            topKHeap.offer(entry);
+        }
+    }
+
+    private static ScoredGlobalIndexResult scoredResult(PriorityQueue<long[]> topKHeap) {
+        if (topKHeap.isEmpty()) {
+            return ScoredGlobalIndexResult.createEmpty();
+        }
+        RoaringNavigableMap64 resultBitmap = new RoaringNavigableMap64();
+        Map<Long, Float> scoreMap = new HashMap<>();
+        for (long[] entry : topKHeap) {
+            long rowId = entry[0];
+            resultBitmap.add(rowId);
+            scoreMap.put(rowId, Float.intBitsToFloat((int) entry[1]));
+        }
+        return ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get);
+    }
+
+    private static void checkVectorDimension(float[] queryVector, float[] stored) {
+        if (stored.length != queryVector.length) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Query vector dimension mismatch: expected %d, got %d",
+                            stored.length, queryVector.length));
+        }
+    }
+
+    protected RowType rawSearchReadType(boolean includeFilter) {
+        RowType tableRowType = table.rowType();
+        List<String> readFields = new ArrayList<>();
+        readFields.add(vectorColumn.name());
+
+        if (includeFilter && filter != null) {
+            Set<String> filterFields = PredicateVisitor.collectFieldNames(filter);
+            for (String field : tableRowType.getFieldNames()) {
+                if (filterFields.contains(field) && !readFields.contains(field)) {
+                    readFields.add(field);
+                }
+            }
+        }
+
+        return SpecialFields.rowTypeWithRowId(tableRowType.project(readFields));
     }
 
     private ReadBuilder newRawReadBuilder(RowType readType, boolean includeFilter) {
@@ -554,7 +716,7 @@ public abstract class AbstractVectorRead implements Serializable {
         return metric.toLowerCase().replace('-', '_');
     }
 
-    private int configuredRefineFactor(String indexType) {
+    protected int configuredRefineFactor(String indexType) {
         String value = configuredRefineFactor(options, indexType);
         if (value == null) {
             value = configuredRefineFactor(table.options(), indexType);
