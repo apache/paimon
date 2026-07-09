@@ -76,7 +76,7 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
         return {
             row_id: values[pos]
             for pos, row_id in self._selected_positions_and_row_ids(
-                state.selected_ranges, batch_row_ids
+                state, batch_row_ids
             )
         }
 
@@ -260,6 +260,36 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
 
             batch = reader.read_arrow_batch()
             self.assertEqual([b"0", b"1"], batch.column(0).to_pylist())
+        finally:
+            reader.close()
+
+    def test_blob_fallback_batch_reader_advances_sparse_range_cursor(self):
+        reader = _BlobFallbackBatchReaderForTest(
+            [_file("sparse.blob", 0, 100, 1)],
+            {
+                "sparse.blob": [
+                    BlobData(b"0"),
+                    BlobData(b"10"),
+                    BlobData(b"20"),
+                    BlobData(b"30"),
+                ],
+            },
+            row_ranges=[Range(0, 0), Range(10, 10), Range(20, 20), Range(30, 30)],
+            batch_size=2,
+        )
+        try:
+            state = reader._file_states[0]
+
+            first = reader.read_arrow_batch()
+            self.assertEqual([b"0", b"10"], first.column(0).to_pylist())
+            self.assertEqual(1, state.selected_range_index)
+            self.assertEqual(1, state.selected_position_base)
+
+            second = reader.read_arrow_batch()
+            self.assertEqual([b"20", b"30"], second.column(0).to_pylist())
+            self.assertEqual(3, state.selected_range_index)
+            self.assertEqual(3, state.selected_position_base)
+            self.assertIsNone(reader.read_arrow_batch())
         finally:
             reader.close()
 

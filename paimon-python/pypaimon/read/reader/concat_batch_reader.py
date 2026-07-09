@@ -45,6 +45,8 @@ class _BlobFileState:
         self.selected_count = sum(row_range.count() for row_range in selected_ranges)
         self.reader = None
         self.reader_initialized = False
+        self.selected_range_index = 0
+        self.selected_position_base = 0
 
 
 class ConcatBatchReader(RecordBatchReader):
@@ -393,7 +395,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
         self, state: _BlobFileState, batch_row_ids: List[int]
     ) -> Dict[int, object]:
         positions_and_row_ids = self._selected_positions_and_row_ids(
-            state.selected_ranges, batch_row_ids
+            state, batch_row_ids
         )
         if not positions_and_row_ids:
             return {}
@@ -426,24 +428,28 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
     @staticmethod
     def _selected_positions_and_row_ids(
-        selected_ranges: List[Range], batch_row_ids: List[int]
+        state: _BlobFileState, batch_row_ids: List[int]
     ) -> List[Tuple[int, int]]:
+        selected_ranges = state.selected_ranges
         positions_and_row_ids = []
-        range_index = 0
-        position_base = 0
         for row_id in batch_row_ids:
             while (
-                range_index < len(selected_ranges)
-                and selected_ranges[range_index].to < row_id
+                state.selected_range_index < len(selected_ranges)
+                and selected_ranges[state.selected_range_index].to < row_id
             ):
-                position_base += selected_ranges[range_index].count()
-                range_index += 1
-            if range_index >= len(selected_ranges):
+                state.selected_position_base += (
+                    selected_ranges[state.selected_range_index].count()
+                )
+                state.selected_range_index += 1
+            if state.selected_range_index >= len(selected_ranges):
                 break
-            row_range = selected_ranges[range_index]
+            row_range = selected_ranges[state.selected_range_index]
             if row_range.from_ <= row_id <= row_range.to:
                 positions_and_row_ids.append(
-                    (position_base + row_id - row_range.from_, row_id)
+                    (
+                        state.selected_position_base + row_id - row_range.from_,
+                        row_id,
+                    )
                 )
         return positions_and_row_ids
 
