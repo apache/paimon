@@ -40,6 +40,10 @@ public class CastedVectorColumnVector implements VecColumnVector {
         this.vectorSize = vectorSize;
     }
 
+    public CastedVectorColumnVector copy(ColumnVector child) {
+        return new CastedVectorColumnVector(heapArrayVector, child, vectorSize);
+    }
+
     @Override
     public InternalVector getVector(int i) {
         long offset = heapArrayVector.offsets[i];

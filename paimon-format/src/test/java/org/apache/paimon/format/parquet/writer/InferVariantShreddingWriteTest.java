@@ -32,7 +32,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.parquet.ParquetFileFormat;
 import org.apache.paimon.format.parquet.ParquetUtil;
-import org.apache.paimon.format.parquet.VariantUtils;
+import org.apache.paimon.format.parquet.VariantShreddingReadPlanFactory;
 import org.apache.paimon.format.shredding.InferShreddingWritePlanWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -552,7 +552,8 @@ public class InferVariantShreddingWriteTest {
             for (int i = 0; i < expectShreddedTypes.length; i++) {
                 assertThat(
                                 VariantMetadataUtils.addVariantMetadata(
-                                        VariantUtils.variantFileType(schema.getType(i))))
+                                        VariantShreddingReadPlanFactory.variantFileType(
+                                                schema.getType(i))))
                         .isEqualTo(variantShreddingSchema(expectShreddedTypes[i]));
             }
         }

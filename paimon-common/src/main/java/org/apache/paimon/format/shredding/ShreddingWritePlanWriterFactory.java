@@ -41,9 +41,13 @@ public class ShreddingWritePlanWriterFactory
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        if (!writePlanFactory.shouldCreateWritePlan()
-                || !(delegate instanceof SupportsShreddingWritePlan)) {
+        if (!writePlanFactory.shouldCreateWritePlan()) {
             return delegate.create(out, compression);
+        }
+        if (!(delegate instanceof SupportsShreddingWritePlan)) {
+            throw new UnsupportedOperationException(
+                    "Delegate writer factory does not support shredding write plans: "
+                            + delegate.getClass().getName());
         }
 
         SupportsShreddingWritePlan shreddingDelegate = (SupportsShreddingWritePlan) delegate;
