@@ -123,7 +123,7 @@ under the License.
 
                                     <!-- Others, not shade to reduce conflicting -->
                                     <!-- <include>org.xerial.snappy:snappy-java</include> -->
-                                    <!-- <include>org.lz4:lz4-java</include> -->
+                                    <!-- <include>at.yawk.lz4:lz4-java</include> -->
                                     <!-- <include>com.google.code.findbugs:jsr305</include> -->
                                     <!-- <include>org.slf4j:slf4j-api</include> -->
                                 </includes>
