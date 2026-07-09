@@ -87,7 +87,11 @@ public interface DataFileMeta {
                             new DataField(17, "_EXTERNAL_PATH", newStringType(true)),
                             new DataField(18, "_FIRST_ROW_ID", new BigIntType(true)),
                             new DataField(
-                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false)))));
+                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false))),
+                            new DataField(
+                                    20,
+                                    "_WRITTEN_FIELD_IDS",
+                                    new ArrayType(true, new IntType(false)))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -108,6 +112,40 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols) {
+        return forAppend(
+                fileName,
+                fileSize,
+                rowCount,
+                rowStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                extraFiles,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                null);
+    }
+
+    static DataFileMeta forAppend(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            SimpleStats rowStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            List<String> extraFiles,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols,
+            @Nullable int[] writtenFieldIds) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -128,7 +166,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writtenFieldIds);
     }
 
     static DataFileMeta create(
@@ -171,7 +210,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     static DataFileMeta create(
@@ -212,7 +252,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     static DataFileMeta create(
@@ -236,6 +277,52 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols) {
+        return create(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                null);
+    }
+
+    static DataFileMeta create(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols,
+            @Nullable int[] writtenFieldIds) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -256,7 +343,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writtenFieldIds);
     }
 
     String fileName();
@@ -325,6 +413,18 @@ public interface DataFileMeta {
 
     @Nullable
     List<String> writeCols();
+
+    /**
+     * The field ids of the columns written in this file, or {@code null} if all columns are written
+     * (or the file was created by an older version that only recorded {@link #writeCols()} names).
+     * This is the id-based counterpart of {@link #writeCols()}: field ids are stable across column
+     * renames and can also address nested fields uniformly, since every (nested) field has a
+     * globally unique id in the table schema.
+     */
+    @Nullable
+    default int[] writtenFieldIds() {
+        return null;
+    }
 
     DataFileMeta upgrade(int newLevel);
 

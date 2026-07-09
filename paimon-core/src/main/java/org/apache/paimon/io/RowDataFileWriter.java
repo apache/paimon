@@ -55,6 +55,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final List<DataFileAuxiliaryWriter> auxiliaryFileWriters;
     private final FileSource fileSource;
     @Nullable private final List<String> writeCols;
+    @Nullable private final int[] writtenFieldIds;
     private final RowDataFileSequenceNumberTracker sequenceNumberTracker;
 
     public RowDataFileWriter(
@@ -130,6 +131,14 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.auxiliaryFileWriters = Collections.unmodifiableList(auxiliaryFileWriters);
         this.fileSource = fileSource;
         this.writeCols = writeCols;
+        // the id-based counterpart of writeCols: writeCols always names fields of writeSchema, so
+        // the field ids (stable across renames) can be derived right here
+        this.writtenFieldIds =
+                writeCols == null
+                        ? null
+                        : writeCols.stream()
+                                .mapToInt(col -> writeSchema.getField(col).id())
+                                .toArray();
         this.sequenceNumberTracker =
                 new RowDataFileSequenceNumberTracker(
                         writeSchema, seqNumCounterSupplier, super::recordCount);
@@ -220,7 +229,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 statsPair.getKey(),
                 externalPath,
                 null,
-                writeCols);
+                writeCols,
+                writtenFieldIds);
     }
 
     private interface DataFileAuxiliaryWriter {
