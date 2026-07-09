@@ -254,7 +254,7 @@ public class ParquetSchemaConverter {
             return Types.primitive(INT64, repetition)
                     .as(
                             LogicalTypeAnnotation.timestampType(
-                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MILLIS))
+                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MICROS))
                     .named(name);
         } else if (precision > 6) {
             return Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition).named(name);
