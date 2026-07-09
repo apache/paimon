@@ -23,6 +23,8 @@ import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -301,28 +303,32 @@ public class CompactChainTableProcedureITCase extends CatalogITCaseBase {
                         "+I[1, 1, 1, 20250810, 22]", "+I[2, 1, 1, 20250810, 22]");
     }
 
-    @Test
-    public void testCompactChainTableWithGroupPartition() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testCompactChainTableWithGroupPartition(boolean overwrite) throws Exception {
         sql(
-                "CREATE TABLE chain_compact_t4 ("
-                        + "  t1 BIGINT,"
-                        + "  t2 BIGINT,"
-                        + "  t3 STRING,"
-                        + "  region STRING,"
-                        + "  dt STRING,"
-                        + "  hr STRING"
-                        + ") PARTITIONED BY (region, dt, hr) "
-                        + " WITH ("
-                        + "  'primary-key' = 'region,dt,hr,t1',"
-                        + "  'bucket-key' = 't1',"
-                        + "  'bucket' = '1',"
-                        + "  'sequence.field' = 't2',"
-                        + "  'merge-engine' = 'deduplicate',"
-                        + "  'chain-table.enabled' = 'true',"
-                        + "  'partition.timestamp-pattern' = '$dt $hr:00:00',"
-                        + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',"
-                        + "  'chain-table.chain-partition-keys' = 'dt,hr'"
-                        + ")");
+                String.format(
+                        "CREATE TABLE chain_compact_t4 ("
+                                + "  t1 BIGINT,"
+                                + "  t2 BIGINT,"
+                                + "  t3 STRING,"
+                                + "  region STRING,"
+                                + "  dt STRING,"
+                                + "  hr STRING"
+                                + ") PARTITIONED BY (region, dt, hr) "
+                                + " WITH ("
+                                + "  'dynamic-partition-overwrite' = '%s',"
+                                + "  'primary-key' = 'region,dt,hr,t1',"
+                                + "  'bucket-key' = 't1',"
+                                + "  'bucket' = '1',"
+                                + "  'sequence.field' = 't2',"
+                                + "  'merge-engine' = 'deduplicate',"
+                                + "  'chain-table.enabled' = 'true',"
+                                + "  'partition.timestamp-pattern' = '$dt $hr:00:00',"
+                                + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',"
+                                + "  'chain-table.chain-partition-keys' = 'dt,hr'"
+                                + ")",
+                        overwrite));
         setupChainTableBranches("chain_compact_t4");
 
         // Write snapshot branch data
@@ -334,6 +340,10 @@ public class CompactChainTableProcedureITCase extends CatalogITCaseBase {
                 "INSERT INTO `chain_compact_t4$branch_snapshot` PARTITION (region='CN', dt = '20250810', hr = '22') VALUES (3, 1, '1')");
         sql(
                 "INSERT INTO `chain_compact_t4$branch_snapshot` PARTITION (region='UK', dt = '20250810', hr = '21') VALUES (21, 1, '1')");
+        sql(
+                "INSERT INTO `chain_compact_t4$branch_snapshot` PARTITION (region='FR', dt = '20250810', hr = '22') VALUES (31, 1, '1')");
+        sql(
+                "INSERT INTO `chain_compact_t4$branch_snapshot` PARTITION (region='CA', dt = '20250810', hr = '21') VALUES (41, 1, '1')");
 
         // Write delta branch data
         sql(
@@ -346,18 +356,40 @@ public class CompactChainTableProcedureITCase extends CatalogITCaseBase {
         assertThat(
                         collectResult(
                                 "SELECT * FROM `chain_compact_t4$branch_snapshot` WHERE dt = '20250810' AND hr = '22'"))
-                .containsExactlyInAnyOrder("+I[3, 1, 1, CN, 20250810, 22]");
+                .containsExactlyInAnyOrder(
+                        "+I[3, 1, 1, CN, 20250810, 22]", "+I[31, 1, 1, FR, 20250810, 22]");
 
         sql("CALL sys.compact_chain_table('default.chain_compact_t4', 'dt=20250810,hr=22', true)");
 
         assertThat(
                         collectResult(
-                                "SELECT * FROM `chain_compact_t4$branch_snapshot` WHERE dt = '20250810' AND hr = '22' ORDER BY region"))
+                                "select snapshot_id,commit_kind from `chain_compact_t4$branch_snapshot$snapshots`"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, APPEND]",
+                        "+I[2, APPEND]",
+                        "+I[3, APPEND]",
+                        "+I[4, APPEND]",
+                        "+I[5, APPEND]",
+                        "+I[6, APPEND]",
+                        "+I[7, OVERWRITE]");
+
+        assertThat(
+                        collectResult(
+                                "SELECT * FROM `chain_compact_t4$branch_snapshot` WHERE dt = '20250810' AND hr = '21'"))
+                .containsExactlyInAnyOrder(
+                        "+I[2, 1, 1, CN, 20250810, 21]",
+                        "+I[21, 1, 1, UK, 20250810, 21]",
+                        "+I[41, 1, 1, CA, 20250810, 21]");
+
+        assertThat(
+                        collectResult(
+                                "SELECT * FROM `chain_compact_t4$branch_snapshot` WHERE dt = '20250810' AND hr = '22'"))
                 .containsExactlyInAnyOrder(
                         "+I[2, 1, 1, CN, 20250810, 22]",
                         "+I[4, 1, 1, CN, 20250810, 22]",
+                        "+I[11, 1, 1, US, 20250810, 22]",
                         "+I[21, 1, 1, UK, 20250810, 22]",
                         "+I[22, 1, 1, UK, 20250810, 22]",
-                        "+I[11, 1, 1, US, 20250810, 22]");
+                        "+I[31, 1, 1, FR, 20250810, 22]");
     }
 }

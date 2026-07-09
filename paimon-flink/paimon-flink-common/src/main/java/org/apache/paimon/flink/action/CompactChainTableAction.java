@@ -40,6 +40,7 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION;
@@ -121,7 +122,7 @@ public class CompactChainTableAction extends TableActionBase {
                 PartitionPredicate.fromPredicate(partitionType, partitionPredicate);
 
         boolean partitionExists =
-                !snapshotTable.newScan().withPartitionFilter(predicate).plan().splits().isEmpty();
+                !snapshotTable.newScan().withPartitionFilter(predicate).listPartitions().isEmpty();
 
         if (partitionExists && !overwrite) {
             LOG.info(
@@ -139,7 +140,13 @@ public class CompactChainTableAction extends TableActionBase {
                         .sourceName(identifier.getFullName() + "-chain-compact-source")
                         .build();
 
-        FlinkSinkBuilder sinkBuilder = new FlinkSinkBuilder(snapshotTable).forRowData(source);
+        FlinkSinkBuilder sinkBuilder =
+                new FlinkSinkBuilder(
+                                snapshotTable.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
+                                                "true")))
+                        .forRowData(source);
         if (partitionExists) {
             sinkBuilder.overwrite(partitionSpec);
         }
