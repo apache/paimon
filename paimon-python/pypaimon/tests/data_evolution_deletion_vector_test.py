@@ -237,6 +237,45 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
 
         self.assertEqual([b"left", b"right"], values)
 
+    def test_blob_fallback_batch_reader_skips_states_outside_batch(self):
+        class _CountingBlobFallbackBatchReader(_BlobFallbackBatchReaderForTest):
+            def __init__(self, files, values_by_file_name, batch_size):
+                super().__init__(files, values_by_file_name, batch_size=batch_size)
+                self.selected_calls = []
+
+            def _selected_positions_and_row_ids(self, state, batch_row_ids):
+                self.selected_calls.append(
+                    (state.file.file_name, list(batch_row_ids))
+                )
+                return BlobFallbackBatchReader._selected_positions_and_row_ids(
+                    state, batch_row_ids
+                )
+
+        reader = _CountingBlobFallbackBatchReader(
+            [
+                _file("blob-0.blob", 0, 1, 1),
+                _file("blob-10.blob", 10, 1, 1),
+                _file("blob-20.blob", 20, 1, 1),
+            ],
+            {
+                "blob-0.blob": [BlobData(b"0")],
+                "blob-10.blob": [BlobData(b"10")],
+                "blob-20.blob": [BlobData(b"20")],
+            },
+            batch_size=1,
+        )
+        try:
+            self.assertEqual([b"0"], reader.read_arrow_batch().column(0).to_pylist())
+            self.assertEqual([("blob-0.blob", [0])], reader.selected_calls)
+
+            self.assertEqual([b"10"], reader.read_arrow_batch().column(0).to_pylist())
+            self.assertEqual(
+                [("blob-0.blob", [0]), ("blob-10.blob", [10])],
+                reader.selected_calls,
+            )
+        finally:
+            reader.close()
+
     def test_blob_fallback_batch_reader_avoids_full_row_id_materialization(self):
         class _LazyBlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
             def _read_blob_values(self, state, batch_row_ids):

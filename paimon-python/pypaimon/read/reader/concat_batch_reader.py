@@ -292,7 +292,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
         groups: Dict[int, Dict[int, Tuple[object, bool]]] = {}
 
+        batch_first = batch_row_ids[0]
+        batch_last = batch_row_ids[-1]
         for state in self._file_states:
+            if not self._state_overlaps_batch(state, batch_first, batch_last):
+                continue
             blob_values = self._read_blob_values(state, batch_row_ids)
             if not blob_values:
                 continue
@@ -389,6 +393,24 @@ class BlobFallbackBatchReader(RecordBatchReader):
             )
         return self._deletion_vector.is_deleted(
             row_id - self._deletion_vector_range.from_
+        )
+
+    @staticmethod
+    def _state_overlaps_batch(
+        state: _BlobFileState, batch_first: int, batch_last: int
+    ) -> bool:
+        selected_ranges = state.selected_ranges
+        while (
+            state.selected_range_index < len(selected_ranges)
+            and selected_ranges[state.selected_range_index].to < batch_first
+        ):
+            state.selected_position_base += (
+                selected_ranges[state.selected_range_index].count()
+            )
+            state.selected_range_index += 1
+        return (
+            state.selected_range_index < len(selected_ranges)
+            and selected_ranges[state.selected_range_index].from_ <= batch_last
         )
 
     def _read_blob_values(
