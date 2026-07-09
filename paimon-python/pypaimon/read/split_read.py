@@ -32,7 +32,11 @@ from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
-from pypaimon.read.push_down_utils import rewrite_predicate_indices, trim_predicate_by_fields
+from pypaimon.read.push_down_utils import (
+    predicate_field_names,
+    rewrite_predicate_indices,
+    trim_predicate_by_fields,
+)
 from pypaimon.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader, ConcatBatchReader,
     MergeAllBatchReader, DataEvolutionMergeReader)
@@ -42,6 +46,8 @@ from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch, VectorBunch
+from pypaimon.read.reader.field_indices import (
+    blob_field_indices, vector_field_indices)
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
@@ -65,7 +71,6 @@ from pypaimon.read.reader.aggregation_merge_function import (
     AggregateMergeFunction, build_field_aggregators)
 from pypaimon.read.reader.sort_merge_reader import (SortMergeReaderWithMinHeap,
                                                     builtin_seq_comparator)
-from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
@@ -79,16 +84,6 @@ NULL_FIELD_INDEX = -1
 ROW_SIDECAR_FORMAT = CoreOptions.FILE_FORMAT_ROW
 
 _COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
-
-
-def _blob_field_indices(fields: List[DataField]) -> set:
-    return {i for i, f in enumerate(fields)
-            if hasattr(f.type, 'type') and f.type.type == 'BLOB'}
-
-
-def _vector_field_indices(fields: List[DataField]) -> set:
-    from pypaimon.schema.data_types import VectorType
-    return {i for i, f in enumerate(fields) if isinstance(f.type, VectorType)}
 
 
 def format_identifier(file_name):
@@ -151,7 +146,7 @@ class SplitRead(ABC):
         read_type_names = {f.name for f in read_type}
         if (
                 self.predicate is not None
-                and _get_all_fields(self.predicate).issubset(read_type_names)
+                and predicate_field_names(self.predicate).issubset(read_type_names)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -309,7 +304,9 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on Vortex files")
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
-            predicate_fields = _get_all_fields(self.push_down_predicate) if self.push_down_predicate else set()
+            predicate_fields = (
+                predicate_field_names(self.push_down_predicate)
+                if self.push_down_predicate else set())
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
                                                read_arrow_predicate, batch_size=batch_size,
                                                row_indices=row_indices,
@@ -787,50 +784,35 @@ class RawFileSplitRead(SplitRead):
 
         concat_reader = ConcatBatchReader(
             data_readers, file_io=self.table.file_io,
-            blob_field_indices=_blob_field_indices(self.read_fields),
-            vector_field_indices=_vector_field_indices(self.read_fields))
-        # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
+            blob_field_indices=blob_field_indices(self.read_fields),
+            vector_field_indices=vector_field_indices(self.read_fields))
+        reader = concat_reader
         if self.table.is_primary_key_table and self.predicate_for_reader:
-            reader = FilterRecordReader(concat_reader, self.predicate_for_reader)
-            if self.outer_extract_name_paths:
-                # Row-level extraction: the filter evaluates rows in the
-                # widened top-level coordinate space, so extract after it.
-                from pypaimon.read.reader.outer_projection_record_reader import \
-                    OuterProjectionRecordReader
-                reader = OuterProjectionRecordReader(
-                    reader, [f.name for f in self.read_fields],
-                    self.outer_extract_name_paths,
-                    file_io=self.table.file_io,
-                    blob_field_indices=_blob_field_indices(self.read_fields),
-                    vector_field_indices=_vector_field_indices(self.read_fields))
-            if self.limit is not None:
-                reader = LimitedRecordReader(reader, self.limit)
-        else:
-            reader = concat_reader
-            if self.outer_extract_name_paths:
-                from pypaimon.read.reader.nested_leaf_batch_reader import \
-                    NestedLeafBatchReader
-                reader = NestedLeafBatchReader(
-                    reader, self.outer_extract_name_paths,
-                    self.outer_flat_read_type)
-                # A predicate on a projected nested leaf cannot be pushed down:
-                # its leaf path is absent from the widened top-level read
-                # fields, so SplitRead.__init__ dropped it (predicate_for_reader
-                # is None). Without re-applying it the filter is silently lost
-                # and every row is returned. Re-evaluate it on the extracted
-                # flat batches, whose column names match the predicate fields;
-                # trim to the projected columns so a filter on a non-projected
-                # column keeps the existing "dropped" semantics rather than
-                # referencing a missing column.
-                if self.predicate is not None and self.predicate_for_reader is None:
-                    flat_names = [f.name for f in self.outer_flat_read_type]
-                    trimmed = trim_predicate_by_fields(self.predicate, flat_names)
-                    if trimmed is not None:
-                        from pypaimon.read.reader.filter_record_batch_reader \
-                            import FilterRecordBatchReader
-                        reader = FilterRecordBatchReader(reader, trimmed)
-            if self.limit is not None:
-                reader = LimitedRecordBatchReader(reader, self.limit)
+            reader = FilterRecordBatchReader(
+                reader,
+                self.predicate_for_reader,
+                field_names=[f.name for f in self.read_fields],
+                schema_fields=self.read_fields,
+            )
+        if self.outer_extract_name_paths:
+            from pypaimon.read.reader.nested_leaf_batch_reader import \
+                NestedLeafBatchReader
+            reader = NestedLeafBatchReader(
+                reader, self.outer_extract_name_paths,
+                self.outer_flat_read_type)
+            # A predicate on a projected nested leaf cannot be pushed down:
+            # its leaf path is absent from the widened top-level read fields,
+            # so SplitRead.__init__ dropped it (predicate_for_reader is None).
+            # Without re-applying it the filter is silently lost and every row
+            # is returned. Re-evaluate it on the extracted flat batches, whose
+            # column names match the predicate fields.
+            if self.predicate is not None and self.predicate_for_reader is None:
+                flat_names = [f.name for f in self.outer_flat_read_type]
+                trimmed = trim_predicate_by_fields(self.predicate, flat_names)
+                if trimmed is not None:
+                    reader = FilterRecordBatchReader(reader, trimmed)
+        if self.limit is not None:
+            reader = LimitedRecordBatchReader(reader, self.limit)
         return reader
 
     def _all_data_fields_from(self, fields):
@@ -960,8 +942,8 @@ class MergeFileSplitRead(SplitRead):
                 reader, [f.name for f in inner_value_fields],
                 self.outer_extract_name_paths,
                 file_io=self.table.file_io,
-                blob_field_indices=_blob_field_indices(inner_value_fields),
-                vector_field_indices=_vector_field_indices(inner_value_fields))
+                blob_field_indices=blob_field_indices(inner_value_fields),
+                vector_field_indices=vector_field_indices(inner_value_fields))
             # A predicate on a projected nested leaf is not pushed down (its leaf
             # path is absent from the widened-to-full-ROW read fields, so it was
             # dropped in __init__). Without re-applying it after extraction the
@@ -995,7 +977,9 @@ class DataEvolutionSplitRead(SplitRead):
             split: Split,
             row_tracking_enabled: bool,
             nested_name_paths: Optional[List[List[str]]] = None,
-            limit: Optional[int] = None):
+            limit: Optional[int] = None,
+            outer_extract_name_paths: Optional[List[List[str]]] = None,
+            outer_flat_read_type: Optional[List[DataField]] = None):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1006,6 +990,8 @@ class DataEvolutionSplitRead(SplitRead):
             nested_name_paths=nested_name_paths,
             limit=limit,
         )
+        self.outer_extract_name_paths = outer_extract_name_paths
+        self.outer_flat_read_type = outer_flat_read_type
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate
@@ -1051,8 +1037,8 @@ class DataEvolutionSplitRead(SplitRead):
 
         merge_reader = ConcatBatchReader(
             suppliers, file_io=self.table.file_io,
-            blob_field_indices=_blob_field_indices(self.read_fields),
-            vector_field_indices=_vector_field_indices(self.read_fields))
+            blob_field_indices=blob_field_indices(self.read_fields),
+            vector_field_indices=vector_field_indices(self.read_fields))
         if self.predicate_for_reader is not None:
             reader = FilterRecordBatchReader(
                 merge_reader,
@@ -1062,6 +1048,16 @@ class DataEvolutionSplitRead(SplitRead):
             )
         else:
             reader = merge_reader
+
+        if self.outer_extract_name_paths:
+            if self.outer_flat_read_type is None:
+                raise ValueError(
+                    "outer_flat_read_type is required when outer_extract_name_paths "
+                    "is set")
+            from pypaimon.read.reader.nested_leaf_batch_reader import \
+                NestedLeafBatchReader
+            reader = NestedLeafBatchReader(
+                reader, self.outer_extract_name_paths, self.outer_flat_read_type)
 
         if self.limit is not None:
             reader = LimitedRecordBatchReader(reader, self.limit)

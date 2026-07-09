@@ -59,8 +59,7 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._table = table
         self._prescan_reader_factory = prescan_reader_factory
         self._blob_parallelism = blob_parallelism
-        self.file_io = inner.file_io
-        self.blob_field_indices = inner.blob_field_indices
+        self._adopt_metadata(inner)
         # Preserve original BlobViewStruct bytes when resolve disabled: skip both
         # view resolution (Stage 1) and descriptor-to-data resolution (Stage 2).
         resolve_enabled = CoreOptions.blob_view_resolve_enabled(

@@ -27,6 +27,7 @@ wrapper extracts the user-visible flat columns afterwards.
 
 from typing import Any, List, Optional
 
+from pypaimon.read.reader.field_indices import project_top_level_field_indices
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.internal_row import InternalRow
@@ -62,20 +63,10 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         self._inner = inner
         self._flat_arity = len(name_paths)
         self._file_io = file_io
-        self._blob_field_indices = None
-        if blob_field_indices is not None:
-            self._blob_field_indices = {
-                proj_pos
-                for proj_pos, spec in enumerate(self._specs)
-                if not spec.sub_names and spec.top_idx in blob_field_indices
-            }
-        self._vector_field_indices = None
-        if vector_field_indices is not None:
-            self._vector_field_indices = {
-                proj_pos
-                for proj_pos, spec in enumerate(self._specs)
-                if not spec.sub_names and spec.top_idx in vector_field_indices
-            }
+        self._blob_field_indices = project_top_level_field_indices(
+            blob_field_indices, self._specs)
+        self._vector_field_indices = project_top_level_field_indices(
+            vector_field_indices, self._specs)
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
         inner_batch = self._inner.read_batch()

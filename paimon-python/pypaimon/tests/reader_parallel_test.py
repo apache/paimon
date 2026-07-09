@@ -400,6 +400,21 @@ class ParallelReaderPrimaryKeyTest(unittest.TestCase):
         df_p = parallel.to_pandas().sort_values(['dt', 'user_id']).reset_index(drop=True)
         self.assertTrue(df_s.equals(df_p))
 
+    def test_parallel_row_kind_survives_output_projection(self):
+        rb_full = self.table.new_read_builder()
+        predicate = rb_full.new_predicate_builder().equal('behavior', 'v2-updated')
+        rb = self.table.new_read_builder().with_projection(
+            ['user_id', 'dt']).with_filter(predicate)
+        splits = rb.new_scan().plan().splits()
+        read = rb.new_read()
+        read.include_row_kind = True
+
+        result = read.to_arrow(splits, parallelism=4)
+
+        self.assertEqual(result.schema.names, ['_row_kind', 'user_id', 'dt'])
+        self.assertEqual(result.num_rows, 5)
+        self.assertEqual(set(result.column('_row_kind').to_pylist()), {'+I'})
+
 
 if __name__ == '__main__':
     unittest.main()
