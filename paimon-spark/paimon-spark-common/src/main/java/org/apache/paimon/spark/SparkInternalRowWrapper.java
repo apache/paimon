@@ -254,7 +254,8 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         return new SparkInternalArray(
                 internalRow.getArray(actualPos),
-                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType());
+                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType(),
+                uriReaderFactory);
     }
 
     @Override
@@ -264,15 +265,20 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             return null;
         }
         DataType dataType = tableSchema.fields()[pos].dataType();
-        return toSparkInternalVector(dataType, internalRow.getArray(actualPos));
+        return toSparkInternalVector(dataType, internalRow.getArray(actualPos), uriReaderFactory);
     }
 
     private static InternalVector toSparkInternalVector(DataType dataType, ArrayData arrayData) {
+        return toSparkInternalVector(dataType, arrayData, null);
+    }
+
+    private static InternalVector toSparkInternalVector(
+            DataType dataType, ArrayData arrayData, @Nullable UriReaderFactory uriReaderFactory) {
         if (!(dataType instanceof ArrayType)) {
             throw new UnsupportedOperationException("Not a vector type: " + dataType);
         }
         ArrayType arrayType = (ArrayType) dataType;
-        return new SparkInternalVector(arrayData, arrayType.elementType());
+        return new SparkInternalVector(arrayData, arrayType.elementType(), uriReaderFactory);
     }
 
     @Override
@@ -283,7 +289,10 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         MapType mapType = (MapType) tableSchema.fields()[pos].dataType();
         return new SparkInternalMap(
-                internalRow.getMap(actualPos), mapType.keyType(), mapType.valueType());
+                internalRow.getMap(actualPos),
+                mapType.keyType(),
+                mapType.valueType(),
+                uriReaderFactory);
     }
 
     @Override
@@ -322,10 +331,19 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         private final ArrayData arrayData;
         private final DataType elementType;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         public SparkInternalArray(ArrayData arrayData, DataType elementType) {
+            this(arrayData, elementType, null);
+        }
+
+        public SparkInternalArray(
+                ArrayData arrayData,
+                DataType elementType,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.arrayData = arrayData;
             this.elementType = elementType;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -437,25 +455,30 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return Blob.fromBytes(arrayData.getBinary(pos), null, null);
+            return Blob.fromBytes(arrayData.getBinary(pos), uriReaderFactory, null);
         }
 
         @Override
         public InternalArray getArray(int pos) {
             return new SparkInternalArray(
-                    arrayData.getArray(pos), ((ArrayType) elementType).elementType());
+                    arrayData.getArray(pos),
+                    ((ArrayType) elementType).elementType(),
+                    uriReaderFactory);
         }
 
         @Override
         public InternalVector getVector(int pos) {
-            return toSparkInternalVector(elementType, arrayData.getArray(pos));
+            return toSparkInternalVector(elementType, arrayData.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalMap getMap(int pos) {
             MapType mapType = (MapType) elementType;
             return new SparkInternalMap(
-                    arrayData.getMap(pos), mapType.keyType(), mapType.valueType());
+                    arrayData.getMap(pos),
+                    mapType.keyType(),
+                    mapType.valueType(),
+                    uriReaderFactory);
         }
 
         @Override
@@ -470,6 +493,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         public SparkInternalVector(ArrayData arrayData, DataType elementType) {
             super(arrayData, elementType);
         }
+
+        public SparkInternalVector(
+                ArrayData arrayData,
+                DataType elementType,
+                @Nullable UriReaderFactory uriReaderFactory) {
+            super(arrayData, elementType, uriReaderFactory);
+        }
     }
 
     /** adapt to spark internal map. */
@@ -478,11 +508,21 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         private final MapData mapData;
         private final DataType keyType;
         private final DataType valueType;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         public SparkInternalMap(MapData mapData, DataType keyType, DataType valueType) {
+            this(mapData, keyType, valueType, null);
+        }
+
+        public SparkInternalMap(
+                MapData mapData,
+                DataType keyType,
+                DataType valueType,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.mapData = mapData;
             this.keyType = keyType;
             this.valueType = valueType;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -492,12 +532,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public InternalArray keyArray() {
-            return new SparkInternalArray(mapData.keyArray(), keyType);
+            return new SparkInternalArray(mapData.keyArray(), keyType, uriReaderFactory);
         }
 
         @Override
         public InternalArray valueArray() {
-            return new SparkInternalArray(mapData.valueArray(), valueType);
+            return new SparkInternalArray(mapData.valueArray(), valueType, uriReaderFactory);
         }
     }
 }

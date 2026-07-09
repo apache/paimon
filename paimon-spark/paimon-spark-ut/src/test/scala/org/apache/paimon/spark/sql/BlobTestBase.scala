@@ -37,6 +37,15 @@ class BlobTestBase extends PaimonSparkTestBase {
 
   private val RANDOM = new Random
 
+  private def writeFile(fileIO: LocalFileIO, uri: String, data: Array[Byte]): Unit = {
+    val outputStream = fileIO.newOutputStream(new Path(uri), true)
+    try {
+      outputStream.write(data)
+    } finally {
+      outputStream.close()
+    }
+  }
+
   override def sparkConf: SparkConf = {
     super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
   }
@@ -120,6 +129,43 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: array blob writes descriptor elements and reads descriptors") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_array_blob"
+      writeFile(fileIO, uri, blobData)
+
+      sql(
+        "CREATE TABLE t (id INT, data STRING, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', " +
+          "'blob-as-descriptor'='true')")
+      sql(s"INSERT INTO t VALUES (1, 'paimon', array(sys.path_to_descriptor('$uri'), X'5945'))")
+
+      val descriptorRow = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      val firstDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](0))
+      val secondDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1))
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val firstBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(firstDescriptor.uri), firstDescriptor)
+      val secondBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(secondDescriptor.uri), secondDescriptor)
+      assert(util.Arrays.equals(blobData, firstBlob.toData))
+      assert(util.Arrays.equals(Array[Byte](89, 69), secondBlob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val dataRow = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      assert(util.Arrays.equals(blobData, dataRow.getAs[Array[Byte]](0)))
+      assert(util.Arrays.equals(Array[Byte](89, 69), dataRow.getAs[Array[Byte]](1)))
+    }
+  }
+
   test("Blob: array blob inline fields are rejected") {
     Seq(
       ("array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
@@ -145,11 +191,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       RANDOM.nextBytes(blobData)
       val fileIO = new LocalFileIO
       val uri = "file://" + tempDBDir.toString + "/external_blob"
-      try {
-        val outputStream = fileIO.newOutputStream(new Path(uri), true)
-        try outputStream.write(blobData)
-        finally if (outputStream != null) outputStream.close()
-      }
+      writeFile(fileIO, uri, blobData)
 
       val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
 
@@ -187,11 +229,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       RANDOM.nextBytes(blobData)
       val fileIO = new LocalFileIO
       val uri = "file://" + tempDBDir.toString + "/external_blob"
-      try {
-        val outputStream = fileIO.newOutputStream(new Path(uri), true)
-        try outputStream.write(blobData)
-        finally if (outputStream != null) outputStream.close()
-      }
+      writeFile(fileIO, uri, blobData)
 
       val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
       sql(
@@ -226,11 +264,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       RANDOM.nextBytes(blobData)
       val fileIO = new LocalFileIO
       val uri = "file://" + tempDBDir.toString + "/external_blob"
-      try {
-        val outputStream = fileIO.newOutputStream(new Path(uri), true)
-        try outputStream.write(blobData)
-        finally if (outputStream != null) outputStream.close()
-      }
+      writeFile(fileIO, uri, blobData)
 
       val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
       sql(
@@ -395,9 +429,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       RANDOM.nextBytes(blobData)
       val blobPath = externalRoot + "/external_blob"
       val fileIO = new LocalFileIO
-      val outputStream = fileIO.newOutputStream(new Path("file://" + blobPath), true)
-      try outputStream.write(blobData)
-      finally outputStream.close()
+      writeFile(fileIO, "file://" + blobPath, blobData)
 
       val isolatedPath = "isolated://" + blobPath
 
@@ -600,9 +632,9 @@ class BlobTestBase extends PaimonSparkTestBase {
       assert(util.Arrays.equals(first.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
       assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](89, 69)))
 
-      val second = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 2").collect()(0)
+      val second = sql("SELECT pictures[0], size(pictures) FROM t WHERE id = 2").collect()(0)
       assert(util.Arrays.equals(second.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
-      assert(second.isNullAt(1))
+      assert(second.getInt(1) == 1)
 
       checkAnswer(
         sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
@@ -649,9 +681,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       RANDOM.nextBytes(blobData)
       val fileIO = new LocalFileIO()
       val uri = "file://" + tempDBDir.getCanonicalPath + "/external_desc_blob"
-      val out = fileIO.newOutputStream(new Path(uri), true)
-      try { out.write(blobData) }
-      finally { out.close() }
+      writeFile(fileIO, uri, blobData)
       val desc = new BlobDescriptor(uri, 0, blobData.length)
       sql(s"INSERT INTO t VALUES (1, 'name1', X'${bytesToHex(desc.serialize())}')")
       sql(s"INSERT INTO t VALUES (2, 'name2', X'${bytesToHex(desc.serialize())}')")

@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -50,14 +51,20 @@ public class FlinkRowData implements RowData {
 
     protected InternalRow row;
     @Nullable protected final RowType rowType;
+    protected final boolean blobAsDescriptor;
 
     public FlinkRowData(InternalRow row) {
         this(row, null);
     }
 
     public FlinkRowData(InternalRow row, @Nullable RowType rowType) {
+        this(row, rowType, false);
+    }
+
+    public FlinkRowData(InternalRow row, @Nullable RowType rowType, boolean blobAsDescriptor) {
         this.row = row;
         this.rowType = rowType;
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     public FlinkRowData replace(InternalRow row) {
@@ -147,7 +154,8 @@ public class FlinkRowData implements RowData {
 
     @Override
     public ArrayData getArray(int pos) {
-        return new FlinkArrayData(row.getArray(pos), arrayElementType(typeAt(pos)));
+        return new FlinkArrayData(
+                row.getArray(pos), arrayElementType(typeAt(pos)), blobAsDescriptor);
     }
 
     @Override
@@ -160,7 +168,8 @@ public class FlinkRowData implements RowData {
         DataType type = typeAt(pos);
         return new FlinkRowData(
                 row.getRow(pos, numFields),
-                type != null && type.getTypeRoot() == DataTypeRoot.ROW ? (RowType) type : null);
+                type != null && type.getTypeRoot() == DataTypeRoot.ROW ? (RowType) type : null,
+                blobAsDescriptor);
     }
 
     public Variant getVariant(int pos) {
@@ -184,14 +193,21 @@ public class FlinkRowData implements RowData {
 
         private final InternalArray array;
         @Nullable private final DataType elementType;
+        private final boolean blobAsDescriptor;
 
         private FlinkArrayData(InternalArray array) {
-            this(array, null);
+            this(array, null, false);
         }
 
         private FlinkArrayData(InternalArray array, @Nullable DataType elementType) {
+            this(array, elementType, false);
+        }
+
+        private FlinkArrayData(
+                InternalArray array, @Nullable DataType elementType, boolean blobAsDescriptor) {
             this.array = array;
             this.elementType = elementType;
+            this.blobAsDescriptor = blobAsDescriptor;
         }
 
         @Override
@@ -271,14 +287,25 @@ public class FlinkRowData implements RowData {
                     return null;
                 }
                 Blob blob = array.getBlob(pos);
-                return blob == null ? null : blob.toData();
+                return fromBlob(blob);
             }
             return array.getBinary(pos);
         }
 
+        private byte[] fromBlob(Blob blob) {
+            if (blob == null) {
+                return null;
+            }
+            if (blob instanceof BlobView && !((BlobView) blob).isResolved()) {
+                return Blob.serializeBlob(blob);
+            }
+            return blobAsDescriptor ? blob.toDescriptor().serialize() : blob.toData();
+        }
+
         @Override
         public ArrayData getArray(int pos) {
-            return new FlinkArrayData(array.getArray(pos), arrayElementType(elementType));
+            return new FlinkArrayData(
+                    array.getArray(pos), arrayElementType(elementType), blobAsDescriptor);
         }
 
         @Override
@@ -292,7 +319,8 @@ public class FlinkRowData implements RowData {
                     array.getRow(pos, numFields),
                     elementType != null && elementType.getTypeRoot() == DataTypeRoot.ROW
                             ? (RowType) elementType
-                            : null);
+                            : null,
+                    blobAsDescriptor);
         }
 
         @Override

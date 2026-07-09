@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.data
 
-import org.apache.paimon.data.InternalArray
+import org.apache.paimon.data.{Blob, BlobView, InternalArray}
 import org.apache.paimon.spark.DataConverter
 import org.apache.paimon.types.{ArrayType => PaimonArrayType, BigIntType, BlobType, DataType => PaimonDataType, DataTypeChecks, RowType}
 import org.apache.paimon.utils.InternalRowUtils
@@ -33,6 +33,8 @@ import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 abstract class SparkArrayData extends org.apache.spark.sql.catalyst.util.ArrayData {
 
   def replace(array: InternalArray): SparkArrayData
+
+  def withBlobAsDescriptor(blobAsDescriptor: Boolean): SparkArrayData
 }
 
 abstract class AbstractSparkArrayData extends SparkArrayData {
@@ -41,22 +43,39 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
 
   var paimonArray: InternalArray = _
 
+  protected var blobAsDescriptor: Boolean = false
+
   override def replace(array: InternalArray): SparkArrayData = {
     this.paimonArray = array
+    this
+  }
+
+  override def withBlobAsDescriptor(blobAsDescriptor: Boolean): SparkArrayData = {
+    this.blobAsDescriptor = blobAsDescriptor
     this
   }
 
   override def numElements(): Int = paimonArray.size()
 
   override def copy(): ArrayData = {
-    SparkArrayData.create(elementType).replace(InternalRowUtils.copyArray(paimonArray, elementType))
+    SparkArrayData
+      .create(elementType, blobAsDescriptor)
+      .replace(InternalRowUtils.copyArray(paimonArray, elementType))
   }
 
   override def array: Array[Any] = {
     Array.range(0, numElements()).map {
       i =>
-        DataConverter
-          .fromPaimon(InternalRowUtils.get(paimonArray, i, elementType), elementType)
+        if (isNullAt(i)) {
+          null
+        } else {
+          elementType match {
+            case _: BlobType => fromBlob(paimonArray.getBlob(i))
+            case _ =>
+              DataConverter
+                .fromPaimon(InternalRowUtils.get(paimonArray, i, elementType), elementType)
+          }
+        }
     }
   }
 
@@ -96,9 +115,24 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
       if (paimonArray.isNullAt(ordinal)) {
         null
       } else {
-        paimonArray.getBlob(ordinal).toData
+        fromBlob(paimonArray.getBlob(ordinal))
       }
     case _ => paimonArray.getBinary(ordinal)
+  }
+
+  private def fromBlob(blob: Blob): Array[Byte] = {
+    if (blob == null) {
+      null
+    } else {
+      blob match {
+        case blobView: BlobView if !blobView.isResolved =>
+          Blob.serializeBlob(blobView)
+        case _ if blobAsDescriptor =>
+          blob.toDescriptor.serialize()
+        case _ =>
+          blob.toData
+      }
+    }
   }
 
   override def getInterval(ordinal: Int): CalendarInterval =
@@ -109,7 +143,8 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
 
   override def getArray(ordinal: Int): ArrayData = DataConverter.fromPaimon(
     paimonArray.getArray(ordinal),
-    elementType.asInstanceOf[PaimonArrayType])
+    elementType.asInstanceOf[PaimonArrayType],
+    blobAsDescriptor)
 
   override def getMap(ordinal: Int): MapData =
     DataConverter.fromPaimon(paimonArray.getMap(ordinal), elementType)
@@ -121,6 +156,10 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
 
 object SparkArrayData {
   def create(elementType: PaimonDataType): SparkArrayData = {
-    SparkShimLoader.shim.createSparkArrayData(elementType)
+    create(elementType, blobAsDescriptor = false)
+  }
+
+  def create(elementType: PaimonDataType, blobAsDescriptor: Boolean): SparkArrayData = {
+    SparkShimLoader.shim.createSparkArrayData(elementType).withBlobAsDescriptor(blobAsDescriptor)
   }
 }

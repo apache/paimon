@@ -320,7 +320,7 @@ public class FileStoreSourceSplitReader
 
             recordAndPosition.setNext(
                     blobFields.isEmpty()
-                            ? new FlinkRowData(row, rowType)
+                            ? new FlinkRowData(row, rowType, blobAsDescriptor)
                             : new FlinkRowDataWithBlob(row, rowType, blobFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {

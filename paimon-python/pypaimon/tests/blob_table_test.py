@@ -4663,7 +4663,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 [SchemaChange.rename_column('blob_col', 'blob_col_renamed')],
                 False
             )
-        self.assertIn('Cannot rename BLOB column', str(ctx.exception))
+        self.assertIn('Cannot rename BLOB or ARRAY<BLOB> column', str(ctx.exception))
 
     def test_nested_field_named_blob_not_treated_as_blob(self):
         """Regression: a ROW field with a nested column whose name contains

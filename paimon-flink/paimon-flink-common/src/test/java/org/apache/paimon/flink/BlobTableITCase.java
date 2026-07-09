@@ -148,6 +148,59 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testArrayBlobFieldWithDescriptorElements() throws Exception {
+        byte[] blobData = new byte[1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/external_array_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                        "CREATE TABLE array_blob_descriptor_table "
+                                + "(id INT, data STRING, pictures ARRAY<BYTES>) "
+                                + "WITH ('row-tracking.enabled'='true', "
+                                + "'data-evolution.enabled'='true', "
+                                + "'blob-field'='pictures', "
+                                + "'blob-as-descriptor'='true')")
+                .await();
+        batchSql(
+                "INSERT INTO array_blob_descriptor_table VALUES "
+                        + "(1, 'paimon', ARRAY[sys.path_to_descriptor('"
+                        + uri
+                        + "'), X'5945'])");
+
+        Row descriptorRow =
+                batchSql("SELECT pictures[1], pictures[2] " + "FROM array_blob_descriptor_table")
+                        .get(0);
+        BlobDescriptor firstDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(0));
+        BlobDescriptor secondDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(1));
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        CatalogContext catalogContext = CatalogContext.create(options);
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
+        Blob firstBlob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(firstDescriptor.uri()), firstDescriptor);
+        Blob secondBlob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(secondDescriptor.uri()), secondDescriptor);
+        assertThat(firstBlob.toData()).isEqualTo(blobData);
+        assertThat(secondBlob.toData()).isEqualTo(new byte[] {89, 69});
+
+        batchSql("ALTER TABLE array_blob_descriptor_table SET ('blob-as-descriptor'='false')");
+        assertThat(
+                        batchSql(
+                                "SELECT pictures[1], pictures[2] "
+                                        + "FROM array_blob_descriptor_table"))
+                .containsExactly(Row.of(blobData, new byte[] {89, 69}));
+    }
+
+    @Test
     public void testBlobCompaction() throws Exception {
         for (int i = 1; i <= 10; i++) {
             batchSql("INSERT INTO blob_table VALUES (%s, 'paimon', X'48656C6C6F')", i);

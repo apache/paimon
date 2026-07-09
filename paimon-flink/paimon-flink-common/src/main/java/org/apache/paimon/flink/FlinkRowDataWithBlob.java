@@ -31,7 +31,6 @@ import java.util.Set;
 public class FlinkRowDataWithBlob extends FlinkRowData {
 
     private final Set<Integer> blobFields;
-    private final boolean blobAsDescriptor;
 
     public FlinkRowDataWithBlob(
             InternalRow row, Set<Integer> blobFields, boolean blobAsDescriptor) {
@@ -43,9 +42,8 @@ public class FlinkRowDataWithBlob extends FlinkRowData {
             @Nullable RowType rowType,
             Set<Integer> blobFields,
             boolean blobAsDescriptor) {
-        super(row, rowType);
+        super(row, rowType, blobAsDescriptor);
         this.blobFields = blobFields;
-        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
