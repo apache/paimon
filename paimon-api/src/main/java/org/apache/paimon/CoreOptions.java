@@ -1618,6 +1618,19 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp (inclusive), "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
+    public static final ConfigOption<String> INCREMENTAL_BETWEEN_BOUNDARY_MODE =
+            key("incremental-between-boundary-mode")
+                    .stringType()
+                    .defaultValue("snapshot")
+                    .withDescription(
+                            "Boundary mode for incremental-between-timestamp. "
+                                    + "Supported values are 'snapshot' and 'snapshot-or-tag'. "
+                                    + "It takes effect only when incremental-between-scan-mode is 'diff'. "
+                                    + "'snapshot' resolves the start boundary by snapshot timestamp. "
+                                    + "'snapshot-or-tag' resolves the start boundary by snapshot timestamp, "
+                                    + "or by the nearest earlier tag if no snapshot is found. "
+                                    + "The end boundary is always resolved by snapshot timestamp.");
+
     public static final ConfigOption<String> INCREMENTAL_TO_AUTO_TAG =
             key("incremental-to-auto-tag")
                     .stringType()
@@ -3569,6 +3582,10 @@ public class CoreOptions implements Serializable {
 
     public IncrementalBetweenScanMode incrementalBetweenScanMode() {
         return options.get(INCREMENTAL_BETWEEN_SCAN_MODE);
+    }
+
+    public String incrementalBetweenBoundaryMode() {
+        return options.get(INCREMENTAL_BETWEEN_BOUNDARY_MODE);
     }
 
     public String incrementalToAutoTag() {

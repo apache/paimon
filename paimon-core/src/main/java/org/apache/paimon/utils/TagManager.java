@@ -355,6 +355,23 @@ public class TagManager {
         }
     }
 
+    /**
+     * Return the latest auto-tagged snapshot whose time is earlier than or equal to the timestamp.
+     */
+    public Optional<Snapshot> earlierOrEqualTimeMillis(
+            long timeMillis, TagPeriodHandler tagPeriodHandler) {
+        List<Snapshot> autoTagSnapshots =
+                new ArrayList<>(tags(tagPeriodHandler::isAutoTag).keySet());
+        autoTagSnapshots.sort(Comparator.comparingLong(Snapshot::timeMillis).reversed());
+        for (Snapshot autoTagSnapshot : autoTagSnapshots) {
+            if (autoTagSnapshot.timeMillis() <= timeMillis) {
+                return Optional.of(autoTagSnapshot);
+            }
+        }
+
+        return Optional.empty();
+    }
+
     /** Return the tag or throw exception indicating the tag not found. */
     public Tag getOrThrow(String tagName) {
         return get(tagName)

@@ -165,13 +165,21 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
         return new IncrementalDeltaStartingScanner(snapshotManager, startId, endId, scanMode);
     }
 
-    public static IncrementalDeltaStartingScanner betweenTimestamps(
+    public static AbstractStartingScanner betweenTimestamps(
             long startTimestamp,
             long endTimestamp,
             SnapshotManager snapshotManager,
             ScanMode scanMode) {
-        Snapshot startingSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
         Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        if (earliestSnapshot == null
+                || latestSnapshot == null
+                || startTimestamp > latestSnapshot.timeMillis()
+                || endTimestamp < earliestSnapshot.timeMillis()) {
+            return new EmptyResultStartingScanner(snapshotManager);
+        }
+
+        Snapshot startingSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
         // if earliestSnapShot.timeMillis() > startTimestamp we should include the earliestSnapShot
         long startId =
                 (startingSnapshot == null || earliestSnapshot.timeMillis() > startTimestamp)
@@ -179,7 +187,7 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
                         : startingSnapshot.id();
 
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
-        long endId = endSnapshot == null ? snapshotManager.latestSnapshot().id() : endSnapshot.id();
+        long endId = endSnapshot == null ? latestSnapshot.id() : endSnapshot.id();
 
         return new IncrementalDeltaStartingScanner(snapshotManager, startId, endId, scanMode);
     }
