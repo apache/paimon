@@ -407,6 +407,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             def map_batches(self, fn, batch_format=None):
                 return self
 
+        parser_path = (
+            "pypaimon.schema.data_types.PyarrowFieldParser.from_paimon_schema"
+        )
         with mock.patch(
                 "pypaimon.catalog.catalog_factory.CatalogFactory.create",
                 return_value=FakeCatalog()), \
@@ -417,12 +420,10 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                                       ("_ROW_ID", pa.int64()),
                                       ("age", pa.int32()),
                                   ])), \
-                mock.patch(
-                    "pypaimon.schema.data_types.PyarrowFieldParser.from_paimon_schema",
-                    return_value=pa.schema([
-                        ("age", pa.int32()),
-                    ]),
-                ), \
+                mock.patch(parser_path,
+                           return_value=pa.schema([
+                               ("age", pa.int32()),
+                           ])), \
                 mock.patch.object(m, "distributed_update_apply",
                                   return_value=(recorder["msgs"], 3, [])):
             recorder["result"] = m.update_by_row_id(
