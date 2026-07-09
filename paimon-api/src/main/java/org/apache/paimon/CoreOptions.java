@@ -2427,6 +2427,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
+            key("data-evolution.compaction.rewrite-row-ids")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
+                                    + "Enable only when callers do not rely on stable _ROW_ID; "
+                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -3932,6 +3941,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorBitmap64() {
         return options.get(DELETION_VECTOR_BITMAP64);
+    }
+
+    public boolean dataEvolutionCompactionRewriteRowIds() {
+        return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
     }
 
     public FileIndexOptions indexColumnsOptions() {

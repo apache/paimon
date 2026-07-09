@@ -22,12 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -52,10 +55,13 @@ import java.util.function.LongFunction;
 import java.util.stream.Collectors;
 
 import static java.util.Comparator.comparingLong;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
@@ -68,15 +74,16 @@ public class DataEvolutionCompactCoordinator {
     private final CompactPlanner planner;
 
     public DataEvolutionCompactCoordinator(
-            FileStoreTable table, boolean compactBlob, boolean compactVector) {
-        this(table, null, compactBlob, compactVector);
+            FileStoreTable table, boolean compactBlob, boolean compactVector, Snapshot snapshot) {
+        this(table, null, compactBlob, compactVector, snapshot);
     }
 
     public DataEvolutionCompactCoordinator(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
             boolean compactBlob,
-            boolean compactVector) {
+            boolean compactVector,
+            Snapshot snapshot) {
         CoreOptions options = table.coreOptions();
 
         long targetFileSize = options.targetFileSize(false);
@@ -87,11 +94,17 @@ public class DataEvolutionCompactCoordinator {
         this.scanner =
                 new CompactScanner(
                         table.newSnapshotReader().withPartitionFilter(partitionPredicate),
-                        table.store().newScan().withPartitionFilter(partitionPredicate));
+                        table.store().newScan().withPartitionFilter(partitionPredicate),
+                        snapshot);
+        boolean rewriteRowIds =
+                options.deletionVectorsEnabled() && options.dataEvolutionCompactionRewriteRowIds();
         this.planner =
                 new CompactPlanner(
                         compactBlob,
                         compactVector,
+                        rewriteRowIds,
+                        table.store().newIndexFileHandler(),
+                        scanner.snapshot(),
                         targetFileSize,
                         options.blobTargetFileSize(),
                         openFileCost,
@@ -120,18 +133,27 @@ public class DataEvolutionCompactCoordinator {
         return Collections.emptyList();
     }
 
+    public Snapshot snapshot() {
+        return scanner.snapshot();
+    }
+
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 
         private final FileStoreScan scan;
+        private final Snapshot snapshot;
         private final Queue<List<ManifestFileMeta>> metas;
 
-        private CompactScanner(SnapshotReader snapshotReader, FileStoreScan scan) {
+        private CompactScanner(
+                SnapshotReader snapshotReader, FileStoreScan scan, Snapshot snapshot) {
             this.scan = scan;
-            Snapshot snapshot = snapshotReader.snapshotManager().latestSnapshot();
+            this.snapshot = snapshot;
 
             List<ManifestFileMeta> manifestFileMetas =
-                    snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
+                    snapshotReader
+                            .manifestsReader()
+                            .read(this.snapshot, ScanMode.ALL)
+                            .filteredManifests;
 
             if (allContainsRowId(manifestFileMetas)) {
                 RangeHelper<ManifestFileMeta> rangeHelper =
@@ -156,6 +178,10 @@ public class DataEvolutionCompactCoordinator {
             }
             return result;
         }
+
+        Snapshot snapshot() {
+            return snapshot;
+        }
     }
 
     /** Generate compaction tasks. */
@@ -163,6 +189,9 @@ public class DataEvolutionCompactCoordinator {
 
         private final boolean compactBlob;
         private final boolean compactVector;
+        private final boolean materializeDeletions;
+        @Nullable private final IndexFileHandler indexFileHandler;
+        @Nullable private final Snapshot snapshot;
         private final long targetFileSize;
         private final long blobTargetFileSize;
         private final long openFileCost;
@@ -180,6 +209,9 @@ public class DataEvolutionCompactCoordinator {
             this(
                     compactBlob,
                     compactVector,
+                    false,
+                    null,
+                    null,
                     targetFileSize,
                     targetFileSize,
                     openFileCost,
@@ -194,6 +226,9 @@ public class DataEvolutionCompactCoordinator {
         CompactPlanner(
                 boolean compactBlob,
                 boolean compactVector,
+                boolean materializeDeletions,
+                @Nullable IndexFileHandler indexFileHandler,
+                @Nullable Snapshot snapshot,
                 long targetFileSize,
                 long blobTargetFileSize,
                 long openFileCost,
@@ -202,6 +237,9 @@ public class DataEvolutionCompactCoordinator {
                 @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
+            this.materializeDeletions = materializeDeletions;
+            this.indexFileHandler = indexFileHandler;
+            this.snapshot = snapshot;
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
@@ -225,6 +263,7 @@ public class DataEvolutionCompactCoordinator {
                     partitionedFiles.entrySet()) {
                 BinaryRow partition = partitionFiles.getKey();
                 List<DataFileMeta> files = partitionFiles.getValue();
+                Map<String, DeletionFile> deletionFiles = deletionFiles(partition);
                 RangeHelper<DataFileMeta> rangeHelper =
                         new RangeHelper<>(
                                 f ->
@@ -254,7 +293,7 @@ public class DataEvolutionCompactCoordinator {
                         }
                     }
 
-                    if (compactBlob) {
+                    if (compactBlob || materializeDeletions) {
                         // associate blob files to data files
                         for (DataFileMeta blobFile : blobFiles) {
                             Long key = treeMap.floorKey(blobFile.nonNullFirstRowId());
@@ -272,7 +311,7 @@ public class DataEvolutionCompactCoordinator {
                             }
                         }
                     }
-                    if (compactVector) {
+                    if (compactVector || materializeDeletions) {
                         // associate vector-store files to data files
                         for (DataFileMeta vectorStoreFile : vectorStoreFiles) {
                             Long key = treeMap.floorKey(vectorStoreFile.nonNullFirstRowId());
@@ -296,53 +335,54 @@ public class DataEvolutionCompactCoordinator {
                             new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
                     List<List<DataFileMeta>> groupedFiles =
                             rangeHelper2.mergeOverlappingRanges(dataFiles);
-                    List<DataFileMeta> waitCompactFiles = new ArrayList<>();
 
-                    long weightSum = 0L;
+                    CompactBin compactBin = new CompactBin(targetFileSize);
                     for (List<DataFileMeta> fileGroup : groupedFiles) {
                         checkArgument(
                                 rangeHelper.areAllRangesSame(fileGroup),
                                 "Data files %s should be all row id ranges same.",
                                 dataFiles);
-                        long currentGroupWeight =
-                                fileGroup.stream()
-                                        .mapToLong(d -> Math.max(d.fileSize(), openFileCost))
-                                        .sum();
-                        if (currentGroupWeight > targetFileSize) {
+                        DataFileMeta anchor = retrieveAnchorFile(fileGroup, file -> file);
+                        DeletionFile anchorDeletionFile =
+                                materializeDeletions ? deletionFiles.get(anchor.fileName()) : null;
+
+                        // use remaining records num ratio to estimate real file size
+                        // of each normal file
+                        long groupWeight = groupWeight(fileGroup, anchor, anchorDeletionFile);
+                        if (groupWeight > targetFileSize) {
+                            tasks.addAll(
+                                    triggerTask(
+                                            compactBin.drain(),
+                                            partition,
+                                            dataFileToBlobFiles,
+                                            dataFileToVectorStoreFiles));
                             // compact current file group to merge field files
                             tasks.addAll(
                                     triggerTask(
-                                            fileGroup,
+                                            compactBin(
+                                                    fileGroup,
+                                                    anchor.fileName(),
+                                                    anchorDeletionFile,
+                                                    groupWeight),
                                             partition,
                                             dataFileToBlobFiles,
                                             dataFileToVectorStoreFiles));
-                            // compact wait compact files
-                            tasks.addAll(
-                                    triggerTask(
-                                            waitCompactFiles,
-                                            partition,
-                                            dataFileToBlobFiles,
-                                            dataFileToVectorStoreFiles));
-                            waitCompactFiles = new ArrayList<>();
-                            weightSum = 0;
                         } else {
-                            weightSum += currentGroupWeight;
-                            waitCompactFiles.addAll(fileGroup);
-                            if (weightSum > targetFileSize) {
+                            compactBin.add(
+                                    fileGroup, anchor.fileName(), anchorDeletionFile, groupWeight);
+                            if (compactBin.enoughContent()) {
                                 tasks.addAll(
                                         triggerTask(
-                                                waitCompactFiles,
+                                                compactBin.drain(),
                                                 partition,
                                                 dataFileToBlobFiles,
                                                 dataFileToVectorStoreFiles));
-                                waitCompactFiles = new ArrayList<>();
-                                weightSum = 0L;
                             }
                         }
                     }
                     tasks.addAll(
                             triggerTask(
-                                    waitCompactFiles,
+                                    compactBin.drain(),
                                     partition,
                                     dataFileToBlobFiles,
                                     dataFileToVectorStoreFiles));
@@ -352,6 +392,28 @@ public class DataEvolutionCompactCoordinator {
         }
 
         private List<DataEvolutionCompactTask> triggerTask(
+                CompactBin compactBin,
+                BinaryRow partition,
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
+            if (compactBin.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            List<DataFileMeta> dataFiles = compactBin.files();
+            if (compactBin.materializeDeletion()) {
+                return triggerMaterializeTask(
+                        dataFiles,
+                        compactBin.anchorDeletionFiles(),
+                        partition,
+                        dataFileToBlobFiles,
+                        dataFileToVectorStoreFiles);
+            }
+            return triggerNonMaterializeTask(
+                    dataFiles, partition, dataFileToBlobFiles, dataFileToVectorStoreFiles);
+        }
+
+        private List<DataEvolutionCompactTask> triggerNonMaterializeTask(
                 List<DataFileMeta> dataFiles,
                 BinaryRow partition,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
@@ -359,7 +421,7 @@ public class DataEvolutionCompactCoordinator {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
             boolean triggerNormalFile = dataFiles.size() >= compactMinFileNum;
             if (triggerNormalFile) {
-                tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
+                tasks.add(new DataEvolutionNormalCompactTask(partition, dataFiles));
             }
 
             if (compactBlob) {
@@ -372,8 +434,7 @@ public class DataEvolutionCompactCoordinator {
                     }
                     for (List<DataFileMeta> blobFilesToCompact :
                             blobFileGroupsToCompact(blobFiles)) {
-                        tasks.add(
-                                new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                        tasks.add(new DataEvolutionBlobCompactTask(partition, blobFilesToCompact));
                     }
                 } else {
                     for (DataFileMeta dataFile : dataFiles) {
@@ -382,8 +443,8 @@ public class DataEvolutionCompactCoordinator {
                                         dataFileToBlobFiles.getOrDefault(
                                                 dataFile, Collections.emptyList()))) {
                             tasks.add(
-                                    new DataEvolutionCompactTask(
-                                            partition, blobFilesToCompact, true));
+                                    new DataEvolutionBlobCompactTask(
+                                            partition, blobFilesToCompact));
                         }
                     }
                 }
@@ -398,7 +459,7 @@ public class DataEvolutionCompactCoordinator {
                                         dataFile, Collections.emptyList()));
                     }
                     if (vectorStoreFiles.size() >= compactMinFileNum) {
-                        tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                        tasks.add(new DataEvolutionNormalCompactTask(partition, vectorStoreFiles));
                     }
                 } else {
                     for (DataFileMeta dataFile : dataFiles) {
@@ -407,13 +468,81 @@ public class DataEvolutionCompactCoordinator {
                                         dataFile, Collections.emptyList());
                         if (vectorStoreFiles.size() >= compactMinFileNum) {
                             tasks.add(
-                                    new DataEvolutionCompactTask(
-                                            partition, vectorStoreFiles, false));
+                                    new DataEvolutionNormalCompactTask(
+                                            partition, vectorStoreFiles));
                         }
                     }
                 }
             }
             return tasks;
+        }
+
+        private List<DataEvolutionCompactTask> triggerMaterializeTask(
+                List<DataFileMeta> dataFiles,
+                Map<String, DeletionFile> deletionFiles,
+                BinaryRow partition,
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
+            List<DataFileMeta> taskFiles = new ArrayList<>(dataFiles);
+            for (DataFileMeta dataFile : dataFiles) {
+                taskFiles.addAll(
+                        dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
+                List<DataFileMeta> vectorStoreFiles =
+                        dataFileToVectorStoreFiles.getOrDefault(dataFile, Collections.emptyList());
+                checkArgument(
+                        vectorStoreFiles.isEmpty(),
+                        "Materializing deletion vectors for vector-store files is not supported.");
+            }
+
+            List<DeletionFile> taskDeletionFiles = new ArrayList<>(taskFiles.size());
+            for (DataFileMeta taskFile : taskFiles) {
+                taskDeletionFiles.add(deletionFiles.get(taskFile.fileName()));
+            }
+            return Collections.singletonList(
+                    new DataEvolutionMaterializeDeletionCompactTask(
+                            partition, taskFiles, taskDeletionFiles));
+        }
+
+        private CompactBin compactBin(
+                List<DataFileMeta> files,
+                String anchorFileName,
+                @Nullable DeletionFile anchorDeletionFile,
+                long groupWeight) {
+            CompactBin bin = new CompactBin(targetFileSize);
+            bin.add(files, anchorFileName, anchorDeletionFile, groupWeight);
+            return bin;
+        }
+
+        private long groupWeight(
+                List<DataFileMeta> files,
+                DataFileMeta anchor,
+                @Nullable DeletionFile anchorDeletionFile) {
+            double remainingRatio = remainingRatio(anchor, anchorDeletionFile);
+            long weight = 0L;
+            for (DataFileMeta file : files) {
+                weight +=
+                        Math.max((long) Math.ceil(file.fileSize() * remainingRatio), openFileCost);
+            }
+            return weight;
+        }
+
+        private double remainingRatio(DataFileMeta file, DeletionFile deletionFile) {
+            Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
+            if (cardinality == null || file.rowCount() <= 0) {
+                return 1D;
+            }
+            long visibleRows = Math.max(0L, file.rowCount() - cardinality);
+            return ((double) visibleRows) / file.rowCount();
+        }
+
+        private Map<String, DeletionFile> deletionFiles(BinaryRow partition) {
+            if (!materializeDeletions || snapshot == null || indexFileHandler == null) {
+                return Collections.emptyMap();
+            }
+            List<IndexFileMeta> indexFiles =
+                    indexFileHandler.scan(
+                            snapshot, DELETION_VECTORS_INDEX, partition, UNAWARE_BUCKET);
+            return indexFileHandler.dvIndex(partition, UNAWARE_BUCKET).toDeletionFiles(indexFiles);
         }
 
         private List<List<DataFileMeta>> blobFileGroupsToCompact(List<DataFileMeta> blobFiles) {
@@ -514,6 +643,62 @@ public class DataEvolutionCompactCoordinator {
                     blobFile);
             RowType rowType = schemaFetcher.apply(blobFile.schemaId());
             return rowType.getField(blobFile.writeCols().get(0)).id();
+        }
+    }
+
+    private static class CompactBin {
+
+        private final List<DataFileMeta> files = new ArrayList<>();
+        private final Map<String, DeletionFile> anchorDeletionFiles = new HashMap<>();
+        private final long targetFileSize;
+
+        private long weight = 0L;
+
+        CompactBin(long targetFileSize) {
+            this.targetFileSize = targetFileSize;
+        }
+
+        private void add(
+                List<DataFileMeta> files,
+                String anchorFileName,
+                @Nullable DeletionFile anchorDeletionFile,
+                long weight) {
+            this.files.addAll(files);
+            this.weight += weight;
+            if (anchorDeletionFile != null) {
+                this.anchorDeletionFiles.put(anchorFileName, anchorDeletionFile);
+            }
+        }
+
+        private boolean isEmpty() {
+            return files.isEmpty();
+        }
+
+        private boolean materializeDeletion() {
+            return !anchorDeletionFiles.isEmpty();
+        }
+
+        private List<DataFileMeta> files() {
+            return files;
+        }
+
+        private Map<String, DeletionFile> anchorDeletionFiles() {
+            return anchorDeletionFiles;
+        }
+
+        private boolean enoughContent() {
+            return weight > targetFileSize;
+        }
+
+        private CompactBin drain() {
+            CompactBin result = new CompactBin(targetFileSize);
+            result.files.addAll(files);
+            result.anchorDeletionFiles.putAll(anchorDeletionFiles);
+            result.weight = weight;
+            files.clear();
+            anchorDeletionFiles.clear();
+            weight = 0L;
+            return result;
         }
     }
 }

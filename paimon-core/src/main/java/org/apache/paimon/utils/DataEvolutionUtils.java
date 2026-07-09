@@ -31,7 +31,7 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Util class for Deletion Vectors. */
+/** Util class for data evolution. */
 public class DataEvolutionUtils {
 
     /**

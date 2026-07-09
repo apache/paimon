@@ -18,12 +18,15 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.VersionedSerializer;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.table.source.DeletionFile;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -37,7 +40,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
-    private static final int CURRENT_VERSION = 1;
+    private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -69,14 +72,18 @@ public class DataEvolutionCompactTaskSerializer
     private void serialize(DataEvolutionCompactTask task, DataOutputView view) throws IOException {
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
-        view.writeBoolean(task.isBlobTask());
+        view.writeInt(task.type().code());
+        if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
+            DeletionFile.serializeList(
+                    view, ((DataEvolutionMaterializeDeletionCompactTask) task).deletionFiles());
+        }
     }
 
     @Override
     public DataEvolutionCompactTask deserialize(int version, byte[] serialized) throws IOException {
         checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
-        return deserialize(view);
+        return deserialize(version, view);
     }
 
     public List<DataEvolutionCompactTask> deserializeList(int version, DataInputView view)
@@ -85,7 +92,7 @@ public class DataEvolutionCompactTaskSerializer
         int length = view.readInt();
         List<DataEvolutionCompactTask> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
-            list.add(deserialize(view));
+            list.add(deserialize(version, view));
         }
         return list;
     }
@@ -102,10 +109,24 @@ public class DataEvolutionCompactTaskSerializer
         }
     }
 
-    private DataEvolutionCompactTask deserialize(DataInputView view) throws IOException {
-        return new DataEvolutionCompactTask(
-                deserializeBinaryRow(view),
-                dataFileSerializer.deserializeList(view),
-                view.readBoolean());
+    private DataEvolutionCompactTask deserialize(int version, DataInputView view)
+            throws IOException {
+        BinaryRow partition = deserializeBinaryRow(view);
+        List<DataFileMeta> files = dataFileSerializer.deserializeList(view);
+        DataEvolutionCompactTask.TaskType type =
+                DataEvolutionCompactTask.TaskType.fromCode(view.readInt());
+        switch (type) {
+            case NORMAL:
+                return new DataEvolutionNormalCompactTask(partition, files);
+            case BLOB:
+                return new DataEvolutionBlobCompactTask(partition, files);
+            case MATERIALIZE_DELETION:
+                return new DataEvolutionMaterializeDeletionCompactTask(
+                        partition,
+                        files,
+                        DeletionFile.deserializeList(view, DeletionFile::deserialize));
+            default:
+                throw new UnsupportedOperationException("Unsupported compact task type: " + type);
+        }
     }
 }
