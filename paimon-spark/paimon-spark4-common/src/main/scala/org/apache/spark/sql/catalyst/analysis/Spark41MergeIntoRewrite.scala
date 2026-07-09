@@ -25,13 +25,13 @@ import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, Exists, Expression, IsNotNull, Literal, MetadataAttribute, MonotonicallyIncreasingID, OuterReference, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
-import org.apache.spark.sql.catalyst.plans.{FullOuter, JoinType, LeftAnti, LeftOuter}
-import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, AppendData, DeleteAction, Filter, HintInfo, InsertAction, Join, JoinHint, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, NO_BROADCAST_AND_REPLICATION, Project, ReplaceData, UpdateAction}
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Discard, Insert, Instruction, Keep, ROW_ID, Update}
+import org.apache.spark.sql.catalyst.plans.{FullOuter, Inner, JoinType, LeftAnti, LeftOuter, RightOuter}
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, AppendData, DeleteAction, Filter, HintInfo, InsertAction, Join, JoinHint, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, NO_BROADCAST_AND_REPLICATION, Project, ReplaceData, UpdateAction, WriteDelta}
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Delete, Discard, Insert, Instruction, Keep, ROW_ID, Update}
 import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{OPERATION_COLUMN, WRITE_OPERATION, WRITE_WITH_METADATA_OPERATION}
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+import org.apache.spark.sql.connector.write.{RowLevelOperationTable, SupportsDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.MERGE
-import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, ExtractV2Table}
 import org.apache.spark.sql.types.IntegerType
@@ -47,14 +47,16 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * already marked analyzed and silently skipped, so the planner rejects it with
  * `UNSUPPORTED_FEATURE.TABLE_OPERATION`. We intercept via `transformDown` under
  * `allowInvokingTransformsInAnalyzer` and inline the three `ReplaceData`/`AppendData` branches.
- * `SupportsDelta` is omitted — Paimon is copy-on-write only.
+ * Copy-on-write tables mirror the non-delta rewrite; deletion-vector append tables mirror the
+ * `SupportsDelta` (`WriteDelta`) rewrite.
  *
  * We fire before `ResolveAssignments`, so `m.aligned` is `false`. The rule pre-aligns each action
  * list via `PaimonAssignmentUtils.alignActions` (shared with the postHoc `PaimonMergeInto` rule).
  *
- * Row-tracking-only tables use the same V2 copy-on-write rewrite. CHAR columns are excluded —
- * `readSidePadding` races with the rewrite and trips CheckAnalysis; those plans fall back to the
- * postHoc `PaimonMergeInto` V1 path, which also owns PK / DE / DV tables via
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite; unaware-bucket deletion-vector
+ * append tables take the transcribed `WriteDelta` branch (delta-based row-level operations). CHAR
+ * columns are excluded — `readSidePadding` races with the rewrite and trips CheckAnalysis; those
+ * plans fall back to the postHoc `PaimonMergeInto` V1 path, which also owns PK / DE tables via
  * `RowLevelHelper.shouldFallbackToV1MergeInto`.
  */
 object Spark41MergeIntoRewrite
@@ -72,7 +74,7 @@ object Spark41MergeIntoRewrite
       plan.transformDown {
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.needSchemaEvolution &&
-              targetsV2CopyOnWriteTable(m.targetTable) =>
+              (targetsV2CopyOnWriteTable(m.targetTable) || targetsV2DeltaTable(m.targetTable)) =>
           // Pure append-only tables skip postHoc `PaimonMergeInto`, so evolve schema here.
           val evolved = evolveSchemaIfPaimon(m)
           rewrite(alignAllMergeActions(evolved, evolved.targetTable.output))
@@ -112,14 +114,26 @@ object Spark41MergeIntoRewrite
           buildNotMatchedOnlyAppendPlan(relation, source, cond, notMatchedActions)
         } else {
           val operationTable = buildOperationTable(tbl, MERGE, CaseInsensitiveStringMap.empty())
-          buildReplaceDataPlan(
-            relation,
-            operationTable,
-            source,
-            cond,
-            matchedActions,
-            notMatchedActions,
-            notMatchedBySourceActions)
+          operationTable.operation match {
+            case _: SupportsDelta =>
+              buildWriteDeltaPlan(
+                relation,
+                operationTable,
+                source,
+                cond,
+                matchedActions,
+                notMatchedActions,
+                notMatchedBySourceActions)
+            case _ =>
+              buildReplaceDataPlan(
+                relation,
+                operationTable,
+                source,
+                cond,
+                matchedActions,
+                notMatchedActions,
+                notMatchedBySourceActions)
+          }
         }
       case _ =>
         m
@@ -172,6 +186,149 @@ object Spark41MergeIntoRewrite
       joinPlan
     )
     AppendData.byPosition(r, mergeRows)
+  }
+
+  // Delta path producing a `WriteDelta` plan for deletion-vector append tables. Mirrors Spark
+  // 4.1's `RewriteMergeIntoTable.{buildWriteDeltaPlan, buildWriteDeltaMergeRowsPlan,
+  // chooseWriteDeltaJoinType, pushDownTargetPredicates}`; only the non-split UPDATE branch is
+  // transcribed because `PaimonSparkDeltaOperation.representUpdateAsDeleteAndInsert` is false.
+  private def buildWriteDeltaPlan(
+      relation: DataSourceV2Relation,
+      operationTable: RowLevelOperationTable,
+      source: LogicalPlan,
+      cond: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction]): WriteDelta = {
+
+    val operation = operationTable.operation.asInstanceOf[SupportsDelta]
+    assert(
+      !operation.representUpdateAsDeleteAndInsert,
+      "Paimon delta operations represent UPDATE as a single operation")
+
+    val rowAttrs = relation.output
+    val rowIdAttrs = resolveRowIdAttrs(relation, operation)
+    val metadataAttrs = resolveRequiredMetadataAttrs(relation, operation)
+
+    val readRelation = buildRelationWithAttrs(relation, operationTable, metadataAttrs, rowIdAttrs)
+
+    // if there is no NOT MATCHED BY SOURCE clause, predicates of the ON condition that
+    // reference only the target table can be pushed down
+    val (filteredReadRelation, joinCond) = if (notMatchedBySourceActions.isEmpty) {
+      pushDownTargetPredicates(readRelation, cond)
+    } else {
+      (readRelation, cond)
+    }
+
+    val checkCardinality = shouldCheckCardinality(matchedActions)
+
+    val joinType = chooseWriteDeltaJoinType(notMatchedActions, notMatchedBySourceActions)
+    val joinPlan = join(filteredReadRelation, source, joinType, joinCond, checkCardinality)
+
+    val mergeRowsPlan = buildWriteDeltaMergeRowsPlan(
+      readRelation,
+      joinPlan,
+      matchedActions,
+      notMatchedActions,
+      notMatchedBySourceActions,
+      rowIdAttrs,
+      checkCardinality)
+
+    val writeRelation = relation.copy(table = operationTable)
+    val projections = buildWriteDeltaProjections(mergeRowsPlan, rowAttrs, rowIdAttrs, metadataAttrs)
+    WriteDelta(writeRelation, cond, mergeRowsPlan, relation, projections)
+  }
+
+  private def chooseWriteDeltaJoinType(
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction]): JoinType = {
+    val unmatchedTargetRowsRequired = notMatchedBySourceActions.nonEmpty
+    val unmatchedSourceRowsRequired = notMatchedActions.nonEmpty
+    if (unmatchedTargetRowsRequired && unmatchedSourceRowsRequired) {
+      FullOuter
+    } else if (unmatchedTargetRowsRequired) {
+      LeftOuter
+    } else if (unmatchedSourceRowsRequired) {
+      RightOuter
+    } else {
+      Inner
+    }
+  }
+
+  private def buildWriteDeltaMergeRowsPlan(
+      targetTable: DataSourceV2Relation,
+      joinPlan: LogicalPlan,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction],
+      rowIdAttrs: Seq[Attribute],
+      checkCardinality: Boolean): MergeRows = {
+
+    val (metadataAttrs, rowAttrs) =
+      targetTable.output.partition(attr => MetadataAttribute.isValid(attr.metadata))
+
+    // original row ID values must be preserved and passed back to the table to encode updates
+    // if there are any assignments to row ID attributes, add extra columns for original values
+    val updateAssignments = (matchedActions ++ notMatchedBySourceActions).flatMap {
+      case UpdateAction(_, assignments, _) => assignments
+      case _ => Nil
+    }
+    val originalRowIdValues = buildOriginalRowIdValues(rowIdAttrs, updateAssignments)
+
+    def toDeltaInstruction(action: MergeAction): Instruction = {
+      action match {
+        case UpdateAction(cond, assignments, _) =>
+          val output = deltaUpdateOutput(assignments, metadataAttrs, originalRowIdValues)
+          Keep(Update, cond.getOrElse(TrueLiteral), output)
+        case DeleteAction(cond) =>
+          val output = deltaDeleteOutput(rowAttrs, rowIdAttrs, metadataAttrs, originalRowIdValues)
+          Keep(Delete, cond.getOrElse(TrueLiteral), output)
+        case InsertAction(cond, assignments) =>
+          val output = deltaInsertOutput(assignments, metadataAttrs, originalRowIdValues)
+          Keep(Insert, cond.getOrElse(TrueLiteral), output)
+        case other =>
+          throw new AnalysisException(
+            errorClass = "_LEGACY_ERROR_TEMP_3052",
+            messageParameters = Map("other" -> other.toString))
+      }
+    }
+
+    val matchedInstructions = matchedActions.map(toDeltaInstruction)
+    val notMatchedInstructions = notMatchedActions.map(toDeltaInstruction)
+    val notMatchedBySourceInstructions = notMatchedBySourceActions.map(toDeltaInstruction)
+
+    val rowFromSourceAttr = resolveAttrRef(ROW_FROM_SOURCE, joinPlan)
+    val rowFromTargetAttr = resolveAttrRef(ROW_FROM_TARGET, joinPlan)
+
+    val outputs = matchedInstructions.flatMap(_.outputs) ++
+      notMatchedInstructions.flatMap(_.outputs) ++
+      notMatchedBySourceInstructions.flatMap(_.outputs)
+
+    val operationTypeAttr = AttributeReference(OPERATION_COLUMN, IntegerType, nullable = false)()
+    val originalRowIdAttrs = originalRowIdValues.map(_.toAttribute)
+    val attrs = Seq(operationTypeAttr) ++ targetTable.output ++ originalRowIdAttrs
+
+    MergeRows(
+      isSourceRowPresent = IsNotNull(rowFromSourceAttr),
+      isTargetRowPresent = IsNotNull(rowFromTargetAttr),
+      matchedInstructions = matchedInstructions,
+      notMatchedInstructions = notMatchedInstructions,
+      notMatchedBySourceInstructions = notMatchedBySourceInstructions,
+      checkCardinality = checkCardinality,
+      output = generateExpandOutput(attrs, outputs),
+      joinPlan
+    )
+  }
+
+  private def pushDownTargetPredicates(
+      targetTable: LogicalPlan,
+      cond: Expression): (LogicalPlan, Expression) = {
+    val predicates = splitConjunctivePredicates(cond)
+    val (targetPredicates, joinPredicates) =
+      predicates.partition(predicate => predicate.references.subsetOf(targetTable.outputSet))
+    val targetCond = targetPredicates.reduceOption(And).getOrElse(TrueLiteral)
+    val joinCond = joinPredicates.reduceOption(And).getOrElse(TrueLiteral)
+    (Filter(targetCond, targetTable), joinCond)
   }
 
   // General path producing a `ReplaceData` plan. Mirrors Spark 4.1.1's

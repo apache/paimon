@@ -32,8 +32,15 @@ case class PaimonMetadataColumn(
     override val dataType: DataType,
     preserveOnDelete: Boolean = true,
     preserveOnUpdate: Boolean = true,
-    preserveOnReinsert: Boolean = false)
+    preserveOnReinsert: Boolean = false,
+    nullable: Boolean = true)
   extends PaimonMetadataColumnBase {
+
+  // Only affects the Spark `MetadataColumn` capability (thus the relation's metadata output and
+  // the delta row ID nullability check). `toStructField` / `toAttribute` stay nullable: V1
+  // commands project these columns through outer joins where the target side can be null, e.g.
+  // the not-matched rows of MERGE INTO.
+  override def isNullable: Boolean = nullable
 
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
