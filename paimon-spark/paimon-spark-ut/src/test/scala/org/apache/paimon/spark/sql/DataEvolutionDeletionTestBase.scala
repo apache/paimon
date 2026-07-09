@@ -26,6 +26,13 @@ import scala.collection.JavaConverters._
 
 abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
 
+  private def assertRawBlobUpdateRejected(update: => Unit): Unit = {
+    val e = intercept[UnsupportedOperationException] {
+      update
+    }
+    assert(e.getMessage.contains("raw-data BLOB or ARRAY<BLOB>"), e.getMessage)
+  }
+
   test("Data Evolution deletion: delete from table with deletion vectors") {
     withTable("t") {
       sql("""
@@ -160,18 +167,20 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       sql("CREATE TABLE s (id INT, picture BINARY)")
       sql("INSERT INTO s VALUES (2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79')")
 
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-            |""".stripMargin)
+      assertRawBlobUpdateRejected {
+        sql("""
+              |MERGE INTO t
+              |USING s
+              |ON t.id = s.id
+              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+              |""".stripMargin)
+      }
 
       checkAnswer(
         sql("SELECT id, b, picture, _ROW_ID FROM t ORDER BY id"),
         Seq(
           Row(5, 5, Array[Byte](5), 5L),
-          Row(7, 7, Array[Byte](77), 7L),
+          Row(7, 7, Array[Byte](7), 7L),
           Row(8, 8, Array[Byte](8), 8L)))
     }
   }
@@ -559,25 +568,29 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |  (9, X'79', 'delete')
             |""".stripMargin)
 
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED AND s.op = 'delete' THEN DELETE
-            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-            |""".stripMargin)
+      assertRawBlobUpdateRejected {
+        sql("""
+              |MERGE INTO t
+              |USING s
+              |ON t.id = s.id
+              |WHEN MATCHED AND s.op = 'delete' THEN DELETE
+              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+              |""".stripMargin)
+      }
 
       checkAnswer(
         sql("SELECT id, b, picture, _ROW_ID FROM t ORDER BY id"),
         Seq(
           Row(0, 0, Array[Byte](0), 0L),
           Row(1, 1, Array[Byte](1), 1L),
+          Row(2, 2, Array[Byte](2), 2L),
           Row(3, 3, Array[Byte](3), 3L),
           Row(4, 4, Array[Byte](4), 4L),
           Row(5, 5, Array[Byte](5), 5L),
-          Row(6, 6, Array[Byte](102), 6L),
-          Row(7, 7, Array[Byte](77), 7L),
-          Row(8, 8, Array[Byte](8), 8L)
+          Row(6, 6, Array[Byte](6), 6L),
+          Row(7, 7, Array[Byte](7), 7L),
+          Row(8, 8, Array[Byte](8), 8L),
+          Row(9, 9, Array[Byte](9), 9L)
         )
       )
     }
