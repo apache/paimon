@@ -20,6 +20,9 @@
 
 from __future__ import annotations
 
+import datetime
+import time
+
 import pyarrow as pa
 import pytest
 
@@ -29,6 +32,7 @@ daft = pytest.importorskip("daft")
 from daft import col
 
 from pypaimon.daft import read_paimon, write_paimon
+from pypaimon.daft.daft_paimon import _timestamp_scan_option
 
 
 @pytest.fixture
@@ -189,14 +193,53 @@ def test_read_paimon_with_tag_name(catalog_options):
     assert result == {"id": [1], "name": ["tagged"]}
 
 
-def test_read_paimon_rejects_snapshot_id_and_tag_name_together(catalog_options):
-    with pytest.raises(ValueError, match="snapshot_id and tag_name cannot be set at the same time"):
-        read_paimon(
-            "test_db.dummy",
-            catalog_options,
-            snapshot_id=1,
-            tag_name="v1",
-        )
+def test_read_paimon_with_timestamp(catalog_options):
+    pa_schema = pa.schema([("id", pa.int64()), ("name", pa.string())])
+    identifier, table = _create_table(catalog_options, "read_timestamp", pa_schema)
+    _write_arrow(table, pa.table({"id": [1], "name": ["first"]}, schema=pa_schema))
+    # A cutoff strictly between the two commits: scan.timestamp-millis returns the
+    # latest snapshot at or before it, i.e. the first snapshot only.
+    time.sleep(0.05)
+    cutoff_ms = int(time.time() * 1000)
+    time.sleep(0.05)
+    _write_arrow(table, pa.table({"id": [2], "name": ["second"]}, schema=pa_schema))
+
+    latest = read_paimon(identifier, catalog_options).sort("id").to_pydict()
+    at_millis = read_paimon(identifier, catalog_options, timestamp=cutoff_ms).to_pydict()
+    at_datetime = read_paimon(
+        identifier,
+        catalog_options,
+        timestamp=datetime.datetime.fromtimestamp(cutoff_ms / 1000),
+    ).to_pydict()
+
+    assert latest["id"] == [1, 2]
+    assert at_millis == {"id": [1], "name": ["first"]}
+    assert at_datetime == {"id": [1], "name": ["first"]}
+
+
+def test_timestamp_scan_option_mapping():
+    assert _timestamp_scan_option(1751990400000) == {"scan.timestamp-millis": "1751990400000"}
+    assert _timestamp_scan_option("2026-07-09 10:00:00") == {"scan.timestamp": "2026-07-09 10:00:00"}
+    dt = datetime.datetime(2026, 7, 9, 10, 0, 0)
+    assert _timestamp_scan_option(dt) == {"scan.timestamp-millis": str(int(dt.timestamp() * 1000))}
+    with pytest.raises(TypeError):
+        _timestamp_scan_option(True)
+    with pytest.raises(TypeError):
+        _timestamp_scan_option(1.5)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"snapshot_id": 1, "tag_name": "v1"},
+        {"snapshot_id": 1, "timestamp": 1},
+        {"tag_name": "v1", "timestamp": 1},
+        {"snapshot_id": 1, "tag_name": "v1", "timestamp": 1},
+    ],
+)
+def test_read_paimon_rejects_multiple_time_travel(catalog_options, kwargs):
+    with pytest.raises(ValueError, match="Only one of snapshot_id, tag_name, timestamp"):
+        read_paimon("test_db.dummy", catalog_options, **kwargs)
 
 
 def test_write_paimon_append(catalog_options):
