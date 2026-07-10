@@ -114,8 +114,8 @@ public class SystemTableSource extends FlinkTableSource {
                             Boolean.parseBoolean(
                                     table.options()
                                             .getOrDefault(
-                                                    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
-                                                    "false")));
+                                                    CoreOptions.BLOB_AS_DESCRIPTOR.key(), "false")),
+                            false);
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,

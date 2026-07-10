@@ -140,6 +140,29 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>compact_chain_table</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.compact_chain_table(
+            `table` => 'table',
+            partition => 'partition',
+            overwrite => overwrite) <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition') <br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition', overwrite) <br/><br/>
+      </td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: the target chain table identifier. Cannot be empty.</li>
+            <li>partition: partition specification format (e.g., 'dt=20250810,hour=22'). Cannot be empty.</li>
+            <li>overwrite: whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(`table` => 'default.T', partition => 'dt=20250810,hour=22')<br/><br/>
+         CALL sys.compact_chain_table('default.T', 'dt=20250810,hour=22', true)
+      </td>
+   </tr>
+   <tr>
       <td>create_tag</td>
       <td>
          -- Use named argument<br/>
