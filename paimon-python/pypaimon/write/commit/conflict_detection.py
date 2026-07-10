@@ -406,7 +406,7 @@ class ConflictDetection:
                 existing_index.add((
                     base.partition, base.bucket,
                     base.file.first_row_id, base.file.row_count))
-                if not DataFileMeta.is_blob_file(base.file.file_name):
+                if not self._is_dedicated_file(base.file.file_name):
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
 
@@ -416,7 +416,7 @@ class ConflictDetection:
         }
 
         for entry in files_to_check:
-            if DataFileMeta.is_blob_file(entry.file.file_name):
+            if self._is_dedicated_file(entry.file.file_name):
                 base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
@@ -452,28 +452,100 @@ class ConflictDetection:
             return None
 
         range_helper = RangeHelper(lambda entry: entry.file.row_id_range())
-        merged_groups = range_helper.merge_overlapping_ranges(entries_with_row_id)
+        data_files = [
+            entry for entry in entries_with_row_id
+            if not self._is_dedicated_file(entry.file.file_name)
+        ]
 
-        for group in merged_groups:
-            data_files = [
-                entry for entry in group
-                if not DataFileMeta.is_blob_file(entry.file.file_name)
-            ]
-            if not range_helper.are_all_ranges_same(data_files):
+        conflict = self._check_data_file_row_id_range_conflicts(
+            range_helper, data_files)
+        if conflict is not None:
+            return conflict
+
+        dedicated_files = [
+            entry for entry in entries_with_row_id
+            if self._is_dedicated_file(entry.file.file_name)
+        ]
+        conflict = self._check_dedicated_file_row_id_range_conflicts(
+            data_files, dedicated_files)
+        if conflict is not None:
+            return conflict
+
+        return None
+
+    def _check_data_file_row_id_range_conflicts(self, range_helper, data_files):
+        for data_file_group in range_helper.merge_overlapping_ranges(data_files):
+            if not range_helper.are_all_ranges_same(data_file_group):
                 file_descriptions = [
-                    "{name}(rowId={row_id}, count={count})".format(
-                        name=entry.file.file_name,
-                        row_id=entry.file.first_row_id,
-                        count=entry.file.row_count,
-                    )
-                    for entry in data_files
+                    self._file_description(entry) for entry in data_file_group
                 ]
                 return RuntimeError(
                     "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
                     "operations have encountered conflicts, data files: "
                     + str(file_descriptions))
+        return None
+
+    def _check_dedicated_file_row_id_range_conflicts(
+            self, data_files, dedicated_files):
+        if not dedicated_files:
+            return None
+
+        data_ranges = self._data_file_row_ranges(data_files)
+
+        for dedicated_file in dedicated_files:
+            dedicated_range = dedicated_file.file.row_id_range()
+            if any(self._contains(row_range, dedicated_range) for row_range in data_ranges):
+                continue
+
+            intersecting_ranges = [
+                row_range for row_range in data_ranges
+                if row_range.overlaps(dedicated_range)
+            ]
+            intersecting_files = [
+                self._file_description(entry)
+                for entry in data_files
+                if entry.file.row_id_range().overlaps(dedicated_range)
+            ]
+            conflict_reason = (
+                "spans multiple data file ranges"
+                if len(intersecting_ranges) > 1
+                else "is not covered by one data file range"
+            )
+            return RuntimeError(
+                "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
+                "operations have encountered conflicts, dedicated file "
+                "{file} {row_range} {reason}: {groups}".format(
+                    file=self._file_description(dedicated_file),
+                    row_range=dedicated_range,
+                    reason=conflict_reason,
+                    groups=intersecting_files))
 
         return None
+
+    @staticmethod
+    def _data_file_row_ranges(data_files):
+        return Range.sort_and_merge_overlap(
+            [entry.file.row_id_range() for entry in data_files],
+            True,
+            False,
+        )
+
+    @staticmethod
+    def _contains(container, row_range):
+        return container.from_ <= row_range.from_ and container.to >= row_range.to
+
+    @staticmethod
+    def _is_dedicated_file(file_name):
+        return (DataFileMeta.is_blob_file(file_name)
+                or DataFileMeta.is_vector_file(file_name))
+
+    @staticmethod
+    def _file_description(entry):
+        return "{name}(rowId={row_id}, count={count})".format(
+            name=entry.file.file_name,
+            row_id=entry.file.first_row_id,
+            count=entry.file.row_count,
+        )
 
     def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
         if not self.data_evolution_enabled:

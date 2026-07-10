@@ -849,6 +849,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null);
     }
 
+    private boolean isRtasAfterTruncate(@Nullable Snapshot latestSnapshot, CommitKind commitKind) {
+        if (latestSnapshot == null || operation == null) {
+            return false;
+        }
+
+        return latestSnapshot.operation() == Snapshot.Operation.TRUNCATE
+                && (operation == Snapshot.Operation.REPLACE_TABLE_AS_SELECT
+                        || operation == Snapshot.Operation.CREATE_OR_REPLACE_TABLE_AS_SELECT);
+    }
+
     @VisibleForTesting
     CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
@@ -1016,23 +1026,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 oldIndexManifest = latestSnapshot.indexManifest();
             }
 
-            // try to merge old manifest files to create base manifest list
-            ManifestMergeReuse manifestMergeReuse =
-                    tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
-            skipManifestMergeOnRetry = manifestMergeReuse == null && retryResult != null;
-            if (manifestMergeReuse != null) {
-                mergeBeforeManifests = manifestMergeReuse.preservedManifests;
-                mergeAfterManifests = manifestMergeReuse.mergeAfterManifests;
-            } else if (skipManifestMergeOnRetry) {
-                mergeAfterManifests = mergeBeforeManifests;
+            boolean resetSnapshotStateForRtas = isRtasAfterTruncate(latestSnapshot, commitKind);
+            if (resetSnapshotStateForRtas) {
+                mergeBeforeManifests = emptyList();
+                mergeAfterManifests = emptyList();
+                oldIndexManifest = null;
             } else {
-                mergeAfterManifests =
-                        ManifestFileMerger.merge(
-                                mergeBeforeManifests,
-                                manifestFile,
-                                partitionType,
-                                options,
-                                ioManager);
+                ManifestMergeReuse manifestMergeReuse =
+                        tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
+                skipManifestMergeOnRetry = manifestMergeReuse == null && retryResult != null;
+                if (manifestMergeReuse != null) {
+                    mergeBeforeManifests = manifestMergeReuse.preservedManifests;
+                    mergeAfterManifests = manifestMergeReuse.mergeAfterManifests;
+                } else if (skipManifestMergeOnRetry) {
+                    mergeAfterManifests = mergeBeforeManifests;
+                } else {
+                    mergeAfterManifests =
+                            ManifestFileMerger.merge(
+                                    mergeBeforeManifests,
+                                    manifestFile,
+                                    partitionType,
+                                    options,
+                                    ioManager);
+                }
             }
             baseManifestList = manifestList.write(mergeAfterManifests);
 
@@ -1081,7 +1097,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String statsFileName = null;
             if (newStatsFileName != null) {
                 statsFileName = newStatsFileName;
-            } else if (latestSnapshot != null) {
+            } else if (latestSnapshot != null && !resetSnapshotStateForRtas) {
                 Optional<Statistics> previousStatistic = statsFileHandler.readStats(latestSnapshot);
                 if (previousStatistic.isPresent()) {
                     if (previousStatistic.get().schemaId() != latestSchemaId) {

@@ -185,12 +185,14 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       val executionMetrics = commandExecutionMetrics(metrics)
       assert(executionMetrics(metrics("addedTableFiles").id) == "1")
       assert(executionMetrics(metrics("deletedTableFiles").id) == "1")
+      assert(executionMetrics(metrics("deletedRecords").id) == "3")
 
       val df1 = sql("DELETE FROM T WHERE id > 0")
       val metrics1 = commandMetrics(df1)
       val executionMetrics1 = commandExecutionMetrics(metrics1)
       assert(executionMetrics1(metrics1("addedTableFiles").id) == "0")
       assert(executionMetrics1(metrics1("deletedTableFiles").id) == "1")
+      assert(executionMetrics1(metrics1("deletedRecords").id) == "7")
     }
   }
 

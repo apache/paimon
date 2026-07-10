@@ -26,6 +26,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
@@ -243,48 +244,120 @@ class AbstractVectorSearchReadImpl:
         future.add_done_callback(lambda _: reader.close())
         return future
 
-    def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector, index_type=None):
-        raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
-        if pre_filter is not None:
-            raw_row_ranges = Range.and_(
-                raw_row_ranges,
-                Range.sort_and_merge_overlap(pre_filter.to_range_list(), True),
-            )
+    def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
+                         index_type=None, include_filter=True,
+                         score_candidates=None):
+        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
 
+        table = self._read_raw_arrow(raw_row_ranges, include_filter)
+        if table is None or table.num_rows == 0:
+            return DictBasedScoredIndexResult({})
+
+        top_k_heap = []
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        vectors = table.column(self._vector_column.name).to_pylist()
+        for row_id, stored in zip(row_ids, vectors):
+            if score_candidates is not None and row_id not in score_candidates:
+                continue
+            if stored is None:
+                continue
+            stored_vector = _to_vector_list(stored)
+            _check_vector_dimension(query_vector, stored_vector)
+            _offer_score(
+                top_k_heap,
+                self._limit,
+                row_id,
+                _compute_score(query_vector, stored_vector, metric),
+            )
+        return _scored_result(top_k_heap)
+
+    def _read_raw_vectors(self, candidates, include_filter=True):
+        return self._read_raw_candidate_vectors(
+            candidates.to_range_list(), candidates, include_filter)
+
+    def _read_raw_candidate_vectors(self, raw_row_ranges, candidates,
+                                    include_filter=True):
+        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, None)
+        if not raw_row_ranges:
+            return {}
+
+        table = self._read_raw_arrow(raw_row_ranges, include_filter)
+        if table is None or table.num_rows == 0:
+            return {}
+
+        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        vectors = table.column(self._vector_column.name).to_pylist()
+        raw_vectors = {}
+        for row_id, stored in zip(row_ids, vectors):
+            if candidates is not None and row_id not in candidates:
+                continue
+            if stored is None:
+                continue
+            raw_vectors[row_id] = _to_vector_list(stored)
+        return raw_vectors
+
+    def _read_raw_arrow(self, raw_row_ranges, include_filter):
         read_builder = self._table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(
                 self._partition_filter)
-        if self._filter is not None:
+        if include_filter and self._filter is not None:
             read_builder = read_builder.with_filter(self._filter)
-        from pypaimon.table.special_fields import SpecialFields
-        projection = [f.name for f in self._table.fields]
-        if SpecialFields.ROW_ID.name not in projection:
-            projection.append(SpecialFields.ROW_ID.name)
-        read_builder = read_builder.with_projection(projection)
+        read_builder = read_builder.with_projection(
+            self._raw_search_projection(include_filter))
         plan = read_builder.new_scan().with_global_index_result(
             GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
-        table = read_builder.new_read().to_arrow(plan.splits())
-        if table is None or table.num_rows == 0:
-            return DictBasedScoredIndexResult({})
+        return read_builder.new_read().to_arrow(plan.splits())
 
-        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
-        vectors = table.column(self._vector_column.name).to_pylist()
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
-        scores = {}
-        for row_id, stored in zip(row_ids, vectors):
-            if stored is None:
+    def _score_raw_vectors(self, candidates, raw_vectors, query_vector, metric, top_k):
+        top_k_heap = []
+        for row_id in candidates:
+            stored_vector = raw_vectors.get(row_id)
+            if stored_vector is None:
                 continue
-            stored_vector = _to_vector_list(stored)
-            if len(stored_vector) != len(query_vector):
-                raise ValueError(
-                    "Query vector dimension mismatch: expected %d, got %d"
-                    % (len(stored_vector), len(query_vector)))
-            scores[row_id] = _compute_score(query_vector, stored_vector, metric)
-        return DictBasedScoredIndexResult(scores).top_k(self._limit)
+            _check_vector_dimension(query_vector, stored_vector)
+            _offer_score(
+                top_k_heap,
+                top_k,
+                row_id,
+                _compute_score(query_vector, stored_vector, metric),
+            )
+        return _scored_result(top_k_heap)
+
+    def _read_raw_refine_search(self, candidates, query_vector, index_type=None):
+        return self._read_raw_candidate_search(
+            candidates.to_range_list(),
+            candidates,
+            query_vector,
+            index_type,
+            include_filter=False,
+        )
+
+    def _read_raw_candidate_search(self, raw_row_ranges, candidates, query_vector,
+                                   index_type=None, include_filter=False):
+        return self._read_raw_search(
+            raw_row_ranges,
+            None,
+            query_vector,
+            index_type,
+            include_filter=include_filter,
+            score_candidates=candidates,
+        )
+
+    def _raw_search_projection(self, include_filter):
+        projection = [self._vector_column.name]
+        if include_filter and self._filter is not None:
+            filter_fields = _predicate_field_names(self._filter)
+            for field in self._table.fields:
+                if field.name in filter_fields and field.name not in projection:
+                    projection.append(field.name)
+        if SpecialFields.ROW_ID.name not in projection:
+            projection.append(SpecialFields.ROW_ID.name)
+        return projection
 
     def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
                     query_vectors, search_limit, include_row_ids):
@@ -319,12 +392,38 @@ class AbstractVectorSearchReadImpl:
                 result.results().is_empty()):
             return result
         candidates = result.top_k(self._indexed_search_limit(index_type))
-        return self._read_raw_search(
-            candidates.results().to_range_list(),
+        return self._read_raw_refine_search(
             candidates.results(),
             query_vector,
             index_type,
         )
+
+    def _maybe_rerank_indexed_results(self, results, index_type, query_vectors):
+        if self._configured_refine_factor(index_type) == 0:
+            return results
+
+        search_limit = self._indexed_search_limit(index_type)
+        candidates = [result.top_k(search_limit) for result in results]
+        union_candidates = RoaringBitmap64()
+        for result in candidates:
+            union_candidates = RoaringBitmap64.or_(
+                union_candidates, result.results())
+        if union_candidates.is_empty():
+            return candidates
+
+        raw_vectors = self._read_raw_vectors(union_candidates, include_filter=False)
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+        return [
+            self._score_raw_vectors(
+                candidates[i].results(),
+                raw_vectors,
+                query_vectors[i],
+                metric,
+                self._limit,
+            )
+            for i in range(len(candidates))
+        ]
 
     def _configured_refine_factor(self, index_type):
         value = _configured_refine_factor(
@@ -454,18 +553,22 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                     if row_id not in merged_scores[i]:
                         merged_scores[i][row_id] = score_getter(row_id)
 
+        indexed_results = [
+            DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
+            for i in range(n)
+        ]
+        indexed_results = self._maybe_rerank_indexed_results(
+            indexed_results, index_type, self._query_vectors)
+
         # Each query: merge indexed results with the raw (brute-force) fallback.
         raw_pre_filter = self._raw_pre_filter(raw_splits)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
         results = []
         for i in range(n):
-            indexed = DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
-            indexed = self._maybe_rerank_indexed_result(
-                indexed, index_type, self._query_vectors[i])
             raw = self._read_raw_search(
                 raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type)
-            results.append(indexed.or_(raw).top_k(self._limit))
+            results.append(indexed_results[i].or_(raw).top_k(self._limit))
         return results
 
 
@@ -508,11 +611,32 @@ def _raw_row_ranges(raw_splits):
     return Range.sort_and_merge_overlap(ranges, True)
 
 
+def _filtered_raw_row_ranges(raw_row_ranges, pre_filter):
+    raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
+    if pre_filter is None:
+        return raw_row_ranges
+    return Range.and_(
+        raw_row_ranges,
+        Range.sort_and_merge_overlap(pre_filter.to_range_list(), True),
+    )
+
+
 def _raw_search_index_type(raw_splits):
     for split in raw_splits:
         if split.index_type is not None:
             return split.index_type
     return None
+
+
+def _predicate_field_names(predicate):
+    if predicate is None:
+        return set()
+    if predicate.method in ("and", "or"):
+        names = set()
+        for child in predicate.literals or []:
+            names.update(_predicate_field_names(child))
+        return names
+    return {predicate.field} if predicate.field is not None else set()
 
 
 def _vector_index_type(index_splits):
@@ -545,6 +669,29 @@ def _to_vector_list(value):
     if hasattr(value, "as_py"):
         value = value.as_py()
     return list(value)
+
+
+def _offer_score(heap, top_k, row_id, score):
+    if top_k <= 0:
+        return
+    import heapq
+
+    entry = (score, -row_id, row_id)
+    if len(heap) < top_k:
+        heapq.heappush(heap, entry)
+    elif entry[:2] > heap[0][:2]:
+        heapq.heapreplace(heap, entry)
+
+
+def _scored_result(heap):
+    return DictBasedScoredIndexResult({row_id: score for score, _, row_id in heap})
+
+
+def _check_vector_dimension(query_vector, stored_vector):
+    if len(stored_vector) != len(query_vector):
+        raise ValueError(
+            "Query vector dimension mismatch: expected %d, got %d"
+            % (len(stored_vector), len(query_vector)))
 
 
 def _configured_refine_factor(options, vector_column_name, index_type):

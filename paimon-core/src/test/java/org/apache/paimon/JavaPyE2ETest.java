@@ -1180,7 +1180,7 @@ public class JavaPyE2ETest {
         table = (FileStoreTable) catalog.getTable(identifier);
         org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator coordinator =
                 new org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator(
-                        table, false, false);
+                        table, false, false, table.latestSnapshot().get());
         List<org.apache.paimon.append.dataevolution.DataEvolutionCompactTask> tasks =
                 coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
@@ -1831,7 +1831,8 @@ public class JavaPyE2ETest {
     private void doDataEvolutionCompact(FileStoreTable table, boolean compactBlob)
             throws Exception {
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, compactBlob, false);
+                new DataEvolutionCompactCoordinator(
+                        table, compactBlob, false, table.latestSnapshot().get());
         List<CommitMessage> messages = new ArrayList<>();
         try {
             List<DataEvolutionCompactTask> tasks;

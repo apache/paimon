@@ -22,13 +22,16 @@ import org.apache.paimon.io.DataFileMeta;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Util class for Deletion Vectors. */
+/** Util class for data evolution. */
 public class DataEvolutionUtils {
 
     /**
@@ -60,5 +63,19 @@ public class DataEvolutionUtils {
                 anchor != null,
                 "Data-evolution deletion vectors should have a normal anchor file in each row range group.");
         return anchor;
+    }
+
+    /** Check files row ranges. */
+    public static Range checkContiguousRowRange(List<DataFileMeta> files) {
+        checkArgument(!files.isEmpty(), "%s should not be empty.", "Data evolution compact files");
+        List<Range> ranges =
+                files.stream().map(DataFileMeta::nonNullRowIdRange).collect(Collectors.toList());
+        List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+        checkArgument(
+                merged.size() == 1,
+                "%s should have a contiguous row range, but got %s.",
+                "Data evolution compact files",
+                merged);
+        return merged.get(0);
     }
 }

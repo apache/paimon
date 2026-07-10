@@ -34,7 +34,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -57,7 +57,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -207,7 +206,7 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(1);
-        assertThat(tasks.get(0).isBlobTask()).isTrue();
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(1).file(), entries.get(2).file());
     }
@@ -305,7 +304,7 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(2);
-        assertThat(tasks).allMatch(DataEvolutionCompactTask::isBlobTask);
+        assertThat(tasks).allMatch(task -> task.type() == DataEvolutionCompactTask.TaskType.BLOB);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(1).file(), entries.get(2).file());
         assertThat(tasks.get(1).compactBefore())
@@ -331,7 +330,7 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(3);
-        assertThat(tasks).allMatch(DataEvolutionCompactTask::isBlobTask);
+        assertThat(tasks).allMatch(task -> task.type() == DataEvolutionCompactTask.TaskType.BLOB);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(1).file(), entries.get(2).file());
         assertThat(tasks.get(1).compactBefore())
@@ -376,7 +375,7 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(1);
-        assertThat(tasks.get(0).isBlobTask()).isTrue();
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(1).file(), entries.get(2).file());
     }
@@ -467,7 +466,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 .thenReturn(Arrays.asList(entry1, entry2).iterator());
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         assertThat(tasks).hasSize(1);
@@ -547,47 +546,14 @@ public class DataEvolutionCompactCoordinatorTest {
         when(partitionPredicate.test(partitionB)).thenReturn(true);
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, partitionPredicate, false, false, snapshot);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).partition()).isEqualTo(partitionB);
         assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
                 .containsExactly(b1.file().fileName(), b2.file().fileName());
-    }
-
-    @Test
-    public void testPlanEndsScanWhenDeletionVectorsEnabled() {
-        Options options = new Options();
-        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
-        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
-        FileStoreTable table = mock(FileStoreTable.class);
-        when(table.coreOptions()).thenReturn(new CoreOptions(options));
-
-        DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
-
-        assertThatThrownBy(coordinator::plan).isInstanceOf(EndOfScanException.class);
-    }
-
-    @Test
-    public void testCompactTaskRejectsDeletionVectorEnabledTable() {
-        Options options = new Options();
-        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
-        FileStoreTable table = mock(FileStoreTable.class);
-        when(table.coreOptions()).thenReturn(new CoreOptions(options));
-
-        DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(
-                        BinaryRow.EMPTY_ROW,
-                        Collections.singletonList(
-                                createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024)),
-                        false);
-
-        assertThatThrownBy(() -> task.doCompact(table, "user"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Data evolution compaction does not support deletion vectors.");
     }
 
     private ManifestEntry makeEntry(
@@ -734,6 +700,9 @@ public class DataEvolutionCompactCoordinatorTest {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
                 true,
                 false,
+                false,
+                null,
+                null,
                 targetFileSize,
                 targetFileSize,
                 openFileCost,
@@ -770,7 +739,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, false);
+                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -789,14 +758,14 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.blob", 0L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, true);
+                new DataEvolutionBlobCompactTask(BinaryRow.EMPTY_ROW, files);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
                 serializer.deserialize(serializer.getVersion(), bytes);
 
         assertThat(deserialized).isEqualTo(task);
-        assertThat(deserialized.isBlobTask()).isTrue();
+        assertThat(deserialized.type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
     }
 
     @Test
@@ -809,7 +778,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         BinaryRow partition = BinaryRow.singleColumn(42);
-        DataEvolutionCompactTask task = new DataEvolutionCompactTask(partition, files, false);
+        DataEvolutionCompactTask task = new DataEvolutionNormalCompactTask(partition, files);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -817,5 +786,31 @@ public class DataEvolutionCompactCoordinatorTest {
 
         assertThat(deserialized).isEqualTo(task);
         assertThat(deserialized.partition()).isEqualTo(partition);
+    }
+
+    @Test
+    public void testSerializerMaterializeDeletionTask() throws IOException {
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024),
+                        createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
+        List<DeletionFile> deletionFiles =
+                Arrays.asList(new DeletionFile("/tmp/dv", 1, 2, 3L), null);
+
+        DataEvolutionCompactTask task =
+                new DataEvolutionMaterializeDeletionCompactTask(
+                        BinaryRow.EMPTY_ROW, files, deletionFiles);
+
+        byte[] bytes = serializer.serialize(task);
+        DataEvolutionCompactTask deserialized =
+                serializer.deserialize(serializer.getVersion(), bytes);
+
+        assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.type())
+                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+        assertThat(((DataEvolutionMaterializeDeletionCompactTask) deserialized).deletionFiles())
+                .isEqualTo(deletionFiles);
     }
 }

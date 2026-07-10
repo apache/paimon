@@ -22,9 +22,6 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.VarCharType;
-
-import java.util.List;
 
 /**
  * A test-only {@link GlobalIndexerFactory} for full-text search. Uses brute-force in-memory
@@ -47,22 +44,5 @@ public class TestFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
     @Override
     public GlobalIndexer create(DataField field, Options options) {
         return new TestFullTextGlobalIndexer(field.type(), options);
-    }
-
-    @Override
-    public GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        // Multi-column support: this brute-force backend indexes a single text column, which may be
-        // the primary field or an extra field. Pick the VARCHAR/STRING column among them.
-        DataField textField = indexField;
-        if (!(textField.type() instanceof VarCharType) && extraFields != null) {
-            for (DataField extra : extraFields) {
-                if (extra.type() instanceof VarCharType) {
-                    textField = extra;
-                    break;
-                }
-            }
-        }
-        return new TestFullTextGlobalIndexer(textField.type(), options);
     }
 }

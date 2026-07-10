@@ -21,6 +21,7 @@ package org.apache.paimon.eslib.index;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -115,9 +116,8 @@ class ESIndexGlobalIndexE2ETest {
         opt.put("global-index.es-index.fields.embedding.dimension", "4");
         opt.put("global-index.es-index.fields.embedding.metric", "l2");
         opt.put("global-index.es-index.fields.title.analyzer", "standard");
-        // category opts out of full-text (type=keyword) so it stays a KEYWORD field; String columns
-        // otherwise default to FULLTEXT. This keeps the "full-text on a non-FULLTEXT field returns
-        // empty" assertion below meaningful while still exercising exact keyword filters.
+        // category uses KEYWORD as its primary field; ESIndexOptions adds category.fulltext so the
+        // same logical field can also serve analyzed search.
         opt.put("global-index.es-index.fields.category.type", "keyword");
         ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
@@ -220,14 +220,15 @@ class ESIndexGlobalIndexE2ETest {
                 fuzzyTypo.get().results().getIntCardinality(),
                 "fuzzy 'evon'~1 matches the 10 'even' docs");
 
-        // --- full-text search on a non-FULLTEXT field of this index (category is KEYWORD) must
-        // return empty, not throw: the ES index carries the column but cannot serve full-text on
-        // it, so the engine should fall back to raw scan ---
-        assertTrue(
+        // --- category is KEYWORD-primary, but full-text search routes to category.fulltext. ---
+        Optional<ScoredGlobalIndexResult> categoryFt =
                 reader.visitFullTextSearch(new FullTextSearch("category", matchQuery("even"), 50))
-                        .join()
-                        .isEmpty(),
-                "full-text search on a KEYWORD field must return empty, not throw");
+                        .join();
+        assertTrue(categoryFt.isPresent(), "KEYWORD field has a FULLTEXT multi-field");
+        assertEquals(
+                10,
+                categoryFt.get().results().getIntCardinality(),
+                "category.fulltext matches 10 even rows");
 
         // --- multi-field: title is FULLTEXT, so ordinary predicates route to the keyword
         // sub-field title.keyword (written by default) and evaluate exactly on the raw value ---
@@ -259,6 +260,19 @@ class ESIndexGlobalIndexE2ETest {
         assertEquals(1, eq.get().results().getIntCardinality(), "1 row with price == 50");
         assertTrue(contains(eq.get().results(), 5L), "row 5 has price=50");
 
+        // --- scalar negative filters are implemented in the reader as exists AND NOT(eq/in). ---
+        Optional<GlobalIndexResult> ne = reader.visitNotEqual(priceRef, 50).join();
+        assertTrue(ne.isPresent(), "scalar <> filter returns a result");
+        assertEquals(19, ne.get().results().getIntCardinality(), "all rows except price=50");
+        assertTrue(!contains(ne.get().results(), 5L), "row 5 must be excluded by price<>50");
+
+        Optional<GlobalIndexResult> notIn =
+                reader.visitNotIn(priceRef, Arrays.asList(50, 60)).join();
+        assertTrue(notIn.isPresent(), "scalar NOT IN filter returns a result");
+        assertEquals(
+                18, notIn.get().results().getIntCardinality(), "all rows except price in (50, 60)");
+        assertTrue(!contains(notIn.get().results(), 5L) && !contains(notIn.get().results(), 6L));
+
         // --- keyword filter: category == "even" → 10 rows ---
         FieldRef categoryRef = new FieldRef(2, "category", DataTypes.STRING());
         Optional<GlobalIndexResult> kw = reader.visitEqual(categoryRef, "even").join();
@@ -283,24 +297,18 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
-    void fulltextMultiFieldServesBothMatchAndExact(@TempDir java.nio.file.Path tmp)
-            throws IOException {
-        // Single STRING column "t" configured FULLTEXT. By default a keyword sub-field "t.keyword"
-        // is also written, so full-text match works on the analyzed field AND exact = works via the
-        // sub-field. With fields.t.keyword_subfield=false the sub-field is absent and exact = falls
-        // back to empty.
+    void textMultiFieldServesBothMatchAndExact(@TempDir java.nio.file.Path tmp) throws IOException {
+        // Whichever text representation is primary, the complementary multi-field is written so
+        // both analyzed search and exact predicates are always available.
         List<DataField> fields = Arrays.asList(new DataField(0, "t", DataTypes.STRING()));
         String[] docs = {"Apache Paimon", "vector search", "Apache Paimon"};
 
-        for (boolean keywordSub : new boolean[] {true, false}) {
+        for (String primaryType : new String[] {"fulltext", "keyword"}) {
             Map<String, String> opt = new HashMap<>();
-            opt.put("global-index.es-index.fields.t.analyzer", "standard");
-            if (!keywordSub) {
-                opt.put("global-index.es-index.fields.t.keyword_subfield", "false");
-            }
+            opt.put("global-index.es-index.fields.t.type", primaryType);
             ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
-            java.nio.file.Path dir = tmp.resolve("mf-" + keywordSub);
+            java.nio.file.Path dir = tmp.resolve("mf-" + primaryType);
             Files.createDirectories(dir);
             LocalDirWriter fw = new LocalDirWriter(dir);
             ESIndexGlobalIndexWriter w = new ESIndexGlobalIndexWriter(fw, fields, options);
@@ -318,24 +326,18 @@ class ESIndexGlobalIndexE2ETest {
                             new LocalFileReader(), List.of(ioMeta), fields, options);
             FieldRef tRef = new FieldRef(0, "t", DataTypes.STRING());
 
-            // full-text match works regardless of the sub-field (analyzed field).
+            // FULLTEXT-primary searches t; KEYWORD-primary searches t.fulltext.
             Optional<ScoredGlobalIndexResult> m =
                     reader.visitFullTextSearch(new FullTextSearch("t", matchQuery("paimon"), 50))
                             .join();
-            assertTrue(m.isPresent(), "match works on the FULLTEXT field");
+            assertTrue(m.isPresent(), "match works for " + primaryType + " primary");
             assertEquals(2, m.get().results().getIntCardinality(), "two docs contain 'paimon'");
 
-            // exact = only works when the keyword sub-field exists.
+            // FULLTEXT-primary routes exact matching to t.keyword; KEYWORD-primary uses t.
             Optional<GlobalIndexResult> eq = reader.visitEqual(tRef, "Apache Paimon").join();
-            if (keywordSub) {
-                assertTrue(eq.isPresent(), "exact = served via t.keyword");
-                assertEquals(
-                        2,
-                        eq.get().results().getIntCardinality(),
-                        "two rows equal 'Apache Paimon'");
-            } else {
-                assertTrue(eq.isEmpty(), "exact = falls back to empty when sub-field disabled");
-            }
+            assertTrue(eq.isPresent(), "exact = works for " + primaryType + " primary");
+            assertEquals(
+                    2, eq.get().results().getIntCardinality(), "two rows equal 'Apache Paimon'");
             try {
                 reader.close();
             } catch (IOException e) {
@@ -551,6 +553,76 @@ class ESIndexGlobalIndexE2ETest {
         RoaringNavigableMap64 nn = isNotNull.get().results();
         assertEquals(8, nn.getIntCardinality(), "eight non-null rows");
         assertTrue(!contains(nn, 3L) && !contains(nn, 7L), "null rows excluded from IS NOT NULL");
+
+        Optional<GlobalIndexResult> notRow1 = reader.visitNotEqual(kRef, "row1").join();
+        assertTrue(notRow1.isPresent(), "<> on keyword is index-evaluable");
+        RoaringNavigableMap64 notRow1Hits = notRow1.get().results();
+        assertEquals(7, notRow1Hits.getIntCardinality(), "non-null rows except row1");
+        assertTrue(
+                !contains(notRow1Hits, 1L)
+                        && !contains(notRow1Hits, 3L)
+                        && !contains(notRow1Hits, 7L),
+                "<> excludes the matching row and null rows");
+
+        Optional<GlobalIndexResult> notRows1And2 =
+                reader.visitNotIn(kRef, Arrays.asList("row1", "row2")).join();
+        assertTrue(notRows1And2.isPresent(), "NOT IN on keyword is index-evaluable");
+        assertEquals(
+                6,
+                notRows1And2.get().results().getIntCardinality(),
+                "non-null rows except row1/row2");
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void temporalPredicatesUseLongScalarPath(@TempDir java.nio.file.Path tmp) throws IOException {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "d", DataTypes.DATE()),
+                        new DataField(1, "ts", DataTypes.TIMESTAMP(3)));
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-temporal");
+        Files.createDirectories(archiveDir);
+        LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
+        ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
+        writer.write(0, GenericRow.of(1, Timestamp.fromEpochMillis(1000L)));
+        writer.write(1, GenericRow.of(2, Timestamp.fromEpochMillis(2000L)));
+        writer.write(2, GenericRow.of(3, Timestamp.fromEpochMillis(3000L)));
+        ResultEntry entry = writer.finish().get(0);
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+
+        FieldRef dateRef = new FieldRef(0, "d", DataTypes.DATE());
+        Optional<GlobalIndexResult> dateGe2 = reader.visitGreaterOrEqual(dateRef, 2).join();
+        assertTrue(dateGe2.isPresent(), "DATE >= literal is index-evaluable");
+        assertEquals(2, dateGe2.get().results().getIntCardinality(), "two rows with d>=2");
+        assertTrue(contains(dateGe2.get().results(), 1L) && contains(dateGe2.get().results(), 2L));
+
+        FieldRef tsRef = new FieldRef(1, "ts", DataTypes.TIMESTAMP(3));
+        Optional<GlobalIndexResult> tsLt3s =
+                reader.visitLessThan(tsRef, Timestamp.fromEpochMillis(3000L)).join();
+        assertTrue(tsLt3s.isPresent(), "TIMESTAMP < literal is index-evaluable");
+        assertEquals(2, tsLt3s.get().results().getIntCardinality(), "two rows before 3000ms");
+        assertTrue(contains(tsLt3s.get().results(), 0L) && contains(tsLt3s.get().results(), 1L));
+
+        Optional<GlobalIndexResult> tsNe2s =
+                reader.visitNotEqual(tsRef, Timestamp.fromEpochMillis(2000L)).join();
+        assertTrue(tsNe2s.isPresent(), "TIMESTAMP <> literal is index-evaluable");
+        assertEquals(2, tsNe2s.get().results().getIntCardinality(), "two rows except 2000ms");
+        assertTrue(contains(tsNe2s.get().results(), 0L) && contains(tsNe2s.get().results(), 2L));
 
         try {
             reader.close();

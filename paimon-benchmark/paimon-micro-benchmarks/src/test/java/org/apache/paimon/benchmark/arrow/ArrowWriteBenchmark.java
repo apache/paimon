@@ -36,7 +36,7 @@ public class ArrowWriteBenchmark {
     public void testWrite() {
         int batch = 1024 * 20;
         Benchmark benchmark =
-                new Benchmark("read", batch * batch)
+                new Benchmark("write", batch * batch)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         RowType rowType =

@@ -724,6 +724,89 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(AbstractFlinkTableFactory.schemaEquals(convertedRowType, flinkRowType)).isTrue();
     }
 
+    @Test
+    public void testBlobDescriptorFieldStreamingWriteWithShuffle() throws Exception {
+        // Verifies that blob-descriptor-field works when shuffle serialization occurs
+        // in streaming mode. When source and sink have different parallelism, Flink
+        // inserts a REBALANCE that serializes InternalRow to BinaryRow via
+        // InternalRowTypeSerializer. writeBlob() must preserve the BlobDescriptor so
+        // that BlobDescriptorWriter can serialize it at the sink.
+
+        byte[] blobData = "multimodal-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/multimodal_blob_stream";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        sEnv.executeSql(
+                "CREATE TABLE multimodal_assets_metadata ("
+                        + "id STRING, "
+                        + "source_uri STRING, "
+                        + "media_content BYTES, "
+                        + "dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'blob-field'='media_content',"
+                        + "'blob-descriptor-field'='media_content'"
+                        + ")");
+
+        // Streaming INSERT with sys.path_to_descriptor
+        // The /*+ OPTIONS('sink.parallelism' = '2') */ hint forces a shuffle
+        // from the source (parallelism 1 for VALUES) to the sink (parallelism 2).
+        // After fix, writeBlob() preserves BlobDescriptor through the shuffle.
+        sEnv.getConfig().set("table.dml-sync", "true");
+        sEnv.executeSql(
+                        "INSERT INTO multimodal_assets_metadata "
+                                + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                                + "VALUES ('test-id', 'test-uri', "
+                                + "sys.path_to_descriptor('"
+                                + uri
+                                + "'), '2025-07-07')")
+                .await();
+    }
+
+    @Test
+    public void testBlobDescriptorFieldBatchWriteWithShuffle() throws Exception {
+        // Same as streaming test but in batch mode.
+        // Verifies that blob-descriptor-field works when shuffle serialization
+        // occurs in batch mode.
+
+        byte[] blobData = "batch-multimodal-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/multimodal_blob_batch";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                "CREATE TABLE batch_multimodal_metadata ("
+                        + "id STRING, "
+                        + "source_uri STRING, "
+                        + "media_content BYTES, "
+                        + "dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'blob-field'='media_content',"
+                        + "'blob-descriptor-field'='media_content'"
+                        + ")");
+
+        // Batch INSERT with sys.path_to_descriptor
+        // The /*+ OPTIONS('sink.parallelism' = '2') */ hint forces a shuffle,
+        // same as streaming mode.
+        batchSql(
+                "INSERT INTO batch_multimodal_metadata "
+                        + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                        + "VALUES ('test-id', 'test-uri', "
+                        + "sys.path_to_descriptor('"
+                        + uri
+                        + "'), '2025-07-07')");
+    }
+
     private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
 
     public static String bytesToHex(byte[] bytes) {

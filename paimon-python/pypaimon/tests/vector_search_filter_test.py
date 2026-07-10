@@ -178,6 +178,7 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
 
         def with_global_index_result(self, result):
             ranges = result.results().to_range_list()
+            calls["raw_read_count"] = calls.get("raw_read_count", 0) + 1
             calls["global_index_ranges"] = ranges
             self._row_ids = [
                 row_id
@@ -1141,6 +1142,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual([3], captured_limits)
         self.assertEqual([Range(0, 2)], raw_calls["global_index_ranges"])
         self.assertEqual([0, 1, 2], raw_calls["candidate_ids"])
+        self.assertEqual(["embedding", "_ROW_ID"], raw_calls["projection"])
         self.assertEqual([0], sorted(list(result.results())))
 
     def test_refine_factor_one_reranks_without_expanding_candidates(self):
@@ -1186,8 +1188,32 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual([1], captured_limits)
         self.assertEqual([Range(2, 2)], raw_calls["global_index_ranges"])
         self.assertEqual([2], raw_calls["candidate_ids"])
+        self.assertEqual(["embedding", "_ROW_ID"], raw_calls["projection"])
         self.assertEqual([2], sorted(list(result.results())))
         self.assertLess(result.score_getter()(2), 1.0)
+
+    def test_raw_candidate_search_scores_only_candidate_bitmap(self):
+        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+
+        table = _StubTable(fields=[self.id_field, self.embedding_field],
+                           entries=[])
+        raw_calls = _install_raw_vector_read_builder(
+            table, "embedding", {0: [0.0], 1: [10.0], 2: [20.0]})
+
+        reader = VectorSearchReadImpl(
+            table,
+            limit=1,
+            vector_column=self.embedding_field,
+            query_vector=[0.0],
+            filter_=None,
+        )
+
+        result = reader._read_raw_candidate_search(
+            [Range(0, 2)], _bitmap(1), [0.0], "ivf-pq")
+
+        self.assertEqual([Range(0, 2)], raw_calls["global_index_ranges"])
+        self.assertEqual([0, 1, 2], raw_calls["candidate_ids"])
+        self.assertEqual([1], sorted(list(result.results())))
 
     def test_refine_factor_query_options_override_table_options(self):
         from pypaimon.common.options.options import Options
@@ -2432,7 +2458,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         self.assertIs(partition_filter, calls["partition_filter"])
         self.assertIs(filter_pred, calls["filter"])
         self.assertEqual([Range(5, 6)], calls["global_index_ranges"])
-        self.assertIn("_ROW_ID", calls["projection"])
+        self.assertEqual(["embedding", "id", "_ROW_ID"], calls["projection"])
         self.assertEqual(["split"], calls["splits"])
         self.assertEqual([5], sorted(list(result.results())))
 
@@ -2798,8 +2824,8 @@ class BatchVectorSearchTest(unittest.TestCase):
                        row_range_start=0, row_range_end=2)
         table = _StubTable(fields=[embedding_field], entries=[entry])
         _patch_snapshot(self, [entry])
-        _install_raw_vector_read_builder(
-            table, "embedding", {0: [0.0], 1: [10.0], 2: [20.0]})
+        raw_calls = _install_raw_vector_read_builder(
+            table, "embedding", {0: [10.0], 1: [0.0], 2: [5.0]})
         captured_limits = []
 
         def _fake_create(index_type, file_io, index_path,
@@ -2807,11 +2833,9 @@ class BatchVectorSearchTest(unittest.TestCase):
             class _FakeReader(GlobalIndexReader):
                 def visit_batch_vector_search(self_inner, bvs):
                     captured_limits.append(bvs.limit)
-                    approximate_scores = [(2, 100.0), (1, 50.0), (0, 1.0)]
                     return _completed_future([
-                        DictBasedScoredIndexResult(
-                            dict(approximate_scores[:bvs.limit]))
-                        for _ in range(bvs.vector_count)
+                        DictBasedScoredIndexResult({0: 100.0, 2: 50.0}),
+                        DictBasedScoredIndexResult({1: 100.0, 2: 50.0}),
                     ])
 
                 def close(self_inner):
@@ -2827,12 +2851,16 @@ class BatchVectorSearchTest(unittest.TestCase):
                 .with_vector_column("embedding")
                 .with_query_vectors([[0.0], [20.0]])
                 .with_limit(1)
-                .with_option("ivf.refine_factor", "3")
+                .with_option("ivf.refine_factor", "2")
                 .execute_batch_local()
             )
 
-        self.assertEqual([3], captured_limits)
-        self.assertEqual([0], sorted(list(results[0].results())))
+        self.assertEqual([2], captured_limits)
+        self.assertEqual(1, raw_calls["raw_read_count"])
+        self.assertEqual([Range(0, 2)], raw_calls["global_index_ranges"])
+        self.assertEqual([0, 1, 2], raw_calls["candidate_ids"])
+        self.assertEqual(["embedding", "_ROW_ID"], raw_calls["projection"])
+        self.assertEqual([2], sorted(list(results[0].results())))
         self.assertEqual([2], sorted(list(results[1].results())))
 
     def test_batch_empty_splits_returns_empty_per_query(self):

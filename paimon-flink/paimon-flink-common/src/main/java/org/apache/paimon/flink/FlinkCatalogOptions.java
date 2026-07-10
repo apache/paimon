@@ -36,4 +36,13 @@ public class FlinkCatalogOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, creating table in default database is not allowed. Default is false.");
+
+    public static final ConfigOption<Boolean> LINEAGE_USE_CATALOG_KEY =
+            ConfigOptions.key("lineage-use-catalog-key-as-identifier")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to use the 'catalog-key' as the catalog identifier in the lineage dataset name "
+                                    + "(i.e., catalog_key.db_name.table_name) when using a JDBC metastore. "
+                                    + "If false, the internal Flink catalog name is used instead.");
 }

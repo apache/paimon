@@ -68,7 +68,7 @@ public class ArrowBundleWriter implements BundleFormatWriter {
         if (!arrowFormatWriter.write(internalRow)) {
             flush();
             if (!arrowFormatWriter.write(internalRow)) {
-                throw new RuntimeException("Exception happens while write to orc file");
+                throw new RuntimeException("Exception happens while writing arrow record");
             }
         }
     }

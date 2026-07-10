@@ -215,7 +215,7 @@ class CoreOptions:
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
         .string_type()
-        .default_value(FILE_FORMAT_ORC)
+        .default_value(FILE_FORMAT_PARQUET)
         .with_description("Specify the message format of data files.")
     )
 

@@ -189,6 +189,31 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testResolveNameByMetastoreUsesCatalogKeyWhenFlagEnabled() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        catalogOptions.put("lineage-use-catalog-key-as-identifier", "true");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        // With flag enabled, catalog-key overrides even when explicit name is provided
+        assertThat(LineageUtils.resolveNameByMetastore(table, "my_catalog.db.src"))
+                .isEqualTo("jdbc-warehouse." + table.fullName());
+    }
+
+    @Test
+    void testResolveNameByMetastoreKeepsCatalogNameWhenFlagDisabled() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        // With flag disabled (default), Flink catalog name is preserved
+        assertThat(LineageUtils.resolveNameByMetastore(table, "my_catalog.db.src"))
+                .isEqualTo("my_catalog.db.src");
+    }
+
+    @Test
     void testDataStreamSourceLineageVertexUsesCatalogKey() throws Exception {
         Map<String, String> catalogOptions = new HashMap<>();
         catalogOptions.put("metastore", "jdbc");

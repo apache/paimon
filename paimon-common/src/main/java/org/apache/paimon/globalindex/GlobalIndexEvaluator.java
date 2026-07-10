@@ -20,13 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.IsNaN;
-import org.apache.paimon.predicate.IsNotNull;
-import org.apache.paimon.predicate.LeafBinaryFunction;
-import org.apache.paimon.predicate.LeafFunction;
-import org.apache.paimon.predicate.LeafNAryFunction;
 import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
@@ -39,11 +33,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -133,8 +125,7 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
             CompoundPredicate predicate) {
-        List<Predicate> children =
-                pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+        List<Predicate> children = flattenChildren(predicate);
         List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
                 new ArrayList<>(children.size());
         for (Predicate child : children) {
@@ -199,64 +190,6 @@ public class GlobalIndexEvaluator implements Closeable {
             result.add(child);
         }
         return result;
-    }
-
-    private List<Predicate> pruneRedundantIsNotNullForAnd(
-            List<Predicate> children, CompoundPredicate predicate) {
-        if (predicate.function() instanceof Or) {
-            return children;
-        }
-
-        // Only a null-rejecting sibling makes "f IS NOT NULL" redundant. A predicate such as
-        // "f IS NULL" must NOT count here: pruning IS NOT NULL from "f IS NULL AND f IS NOT NULL"
-        // would turn the empty result into the set of null rows. So we whitelist explicitly
-        // null-rejecting predicates instead of treating every non-IsNotNull leaf as constraining.
-        Set<String> constrainedFields = new HashSet<>();
-        for (Predicate child : children) {
-            if (!isNullRejecting(child)) {
-                continue;
-            }
-            Optional<FieldRef> fieldRef = ((LeafPredicate) child).fieldRefOptional();
-            fieldRef.ifPresent(ref -> constrainedFields.add(ref.name()));
-        }
-        if (constrainedFields.isEmpty()) {
-            return children;
-        }
-
-        List<Predicate> pruned = new ArrayList<>(children.size());
-        for (Predicate child : children) {
-            if (isIsNotNull(child)) {
-                Optional<FieldRef> fieldRef = ((LeafPredicate) child).fieldRefOptional();
-                if (fieldRef.isPresent() && constrainedFields.contains(fieldRef.get().name())) {
-                    continue;
-                }
-            }
-            pruned.add(child);
-        }
-        return pruned;
-    }
-
-    private boolean isIsNotNull(Predicate predicate) {
-        return predicate instanceof LeafPredicate
-                && ((LeafPredicate) predicate).function() instanceof IsNotNull;
-    }
-
-    /**
-     * A predicate is null-rejecting when it cannot match a row whose tested field is null. Under
-     * SQL three-valued logic every comparison/match predicate (=, &lt;&gt;, &lt;, &gt;, IN, NOT IN,
-     * BETWEEN, LIKE, ...) and IS NaN reject null; only IS NULL accepts it (and IS NOT NULL is the
-     * predicate we are deciding whether to prune). We whitelist by arity base class so future
-     * comparison functions are covered automatically without re-introducing the IS NULL hazard.
-     */
-    private boolean isNullRejecting(Predicate predicate) {
-        if (!(predicate instanceof LeafPredicate)) {
-            return false;
-        }
-        LeafFunction function = ((LeafPredicate) predicate).function();
-        return function instanceof LeafBinaryFunction
-                || function instanceof LeafNAryFunction
-                || function instanceof LeafTernaryFunction
-                || function instanceof IsNaN;
     }
 
     @Override

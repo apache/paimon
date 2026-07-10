@@ -20,9 +20,10 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.fs.Path
+import org.apache.paimon.globalindex.IndexedSplitRecordReader
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIterator}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS, SEARCH_SCORE_COLUMN}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
 import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.{CloseableIterator, Preconditions}
 
@@ -48,10 +49,12 @@ case class PaimonRecordReaderIterator(
   private val needMetadata = metadataColumns.nonEmpty
   private val needPathAndIndexMetadata =
     metadataColumns.exists(c => PATH_AND_INDEX_META_COLUMNS.contains(c.name))
-  private val needScoreMetadata = {
-    metadataColumns.exists(_.name == SEARCH_SCORE_COLUMN)
-  }
-  Preconditions.checkArgument(!needScoreMetadata || metadataColumns.size == 1)
+  private val needVectorSearchMetadata = reader.isInstanceOf[IndexedSplitRecordReader] &&
+    metadataColumns.exists(c => VECTOR_SEARCH_META_COLUMN_NAMES.contains(c.name))
+
+  Preconditions.checkArgument(
+    !needVectorSearchMetadata ||
+      metadataColumns.forall(c => VECTOR_SEARCH_META_COLUMN_NAMES.contains(c.name)))
 
   private val metadataRow: GenericRow =
     GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
@@ -126,7 +129,7 @@ case class PaimonRecordReaderIterator(
         while (!stop) {
           val dataRow = currentIterator.next()
           if (dataRow != null) {
-            if (needScoreMetadata) {
+            if (needVectorSearchMetadata) {
               updateScoreMetadata(
                 currentIterator.asInstanceOf[ScoreRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
@@ -179,6 +182,8 @@ case class PaimonRecordReaderIterator(
     metadataColumns.zipWithIndex.foreach {
       case (metadataColumn, index) =>
         metadataColumn.name match {
+          case PaimonMetadataColumn.ROW_ID_COLUMN =>
+            metadataRow.setField(index, fileRecordIterator.returnedRowId())
           case PaimonMetadataColumn.SEARCH_SCORE_COLUMN =>
             metadataRow.setField(index, fileRecordIterator.returnedScore())
         }

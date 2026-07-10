@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-spark</artifactId>
-        <version>1.5-SNAPSHOT</version>
+        <version>2.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-spark-3.5_${scala.binary.version}</artifactId>
@@ -138,7 +138,6 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                      <include>org.apache.paimon:paimon-spark3-common_${scala.binary.version}</include>
-                                     <include>org.apache.paimon:paimon-eslib</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
@@ -147,36 +146,4 @@ under the License.
             </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <!-- paimon-eslib is a Java-11 / Lucene-9.12 module built only under the paimon-eslib
-             profile and is not published to the default snapshot repository. The Spark module has
-             no compile-time reference to it; the dependency exists solely so the shaded Spark jar
-             bundles the ES index backend (see the maven-shade <include> above). Gating it behind
-             the same profile keeps the default reactor build (CI) resolvable while still bundling
-             paimon-eslib when the profile is active. -->
-        <profile>
-            <id>paimon-eslib</id>
-            <!-- Auto-activate on JDK 11/17/21, aligned with the root paimon-eslib profile that
-                 builds the module. The [11,) range (not a bare <jdk>11</jdk> prefix match) ensures
-                 the shaded Spark jar bundles paimon-eslib on 17/21 too, not only JDK 11; on JDK 8
-                 both profiles stay inactive so the dependency reference is not resolved. -->
-            <activation>
-                <jdk>[11,)</jdk>
-            </activation>
-            <dependencies>
-                <dependency>
-                    <groupId>org.apache.paimon</groupId>
-                    <artifactId>paimon-eslib</artifactId>
-                    <version>${project.version}</version>
-                    <exclusions>
-                        <exclusion>
-                            <groupId>*</groupId>
-                            <artifactId>*</artifactId>
-                        </exclusion>
-                    </exclusions>
-                </dependency>
-            </dependencies>
-        </profile>
-    </profiles>
 </project>

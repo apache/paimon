@@ -95,14 +95,14 @@ CREATE TABLE default.t (
     `t1` STRING,
     `t2` STRING,
     `t3` STRING,
-    `dt` STRING
-) PARTITIONED BY (`dt`) WITH (
+    `date` STRING
+) PARTITIONED BY (`date`) WITH (
   'chain-table.enabled' = 'true',
-  'primary-key' = 'dt,t1',
+  'primary-key' = 'date,t1',
   'sequence.field' = 't2',
   'bucket-key' = 't1',
   'bucket' = '2',
-  'partition.timestamp-pattern' = '$dt', 
+  'partition.timestamp-pattern' = '$date',
   'partition.timestamp-formatter' = 'yyyyMMdd'
 );
 
@@ -130,6 +130,9 @@ Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
 - Chain table should ensure that the schema of each branch is consistent.
 - Deletion vector is not supported for chain table.
+- The delta branch must use the `DEDUPLICATE` merge engine (default) if you plan
+  to use streaming read or lookup join. Other merge engine types are not supported
+  on the delta branch for these incremental read paths. Batch read is not affected.
 
 After creating a chain table, you can read and write data in the following ways.
 
@@ -263,6 +266,51 @@ INSERT INTO downstream_sink SELECT * FROM default.t;
   scan determines which partitions to read based on the chain-merge logic across snapshot and
   delta branches, and applying a partition filter would interfere with this logic. To read a
   specific partition, use batch mode instead.
+- The delta branch must use the `DEDUPLICATE` merge engine (default). Other merge engine
+  types are not supported.
+
+## Lookup Join
+
+Chain tables support Flink lookup joins. When used as a dimension table, the lookup
+join reflects the latest state of the chain table: the most recent snapshot partition
+per group, combined with delta partitions that come after it. Older snapshot
+partitions are considered outdated and excluded. After the initial load, new delta
+branch writes become visible through periodic incremental refresh.
+
+```sql
+SELECT
+    orders.order_id,
+    dim.product_name
+FROM orders
+LEFT JOIN dim /*+ OPTIONS('continuous.discovery-interval' = '5s') */
+    FOR SYSTEM_TIME AS OF orders.proc_time AS dim
+    ON orders.product_id = dim.product_id;
+```
+
+The incremental refresh only monitors the **delta branch**. Writes to the snapshot
+branch are not detected until the lookup join job is restarted.
+
+### Limitations
+
+- The incremental refresh only monitors the **delta branch**. Writes to the snapshot
+  branch are not detected until the lookup join job is restarted.
+- Join key must not contain partition keys. Chain table's partition model spans two
+  branches (snapshot + delta) with anchor-based merging, making partition-level routing
+  unreliable for lookup joins. If partition keys appear in the join condition, an error
+  will be raised.
+- Partition filters are not supported in chain table lookup joins. Specifying a
+  partition filter via the `scan.partitions` table option throws an
+  `UnsupportedOperationException`. This is because the chain table lookup scan
+  determines which partitions to read based on the chain-merge logic across snapshot
+  and delta branches, and applying a partition filter would interfere with this logic.
+- The chain-table-aware lookup scan only supports the default startup mode
+  (`latest-full`). When the user specifies an explicit starting position — such as
+  `scan.snapshot-id`, `scan.timestamp-millis`, `scan.mode = 'latest'`, or
+  `consumer-id` — an `UnsupportedOperationException` is thrown.
+- `lookup.cache` must be `AUTO` or `FULL`. Other cache modes are not supported for
+  chain tables.
+- The delta branch must use the `DEDUPLICATE` merge engine (default). Other merge
+  engine types are not supported.
 
 ## Group Partition
 

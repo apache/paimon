@@ -538,6 +538,7 @@ class TableUpdateByRowId:
         new_files = []
         file_store_write = None
         blob_writers = []
+        success = False
         try:
             if merged_data is not None:
                 file_store_write = FileStoreWrite(self.table, self.commit_user)
@@ -575,11 +576,18 @@ class TableUpdateByRowId:
                         check_from_snapshot=self.snapshot_id,
                     )
                 )
+            success = True
         finally:
-            if file_store_write is not None:
-                file_store_write.close()
-            for blob_writer in blob_writers:
-                blob_writer.close()
+            if success:
+                if file_store_write is not None:
+                    file_store_write.close()
+                for blob_writer in blob_writers:
+                    blob_writer.close()
+            else:
+                if file_store_write is not None:
+                    file_store_write.abort()
+                for blob_writer in blob_writers:
+                    blob_writer.abort()
 
     @staticmethod
     def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,

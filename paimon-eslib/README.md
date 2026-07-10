@@ -45,13 +45,12 @@ override it with `fields.<field>.type`:
 | Column data type | Default sub-index | Override with `type` |
 |---|---|---|
 | `VECTOR<FLOAT>` / `ARRAY<FLOAT>` | Vector (ANN) | `vector` |
-| `STRING` with an `analyzer` set | Full-text (BM25) | `fulltext` |
-| `STRING` without an `analyzer` | Keyword (exact match) | `keyword` |
-| `TIMESTAMP` / `DATE` | Date | `date` |
+| `STRING` | Full-text primary + keyword sub-field | `fulltext` or `keyword` |
+| `TIMESTAMP` / `DATE` | Long scalar | `date` |
 | numeric and other scalars | Scalar | — |
 
-A full-text column also gets a `<column>.keyword` sub-field by default, so exact filters keep working
-alongside full-text match. Disable it with `fields.<column>.keyword_subfield=false`.
+Text columns always provide both capabilities. A `fulltext` primary field gets a `<column>.keyword`
+exact-match sub-field; a `keyword` primary field gets a `<column>.fulltext` analyzed sub-field.
 
 ## Prerequisites
 
@@ -139,8 +138,7 @@ column.
 | `m` | vector (`hnsw`) | engine default | HNSW graph out-degree. |
 | `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width. |
 | `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ. |
-| `analyzer` | string | not set | Text analyzer (for example `standard`). Setting it makes a `STRING` column full-text; leaving it unset makes it a keyword column. |
-| `keyword_subfield` | full-text | `true` | Whether a full-text column also gets a `<column>.keyword` exact-match sub-field. |
+| `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field. |
 | `read-search-threads` | index-type only | `-1` | Read/search thread pool size. `-1` uses CPU/2; `0` disables parallel search (serial). Key: `global-index.es-index.read-search-threads`. |
 
 ## Query

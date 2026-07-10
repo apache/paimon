@@ -20,18 +20,16 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -47,7 +45,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,20 +107,14 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
 
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        RowType emptyRowType = new RowType(Collections.emptyList());
-        try (FileRecordReader<InternalRow> reader =
-                format.createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
-                        .createReader(context)) {
-            Map<String, Map<String, String>> readFieldMetadata =
-                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-            Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");
-            Assertions.assertThat(readFieldMetadata.get("id"))
-                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
-            Assertions.assertThat(readFieldMetadata.get("name"))
-                    .containsAllEntriesOf(fieldMetadata);
-            Assertions.assertThat(readFieldMetadata.get("name"))
-                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
-        }
+        Map<String, Map<String, String>> readFieldMetadata =
+                ((SupportsFieldMetadata) format).readFieldMetadata(context);
+        Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");
+        Assertions.assertThat(readFieldMetadata.get("id"))
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
+        Assertions.assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
+        Assertions.assertThat(readFieldMetadata.get("name"))
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
     }
 
     @ParameterizedTest

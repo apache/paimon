@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.compact;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.DataEvolutionTableCompactSink;
@@ -55,15 +56,20 @@ public class DataEvolutionTableCompact {
     }
 
     public void build() {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
         DataEvolutionTableCompactSource source =
-                new DataEvolutionTableCompactSource(table, partitionPredicate);
+                new DataEvolutionTableCompactSource(table, partitionPredicate, snapshot);
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionTableCompactSource.buildSource(env, source, tableIdentifier);
 
-        sinkFromSource(sourceStream);
+        sinkFromSource(sourceStream, snapshot);
     }
 
-    private void sinkFromSource(DataStreamSource<DataEvolutionCompactTask> input) {
+    private void sinkFromSource(
+            DataStreamSource<DataEvolutionCompactTask> input, Snapshot snapshot) {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
@@ -77,6 +83,6 @@ public class DataEvolutionTableCompact {
         }
 
         DataStream<DataEvolutionCompactTask> rebalanced = new DataStream<>(env, transformation);
-        DataEvolutionTableCompactSink.sink(table, rebalanced);
+        DataEvolutionTableCompactSink.sink(table, rebalanced, snapshot);
     }
 }

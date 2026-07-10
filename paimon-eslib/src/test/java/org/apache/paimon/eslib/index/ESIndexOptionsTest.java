@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
+import org.elasticsearch.eslib.api.model.ScalarFieldType;
 import org.elasticsearch.eslib.api.model.VectorAlgorithm;
 import org.junit.jupiter.api.Test;
 
@@ -86,16 +87,16 @@ class ESIndexOptionsTest {
     }
 
     @Test
-    void fulltextGetsKeywordSubFieldByDefaultAndCanBeDisabled() {
-        Map<String, String> on = new HashMap<>();
-        on.put("global-index.es-index.fields.title.analyzer", "standard");
-        ESIndexOptions enabled = new ESIndexOptions(FIELDS, Options.fromMap(on));
-        assertThat(enabled.keywordSubField("title")).isEqualTo("title.keyword");
+    void textFieldsGetComplementaryMultiField() {
+        ESIndexOptions fulltext = new ESIndexOptions(FIELDS, Options.fromMap(new HashMap<>()));
+        assertThat(fulltext.keywordSubField("title")).isEqualTo("title.keyword");
+        assertThat(fulltext.fullTextSearchField("title")).isEqualTo("title");
 
-        Map<String, String> off = new HashMap<>(on);
-        off.put("global-index.es-index.fields.title.keyword_subfield", "false");
-        ESIndexOptions disabled = new ESIndexOptions(FIELDS, Options.fromMap(off));
-        assertThat(disabled.keywordSubField("title")).isNull();
+        Map<String, String> keywordOptions = new HashMap<>();
+        keywordOptions.put("global-index.es-index.fields.title.type", "keyword");
+        ESIndexOptions keyword = new ESIndexOptions(FIELDS, Options.fromMap(keywordOptions));
+        assertThat(keyword.fullTextSubField("title")).isEqualTo("title.fulltext");
+        assertThat(keyword.fullTextSearchField("title")).isEqualTo("title.fulltext");
     }
 
     @Test
@@ -122,12 +123,35 @@ class ESIndexOptionsTest {
     }
 
     @Test
-    void textFieldCanOptOutOfFullTextWithTypeKeyword() {
+    void textFieldConfiguredAsKeywordStillGetsFullTextSubField() {
         Map<String, String> m = new HashMap<>();
         m.put("global-index.es-index.fields.title.type", "keyword");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
         assertThat(options.getConfig("title").indexType())
                 .isEqualTo(FieldIndexConfig.IndexType.KEYWORD);
         assertThat(options.keywordSubField("title")).isNull();
+        assertThat(options.fullTextSubField("title")).isEqualTo("title.fulltext");
+    }
+
+    @Test
+    void temporalFieldsUseLongScalarForFiltering() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "d", DataTypes.DATE()),
+                        new DataField(1, "ts", DataTypes.TIMESTAMP(3)));
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        assertThat(options.getConfig("d").indexType()).isEqualTo(FieldIndexConfig.IndexType.SCALAR);
+        assertThat(options.getConfig("d").scalarType()).isEqualTo(ScalarFieldType.LONG);
+        assertThat(options.getConfig("ts").indexType())
+                .isEqualTo(FieldIndexConfig.IndexType.SCALAR);
+        assertThat(options.getConfig("ts").scalarType()).isEqualTo(ScalarFieldType.LONG);
+
+        Map<String, String> explicitDate = new HashMap<>();
+        explicitDate.put("global-index.es-index.fields.d.type", "date");
+        ESIndexOptions explicitOptions = new ESIndexOptions(fields, Options.fromMap(explicitDate));
+        assertThat(explicitOptions.getConfig("d").indexType())
+                .isEqualTo(FieldIndexConfig.IndexType.SCALAR);
+        assertThat(explicitOptions.getConfig("d").scalarType()).isEqualTo(ScalarFieldType.LONG);
     }
 }

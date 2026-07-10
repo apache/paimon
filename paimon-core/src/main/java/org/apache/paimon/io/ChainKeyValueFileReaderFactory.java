@@ -88,7 +88,7 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
     protected TableSchema getDataSchema(DataFileMeta fileMeta) {
         String branch = chainReadContext.fileBranchMapping().get(fileMeta.fileName());
         if (currentBranch.equalsIgnoreCase(branch)) {
-            super.getDataSchema(fileMeta);
+            return super.getDataSchema(fileMeta);
         }
         if (!branchSchemaManagers.containsKey(branch)) {
             throw new RuntimeException("No schema manager found for branch: " + branch);

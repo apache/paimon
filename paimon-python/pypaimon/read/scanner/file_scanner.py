@@ -35,7 +35,9 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
                                            remove_row_id_filter,
-                                           trim_and_transform_predicate)
+                                           rewrite_predicate_indices,
+                                           trim_and_transform_predicate,
+                                           trim_predicate_by_fields)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
@@ -52,6 +54,7 @@ from pypaimon.read.scanner.primary_key_table_split_generator import \
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
 
 
@@ -221,7 +224,15 @@ class FileScanner:
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
-        self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
+        row_ranges = (
+            _row_ranges_from_predicate(predicate) if predicate else None
+        )
+        if predicate and row_ranges is not None:
+            self.predicate_for_stats = remove_row_id_filter(predicate)
+        else:
+            self.predicate_for_stats = predicate
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, {SpecialFields.ROW_ID.name})
         # Partition columns aren't in data files, so skip them for value-stats pruning.
         self.predicate_for_stats = exclude_predicate_with_fields(
             self.predicate_for_stats, set(self.table.partition_keys))
@@ -238,7 +249,12 @@ class FileScanner:
             self.partition_key_predicate = trim_and_transform_predicate(
                 self.predicate, self.table.field_names, self.table.partition_keys)
         else:
-            self.partition_key_predicate = partition_predicate
+            # External predicate may carry full-schema indices and non-partition
+            # leaves; drop non-partition leaves and rebind the rest by name to the
+            # partition-row layout (matches derived path / Java), else IndexError.
+            self.partition_key_predicate = rewrite_predicate_indices(
+                trim_predicate_by_fields(partition_predicate, self.table.partition_keys),
+                self.table.partition_keys_fields)
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()

@@ -21,6 +21,7 @@ package org.apache.paimon.eslib.index;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
@@ -154,11 +155,13 @@ public class ESIndexGlobalIndexWriter
                 writeKeywordSubField(field.name(), docId, singleText);
                 break;
             case KEYWORD:
+                String singleKeyword = fieldData.toString();
                 builder.addScalarField(
                         field.name(),
                         docId,
-                        fieldData.toString(),
+                        singleKeyword,
                         org.elasticsearch.eslib.api.model.ScalarFieldType.KEYWORD);
+                writeFullTextSubField(field.name(), docId, singleKeyword);
                 break;
             case SCALAR:
             case DATE:
@@ -194,6 +197,7 @@ public class ESIndexGlobalIndexWriter
                         docId,
                         keyword,
                         org.elasticsearch.eslib.api.model.ScalarFieldType.KEYWORD);
+                writeFullTextSubField(field.name(), docId, keyword);
                 break;
             case SCALAR:
             case DATE:
@@ -221,6 +225,15 @@ public class ESIndexGlobalIndexWriter
                     docId,
                     value,
                     org.elasticsearch.eslib.api.model.ScalarFieldType.KEYWORD);
+        }
+    }
+
+    /** Writes the analyzed multi-field paired with a KEYWORD primary field. */
+    private void writeFullTextSubField(String fieldName, long docId, String value)
+            throws IOException {
+        String subField = indexOptions.fullTextSubField(fieldName);
+        if (subField != null) {
+            builder.addTextField(subField, docId, value);
         }
     }
 
@@ -253,7 +266,7 @@ public class ESIndexGlobalIndexWriter
             case DATE:
                 // DATE is stored as an int day-count; TIME as an int millis-of-day.
             case TIME_WITHOUT_TIME_ZONE:
-                return row.getInt(pos);
+                return (long) row.getInt(pos);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return row.getTimestamp(pos, ((TimestampType) type).getPrecision())
                         .getMillisecond();
@@ -268,6 +281,22 @@ public class ESIndexGlobalIndexWriter
     private Object extractScalar(Object fieldData, DataType type) {
         if (type instanceof ArrayType && fieldData instanceof InternalArray) {
             return extractScalarArray((InternalArray) fieldData, (ArrayType) type);
+        }
+        switch (type.getTypeRoot()) {
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return fieldData instanceof Number ? ((Number) fieldData).longValue() : fieldData;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                if (fieldData instanceof Timestamp) {
+                    return ((Timestamp) fieldData).getMillisecond();
+                }
+                if (fieldData instanceof java.sql.Timestamp) {
+                    return ((java.sql.Timestamp) fieldData).getTime();
+                }
+                return fieldData instanceof Number ? ((Number) fieldData).longValue() : fieldData;
+            default:
+                break;
         }
         return fieldData;
     }

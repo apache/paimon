@@ -59,6 +59,7 @@ public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
         return new ScoreRecordIterator<InternalRow>() {
 
             private float score = Float.NaN;
+            private long rowId;
 
             @Override
             public float returnedScore() {
@@ -66,11 +67,18 @@ public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
             }
 
             @Override
+            public long returnedRowId() {
+                return rowId;
+            }
+
+            @Override
             public InternalRow next() throws IOException {
                 InternalRow row = iterator.next();
-                if (row != null && rowIdToScore != null) {
-                    Long rowId = row.getLong(rowIdIndex);
-                    this.score = rowIdToScore.get(rowId);
+                if (row != null && rowIdIndex >= 0) {
+                    this.rowId = row.getLong(rowIdIndex);
+                    if (rowIdToScore != null) {
+                        this.score = rowIdToScore.get(rowId);
+                    }
                     if (projectedRow != null) {
                         projectedRow.replaceRow(row);
                         return projectedRow;

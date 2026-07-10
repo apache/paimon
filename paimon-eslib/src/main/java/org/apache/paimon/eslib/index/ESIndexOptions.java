@@ -64,10 +64,11 @@ public class ESIndexOptions {
     /** Field-level key prefix, e.g. {@code global-index.es-index.fields.<field>.algorithm}. */
     private static final String FIELDS_PREFIX = INDEX_TYPE_PREFIX + "fields.";
 
-    /**
-     * Suffix of the keyword multi-field sub-field of a FULLTEXT column (mirrors ES text.keyword).
-     */
+    /** Suffix of the keyword multi-field sub-field of a FULLTEXT column. */
     public static final String KEYWORD_SUBFIELD_SUFFIX = ".keyword";
+
+    /** Suffix of the full-text multi-field sub-field of a KEYWORD column. */
+    public static final String FULLTEXT_SUBFIELD_SUFFIX = ".fulltext";
 
     private final Map<String, FieldIndexConfig> fieldConfigs;
 
@@ -76,17 +77,25 @@ public class ESIndexOptions {
         for (DataField field : fields) {
             FieldIndexConfig config = parseFieldConfig(field, options);
             fieldConfigs.put(field.name(), config);
-            // Multi-field: a FULLTEXT column also gets a keyword sub-field (content.keyword) so
-            // exact filters (=, IN, prefix, ...) work alongside full-text match. Enabled by
-            // default; disable with fields.<name>.keyword_subfield=false.
-            if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT
-                    && Boolean.parseBoolean(
-                            resolve(options, field.name(), "keyword_subfield", "true"))) {
+            // Text fields always support both analyzed search and exact matching. The configured
+            // type selects the primary field; the complementary capability is stored in a
+            // multi-field sub-field.
+            if (isTextType(field.type())
+                    && config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
                 String subField = field.name() + KEYWORD_SUBFIELD_SUFFIX;
                 fieldConfigs.put(
                         subField,
                         FieldIndexConfig.builder(subField, FieldIndexConfig.IndexType.KEYWORD)
                                 .scalarType(ScalarFieldType.KEYWORD)
+                                .build());
+            } else if (isTextType(field.type())
+                    && config.indexType() == FieldIndexConfig.IndexType.KEYWORD) {
+                String subField = field.name() + FULLTEXT_SUBFIELD_SUFFIX;
+                String analyzer = resolve(options, field.name(), "analyzer", "standard");
+                fieldConfigs.put(
+                        subField,
+                        FieldIndexConfig.builder(subField, FieldIndexConfig.IndexType.FULLTEXT)
+                                .analyzer(BuiltinAnalyzer.fromName(analyzer))
                                 .build());
             }
         }
@@ -100,13 +109,25 @@ public class ESIndexOptions {
         return fieldConfigs.get(fieldName);
     }
 
-    /**
-     * Returns the keyword multi-field sub-field name for {@code fieldName} if one exists (i.e. the
-     * field is FULLTEXT and the keyword sub-field is enabled), otherwise {@code null}.
-     */
+    /** Returns the keyword multi-field sub-field name for {@code fieldName} if one exists. */
     public String keywordSubField(String fieldName) {
         String subField = fieldName + KEYWORD_SUBFIELD_SUFFIX;
         return fieldConfigs.containsKey(subField) ? subField : null;
+    }
+
+    /** Returns the full-text multi-field sub-field name for {@code fieldName} if one exists. */
+    public String fullTextSubField(String fieldName) {
+        String subField = fieldName + FULLTEXT_SUBFIELD_SUFFIX;
+        return fieldConfigs.containsKey(subField) ? subField : null;
+    }
+
+    /** Returns the physical FULLTEXT field used to search the logical Paimon field. */
+    public String fullTextSearchField(String fieldName) {
+        FieldIndexConfig config = fieldConfigs.get(fieldName);
+        if (config != null && config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
+            return fieldName;
+        }
+        return fullTextSubField(fieldName);
     }
 
     /**
@@ -138,17 +159,18 @@ public class ESIndexOptions {
             // String fields default to FULLTEXT (analyzed with the standard analyzer) so full-text
             // search always works on a text column; a keyword sub-field (<field>.keyword) is added
             // below for exact filters — the ES text/keyword multi-field, so both capabilities are
-            // available. This also removes a full-text coverage gap: a text column carried only as
-            // an extra field of a hybrid index would otherwise default to KEYWORD, be counted as
-            // full-text coverage during planning, yet no-match at read time, skipping those rows.
-            // An explicit analyzer overrides the default; use type=keyword to opt out of full-text.
+            // available. An explicit analyzer overrides the default. Configuring type=keyword
+            // makes the exact field primary and adds a FULLTEXT sub-field instead.
             String analyzer = resolve(options, field.name(), "analyzer", "standard");
             return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.FULLTEXT)
                     .analyzer(BuiltinAnalyzer.fromName(analyzer))
                     .build();
         } else if (isTimestampType(dataType)) {
-            return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.DATE)
-                    .scalarType(ScalarFieldType.DATE)
+            // eslib-core 1.0.3 does not implement DATE scalar filters. Store DATE/TIMESTAMP as a
+            // long scalar instead (DATE = epoch day, TIMESTAMP = epoch millis) so predicate
+            // filtering uses the supported LONG query path.
+            return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.SCALAR)
+                    .scalarType(ScalarFieldType.LONG)
                     .build();
         } else {
             return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.SCALAR)
@@ -174,8 +196,8 @@ public class ESIndexOptions {
                         .scalarType(ScalarFieldType.GEO_POINT)
                         .build();
             case "date":
-                return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.DATE)
-                        .scalarType(ScalarFieldType.DATE)
+                return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.SCALAR)
+                        .scalarType(ScalarFieldType.LONG)
                         .build();
             case "vector":
                 return parseVectorConfig(fieldName, dataType, options);

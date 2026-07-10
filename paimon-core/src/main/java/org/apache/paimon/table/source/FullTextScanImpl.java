@@ -34,7 +34,6 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -94,7 +93,7 @@ public class FullTextScanImpl implements FullTextScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
+                    return textColumnIds.contains(globalIndex.indexFieldId())
                             && supportsFullTextSearch(entry.indexFile().indexType());
                 };
 
@@ -103,37 +102,16 @@ public class FullTextScanImpl implements FullTextScan {
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
 
-        // A searched text column can be covered by more than one full-text-capable global index
-        // (e.g. a dedicated full-text index whose primary field is the column, and a vector index
-        // that carries the column as an extra field). These are different index definitions and
-        // must not be merged into one reader input. Pick one index definition per (column, range),
-        // preferring the one where the column is the primary indexFieldId (dedicated full-text)
-        // over an extra-field match, so every split carries files from a single index identity.
-        // Choosing per range (not per whole column) keeps a range that only one index covers from
-        // being dropped when a different index wins the other ranges of the same column.
-        Map<String, Map<Range, IndexIdentity>> chosenByColumnAndRange =
-                chooseIndexPerColumnAndRange(allIndexFiles, textColumnIds, idToColumn);
-
-        // Group full-text index files by column and row range. A multi-column index serves a text
-        // column through either its primary indexFieldId or its extraFieldIds, and one file may
-        // cover more than one searched text column.
+        // Group full-text index files by column and row range.
         Map<String, Map<Range, List<IndexFileMeta>>> byColumnAndRange = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            IndexIdentity identity = IndexIdentity.of(indexFile);
+            String columnName = checkNotNull(idToColumn.get(meta.indexFieldId()));
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
-                String columnName = checkNotNull(idToColumn.get(columnId));
-                Map<Range, IndexIdentity> chosenForColumn = chosenByColumnAndRange.get(columnName);
-                if (chosenForColumn == null || !identity.equals(chosenForColumn.get(range))) {
-                    // This (column, range) is served by a different (preferred) index definition.
-                    continue;
-                }
-                byColumnAndRange
-                        .computeIfAbsent(columnName, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new ArrayList<>())
-                        .add(indexFile);
-            }
+            byColumnAndRange
+                    .computeIfAbsent(columnName, k -> new HashMap<>())
+                    .computeIfAbsent(range, k -> new ArrayList<>())
+                    .add(indexFile);
         }
 
         List<FullTextSearchSplit> splits = new ArrayList<>();
@@ -159,130 +137,6 @@ public class FullTextScanImpl implements FullTextScan {
         }
 
         return () -> splits;
-    }
-
-    /**
-     * Returns the searched text-column ids served by {@code meta}: its primary {@code indexFieldId}
-     * plus any {@code extraFieldIds} present in {@code textColumnIds}. This lets a multi-column
-     * index (e.g. vector primary + text extra) serve full-text search on its extra text column.
-     */
-    private static List<Integer> matchedTextColumnIds(
-            GlobalIndexMeta meta, Set<Integer> textColumnIds) {
-        List<Integer> matched = new ArrayList<>();
-        if (textColumnIds.contains(meta.indexFieldId())) {
-            matched.add(meta.indexFieldId());
-        }
-        int[] extraFieldIds = meta.extraFieldIds();
-        if (extraFieldIds != null) {
-            for (int extraFieldId : extraFieldIds) {
-                if (textColumnIds.contains(extraFieldId)) {
-                    matched.add(extraFieldId);
-                }
-            }
-        }
-        return matched;
-    }
-
-    /**
-     * Chooses exactly one index definition to serve each searched (text column, row range). When
-     * more than one index covers the same column over the same range, the dedicated full-text index
-     * (the column is its primary {@code indexFieldId}) is preferred over an extra-field match; ties
-     * are broken deterministically by index identity so the choice is stable across planning runs.
-     *
-     * <p>Selection is per range rather than per whole column on purpose: a range covered only by a
-     * non-preferred index (e.g. a range indexed solely by a vector index that carries the column as
-     * an extra field) must still be emitted as a searchable split. Otherwise it is skipped here yet
-     * the raw-coverage fallback (computed from all index files) still treats it as indexed, so the
-     * rows in that range would never be searched.
-     */
-    private static Map<String, Map<Range, IndexIdentity>> chooseIndexPerColumnAndRange(
-            List<IndexFileMeta> allIndexFiles,
-            Set<Integer> textColumnIds,
-            Map<Integer, String> idToColumn) {
-        // (columnName, range) -> candidate identity -> whether the column is that index's primary
-        Map<String, Map<Range, Map<IndexIdentity, Boolean>>> candidates = new HashMap<>();
-        for (IndexFileMeta indexFile : allIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            IndexIdentity identity = IndexIdentity.of(indexFile);
-            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
-                String columnName = checkNotNull(idToColumn.get(columnId));
-                boolean primary = meta.indexFieldId() == columnId;
-                candidates
-                        .computeIfAbsent(columnName, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new HashMap<>())
-                        .merge(identity, primary, (a, b) -> a || b);
-            }
-        }
-
-        Map<String, Map<Range, IndexIdentity>> chosen = new HashMap<>();
-        for (Map.Entry<String, Map<Range, Map<IndexIdentity, Boolean>>> columnEntry :
-                candidates.entrySet()) {
-            String columnName = columnEntry.getKey();
-            for (Map.Entry<Range, Map<IndexIdentity, Boolean>> rangeEntry :
-                    columnEntry.getValue().entrySet()) {
-                IndexIdentity best = null;
-                boolean bestPrimary = false;
-                for (Map.Entry<IndexIdentity, Boolean> candidate :
-                        rangeEntry.getValue().entrySet()) {
-                    IndexIdentity identity = candidate.getKey();
-                    boolean primary = candidate.getValue();
-                    boolean better =
-                            best == null
-                                    || (primary && !bestPrimary)
-                                    || (primary == bestPrimary
-                                            && identity.key().compareTo(best.key()) < 0);
-                    if (better) {
-                        best = identity;
-                        bestPrimary = primary;
-                    }
-                }
-                chosen.computeIfAbsent(columnName, k -> new HashMap<>())
-                        .put(rangeEntry.getKey(), best);
-            }
-        }
-        return chosen;
-    }
-
-    /**
-     * Identity of a global index definition — its index type, primary {@code indexFieldId} and
-     * extra field ids. Two index files with the same identity belong to the same index definition
-     * (differing only by row range/shard); files with different identities must not be merged into
-     * one reader input.
-     */
-    private static final class IndexIdentity {
-        private final String key;
-
-        private IndexIdentity(String key) {
-            this.key = key;
-        }
-
-        static IndexIdentity of(IndexFileMeta indexFile) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            int[] extra = meta.extraFieldIds();
-            int[] sortedExtra = extra == null ? new int[0] : extra.clone();
-            Arrays.sort(sortedExtra);
-            return new IndexIdentity(
-                    indexFile.indexType()
-                            + '|'
-                            + meta.indexFieldId()
-                            + '|'
-                            + Arrays.toString(sortedExtra));
-        }
-
-        String key() {
-            return key;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof IndexIdentity && key.equals(((IndexIdentity) o).key);
-        }
-
-        @Override
-        public int hashCode() {
-            return key.hashCode();
-        }
     }
 
     private static boolean supportsFullTextSearch(String indexType) {

@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
@@ -296,26 +297,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     @staticmethod
     def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """
-        Split files by row ID for data evolution tables.
-        Files are grouped by their overlapping row ID ranges.
-        """
-        list_ranges = [file.row_id_range() for file in files]
-
-        if not list_ranges:
-            return []
-
-        sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
-
-        range_to_files = {}
-        for file in files:
-            file_range = file.row_id_range()
-            for r in sorted_ranges:
-                if r.overlaps(file_range):
-                    range_to_files.setdefault(r, []).append(file)
-                    break
-
-        return list(range_to_files.values())
+        """Group data-evolution files with overlapping row-id ranges (an original file and its
+        column deltas) via the shared RangeHelper; fails fast on a file missing first_row_id."""
+        return RangeHelper(lambda f: f.non_null_row_id_range()).merge_overlapping_ranges(files)
 
     def _wrap_to_indexed_splits(self, splits: List[Split], row_ranges: List[Range]) -> List[Split]:
         """

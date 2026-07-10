@@ -2427,6 +2427,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
+            key("data-evolution.compaction.rewrite-row-ids")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
+                                    + "Enable only when callers do not rely on stable _ROW_ID; "
+                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -2592,6 +2601,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
+
+    public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
+            key("postpone.target-row-num-per-bucket")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -3927,6 +3943,10 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_BITMAP64);
     }
 
+    public boolean dataEvolutionCompactionRewriteRowIds() {
+        return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
+    }
+
     public FileIndexOptions indexColumnsOptions() {
         return new FileIndexOptions(this);
     }
@@ -4158,6 +4178,10 @@ public class CoreOptions implements Serializable {
 
     public int postponeDefaultBucketNum() {
         return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
+    }
+
+    public Optional<Long> postponeTargetRowNumPerBucket() {
+        return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
     }
 
     public long globalIndexRowCountPerShard() {

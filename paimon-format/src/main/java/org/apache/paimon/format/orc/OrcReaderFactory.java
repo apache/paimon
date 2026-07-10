@@ -27,7 +27,6 @@ import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
@@ -230,8 +229,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * batch is addressed by the starting row number of the batch, plus the number of records to be
      * skipped before.
      */
-    private static final class OrcVectorizedReader
-            implements FileRecordReader<InternalRow>, SupportsReaderFieldMetadata {
+    private static final class OrcVectorizedReader implements FileRecordReader<InternalRow> {
 
         private final OrcRecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -255,30 +253,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
             }
 
             return batch.convertAndGetIterator(orcVectorBatch, rowNumber);
-        }
-
-        @Override
-        public Map<String, Map<String, String>> readFieldMetadata() {
-            org.apache.orc.Reader fileReader = orcReader.fileReader;
-            if (!fileReader
-                    .getMetadataKeys()
-                    .contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
-                return Collections.emptyMap();
-            }
-            String encodedSchema =
-                    StandardCharsets.UTF_8
-                            .decode(
-                                    fileReader
-                                            .getMetadataValue(
-                                                    FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
-                                            .duplicate())
-                            .toString();
-            return FormatMetadataUtils.readFieldMetadata(
-                    FormatMetadataUtils.decodeMetadata(
-                                    Collections.singletonMap(
-                                            FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
-                                            encodedSchema))
-                            .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
         }
 
         @Override
@@ -398,6 +372,27 @@ public class OrcReaderFactory implements FormatReaderFactory {
         } else {
             return Pair.of(0L, 0L);
         }
+    }
+
+    public static Map<String, Map<String, String>> readFieldMetadata(
+            org.apache.orc.Reader fileReader) {
+        if (!fileReader.getMetadataKeys().contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
+            return Collections.emptyMap();
+        }
+        String encodedSchema =
+                StandardCharsets.UTF_8
+                        .decode(
+                                fileReader
+                                        .getMetadataValue(
+                                                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
+                                        .duplicate())
+                        .toString();
+        return FormatMetadataUtils.readFieldMetadata(
+                FormatMetadataUtils.decodeMetadata(
+                                Collections.singletonMap(
+                                        FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                        encodedSchema))
+                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
     }
 
     public static org.apache.orc.Reader createReader(

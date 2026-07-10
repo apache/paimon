@@ -18,6 +18,7 @@
 
 package org.apache.paimon.eslib.index;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -184,13 +185,15 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     try {
                         ensureLoaded();
-                        // Parse the JSON DSL query into an eslib FullTextQuerySpec and run it. The
-                        // eslib searcher builds the Lucene query (Match/Phrase/Bool/Boost) and
-                        // treats any referenced field that is not FULLTEXT in this index as a
-                        // no-match, so a non-FULLTEXT column simply yields an empty result rather
-                        // than throwing.
-                        FullTextQuerySpec spec =
-                                parseSpec(fullTextSearch.fieldName(), fullTextSearch.query());
+                        String searchField =
+                                indexOptions.fullTextSearchField(fullTextSearch.fieldName());
+                        if (searchField == null) {
+                            return Optional.empty();
+                        }
+                        // Parse the JSON DSL query into an eslib FullTextQuerySpec and run it. A
+                        // FULLTEXT primary field is searched directly; a KEYWORD primary field is
+                        // searched through its analyzed .fulltext multi-field.
+                        FullTextQuerySpec spec = parseSpec(searchField, fullTextSearch.query());
                         SearchResult result = searcher.fullTextSearch(spec, fullTextSearch.limit());
                         return toScoredResult(result);
                     } catch (IOException e) {
@@ -214,7 +217,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
      * Maps the JSON query DSL ({@code {"match":...}}, {@code {"match_phrase":...}}, {@code
      * {"boolean":...}}, {@code {"boost":...}}) onto an eslib spec. The field comes from {@link
      * FullTextSearch#fieldName()} (the flat model carries a single field); the query semantics come
-     * from the JSON. A column that is not FULLTEXT in this index no-matches inside the searcher.
+     * from the JSON. The caller resolves the logical Paimon field to its physical FULLTEXT field.
      */
     private static FullTextQuerySpec parseSpec(String field, JsonNode q) {
         if (q.has("match")) {
@@ -650,6 +653,72 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         return executeFilter(fieldRef.name(), filter);
     }
 
+    /**
+     * eslib-core 1.0.3 does not implement NOT_EQUAL / NOT_IN scalar predicates and falls through to
+     * MatchAllDocsQuery. Evaluate the negation here as exists(field) AND NOT matchingFilter, so
+     * null rows are excluded and vector/hybrid includeRowIds cannot become an accidental full
+     * match.
+     */
+    private Optional<GlobalIndexResult> dispatchExistingRowsNotMatching(
+            FieldRef fieldRef, IndexFilter matchingFilter) {
+        Optional<GlobalIndexResult> existing = dispatchFilter(fieldRef, IndexFilter.exists());
+        if (existing.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<GlobalIndexResult> matching = dispatchFilter(fieldRef, matchingFilter);
+        if (matching.isEmpty()) {
+            return Optional.empty();
+        }
+
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        result.or(existing.get().results());
+        result.andNot(matching.get().results());
+        return Optional.of(GlobalIndexResult.create(result));
+    }
+
+    private IndexFilter exactValueFilter(FieldRef fieldRef, Object literal) {
+        FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
+        if (config != null
+                && (config.indexType() == FieldIndexConfig.IndexType.KEYWORD
+                        || config.indexType() == FieldIndexConfig.IndexType.FULLTEXT)) {
+            return IndexFilter.text(IndexFilter.TextFilter.TextOp.TERM, str(literal));
+        }
+        return IndexFilter.scalar(ScalarPredicate.eq(indexedScalarLiteral(fieldRef, literal)));
+    }
+
+    private static List<Object> indexedScalarLiterals(FieldRef fieldRef, List<Object> literals) {
+        if (literals == null) {
+            return null;
+        }
+        List<Object> indexed = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            indexed.add(indexedScalarLiteral(fieldRef, literal));
+        }
+        return indexed;
+    }
+
+    private static Object indexedScalarLiteral(FieldRef fieldRef, Object literal) {
+        if (literal == null || fieldRef.type() == null) {
+            return literal;
+        }
+        switch (fieldRef.type().getTypeRoot()) {
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return literal instanceof Number ? ((Number) literal).longValue() : literal;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                if (literal instanceof Timestamp) {
+                    return ((Timestamp) literal).getMillisecond();
+                }
+                if (literal instanceof java.sql.Timestamp) {
+                    return ((java.sql.Timestamp) literal).getTime();
+                }
+                return literal instanceof Number ? ((Number) literal).longValue() : literal;
+            default:
+                return literal;
+        }
+    }
+
     private static String filterSummary(IndexFilter filter) {
         if (filter == null) {
             return "null";
@@ -688,7 +757,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                 IndexFilter.text(IndexFilter.TextFilter.TextOp.TERM, str(literal)));
                     }
                     return dispatchFilter(
-                            fieldRef, IndexFilter.scalar(ScalarPredicate.eq(literal)));
+                            fieldRef,
+                            IndexFilter.scalar(
+                                    ScalarPredicate.eq(indexedScalarLiteral(fieldRef, literal))));
                 });
     }
 
@@ -696,42 +767,69 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.neq(literal))));
+                () ->
+                        dispatchExistingRowsNotMatching(
+                                fieldRef, exactValueFilter(fieldRef, literal)));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.lt(literal))));
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.lt(
+                                                indexedScalarLiteral(fieldRef, literal)))));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.lte(literal))));
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.lte(
+                                                indexedScalarLiteral(fieldRef, literal)))));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.gt(literal))));
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.gt(
+                                                indexedScalarLiteral(fieldRef, literal)))));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.gte(literal))));
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.gte(
+                                                indexedScalarLiteral(fieldRef, literal)))));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
             FieldRef fieldRef, List<Object> literals) {
         return async(
-                () -> dispatchFilter(fieldRef, IndexFilter.scalar(ScalarPredicate.in(literals))));
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.in(
+                                                indexedScalarLiterals(fieldRef, literals)))));
     }
 
     @Override
@@ -739,8 +837,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             FieldRef fieldRef, List<Object> literals) {
         return async(
                 () ->
-                        dispatchFilter(
-                                fieldRef, IndexFilter.scalar(ScalarPredicate.notIn(literals))));
+                        dispatchExistingRowsNotMatching(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.in(
+                                                indexedScalarLiterals(fieldRef, literals)))));
     }
 
     // =================== text pattern visitors (keyword / fulltext) =====================
