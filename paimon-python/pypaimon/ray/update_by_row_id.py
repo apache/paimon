@@ -23,6 +23,7 @@ shuffle join (unlike ``merge_into(on=["_ROW_ID"])``, which reads and joins the w
 target). Pairs with ``bucket_join``, which produces the row ids.
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
@@ -37,6 +38,8 @@ from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
 
 __all__ = ["update_by_row_id"]
+
+logger = logging.getLogger(__name__)
 
 
 def _blob_col_names(table: "FileStoreTable") -> set:
@@ -147,10 +150,57 @@ def update_by_row_id(
         raise  # _reraise_inner always raises; keeps msgs/num_updated defined for linters
 
     if msgs:
-        wb = table.new_batch_write_builder()
-        tc = wb.new_commit()
-        try:
-            tc.commit(msgs)
-        finally:
-            tc.close()
+        _commit_update_messages(table, msgs)
     return {"num_updated": num_updated}
+
+
+def _commit_update_messages(table, commit_messages) -> None:
+    pending_msgs: list = list(commit_messages)
+    commit_started = False
+
+    try:
+        table_commit = None
+        try:
+            table_commit = table.new_batch_write_builder().new_commit()
+            commit_started = True
+            table_commit.commit(pending_msgs)
+        finally:
+            if table_commit is not None:
+                try:
+                    table_commit.close()
+                except Exception as close_error:
+                    logger.warning(
+                        "Failed to close update_by_row_id commit: %s",
+                        close_error,
+                        exc_info=close_error,
+                    )
+    except Exception as e:
+        if not commit_started:
+            _abort_pending_update_messages(table, pending_msgs)
+        _reraise_inner(e)
+
+
+def _abort_pending_update_messages(table, commit_messages) -> None:
+    if not commit_messages:
+        return
+
+    table_commit = None
+    try:
+        table_commit = table.new_batch_write_builder().new_commit()
+        table_commit.abort(commit_messages)
+    except Exception as abort_error:
+        logger.warning(
+            "Failed to abort pending update_by_row_id commit messages: %s",
+            abort_error,
+            exc_info=abort_error,
+        )
+    finally:
+        if table_commit is not None:
+            try:
+                table_commit.close()
+            except Exception as close_error:
+                logger.warning(
+                    "Failed to close update_by_row_id abort commit: %s",
+                    close_error,
+                    exc_info=close_error,
+                )
