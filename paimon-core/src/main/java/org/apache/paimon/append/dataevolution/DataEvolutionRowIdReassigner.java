@@ -595,9 +595,23 @@ public class DataEvolutionRowIdReassigner {
             for (ManifestEntry entry : appended.getValue()) {
                 validatePlanningEntry(entry);
             }
-            logicalRangesByPartition
-                    .get(appended.getKey())
-                    .addAll(logicalRanges(appended.getValue()));
+            List<Range> plannedRanges = logicalRangesByPartition.get(appended.getKey());
+            RowRangeMappingIndex plannedMapping =
+                    assignmentPlan.rowIdMappings.get(appended.getKey());
+            for (Range appendedRange : logicalRanges(appended.getValue())) {
+                if (plannedMapping.map(appendedRange).isPresent()) {
+                    continue;
+                }
+                for (Range plannedRange : plannedRanges) {
+                    checkState(
+                            !rangesOverlap(plannedRange, appendedRange),
+                            "Cannot advance row-id assignment because appended row-id range %s partially overlaps planned range %s in partition %s.",
+                            appendedRange,
+                            plannedRange,
+                            appended.getKey());
+                }
+                plannedRanges.add(appendedRange);
+            }
         }
 
         List<ManifestFileMeta> latestManifestMetas = manifestList.readDataManifests(latest);
@@ -834,6 +848,10 @@ public class DataEvolutionRowIdReassigner {
             logicalRanges.add(oldLogicalRange(group));
         }
         return logicalRanges;
+    }
+
+    private boolean rangesOverlap(Range left, Range right) {
+        return left.from <= right.to && right.from <= left.to;
     }
 
     private Map<BinaryRow, RowRangeMappingIndex> createRelativeRowIdMappings(
