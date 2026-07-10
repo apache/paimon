@@ -109,7 +109,7 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(8, "options", DataTypes.STRING()),
                             new DataField(9, "total_buckets", DataTypes.INT().notNull()),
                             new DataField(10, "done", DataTypes.BOOLEAN().notNull()),
-                            new DataField(11, "deletion_num", new BigIntType(true))));
+                            new DataField(11, "deleted_record_count", new BigIntType(true))));
 
     private final FileStoreTable storeTable;
 
@@ -329,8 +329,9 @@ public class PartitionsTable implements ReadonlyTable {
 
             // do not scan deletion indices if query doesn't need them.
             if (readType != null
-                    && !readType.containsField("deletion_num")
-                    && !PredicateVisitor.collectFieldNames(predicate).contains("deletion_num")) {
+                    && !readType.containsField("deleted_record_count")
+                    && !PredicateVisitor.collectFieldNames(predicate)
+                            .contains("deleted_record_count")) {
                 return null;
             }
 
