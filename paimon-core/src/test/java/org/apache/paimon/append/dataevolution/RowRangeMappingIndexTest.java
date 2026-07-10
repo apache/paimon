@@ -80,8 +80,6 @@ public class RowRangeMappingIndexTest {
                                 RowRangeMappingIndex.mapping(10, 14, 0),
                                 RowRangeMappingIndex.mapping(20, 24, 5)));
 
-        assertThat(relative.oldRanges()).containsExactly(new Range(10, 14), new Range(20, 24));
-
         RowRangeMappingIndex absolute = relative.shiftNewStarts(100L);
         assertThat(absolute.map(new Range(10, 14))).hasValue(new Range(100, 104));
         assertThat(absolute.map(new Range(20, 24))).hasValue(new Range(105, 109));

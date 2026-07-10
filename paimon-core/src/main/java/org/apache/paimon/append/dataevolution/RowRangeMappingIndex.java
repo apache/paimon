@@ -70,14 +70,6 @@ final class RowRangeMappingIndex {
         return new Mapping(oldStart, oldEnd, newStart);
     }
 
-    List<Range> oldRanges() {
-        List<Range> ranges = new ArrayList<>(mappings.size());
-        for (Mapping mapping : mappings) {
-            ranges.add(new Range(mapping.oldStart, mapping.oldEnd));
-        }
-        return ranges;
-    }
-
     RowRangeMappingIndex shiftNewStarts(long offset) {
         List<Mapping> shifted = new ArrayList<>(mappings.size());
         for (Mapping mapping : mappings) {
