@@ -128,7 +128,7 @@ public class DataEvolutionRowIdReassigner {
 
         PlanAssignmentResult planResult =
                 planAssignment(manifestList.readDataManifests(latest), manifestFile, context);
-        if (!planResult.hasCurrentFiles) {
+        if (!planResult.hasCurrentFilesInScope) {
             return Result.skipped(
                     latest.id(),
                     nextRowId,
@@ -206,7 +206,7 @@ public class DataEvolutionRowIdReassigner {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         Map<BinaryRow, List<ManifestEntry>> entriesToReassignByPartition = new LinkedHashMap<>();
         Set<String> manifestsToRewrite = new HashSet<>();
-        boolean hasCurrentFiles = false;
+        boolean hasCurrentFilesInScope = false;
 
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
             if (skipManifestGroupByPartitionFilter(manifestGroup)) {
@@ -217,7 +217,7 @@ public class DataEvolutionRowIdReassigner {
             if (currentManifest.currentEntries.isEmpty()) {
                 continue;
             }
-            hasCurrentFiles = true;
+            hasCurrentFilesInScope = true;
 
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                     entriesByPartition(currentManifest.currentEntries);
@@ -247,7 +247,7 @@ public class DataEvolutionRowIdReassigner {
                 new AssignmentPlan(
                         manifestMetasToRewrite,
                         createRelativeRowIdMappings(entriesToReassignByPartition));
-        return new PlanAssignmentResult(assignmentPlan, hasCurrentFiles);
+        return new PlanAssignmentResult(assignmentPlan, hasCurrentFilesInScope);
     }
 
     private List<List<ManifestFileMeta>> manifestGroupsByPartition(
@@ -1234,11 +1234,12 @@ public class DataEvolutionRowIdReassigner {
 
     private static class PlanAssignmentResult {
         private final AssignmentPlan assignmentPlan;
-        private final boolean hasCurrentFiles;
+        private final boolean hasCurrentFilesInScope;
 
-        private PlanAssignmentResult(AssignmentPlan assignmentPlan, boolean hasCurrentFiles) {
+        private PlanAssignmentResult(
+                AssignmentPlan assignmentPlan, boolean hasCurrentFilesInScope) {
             this.assignmentPlan = assignmentPlan;
-            this.hasCurrentFiles = hasCurrentFiles;
+            this.hasCurrentFilesInScope = hasCurrentFilesInScope;
         }
     }
 
