@@ -100,18 +100,31 @@ df = read_paimon(
     catalog_options={"warehouse": "/path/to/warehouse"},
     tag_name="release-2026-04",
 )
+
+# Read the latest snapshot at or before a timestamp.
+# Accepts an int (epoch millis), a datetime, or a "YYYY-MM-DD HH:MM:SS" string.
+df = read_paimon(
+    "database_name.table_name",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    timestamp="2026-07-09 10:00:00",
+)
 ```
 
-`snapshot_id` and `tag_name` are mutually exclusive.
+`snapshot_id`, `tag_name`, and `timestamp` are mutually exclusive.
 
 **Parameters:**
 - `table_identifier`: full table name, e.g. `"db_name.table_name"`.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`,
   e.g. `{"warehouse": "/path/to/warehouse"}`.
 - `snapshot_id`: optional snapshot id to time-travel to. Mutually
-  exclusive with `tag_name`.
+  exclusive with `tag_name` and `timestamp`.
 - `tag_name`: optional tag name to time-travel to. Mutually
-  exclusive with `snapshot_id`.
+  exclusive with `snapshot_id` and `timestamp`.
+- `timestamp`: optional timestamp to time-travel to the latest snapshot at or
+  before it. Accepts an `int` (epoch milliseconds) or `datetime` (both mapped to
+  `scan.timestamp-millis`), or a `str` such as `"2026-07-09 10:00:00"` (mapped to
+  `scan.timestamp`). A naive `datetime` is interpreted in the local timezone.
+  Mutually exclusive with `snapshot_id` and `tag_name`.
 - `io_config`: optional Daft `IOConfig` for accessing object storage.
   If `None`, will be inferred from the catalog options.
 
