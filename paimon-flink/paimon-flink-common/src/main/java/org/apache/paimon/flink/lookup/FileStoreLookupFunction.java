@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -93,6 +94,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final RefreshBlacklist refreshBlacklist;
     @Nullable private final ShuffleStrategy strategy;
     private final RowType projectedType;
+    private final boolean blobAsDescriptor;
 
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
@@ -158,6 +160,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
         this.projectedType = rowType.project(projectFields);
+        Options options = table.coreOptions().toConfiguration();
+        this.blobAsDescriptor =
+                options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
+                        || options.get(CoreOptions.LOOKUP_CACHE_BLOB_DESCRIPTOR);
 
         this.predicate = predicate;
 
@@ -320,7 +326,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<RowData> rows = new ArrayList<>();
         List<InternalRow> lookupResults = lookupTable.get(key);
         for (InternalRow matchedRow : lookupResults) {
-            rows.add(new FlinkRowData(matchedRow, projectedType));
+            rows.add(new FlinkRowData(matchedRow, projectedType, blobAsDescriptor));
         }
 
         if (LOG.isDebugEnabled()) {
