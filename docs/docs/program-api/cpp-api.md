@@ -25,7 +25,9 @@ under the License.
 
 # Cpp API
 
-[Paimon C++](https://github.com/apache/paimon-cpp.git) is a high-performance C++ implementation of Apache Paimon. Paimon C++ aims to provide a native, high-performance and extensible implementation that allows native engines to access the Paimon datalake format with maximum efficiency.
+[Paimon C++](https://github.com/apache/paimon-cpp.git) is a high-performance C++ implementation of Apache Paimon. 
+Paimon C++ aims to provide a native, high-performance and extensible implementation 
+that allows native engines to access the Paimon datalake format with maximum efficiency.
 
 ## Environment Settings
 
@@ -250,4 +252,4 @@ if (!chunk_result.ok()) {
 
 ## Documentation
 
-For more information, See [C++ Paimon Documentation](https://paimon.apache.org/docs/cpp/index.html).
+For more information, see [C++ Paimon Documentation](https://paimon.apache.org/docs/cpp/index.html).
