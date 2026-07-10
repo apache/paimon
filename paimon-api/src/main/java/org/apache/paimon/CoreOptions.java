@@ -2291,6 +2291,14 @@ public class CoreOptions implements Serializable {
                                     + " This avoids repeated manifest scans by multiple writers in the same TaskManager,"
                                     + " but the cached mapping is shared until the table snapshot changes.");
 
+    public static final ConfigOption<Integer> PARTITION_BUCKET_MAPPING_CACHE_MAX_ENTRIES =
+            key("partition-bucket-mapping.cache-max-entries")
+                    .intType()
+                    .defaultValue(128)
+                    .withDescription(
+                            "Maximum number of partition bucket mappings to cache in the current JVM."
+                                    + " Older snapshots of the same table are invalidated when a newer snapshot mapping is loaded.");
+
     public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
             key("data-file.thin-mode")
                     .booleanType()
@@ -3692,6 +3700,10 @@ public class CoreOptions implements Serializable {
 
     public boolean partitionBucketMappingCacheEnabled() {
         return options.get(PARTITION_BUCKET_MAPPING_CACHE_ENABLED);
+    }
+
+    public int partitionBucketMappingCacheMaxEntries() {
+        return options.get(PARTITION_BUCKET_MAPPING_CACHE_MAX_ENTRIES);
     }
 
     public boolean disableNullToNotNull() {

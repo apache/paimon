@@ -24,14 +24,15 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 
 /**
@@ -52,9 +53,8 @@ public class PartitionBucketMapping implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final ConcurrentMap<CacheKey, PartitionBucketMapping> CACHE =
-            new ConcurrentHashMap<>();
-    private static final ConcurrentMap<CacheKey, Object> CACHE_LOCKS = new ConcurrentHashMap<>();
+    private static final Cache<CacheKey, PartitionBucketMapping> CACHE =
+            Caffeine.newBuilder().maximumSize(128).executor(Runnable::run).build();
 
     /** The default number of buckets, used when a partition has no explicit mapping. */
     private final int defaultBucketCount;
@@ -102,31 +102,34 @@ public class PartitionBucketMapping implements Serializable {
         }
 
         CacheKey key = CacheKey.from(table);
-        return getOrLoad(key, () -> loadFromTableWithoutCache(table));
+        return getOrLoad(
+                key,
+                table.coreOptions().partitionBucketMappingCacheMaxEntries(),
+                () -> loadFromTableWithoutCache(table));
     }
 
     static PartitionBucketMapping getOrLoad(
-            CacheKey key, Supplier<PartitionBucketMapping> mappingLoader) {
-        PartitionBucketMapping cached = CACHE.get(key);
-        if (cached != null) {
-            return cached;
-        }
+            CacheKey key, int maxEntries, Supplier<PartitionBucketMapping> mappingLoader) {
+        ensureMaximumSize(maxEntries);
+        return CACHE.get(
+                key,
+                ignored -> {
+                    invalidateOlderSnapshots(key);
+                    return mappingLoader.get();
+                });
+    }
 
-        Object lock = CACHE_LOCKS.computeIfAbsent(key, ignored -> new Object());
-        synchronized (lock) {
-            try {
-                cached = CACHE.get(key);
-                if (cached != null) {
-                    return cached;
-                }
+    private static void ensureMaximumSize(int maxEntries) {
+        CACHE.policy().eviction().ifPresent(eviction -> eviction.setMaximum(maxEntries));
+    }
 
-                PartitionBucketMapping loaded = mappingLoader.get();
-                CACHE.put(key, loaded);
-                return loaded;
-            } finally {
-                CACHE_LOCKS.remove(key);
-            }
-        }
+    private static void invalidateOlderSnapshots(CacheKey key) {
+        CACHE.asMap().keySet().stream()
+                .filter(
+                        existingKey ->
+                                existingKey.isSameTable(key)
+                                        && existingKey.latestSnapshotId < key.latestSnapshotId)
+                .forEach(CACHE::invalidate);
     }
 
     static PartitionBucketMapping loadFromTableWithoutCache(FileStoreTable table) {
@@ -140,12 +143,15 @@ public class PartitionBucketMapping implements Serializable {
     }
 
     static void clearCache() {
-        CACHE.clear();
-        CACHE_LOCKS.clear();
+        CACHE.invalidateAll();
     }
 
     static PartitionBucketMapping getCachedMapping(FileStoreTable table) {
-        return CACHE.get(CacheKey.from(table));
+        return CACHE.getIfPresent(CacheKey.from(table));
+    }
+
+    static PartitionBucketMapping getCachedMapping(CacheKey key) {
+        return CACHE.getIfPresent(key);
     }
 
     public static PartitionBucketMapping loadFromEntries(
@@ -208,6 +214,12 @@ public class PartitionBucketMapping implements Serializable {
                     latestSnapshotId == null ? -1L : latestSnapshotId,
                     table.schema().id(),
                     table.schema().numBuckets());
+        }
+
+        private boolean isSameTable(CacheKey other) {
+            return schemaId == other.schemaId
+                    && defaultBucketCount == other.defaultBucketCount
+                    && Objects.equals(tablePath, other.tablePath);
         }
 
         @Override

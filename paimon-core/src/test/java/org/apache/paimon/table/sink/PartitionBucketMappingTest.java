@@ -191,6 +191,7 @@ public class PartitionBucketMappingTest {
         PartitionBucketMapping first =
                 PartitionBucketMapping.getOrLoad(
                         key,
+                        128,
                         () -> {
                             loadCount.incrementAndGet();
                             return new PartitionBucketMapping(32);
@@ -198,6 +199,7 @@ public class PartitionBucketMappingTest {
         PartitionBucketMapping second =
                 PartitionBucketMapping.getOrLoad(
                         key,
+                        128,
                         () -> {
                             loadCount.incrementAndGet();
                             return new PartitionBucketMapping(64);
@@ -206,6 +208,27 @@ public class PartitionBucketMappingTest {
         assertThat(second).isSameAs(first);
         assertThat(second.resolveNumBuckets(partition(1))).isEqualTo(32);
         assertThat(loadCount).hasValue(1);
+        PartitionBucketMapping.clearCache();
+    }
+
+    @Test
+    public void testGetOrLoadInvalidatesOlderSnapshotsForSameTable() {
+        PartitionBucketMapping.clearCache();
+        PartitionBucketMapping.CacheKey oldSnapshot =
+                new PartitionBucketMapping.CacheKey("table", 1, 0, 32);
+        PartitionBucketMapping.CacheKey newSnapshot =
+                new PartitionBucketMapping.CacheKey("table", 2, 0, 32);
+
+        PartitionBucketMapping oldMapping =
+                PartitionBucketMapping.getOrLoad(
+                        oldSnapshot, 128, () -> new PartitionBucketMapping(32));
+        PartitionBucketMapping newMapping =
+                PartitionBucketMapping.getOrLoad(
+                        newSnapshot, 128, () -> new PartitionBucketMapping(64));
+
+        assertThat(newMapping).isNotSameAs(oldMapping);
+        assertThat(PartitionBucketMapping.getCachedMapping(oldSnapshot)).isNull();
+        assertThat(PartitionBucketMapping.getCachedMapping(newSnapshot)).isSameAs(newMapping);
         PartitionBucketMapping.clearCache();
     }
 
@@ -224,6 +247,7 @@ public class PartitionBucketMappingTest {
                             () ->
                                     PartitionBucketMapping.getOrLoad(
                                             key,
+                                            128,
                                             () -> {
                                                 loadCount.incrementAndGet();
                                                 loaderStarted.countDown();
@@ -238,6 +262,7 @@ public class PartitionBucketMappingTest {
                             () ->
                                     PartitionBucketMapping.getOrLoad(
                                             key,
+                                            128,
                                             () -> {
                                                 loadCount.incrementAndGet();
                                                 return new PartitionBucketMapping(64);
@@ -280,6 +305,8 @@ public class PartitionBucketMappingTest {
                 null,
                 BinaryRow.EMPTY_ROW,
                 BinaryRow.EMPTY_ROW,
+                null,
+                0L,
                 null);
     }
 
