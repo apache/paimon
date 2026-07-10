@@ -371,7 +371,8 @@ object ScalarOperatorGens {
                |      }
                |
                |      ${keyEqualsExpr.code}
-               |      if (${keyEqualsExpr.resultTerm}) {
+               |      if (($leftKeyNullTerm && $rightKeyNullTerm) ||
+               |          (!$leftKeyNullTerm && !$rightKeyNullTerm && ${keyEqualsExpr.resultTerm})) {
                |        $valueCls $leftValueTerm = null;
                |        boolean $leftValueNullTerm = $leftValueArrayTerm.isNullAt($leftIndexTerm);
                |        if (!$leftValueNullTerm) {

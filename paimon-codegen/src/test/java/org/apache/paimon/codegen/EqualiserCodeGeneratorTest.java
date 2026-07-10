@@ -370,6 +370,17 @@ public class EqualiserCodeGeneratorTest {
                 new GenericMap(leftMap),
                 new GenericMap(rightMap),
                 true);
+
+        Map<Object, Object> leftNullKeyMap = new HashMap<>();
+        leftNullKeyMap.put(null, 1);
+        Map<Object, Object> rightNullKeyMap = new HashMap<>();
+        rightNullKeyMap.put(null, 1);
+        assertFloatingPointEqualiser(
+                doubleRowMapEqualiser,
+                doubleRowMapType,
+                new GenericMap(leftNullKeyMap),
+                new GenericMap(rightNullKeyMap),
+                true);
     }
 
     private static void assertFloatingPointEqualiser(
