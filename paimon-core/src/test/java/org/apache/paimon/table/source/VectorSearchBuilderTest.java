@@ -1144,6 +1144,49 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorPrimaryMultiFieldIndexServesScalarExtraField() throws Exception {
+        catalog.createTable(
+                identifier("vector_primary_scalar_extra_field_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_primary_scalar_extra_field_table"));
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+
+        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+        DataField idField = table.rowType().getField("id");
+        buildAndCommitVectorIndexWithFields(
+                table, vectors, new Range(0, 1), Arrays.asList(vectorField, idField));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 1);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorScan()
+                        .scan();
+
+        // A vector-primary multi-field index can serve both the vector search and a scalar
+        // predicate on an extra field. It must therefore be attached as both vector and scalar
+        // index input, and full search mode must not create a raw fallback for the covered range.
+        assertThat(indexVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits())).isEmpty();
+
+        IndexVectorSearchSplit split = indexVectorSearchSplits(plan.splits()).get(0);
+        assertThat(split.vectorIndexFiles()).hasSize(1);
+        assertThat(split.scalarIndexFiles()).containsExactlyElementsOf(split.vectorIndexFiles());
+
+        IndexFileMeta indexFile = split.vectorIndexFiles().get(0);
+        assertThat(indexFile.globalIndexMeta().indexFieldId()).isEqualTo(vectorField.id());
+        assertThat(indexFile.globalIndexMeta().extraFieldIds()).containsExactly(idField.id());
+    }
+
+    @Test
     public void testVectorSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
