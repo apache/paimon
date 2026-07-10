@@ -2282,6 +2282,15 @@ public class CoreOptions implements Serializable {
                             "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
                                     + " Default value is false only for compatibility of old reader.");
 
+    public static final ConfigOption<Boolean> PARTITION_BUCKET_MAPPING_CACHE_ENABLED =
+            key("partition-bucket-mapping.cache-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, cache partition bucket mappings in the current JVM when initializing writers."
+                                    + " This avoids repeated manifest scans by multiple writers in the same TaskManager,"
+                                    + " but the cached mapping is shared until the table snapshot changes.");
+
     public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
             key("data-file.thin-mode")
                     .booleanType()
@@ -3679,6 +3688,10 @@ public class CoreOptions implements Serializable {
 
     public boolean manifestDeleteFileDropStats() {
         return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
+    }
+
+    public boolean partitionBucketMappingCacheEnabled() {
+        return options.get(PARTITION_BUCKET_MAPPING_CACHE_ENABLED);
     }
 
     public boolean disableNullToNotNull() {
