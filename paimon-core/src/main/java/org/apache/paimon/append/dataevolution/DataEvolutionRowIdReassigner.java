@@ -226,7 +226,7 @@ public class DataEvolutionRowIdReassigner {
         return Optional.of(
                 new AssignmentPlan(
                         findManifestMetasToRewrite(
-                                manifestMetas, relativeRowIdMappings.mappings, manifestFile),
+                                manifestMetas, relativeRowIdMappings, manifestFile),
                         relativeRowIdMappings));
     }
 
@@ -571,11 +571,12 @@ public class DataEvolutionRowIdReassigner {
 
     private List<ManifestFileMeta> findManifestMetasToRewrite(
             List<ManifestFileMeta> manifestMetas,
-            Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
+            RelativeRowIdMappings relativeRowIdMappings,
             ManifestFile manifestFile) {
         PartitionPredicate plannedPartitionPredicate =
                 PartitionPredicate.fromMultiple(
-                        table.schema().logicalPartitionType(), rowIdMappings.keySet());
+                        table.schema().logicalPartitionType(),
+                        relativeRowIdMappings.mappings.keySet());
         checkState(plannedPartitionPredicate != null, "Planned partition predicate is null.");
         List<ManifestFileMeta> result = new ArrayList<>();
         for (ManifestFileMeta manifestMeta : manifestMetas) {
@@ -584,7 +585,8 @@ public class DataEvolutionRowIdReassigner {
                 continue;
             }
             for (ManifestEntry entry : readPlanningManifestEntries(manifestFile, manifestMeta)) {
-                RowRangeMappingIndex mapping = rowIdMappings.get(entry.partition());
+                RowRangeMappingIndex mapping =
+                        relativeRowIdMappings.mappings.get(entry.partition());
                 if (mapping != null && mapping.map(entry.file().nonNullRowIdRange()).isPresent()) {
                     result.add(manifestMeta);
                     break;
