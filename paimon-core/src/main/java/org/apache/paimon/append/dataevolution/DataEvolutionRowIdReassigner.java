@@ -126,9 +126,9 @@ public class DataEvolutionRowIdReassigner {
             return Result.skipped(latest.id(), nextRowId, "table is not partitioned");
         }
 
-        PlanAssignmentResult planResult =
+        Optional<AssignmentPlan> optionalPlan =
                 planAssignment(manifestList.readDataManifests(latest), manifestFile, context);
-        if (!planResult.hasCurrentFilesInScope) {
+        if (!optionalPlan.isPresent()) {
             return Result.skipped(
                     latest.id(),
                     nextRowId,
@@ -136,7 +136,7 @@ public class DataEvolutionRowIdReassigner {
                             ? "partition filter matches no current files"
                             : "table has no current files");
         }
-        AssignmentPlan assignmentPlan = planResult.assignmentPlan;
+        AssignmentPlan assignmentPlan = optionalPlan.get();
         if (assignmentPlan.rowIdMappings.isEmpty()) {
             LOG.info(
                     "Skip reassigning row IDs for table {} because partition row IDs are already contiguous.",
@@ -199,7 +199,7 @@ public class DataEvolutionRowIdReassigner {
         return nextRowId;
     }
 
-    private PlanAssignmentResult planAssignment(
+    private Optional<AssignmentPlan> planAssignment(
             List<ManifestFileMeta> manifestMetas,
             ManifestFile manifestFile,
             ReassignContext context) {
@@ -243,11 +243,13 @@ public class DataEvolutionRowIdReassigner {
             }
         }
 
-        AssignmentPlan assignmentPlan =
+        if (!hasCurrentFilesInScope) {
+            return Optional.empty();
+        }
+        return Optional.of(
                 new AssignmentPlan(
                         manifestMetasToRewrite,
-                        createRelativeRowIdMappings(entriesToReassignByPartition));
-        return new PlanAssignmentResult(assignmentPlan, hasCurrentFilesInScope);
+                        createRelativeRowIdMappings(entriesToReassignByPartition)));
     }
 
     private List<List<ManifestFileMeta>> manifestGroupsByPartition(
@@ -1229,17 +1231,6 @@ public class DataEvolutionRowIdReassigner {
                     absoluteRowIdMappings,
                     firstAssignedRowId,
                     Math.addExact(firstAssignedRowId, nextOffset));
-        }
-    }
-
-    private static class PlanAssignmentResult {
-        private final AssignmentPlan assignmentPlan;
-        private final boolean hasCurrentFilesInScope;
-
-        private PlanAssignmentResult(
-                AssignmentPlan assignmentPlan, boolean hasCurrentFilesInScope) {
-            this.assignmentPlan = assignmentPlan;
-            this.hasCurrentFilesInScope = hasCurrentFilesInScope;
         }
     }
 
