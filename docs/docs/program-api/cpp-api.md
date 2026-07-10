@@ -25,18 +25,14 @@ under the License.
 
 # Cpp API
 
-Paimon C++ is a high-performance C++ implementation of Apache Paimon. Paimon C++ aims to provide a native,
-high-performance and extensible implementation that allows native engines to access the Paimon datalake
-format with maximum efficiency.
+[Paimon C++](https://github.com/apache/paimon-cpp.git) is a high-performance C++ implementation of Apache Paimon. Paimon C++ aims to provide a native, high-performance and extensible implementation that allows native engines to access the Paimon datalake format with maximum efficiency.
 
 ## Environment Settings
 
-[Paimon C++](https://github.com/alibaba/paimon-cpp.git) is currently governed under Alibaba open source
-community. You can checkout the [document](https://alibaba.github.io/paimon-cpp/getting_started.html)
-for more details about environment settings.
+You can checkout the [document](https://paimon.apache.org/docs/cpp/index.html) for more details about environment settings.
 
 ```sh
-git clone https://github.com/alibaba/paimon-cpp.git
+git clone https://github.com/apache/paimon-cpp.git
 cd paimon-cpp
 mkdir build-release
 cd build-release
@@ -98,13 +94,13 @@ PAIMON_RETURN_NOT_OK(catalog->CreateTable(paimon::Identifier(db_name, table_name
                                             /*ignore_if_exists=*/false));
 ```
 
-See [Data Types](https://alibaba.github.io/paimon-cpp/user_guide/data_types.html) for all supported
+See [Data Types](https://paimon.apache.org/docs/cpp/user_guide/data_types.html) for all supported
 `arrow-to-paimon` data types mapping.
 
 ## Batch Write
 
 Paimon table write is Two-Phase Commit, you can write many times, but once committed, no more data can be written.
-C++ Paimon uses Apache Arrow as [in-memory format], check out [document](https://alibaba.github.io/paimon-cpp/user_guide/arrow.html)
+C++ Paimon uses Apache Arrow as [in-memory format], check out [document](https://paimon.apache.org/docs/cpp/user_guide/arrow.html)
 for more details.
 
 for example:
@@ -254,4 +250,4 @@ if (!chunk_result.ok()) {
 
 ## Documentation
 
-For more information, See [C++ Paimon Documentation](https://alibaba.github.io/paimon-cpp/index.html).
+For more information, See [C++ Paimon Documentation](https://paimon.apache.org/docs/cpp/index.html).
