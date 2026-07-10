@@ -66,7 +66,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -91,8 +90,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     private static final int LARGE_ENTRY_COUNT = 10_000;
     private static final int LARGE_MANIFEST_FILE_COUNT = 20;
-    private static final int ONE_MILLION_ENTRY_COUNT = 1_000_000;
-    private static final int ONE_MILLION_MANIFEST_FILE_COUNT = 200;
     private static final long LARGE_ENTRY_ROW_COUNT = 2L;
     private static final long RANDOM_PARTITION_SEED = 20260519L;
     private static final String LARGE_FILE_PREFIX = "large-partition-";
@@ -1108,13 +1105,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     @Test
     public void testReassignManyOutOfOrderPartitionEntries() throws Exception {
         verifyReassignOutOfOrderPartitionEntries(LARGE_ENTRY_COUNT, LARGE_MANIFEST_FILE_COUNT);
-    }
-
-    @Disabled("Writes one million manifest entries; run manually for large metadata stress tests.")
-    @Test
-    public void testReassignOneMillionOutOfOrderPartitionEntries() throws Exception {
-        verifyReassignOutOfOrderPartitionEntries(
-                ONE_MILLION_ENTRY_COUNT, ONE_MILLION_MANIFEST_FILE_COUNT);
     }
 
     private FileStoreTable createTableWithInterleavedPartitions() throws Exception {
