@@ -399,8 +399,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
             TableSchema latestSchema = optionalLatestSchema.get();
-            Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
-            mergedOptions.putAll(tableSchema.options());
+            Map<String, String> mergedOptions = new HashMap<>(tableSchema.options());
+            mergedOptions.putAll(latestSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
             SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);

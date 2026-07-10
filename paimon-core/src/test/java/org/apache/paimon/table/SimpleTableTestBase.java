@@ -627,6 +627,18 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCopyWithLatestSchemaPicksUpAlteredOptionValues() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(SNAPSHOT_NUM_RETAINED_MAX, 100));
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+
+        schemaManager.commitChanges(SchemaChange.setOption(SNAPSHOT_NUM_RETAINED_MAX.key(), "10"));
+
+        FileStoreTable updated = table.copyWithLatestSchema();
+        assertThat(updated.coreOptions().snapshotNumRetainMax()).isEqualTo(10);
+    }
+
+    @Test
     public void testConsumerIdNotBlank() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
