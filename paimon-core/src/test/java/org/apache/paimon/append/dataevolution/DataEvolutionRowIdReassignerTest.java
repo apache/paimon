@@ -726,7 +726,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 new DataEvolutionRowIdReassigner(table).reassign("test-skip-row-id");
 
         assertThat(result.reassigned).isFalse();
-        assertThat(result.skipReason).isEqualTo("partition row IDs are already contiguous");
+        assertThat(result.skipReason).isEqualTo("no partition requires row-id reassignment");
         assertThat(result.previousSnapshotId).isEqualTo(3L);
         assertThat(result.newSnapshotId).isEqualTo(3L);
         assertThat(result.firstAssignedRowId).isEqualTo(5L);

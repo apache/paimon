@@ -129,21 +129,13 @@ public class DataEvolutionRowIdReassigner {
         Optional<AssignmentPlan> optionalPlan =
                 planAssignment(manifestList.readDataManifests(latest), manifestFile, context);
         if (!optionalPlan.isPresent()) {
-            return Result.skipped(
-                    latest.id(),
-                    nextRowId,
-                    partitionFilterEnabled()
-                            ? "partition filter matches no current files"
-                            : "table has no current files");
-        }
-        AssignmentPlan assignmentPlan = optionalPlan.get();
-        if (assignmentPlan.rowIdMappings.isEmpty()) {
             LOG.info(
-                    "Skip reassigning row IDs for table {} because partition row IDs are already contiguous.",
+                    "Skip reassigning row IDs for table {} because no partition requires reassignment.",
                     table.name());
             return Result.skipped(
-                    latest.id(), nextRowId, "partition row IDs are already contiguous");
+                    latest.id(), nextRowId, "no partition requires row-id reassignment");
         }
+        AssignmentPlan assignmentPlan = optionalPlan.get();
 
         for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
             Assignment assignment = assignmentPlan.createAssignment(latest);
@@ -206,7 +198,6 @@ public class DataEvolutionRowIdReassigner {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         Map<BinaryRow, List<ManifestEntry>> entriesToReassignByPartition = new LinkedHashMap<>();
         Set<String> manifestsToRewrite = new HashSet<>();
-        boolean hasCurrentFilesInScope = false;
 
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
             if (skipManifestGroupByPartitionFilter(manifestGroup)) {
@@ -217,7 +208,6 @@ public class DataEvolutionRowIdReassigner {
             if (currentManifest.currentEntries.isEmpty()) {
                 continue;
             }
-            hasCurrentFilesInScope = true;
 
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                     entriesByPartition(currentManifest.currentEntries);
@@ -236,6 +226,10 @@ public class DataEvolutionRowIdReassigner {
             }
         }
 
+        if (entriesToReassignByPartition.isEmpty()) {
+            return Optional.empty();
+        }
+
         List<ManifestFileMeta> manifestMetasToRewrite = new ArrayList<>();
         for (ManifestFileMeta manifestMeta : manifestMetas) {
             if (manifestsToRewrite.contains(manifestMeta.fileName())) {
@@ -243,9 +237,6 @@ public class DataEvolutionRowIdReassigner {
             }
         }
 
-        if (!hasCurrentFilesInScope) {
-            return Optional.empty();
-        }
         return Optional.of(
                 new AssignmentPlan(
                         manifestMetasToRewrite,
@@ -872,7 +863,7 @@ public class DataEvolutionRowIdReassigner {
             Map<BinaryRow, List<Range>> logicalRangesByPartition) {
         List<BinaryRow> partitions = new ArrayList<>(logicalRangesByPartition.keySet());
         RecordComparator partitionComparator = partitionComparator();
-        Collections.sort(partitions, partitionComparator::compare);
+        Collections.sort(partitions, partitionComparator);
 
         Map<BinaryRow, RowRangeMappingIndex> result = new LinkedHashMap<>();
         long nextOffset = 0L;
