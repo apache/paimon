@@ -29,6 +29,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.index.pkvector.PrimaryKeyVectorIndexOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
@@ -349,6 +350,8 @@ public class SchemaValidation {
         checkArgument(
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
+
+        validatePrimaryKeyVectorIndex(schema, options);
 
         validateMergeFunctionFactory(schema);
 
@@ -881,6 +884,94 @@ public class SchemaValidation {
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
         }
+    }
+
+    private static void validatePrimaryKeyVectorIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyVectorIndexEnabled()) {
+            return;
+        }
+
+        String indexName = options.primaryKeyVectorIndexName();
+        String indexColumn = options.primaryKeyVectorIndexColumn();
+        String indexType = options.primaryKeyVectorIndexType();
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexName),
+                "pk-vector.index.name must be configured when pk-vector.index.state = %s.",
+                options.primaryKeyVectorIndexState());
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "pk-vector.index.column must be configured when pk-vector.index.state = %s.",
+                options.primaryKeyVectorIndexState());
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexType),
+                "pk-vector.index.type must be configured when pk-vector.index.state = %s.",
+                options.primaryKeyVectorIndexState());
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "pk-vector.index.state = %s requires a primary-key table.",
+                options.primaryKeyVectorIndexState());
+        checkArgument(
+                options.deletionVectorsEnabled(),
+                "pk-vector.index.state = %s requires deletion-vectors.enabled = true.",
+                options.primaryKeyVectorIndexState());
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                "Primary-key vector index only supports merge-engine = deduplicate or partial-update, but is %s.",
+                options.mergeEngine());
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
+                options.mergeEngine());
+        checkArgument(
+                options.bucket() > 0,
+                "Primary-key vector index requires fixed bucket mode (bucket > 0), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key vector index does not support pk-clustering-override.");
+        PrimaryKeyVectorIndexOptions.resolve(options);
+
+        DataField vectorField =
+                schema.fields().stream()
+                        .filter(field -> field.name().equals(indexColumn))
+                        .findFirst()
+                        .orElse(null);
+        checkArgument(
+                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
+                "pk-vector.index.column '%s' must reference a VECTOR column.",
+                indexColumn);
+        checkArgument(
+                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
+                        == DataTypeRoot.FLOAT,
+                "pk-vector.index.column '%s' must use FLOAT elements.",
+                indexColumn);
+        checkArgument(
+                Arrays.asList("l2", "cosine", "inner_product")
+                        .contains(options.primaryKeyVectorDistanceMetric()),
+                "pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                options.primaryKeyVectorDistanceMetric());
+        checkArgument(
+                options.primaryKeyVectorL0MaxSegments() > 0,
+                "pk-vector.l0.max-segments must be greater than 0.");
+        checkArgument(
+                options.primaryKeyVectorL0MaxRows() > 0,
+                "pk-vector.l0.max-rows must be greater than 0.");
+        checkArgument(
+                options.primaryKeyVectorAnnMinRows() > 0,
+                "pk-vector.ann.min-rows must be greater than 0.");
+        checkArgument(
+                options.primaryKeyVectorAnnMaxRows() > 0,
+                "pk-vector.ann.max-rows must be greater than 0.");
+        checkArgument(
+                options.primaryKeyVectorAnnMaxRows() >= options.primaryKeyVectorAnnMinRows(),
+                "pk-vector.ann.max-rows must be greater than or equal to pk-vector.ann.min-rows.");
+        checkArgument(
+                options.primaryKeyVectorAnnMaxSourceFiles() > 0,
+                "pk-vector.ann.max-source-files must be greater than 0.");
+        checkArgument(
+                options.primaryKeyVectorRefineFactor() > 0,
+                "pk-vector.refine-factor must be greater than 0.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

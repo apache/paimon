@@ -2726,6 +2726,98 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
+    /**
+     * State of the bucket-local vector index for a primary-key table. The definition is persisted
+     * in table options so every writer uses the same indexed column and algorithm.
+     */
+    public static final ConfigOption<PrimaryKeyVectorIndexState> PK_VECTOR_INDEX_STATE =
+            key("pk-vector.index.state")
+                    .enumType(PrimaryKeyVectorIndexState.class)
+                    .defaultValue(PrimaryKeyVectorIndexState.DISABLED)
+                    .withDescription(
+                            "Lifecycle state of the bucket-local primary-key vector index. "
+                                    + "Only BUILDING and ACTIVE cause writers to create vector sidecars.");
+
+    public static final ConfigOption<String> PK_VECTOR_INDEX_NAME =
+            key("pk-vector.index.name")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Name of the bucket-local primary-key vector index.");
+
+    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMN =
+            key("pk-vector.index.column")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("VECTOR column indexed by the primary-key vector index.");
+
+    public static final ConfigOption<String> PK_VECTOR_INDEX_TYPE =
+            key("pk-vector.index.type")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Vector index algorithm identifier, for example 'ivf-pq'. "
+                                    + "The implementation validates it through the vector-index SPI.");
+
+    public static final ConfigOption<String> PK_VECTOR_INDEX_OPTIONS =
+            key("pk-vector.index.options")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Algorithm-specific options as a JSON object. Unqualified keys are "
+                                    + "scoped to pk-vector.index.type; fully qualified index or "
+                                    + "fields.<column> keys are preserved.");
+
+    public static final ConfigOption<String> PK_VECTOR_DISTANCE_METRIC =
+            key("pk-vector.distance.metric")
+                    .stringType()
+                    .defaultValue("inner_product")
+                    .withDescription(
+                            "Distance metric persisted by the primary-key vector index. "
+                                    + "Supported values are l2, cosine, and inner_product.");
+
+    public static final ConfigOption<Integer> PK_VECTOR_L0_MAX_SEGMENTS =
+            key("pk-vector.l0.max-segments")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "Maximum raw vector segments in a bucket before vector minor compaction.");
+
+    public static final ConfigOption<Long> PK_VECTOR_L0_MAX_ROWS =
+            key("pk-vector.l0.max-rows")
+                    .longType()
+                    .defaultValue(50_000L)
+                    .withDescription(
+                            "Maximum raw vector rows in a bucket before vector minor compaction.");
+
+    public static final ConfigOption<Long> PK_VECTOR_ANN_MIN_ROWS =
+            key("pk-vector.ann.min-rows")
+                    .longType()
+                    .defaultValue(10_000L)
+                    .withDescription(
+                            "Minimum live rows required before a bucket vector segment is built as ANN.");
+
+    public static final ConfigOption<Long> PK_VECTOR_ANN_MAX_ROWS =
+            key("pk-vector.ann.max-rows")
+                    .longType()
+                    .defaultValue(100_000L)
+                    .withDescription(
+                            "Target maximum rows in one primary-key ANN segment. A single oversized source file is not split.");
+
+    public static final ConfigOption<Integer> PK_VECTOR_ANN_MAX_SOURCE_FILES =
+            key("pk-vector.ann.max-source-files")
+                    .intType()
+                    .defaultValue(32)
+                    .withDescription(
+                            "Maximum source data files represented by one primary-key ANN segment.");
+
+    public static final ConfigOption<Integer> PK_VECTOR_REFINE_FACTOR =
+            key("pk-vector.refine-factor")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "Initial ANN candidate multiplier for primary-key vector search. "
+                                    + "It is not a visibility correctness boundary.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4254,6 +4346,68 @@ public class CoreOptions implements Serializable {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
     }
 
+    public PrimaryKeyVectorIndexState primaryKeyVectorIndexState() {
+        return options.get(PK_VECTOR_INDEX_STATE);
+    }
+
+    public boolean primaryKeyVectorIndexEnabled() {
+        return primaryKeyVectorIndexState() != PrimaryKeyVectorIndexState.DISABLED;
+    }
+
+    public boolean primaryKeyVectorIndexWriteEnabled() {
+        PrimaryKeyVectorIndexState state = primaryKeyVectorIndexState();
+        return state == PrimaryKeyVectorIndexState.BUILDING
+                || state == PrimaryKeyVectorIndexState.ACTIVE;
+    }
+
+    @Nullable
+    public String primaryKeyVectorIndexName() {
+        return options.get(PK_VECTOR_INDEX_NAME);
+    }
+
+    @Nullable
+    public String primaryKeyVectorIndexColumn() {
+        return options.get(PK_VECTOR_INDEX_COLUMN);
+    }
+
+    @Nullable
+    public String primaryKeyVectorIndexType() {
+        return options.get(PK_VECTOR_INDEX_TYPE);
+    }
+
+    @Nullable
+    public String primaryKeyVectorIndexOptions() {
+        return options.get(PK_VECTOR_INDEX_OPTIONS);
+    }
+
+    public String primaryKeyVectorDistanceMetric() {
+        return options.get(PK_VECTOR_DISTANCE_METRIC).toLowerCase(Locale.ROOT).replace('-', '_');
+    }
+
+    public int primaryKeyVectorL0MaxSegments() {
+        return options.get(PK_VECTOR_L0_MAX_SEGMENTS);
+    }
+
+    public long primaryKeyVectorL0MaxRows() {
+        return options.get(PK_VECTOR_L0_MAX_ROWS);
+    }
+
+    public long primaryKeyVectorAnnMinRows() {
+        return options.get(PK_VECTOR_ANN_MIN_ROWS);
+    }
+
+    public long primaryKeyVectorAnnMaxRows() {
+        return options.get(PK_VECTOR_ANN_MAX_ROWS);
+    }
+
+    public int primaryKeyVectorAnnMaxSourceFiles() {
+        return options.get(PK_VECTOR_ANN_MAX_SOURCE_FILES);
+    }
+
+    public int primaryKeyVectorRefineFactor() {
+        return options.get(PK_VECTOR_REFINE_FACTOR);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -5067,6 +5221,36 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         GlobalIndexSearchMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Lifecycle state of a bucket-local primary-key vector index. */
+    public enum PrimaryKeyVectorIndexState implements DescribedEnum {
+        DISABLED("disabled", "No primary-key vector index is configured."),
+        BUILDING("building", "Existing files are being backfilled; new files create raw sidecars."),
+        ACTIVE(
+                "active",
+                "The index is available for vector search and new files create raw sidecars."),
+        DROPPING(
+                "dropping",
+                "New sidecars are disabled while existing vector index files are removed.");
+
+        private final String value;
+        private final String description;
+
+        PrimaryKeyVectorIndexState(String value, String description) {
             this.value = value;
             this.description = description;
         }
