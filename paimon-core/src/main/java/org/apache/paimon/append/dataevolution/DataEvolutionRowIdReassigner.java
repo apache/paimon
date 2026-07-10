@@ -112,8 +112,6 @@ public class DataEvolutionRowIdReassigner {
                 "Table '%s' must enable 'data-evolution.enabled=true' before reassigning row IDs.",
                 table.name());
 
-        ManifestFile manifestFile = table.store().manifestFileFactory().create();
-        ManifestList manifestList = table.store().manifestListFactory().create();
         Snapshot latest = table.snapshotManager().latestSnapshot();
         checkArgument(
                 latest != null, "Cannot reassign row IDs for empty table '%s'.", table.name());
@@ -125,6 +123,8 @@ public class DataEvolutionRowIdReassigner {
             return Result.skipped(latest.id(), nextRowId, "table is not partitioned");
         }
 
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        ManifestList manifestList = table.store().manifestListFactory().create();
         Optional<AssignmentPlan> optionalPlan =
                 planAssignment(manifestList.readDataManifests(latest), manifestFile);
         if (!optionalPlan.isPresent()) {
