@@ -203,7 +203,8 @@ public class DataEvolutionRowIdReassigner {
             ManifestFile manifestFile,
             ReassignContext context) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
-        Map<BinaryRow, List<SourcedManifestEntry>> entriesToReassign = new LinkedHashMap<>();
+        Map<BinaryRow, List<SourcedManifestEntry>> entriesToReassignByPartition =
+                new LinkedHashMap<>();
         boolean hasCurrentFiles = false;
 
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
@@ -226,7 +227,7 @@ public class DataEvolutionRowIdReassigner {
 
             for (SourcedManifestEntry entry : currentManifest.currentEntries) {
                 if (partitionsToReassign.contains(entry.entry.partition())) {
-                    entriesToReassign
+                    entriesToReassignByPartition
                             .computeIfAbsent(entry.entry.partition(), ignored -> new ArrayList<>())
                             .add(entry);
                 }
@@ -234,7 +235,8 @@ public class DataEvolutionRowIdReassigner {
         }
 
         AssignmentPlan assignment =
-                new AssignmentPlan(snapshot, manifestMetas, entriesToReassign, hasCurrentFiles);
+                new AssignmentPlan(
+                        snapshot, manifestMetas, entriesToReassignByPartition, hasCurrentFiles);
         recalculateAssignment(assignment, requireNextRowId(snapshot));
         return assignment;
     }
@@ -851,7 +853,8 @@ public class DataEvolutionRowIdReassigner {
         for (SourcedManifestEntry plannedFile : assignment.plannedFiles.values()) {
             plannedFile.reassignedFirstRowId = null;
         }
-        List<BinaryRow> partitions = new ArrayList<>(assignment.entriesByPartition.keySet());
+        List<BinaryRow> partitions =
+                new ArrayList<>(assignment.entriesToReassignByPartition.keySet());
         RecordComparator partitionComparator = partitionComparator();
         Collections.sort(partitions, partitionComparator::compare);
 
@@ -859,7 +862,7 @@ public class DataEvolutionRowIdReassigner {
         long logicalRowCount = 0;
         for (BinaryRow partition : partitions) {
             List<SourcedManifestEntry> sourcedEntries =
-                    assignment.entriesByPartition.get(partition);
+                    assignment.entriesToReassignByPartition.get(partition);
             List<ManifestEntry> entries = new ArrayList<>(sourcedEntries.size());
             for (SourcedManifestEntry sourcedEntry : sourcedEntries) {
                 validatePlanningEntry(sourcedEntry.entry);
@@ -1230,7 +1233,7 @@ public class DataEvolutionRowIdReassigner {
     private static class AssignmentPlan {
         private Snapshot snapshot;
         private List<ManifestFileMeta> manifestMetas;
-        private final Map<BinaryRow, List<SourcedManifestEntry>> entriesByPartition;
+        private final Map<BinaryRow, List<SourcedManifestEntry>> entriesToReassignByPartition;
         private final Map<FileEntry.Identifier, SourcedManifestEntry> plannedFiles;
         private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
         private long firstAssignedRowId;
@@ -1241,21 +1244,21 @@ public class DataEvolutionRowIdReassigner {
         private AssignmentPlan(
                 Snapshot snapshot,
                 List<ManifestFileMeta> manifestMetas,
-                Map<BinaryRow, List<SourcedManifestEntry>> entriesByPartition,
+                Map<BinaryRow, List<SourcedManifestEntry>> entriesToReassignByPartition,
                 boolean hasCurrentFiles) {
             this.snapshot = snapshot;
             this.manifestMetas = manifestMetas;
-            this.entriesByPartition = new LinkedHashMap<>();
+            this.entriesToReassignByPartition = new LinkedHashMap<>();
             this.plannedFiles = new LinkedHashMap<>();
             this.rowIdMappings = new LinkedHashMap<>();
             this.hasCurrentFiles = hasCurrentFiles;
-            for (List<SourcedManifestEntry> entries : entriesByPartition.values()) {
+            for (List<SourcedManifestEntry> entries : entriesToReassignByPartition.values()) {
                 addAll(entries);
             }
         }
 
         private boolean containsPartition(BinaryRow partition) {
-            return entriesByPartition.containsKey(partition);
+            return entriesToReassignByPartition.containsKey(partition);
         }
 
         private void addAll(List<SourcedManifestEntry> entries) {
@@ -1271,7 +1274,7 @@ public class DataEvolutionRowIdReassigner {
                     "Duplicate planned manifest entry for file %s.",
                     entry.entry);
             plannedFiles.put(identifier, entry);
-            entriesByPartition
+            entriesToReassignByPartition
                     .computeIfAbsent(entry.entry.partition(), ignored -> new ArrayList<>())
                     .add(entry);
         }
