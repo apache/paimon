@@ -114,7 +114,6 @@ public class DataEvolutionRowIdReassigner {
 
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
-        ReassignContext context = new ReassignContext();
         Snapshot latest = table.snapshotManager().latestSnapshot();
         checkArgument(
                 latest != null, "Cannot reassign row IDs for empty table '%s'.", table.name());
@@ -127,7 +126,7 @@ public class DataEvolutionRowIdReassigner {
         }
 
         Optional<AssignmentPlan> optionalPlan =
-                planAssignment(manifestList.readDataManifests(latest), manifestFile, context);
+                planAssignment(manifestList.readDataManifests(latest), manifestFile);
         if (!optionalPlan.isPresent()) {
             LOG.info(
                     "Skip reassigning row IDs for table {} because no partition requires reassignment.",
@@ -136,12 +135,11 @@ public class DataEvolutionRowIdReassigner {
                     latest.id(), nextRowId, "no partition requires row-id reassignment");
         }
         AssignmentPlan assignmentPlan = optionalPlan.get();
-        context.clearPlanningManifestEntries();
 
         for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
             Assignment assignment = assignmentPlan.createAssignment(latest);
             CommitAssignmentResult commitResult =
-                    commitAssignment(assignment, manifestFile, manifestList, context, commitUser);
+                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
             if (commitResult.success) {
                 LOG.info(
                         "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
@@ -170,7 +168,7 @@ public class DataEvolutionRowIdReassigner {
             checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
             assignmentPlan =
                     advanceAssignmentPlan(
-                            assignmentPlan, latest, newLatest, manifestFile, manifestList, context);
+                            assignmentPlan, latest, newLatest, manifestFile, manifestList);
             LOG.info(
                     "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
                     table.name(),
@@ -194,9 +192,7 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private Optional<AssignmentPlan> planAssignment(
-            List<ManifestFileMeta> manifestMetas,
-            ManifestFile manifestFile,
-            ReassignContext context) {
+            List<ManifestFileMeta> manifestMetas, ManifestFile manifestFile) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         Map<BinaryRow, List<ManifestEntry>> entriesToReassignByPartition = new LinkedHashMap<>();
 
@@ -205,8 +201,7 @@ public class DataEvolutionRowIdReassigner {
                 continue;
             }
 
-            List<ManifestEntry> currentEntries =
-                    currentEntries(manifestGroup, manifestFile, context);
+            List<ManifestEntry> currentEntries = currentEntries(manifestGroup, manifestFile);
             if (currentEntries.isEmpty()) {
                 continue;
             }
@@ -235,8 +230,7 @@ public class DataEvolutionRowIdReassigner {
                 createRelativeRowIdMappings(entriesToReassignByPartition);
         return Optional.of(
                 new AssignmentPlan(
-                        findManifestMetasToRewrite(
-                                manifestMetas, rowIdMappings, manifestFile, context),
+                        findManifestMetasToRewrite(manifestMetas, rowIdMappings, manifestFile),
                         rowIdMappings));
     }
 
@@ -382,19 +376,16 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private List<ManifestEntry> currentEntries(
-            List<ManifestFileMeta> manifestMetas,
-            ManifestFile manifestFile,
-            ReassignContext context) {
+            List<ManifestFileMeta> manifestMetas, ManifestFile manifestFile) {
         Set<FileEntry.Identifier> deletedIdentifiers =
-                deletedIdentifiers(manifestFile, manifestMetas, context);
+                deletedIdentifiers(manifestFile, manifestMetas);
 
         List<ManifestEntry> currentEntries = new ArrayList<>();
         for (ManifestFileMeta manifestMeta : manifestMetas) {
             if (manifestMeta.numAddedFiles() <= 0) {
                 continue;
             }
-            List<ManifestEntry> entries =
-                    readPlanningManifestEntries(manifestFile, manifestMeta, context);
+            List<ManifestEntry> entries = readPlanningManifestEntries(manifestFile, manifestMeta);
             for (ManifestEntry entry : entries) {
                 if (entry.kind() == FileKind.ADD
                         && partitionIncluded(entry.partition())
@@ -407,16 +398,13 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private Set<FileEntry.Identifier> deletedIdentifiers(
-            ManifestFile manifestFile,
-            List<ManifestFileMeta> manifestMetas,
-            ReassignContext context) {
+            ManifestFile manifestFile, List<ManifestFileMeta> manifestMetas) {
         Set<FileEntry.Identifier> deletedIdentifiers = new HashSet<>();
         for (ManifestFileMeta manifestMeta : manifestMetas) {
             if (manifestMeta.numDeletedFiles() <= 0) {
                 continue;
             }
-            List<ManifestEntry> entries =
-                    readPlanningManifestEntries(manifestFile, manifestMeta, context);
+            List<ManifestEntry> entries = readPlanningManifestEntries(manifestFile, manifestMeta);
             for (ManifestEntry entry : entries) {
                 if (entry.kind() == FileKind.DELETE && partitionIncluded(entry.partition())) {
                     deletedIdentifiers.add(entry.identifier());
@@ -438,7 +426,6 @@ public class DataEvolutionRowIdReassigner {
             Assignment assignment,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            ReassignContext context,
             String commitUser) {
         RewrittenDataManifests rewrittenDataManifests =
                 writeManifestReplacements(assignment, manifestFile);
@@ -448,7 +435,7 @@ public class DataEvolutionRowIdReassigner {
                         rewrittenDataManifests.manifestMetas,
                         manifestList);
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
-        RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(assignment, context);
+        RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(assignment);
 
         boolean success;
         try (FileStoreCommitImpl commit =
@@ -472,8 +459,7 @@ public class DataEvolutionRowIdReassigner {
             Snapshot previous,
             Snapshot latest,
             ManifestFile manifestFile,
-            ManifestList manifestList,
-            ReassignContext context) {
+            ManifestList manifestList) {
         checkState(
                 latest.id() > previous.id(),
                 "Cannot advance row-id assignment from snapshot %s to %s.",
@@ -514,7 +500,7 @@ public class DataEvolutionRowIdReassigner {
             for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
                 boolean needsReassign = false;
                 for (ManifestEntry entry :
-                        readPlanningManifestEntries(manifestFile, manifestMeta, context)) {
+                        readPlanningManifestEntries(manifestFile, manifestMeta)) {
                     checkState(
                             entry.kind() == FileKind.ADD,
                             "APPEND snapshot %s contains non-ADD manifest entry %s.",
@@ -541,8 +527,6 @@ public class DataEvolutionRowIdReassigner {
                     "Cannot advance row-id assignment because planned manifest %s no longer exists after APPEND manifest merge.",
                     plannedManifestFile);
         }
-        context.clearPlanningManifestEntries();
-        context.retainIndexManifest(latest.indexManifest());
         return new AssignmentPlan(
                 new ArrayList<>(manifestMetasToRewrite.values()), assignmentPlan.rowIdMappings);
     }
@@ -590,8 +574,7 @@ public class DataEvolutionRowIdReassigner {
     private List<ManifestFileMeta> findManifestMetasToRewrite(
             List<ManifestFileMeta> manifestMetas,
             Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
-            ManifestFile manifestFile,
-            ReassignContext context) {
+            ManifestFile manifestFile) {
         PartitionPredicate plannedPartitionPredicate =
                 PartitionPredicate.fromMultiple(
                         table.schema().logicalPartitionType(), rowIdMappings.keySet());
@@ -602,8 +585,7 @@ public class DataEvolutionRowIdReassigner {
                     Collections.singletonList(manifestMeta), plannedPartitionPredicate)) {
                 continue;
             }
-            for (ManifestEntry entry :
-                    readPlanningManifestEntries(manifestFile, manifestMeta, context)) {
+            for (ManifestEntry entry : readPlanningManifestEntries(manifestFile, manifestMeta)) {
                 RowRangeMappingIndex mapping = rowIdMappings.get(entry.partition());
                 if (mapping != null && mapping.map(entry.file().nonNullRowIdRange()).isPresent()) {
                     result.add(manifestMeta);
@@ -825,16 +807,14 @@ public class DataEvolutionRowIdReassigner {
         return new Range(min, max);
     }
 
-    private RewrittenIndexManifest rewriteIndexManifest(
-            Assignment assignment, ReassignContext context) {
+    private RewrittenIndexManifest rewriteIndexManifest(Assignment assignment) {
         if (assignment.snapshot.indexManifest() == null) {
             return new RewrittenIndexManifest(null, 0);
         }
 
         IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
         List<IndexManifestEntry> indexEntries =
-                readIndexManifestEntries(
-                        indexManifestFile, assignment.snapshot.indexManifest(), context);
+                indexManifestFile.read(assignment.snapshot.indexManifest());
         if (indexEntries.isEmpty()) {
             return new RewrittenIndexManifest(null, 0);
         }
@@ -897,37 +877,15 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private List<ManifestEntry> readPlanningManifestEntries(
-            ManifestFile manifestFile, ManifestFileMeta manifestMeta, ReassignContext context) {
-        // Rewrites reread full entries so this retry cache can safely omit value stats.
-        return context.planningManifestEntries.computeIfAbsent(
-                manifestMeta,
-                ignored ->
-                        Collections.unmodifiableList(
-                                readPlanningManifestEntries(
-                                        manifestFile, manifestMeta, partitionPredicate)));
-    }
-
-    private List<ManifestEntry> readPlanningManifestEntries(
-            ManifestFile manifestFile,
-            ManifestFileMeta manifestMeta,
-            @Nullable PartitionPredicate effectivePartitionPredicate) {
+            ManifestFile manifestFile, ManifestFileMeta manifestMeta) {
         return manifestFile.read(
                 manifestMeta.fileName(),
                 manifestMeta.fileSize(),
-                effectivePartitionPredicate,
+                partitionPredicate,
                 null,
                 Filter.alwaysTrue(),
-                entry ->
-                        effectivePartitionPredicate == null
-                                || effectivePartitionPredicate.test(entry.partition()),
+                entry -> partitionPredicate == null || partitionPredicate.test(entry.partition()),
                 ManifestEntry::copyWithoutStats);
-    }
-
-    private List<IndexManifestEntry> readIndexManifestEntries(
-            IndexManifestFile indexManifestFile, String indexManifest, ReassignContext context) {
-        return context.indexManifestEntries.computeIfAbsent(
-                indexManifest,
-                ignored -> Collections.unmodifiableList(indexManifestFile.read(indexManifest)));
     }
 
     private Comparator<ManifestEntry> entryComparator() {
@@ -1067,24 +1025,6 @@ public class DataEvolutionRowIdReassigner {
         private RewrittenIndexManifest(@Nullable String indexManifest, long indexFileCount) {
             this.indexManifest = indexManifest;
             this.indexFileCount = indexFileCount;
-        }
-    }
-
-    private static class ReassignContext {
-        private final Map<ManifestFileMeta, List<ManifestEntry>> planningManifestEntries =
-                new HashMap<>();
-        private final Map<String, List<IndexManifestEntry>> indexManifestEntries = new HashMap<>();
-
-        private void clearPlanningManifestEntries() {
-            planningManifestEntries.clear();
-        }
-
-        private void retainIndexManifest(@Nullable String indexManifest) {
-            if (indexManifest == null) {
-                indexManifestEntries.clear();
-            } else {
-                indexManifestEntries.keySet().retainAll(Collections.singleton(indexManifest));
-            }
         }
     }
 
