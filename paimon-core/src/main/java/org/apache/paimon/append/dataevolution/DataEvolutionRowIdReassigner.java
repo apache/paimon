@@ -115,7 +115,11 @@ public class DataEvolutionRowIdReassigner {
         Snapshot latest = table.snapshotManager().latestSnapshot();
         checkArgument(
                 latest != null, "Cannot reassign row IDs for empty table '%s'.", table.name());
-        long nextRowId = requireNextRowId(latest);
+        Long nextRowId = latest.nextRowId();
+        checkState(
+                nextRowId != null,
+                "Next row id cannot be null for row-tracking table '%s'.",
+                table.name());
         if (table.schema().logicalPartitionType().getFieldCount() == 0) {
             LOG.info(
                     "Skip reassigning row IDs for table {} because it is not partitioned.",
@@ -180,15 +184,6 @@ public class DataEvolutionRowIdReassigner {
         }
 
         throw new IllegalStateException("Unreachable retry state while reassigning row IDs.");
-    }
-
-    private long requireNextRowId(Snapshot snapshot) {
-        Long nextRowId = snapshot.nextRowId();
-        checkState(
-                nextRowId != null,
-                "Next row id cannot be null for row-tracking table '%s'.",
-                table.name());
-        return nextRowId;
     }
 
     private Optional<AssignmentPlan> planAssignment(
