@@ -57,7 +57,8 @@ class _OneBatchReader(RecordBatchReader):
 
 class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
     def __init__(
-        self, files, values_by_file_name, row_ranges=None, deletion_vector=None
+        self, files, values_by_file_name, row_ranges=None, deletion_vector=None,
+        batch_size=1024
     ):
         super().__init__(
             [(file, lambda: None) for file in files],
@@ -66,15 +67,18 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
             row_ranges=row_ranges,
             blob_as_descriptor=False,
             deletion_vector=deletion_vector,
+            batch_size=batch_size,
         )
         self._values_by_file_name = values_by_file_name
 
-    def _read_blob_values(self, file, supplier):
-        values = self._values_by_file_name[file.file_name]
-        return [
-            values[row_id - file.first_row_id]
-            for row_id in self._selected_row_ids(file)
-        ]
+    def _read_blob_values(self, state, batch_row_ids):
+        values = self._values_by_file_name[state.file.file_name]
+        return {
+            row_id: values[pos]
+            for pos, row_id in self._selected_positions_and_row_ids(
+                state, batch_row_ids
+            )
+        }
 
 
 def _file(name, first_row_id, row_count, max_sequence_number):
@@ -213,6 +217,121 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
         )
         self.assertIsNone(reader.read_arrow_batch())
 
+    def test_blob_fallback_batch_reader_does_not_eof_on_row_id_gap(self):
+        reader = _BlobFallbackBatchReaderForTest(
+            [
+                _file("blob-left.blob", 0, 1, 1),
+                _file("blob-right.blob", 2, 1, 1),
+            ],
+            {
+                "blob-left.blob": [BlobData(b"left")],
+                "blob-right.blob": [BlobData(b"right")],
+            },
+            row_ranges=[Range(0, 2)],
+            batch_size=1,
+        )
+
+        values = []
+        for batch in iter(reader.read_arrow_batch, None):
+            values.extend(batch.column(0).to_pylist())
+
+        self.assertEqual([b"left", b"right"], values)
+
+    def test_blob_fallback_batch_reader_skips_states_outside_batch(self):
+        class _CountingBlobFallbackBatchReader(_BlobFallbackBatchReaderForTest):
+            def __init__(self, files, values_by_file_name, batch_size):
+                super().__init__(files, values_by_file_name, batch_size=batch_size)
+                self.selected_calls = []
+
+            def _selected_positions_and_row_ids(self, state, batch_row_ids):
+                self.selected_calls.append(
+                    (state.file.file_name, list(batch_row_ids))
+                )
+                return BlobFallbackBatchReader._selected_positions_and_row_ids(
+                    state, batch_row_ids
+                )
+
+        reader = _CountingBlobFallbackBatchReader(
+            [
+                _file("blob-0.blob", 0, 1, 1),
+                _file("blob-10.blob", 10, 1, 1),
+                _file("blob-20.blob", 20, 1, 1),
+            ],
+            {
+                "blob-0.blob": [BlobData(b"0")],
+                "blob-10.blob": [BlobData(b"10")],
+                "blob-20.blob": [BlobData(b"20")],
+            },
+            batch_size=1,
+        )
+        try:
+            self.assertEqual([b"0"], reader.read_arrow_batch().column(0).to_pylist())
+            self.assertEqual([("blob-0.blob", [0])], reader.selected_calls)
+
+            self.assertEqual([b"10"], reader.read_arrow_batch().column(0).to_pylist())
+            self.assertEqual(
+                [("blob-0.blob", [0]), ("blob-10.blob", [10])],
+                reader.selected_calls,
+            )
+        finally:
+            reader.close()
+
+    def test_blob_fallback_batch_reader_avoids_full_row_id_materialization(self):
+        class _LazyBlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
+            def _read_blob_values(self, state, batch_row_ids):
+                return {
+                    row_id: BlobData(str(row_id).encode("utf-8"))
+                    for row_id in batch_row_ids
+                }
+
+        reader = _LazyBlobFallbackBatchReaderForTest(
+            [(_file("large.blob", 0, 1_000_000, 1), lambda: None)],
+            "blob_col",
+            pa.binary(),
+            batch_size=2,
+        )
+        try:
+            self.assertNotIn("_target_row_ids", reader.__dict__)
+            for state in reader._file_states:
+                self.assertFalse(hasattr(state, "selected_row_ids"))
+                self.assertFalse(hasattr(state, "row_id_to_pos"))
+                self.assertFalse(hasattr(state, "reader_uses_selected_positions"))
+
+            batch = reader.read_arrow_batch()
+            self.assertEqual([b"0", b"1"], batch.column(0).to_pylist())
+        finally:
+            reader.close()
+
+    def test_blob_fallback_batch_reader_advances_sparse_range_cursor(self):
+        reader = _BlobFallbackBatchReaderForTest(
+            [_file("sparse.blob", 0, 100, 1)],
+            {
+                "sparse.blob": [
+                    BlobData(b"0"),
+                    BlobData(b"10"),
+                    BlobData(b"20"),
+                    BlobData(b"30"),
+                ],
+            },
+            row_ranges=[Range(0, 0), Range(10, 10), Range(20, 20), Range(30, 30)],
+            batch_size=2,
+        )
+        try:
+            state = reader._file_states[0]
+
+            first = reader.read_arrow_batch()
+            self.assertEqual([b"0", b"10"], first.column(0).to_pylist())
+            self.assertEqual(1, state.selected_range_index)
+            self.assertEqual(1, state.selected_position_base)
+
+            second = reader.read_arrow_batch()
+            self.assertEqual([b"20", b"30"], second.column(0).to_pylist())
+            self.assertEqual(3, state.selected_range_index)
+            self.assertEqual(3, state.selected_position_base)
+            self.assertIsNone(reader.read_arrow_batch())
+        finally:
+            reader.close()
+
     def test_data_evolution_merge_reader_aligns_blob_with_row_ranges_and_dv(self):
         row_ranges = [Range(1, 4)]
         deletion_vector = BitmapDeletionVector()
@@ -234,20 +353,16 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             ],
             {
                 "blob-old.blob": [
-                    BlobData(b"old-0"),
                     BlobData(b"old-1"),
                     BlobData(b"old-2"),
                     BlobData(b"old-3"),
                     BlobData(b"old-4"),
-                    BlobData(b"old-5"),
                 ],
                 "blob-new.blob": [
-                    Blob.PLACE_HOLDER,
                     Blob.PLACE_HOLDER,
                     BlobData(b"new-2"),
                     BlobData(b"new-3"),
                     BlobData(b"new-4"),
-                    Blob.PLACE_HOLDER,
                 ],
             },
             row_ranges=row_ranges,
