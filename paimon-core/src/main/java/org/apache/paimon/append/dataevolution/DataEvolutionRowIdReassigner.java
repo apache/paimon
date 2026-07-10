@@ -40,6 +40,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -114,109 +115,95 @@ public class DataEvolutionRowIdReassigner {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
         ReassignContext context = new ReassignContext();
-        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
-            Snapshot latest = table.snapshotManager().latestSnapshot();
-            checkArgument(
-                    latest != null, "Cannot reassign row IDs for empty table '%s'.", table.name());
-            Long nextRowId = latest.nextRowId();
-            checkState(
-                    nextRowId != null,
-                    "Next row id cannot be null for row-tracking table '%s'.",
-                    table.name());
-            if (table.schema().logicalPartitionType().getFieldCount() == 0) {
-                LOG.info(
-                        "Skip reassigning row IDs for table {} because it is not partitioned.",
-                        table.name());
-                return Result.skipped(latest.id(), nextRowId, "table is not partitioned");
-            }
-
-            List<ManifestFileMeta> manifestMetas = manifestList.readDataManifests(latest);
-            AssignmentPlan assignment =
-                    planAssignment(manifestMetas, manifestFile, nextRowId, context);
-            if (!assignment.hasCurrentFiles) {
-                return Result.skipped(
-                        latest.id(),
-                        nextRowId,
-                        partitionFilterEnabled()
-                                ? "partition filter matches no current files"
-                                : "table has no current files");
-            }
-            if (assignment.reassignedFileCount == 0) {
-                LOG.info(
-                        "Skip reassigning row IDs for table {} because partition row IDs are already contiguous.",
-                        table.name());
-                return Result.skipped(
-                        latest.id(), nextRowId, "partition row IDs are already contiguous");
-            }
-
-            Pair<String, Long> baseManifestList =
-                    writeBaseManifestList(
-                            manifestMetas, assignment.rewrittenManifestMetas, manifestList);
-            Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
-
-            RewrittenIndexManifest rewrittenIndexManifest =
-                    rewriteIndexManifest(latest, assignment, context);
-
-            boolean success;
-            try (FileStoreCommitImpl commit =
-                    (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
-                beforeCommit.run();
-                success =
-                        commit.replaceManifestList(
-                                latest,
-                                latest.totalRecordCount(),
-                                baseManifestList,
-                                deltaManifestList,
-                                rewrittenIndexManifest.indexManifest,
-                                assignment.nextRowId);
-            }
-            if (!success) {
-                if (attempt == MAX_COMMIT_ATTEMPTS) {
-                    throw new RuntimeException(
-                            "Failed to reassign row IDs because a newer snapshot has been committed.");
-                }
-                LOG.info(
-                        "Failed to commit row-id reassignment for table {} based on snapshot {} because a newer snapshot {} has been committed. Retrying {}/{} with cached manifest reads.",
-                        table.name(),
-                        latest.id(),
-                        table.snapshotManager().latestSnapshotId(),
-                        attempt + 1,
-                        MAX_COMMIT_ATTEMPTS);
-                continue;
-            }
-
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        checkArgument(
+                latest != null, "Cannot reassign row IDs for empty table '%s'.", table.name());
+        long nextRowId = requireNextRowId(latest);
+        if (table.schema().logicalPartitionType().getFieldCount() == 0) {
             LOG.info(
-                    "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
-                    table.name(),
-                    nextRowId,
-                    assignment.nextRowId,
-                    assignment.rowIdMappings.size(),
-                    assignment.reassignedFileCount,
-                    assignment.logicalRowCount);
-            return new Result(
+                    "Skip reassigning row IDs for table {} because it is not partitioned.",
+                    table.name());
+            return Result.skipped(latest.id(), nextRowId, "table is not partitioned");
+        }
+
+        AssignmentPlan assignment =
+                planAssignment(
+                        latest, manifestList.readDataManifests(latest), manifestFile, context);
+        if (!assignment.hasCurrentFiles) {
+            return Result.skipped(
                     latest.id(),
-                    latest.id() + 1,
-                    assignment.reassignedFileCount,
-                    assignment.logicalRowCount,
-                    rewrittenIndexManifest.indexFileCount,
                     nextRowId,
-                    assignment.nextRowId);
+                    partitionFilterEnabled()
+                            ? "partition filter matches no current files"
+                            : "table has no current files");
+        }
+        if (assignment.plannedFiles.isEmpty()) {
+            LOG.info(
+                    "Skip reassigning row IDs for table {} because partition row IDs are already contiguous.",
+                    table.name());
+            return Result.skipped(
+                    latest.id(), nextRowId, "partition row IDs are already contiguous");
+        }
+
+        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+            CommitAssignmentResult commitResult =
+                    commitAssignment(assignment, manifestFile, manifestList, context, commitUser);
+            if (commitResult.success) {
+                LOG.info(
+                        "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
+                        table.name(),
+                        assignment.firstAssignedRowId,
+                        assignment.nextRowId,
+                        assignment.rowIdMappings.size(),
+                        assignment.plannedFiles.size(),
+                        assignment.logicalRowCount);
+                return new Result(
+                        assignment.snapshot.id(),
+                        assignment.snapshot.id() + 1,
+                        assignment.plannedFiles.size(),
+                        assignment.logicalRowCount,
+                        commitResult.indexFileCount,
+                        assignment.firstAssignedRowId,
+                        assignment.nextRowId);
+            }
+
+            if (attempt == MAX_COMMIT_ATTEMPTS) {
+                throw new RuntimeException(
+                        "Failed to reassign row IDs because a newer snapshot has been committed.");
+            }
+
+            Snapshot newLatest = table.snapshotManager().latestSnapshot();
+            checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
+            advanceAssignment(assignment, newLatest, manifestFile, manifestList, context);
+            LOG.info(
+                    "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
+                    table.name(),
+                    latest.id(),
+                    newLatest.id(),
+                    attempt + 1,
+                    MAX_COMMIT_ATTEMPTS);
+            latest = newLatest;
         }
 
         throw new IllegalStateException("Unreachable retry state while reassigning row IDs.");
     }
 
+    private long requireNextRowId(Snapshot snapshot) {
+        Long nextRowId = snapshot.nextRowId();
+        checkState(
+                nextRowId != null,
+                "Next row id cannot be null for row-tracking table '%s'.",
+                table.name());
+        return nextRowId;
+    }
+
     private AssignmentPlan planAssignment(
+            Snapshot snapshot,
             List<ManifestFileMeta> manifestMetas,
             ManifestFile manifestFile,
-            long firstRowId,
             ReassignContext context) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
-        Map<String, List<ManifestFileMeta>> rewrittenManifestMetas = new HashMap<>();
-        Map<BinaryRow, RowRangeMappingIndex> rowIdMappings = new LinkedHashMap<>();
-        long nextRowId = firstRowId;
-        long logicalRowCount = 0;
-        long reassignedFileCount = 0;
+        Map<BinaryRow, List<SourcedManifestEntry>> entriesToReassign = new LinkedHashMap<>();
         boolean hasCurrentFiles = false;
 
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
@@ -225,59 +212,31 @@ public class DataEvolutionRowIdReassigner {
             }
 
             CurrentManifest currentManifest = currentManifest(manifestGroup, manifestFile, context);
-            List<ManifestEntry> currentEntries = currentManifest.entries();
-            if (currentEntries.isEmpty()) {
+            if (currentManifest.currentEntries.isEmpty()) {
                 continue;
             }
             hasCurrentFiles = true;
 
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
-                    entriesByPartition(currentEntries);
+                    entriesByPartition(currentManifest.currentEntries);
             Set<BinaryRow> partitionsToReassign = partitionsToReassign(entriesByPartition);
             if (partitionsToReassign.isEmpty()) {
                 continue;
             }
 
-            Assignment groupAssignment =
-                    assign(entriesByPartition, partitionsToReassign, nextRowId);
-            nextRowId = groupAssignment.nextRowId;
-            logicalRowCount += groupAssignment.logicalRowCount;
-            reassignedFileCount += groupAssignment.reassignedFileCount;
-            for (Map.Entry<BinaryRow, RowRangeMappingIndex> mapping :
-                    groupAssignment.rowIdMappings.entrySet()) {
-                RowRangeMappingIndex previous =
-                        rowIdMappings.put(mapping.getKey(), mapping.getValue());
-                checkState(
-                        previous == null,
-                        "Partition %s appears in multiple manifest groups.",
-                        table.store().pathFactory().getPartitionString(mapping.getKey()));
-            }
-
-            Map<String, List<ManifestFileMeta>> groupRewrittenManifestMetas =
-                    writeManifestReplacements(
-                            currentManifest,
-                            groupAssignment,
-                            partitionsToReassign,
-                            manifestFile,
-                            context);
-            for (Map.Entry<String, List<ManifestFileMeta>> rewritten :
-                    groupRewrittenManifestMetas.entrySet()) {
-                List<ManifestFileMeta> previous =
-                        rewrittenManifestMetas.put(rewritten.getKey(), rewritten.getValue());
-                checkState(
-                        previous == null,
-                        "Manifest file %s appears in multiple manifest groups.",
-                        rewritten.getKey());
+            for (SourcedManifestEntry entry : currentManifest.currentEntries) {
+                if (partitionsToReassign.contains(entry.entry.partition())) {
+                    entriesToReassign
+                            .computeIfAbsent(entry.entry.partition(), ignored -> new ArrayList<>())
+                            .add(entry);
+                }
             }
         }
 
-        return new AssignmentPlan(
-                rewrittenManifestMetas,
-                rowIdMappings,
-                nextRowId,
-                logicalRowCount,
-                reassignedFileCount,
-                hasCurrentFiles);
+        AssignmentPlan assignment =
+                new AssignmentPlan(snapshot, manifestMetas, entriesToReassign, hasCurrentFiles);
+        recalculateAssignment(assignment, requireNextRowId(snapshot));
+        return assignment;
     }
 
     private List<List<ManifestFileMeta>> manifestGroupsByPartition(
@@ -310,6 +269,7 @@ public class DataEvolutionRowIdReassigner {
                             manifestMeta,
                             manifestMeta.partitionStats().minValues(),
                             manifestMeta.partitionStats().maxValues(),
+                            containsNullPartition(manifestMeta, partitionFieldCount),
                             i));
         }
         Collections.sort(
@@ -341,6 +301,32 @@ public class DataEvolutionRowIdReassigner {
             }
         }
         groupedManifestRanges.add(currentGroup);
+
+        // Partition min/max excludes nulls, so null-bearing ranges need an extra shared group.
+        List<PartitionManifestRange> nullPartitionGroup = new ArrayList<>();
+        int nullPartitionGroupIndex = -1;
+        for (int i = 0; i < groupedManifestRanges.size(); ) {
+            List<PartitionManifestRange> group = groupedManifestRanges.get(i);
+            boolean containsNullPartition = false;
+            for (PartitionManifestRange range : group) {
+                if (range.containsNullPartition) {
+                    containsNullPartition = true;
+                    break;
+                }
+            }
+            if (containsNullPartition) {
+                if (nullPartitionGroupIndex < 0) {
+                    nullPartitionGroupIndex = i;
+                }
+                nullPartitionGroup.addAll(group);
+                groupedManifestRanges.remove(i);
+            } else {
+                i++;
+            }
+        }
+        if (!nullPartitionGroup.isEmpty()) {
+            groupedManifestRanges.add(nullPartitionGroupIndex, nullPartitionGroup);
+        }
 
         List<List<ManifestFileMeta>> groups = new ArrayList<>();
         for (List<PartitionManifestRange> group : groupedManifestRanges) {
@@ -385,6 +371,15 @@ public class DataEvolutionRowIdReassigner {
                 && partitionStats.nullCounts().size() == partitionFieldCount;
     }
 
+    private boolean containsNullPartition(ManifestFileMeta manifestMeta, int partitionFieldCount) {
+        for (int i = 0; i < partitionFieldCount; i++) {
+            if (manifestMeta.partitionStats().nullCounts().getLong(i) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private CurrentManifest currentManifest(
             List<ManifestFileMeta> manifestMetas,
             ManifestFile manifestFile,
@@ -397,7 +392,8 @@ public class DataEvolutionRowIdReassigner {
             if (manifestMeta.numAddedFiles() <= 0) {
                 continue;
             }
-            List<ManifestEntry> entries = readManifestEntries(manifestFile, manifestMeta, context);
+            List<ManifestEntry> entries =
+                    readPlanningManifestEntries(manifestFile, manifestMeta, context);
             for (ManifestEntry entry : entries) {
                 if (entry.kind() == FileKind.ADD
                         && partitionIncluded(entry.partition())
@@ -406,7 +402,53 @@ public class DataEvolutionRowIdReassigner {
                 }
             }
         }
-        return new CurrentManifest(manifestMetas, currentEntries);
+        return new CurrentManifest(currentEntries);
+    }
+
+    private CurrentManifest currentManifest(
+            List<ManifestFileMeta> manifestMetas,
+            ManifestFile manifestFile,
+            PartitionPredicate effectivePartitionPredicate) {
+        Map<ManifestFileMeta, List<ManifestEntry>> entriesByManifest = new HashMap<>();
+        Set<FileEntry.Identifier> deletedIdentifiers = new HashSet<>();
+        for (ManifestFileMeta manifestMeta : manifestMetas) {
+            if (manifestMeta.numDeletedFiles() <= 0) {
+                continue;
+            }
+            for (ManifestEntry entry :
+                    entriesByManifest.computeIfAbsent(
+                            manifestMeta,
+                            ignored ->
+                                    readPlanningManifestEntries(
+                                            manifestFile,
+                                            manifestMeta,
+                                            effectivePartitionPredicate))) {
+                if (entry.kind() == FileKind.DELETE) {
+                    deletedIdentifiers.add(entry.identifier());
+                }
+            }
+        }
+
+        List<SourcedManifestEntry> currentEntries = new ArrayList<>();
+        for (ManifestFileMeta manifestMeta : manifestMetas) {
+            if (manifestMeta.numAddedFiles() <= 0) {
+                continue;
+            }
+            for (ManifestEntry entry :
+                    entriesByManifest.computeIfAbsent(
+                            manifestMeta,
+                            ignored ->
+                                    readPlanningManifestEntries(
+                                            manifestFile,
+                                            manifestMeta,
+                                            effectivePartitionPredicate))) {
+                if (entry.kind() == FileKind.ADD
+                        && !deletedIdentifiers.contains(entry.identifier())) {
+                    currentEntries.add(new SourcedManifestEntry(manifestMeta, entry));
+                }
+            }
+        }
+        return new CurrentManifest(currentEntries);
     }
 
     private Set<FileEntry.Identifier> deletedIdentifiers(
@@ -418,7 +460,8 @@ public class DataEvolutionRowIdReassigner {
             if (manifestMeta.numDeletedFiles() <= 0) {
                 continue;
             }
-            List<ManifestEntry> entries = readManifestEntries(manifestFile, manifestMeta, context);
+            List<ManifestEntry> entries =
+                    readPlanningManifestEntries(manifestFile, manifestMeta, context);
             for (ManifestEntry entry : entries) {
                 if (entry.kind() == FileKind.DELETE && partitionIncluded(entry.partition())) {
                     deletedIdentifiers.add(entry.identifier());
@@ -434,6 +477,223 @@ public class DataEvolutionRowIdReassigner {
 
     private boolean partitionFilterEnabled() {
         return partitionPredicate != null;
+    }
+
+    private CommitAssignmentResult commitAssignment(
+            AssignmentPlan assignment,
+            ManifestFile manifestFile,
+            ManifestList manifestList,
+            ReassignContext context,
+            String commitUser) {
+        Map<String, List<ManifestFileMeta>> rewrittenManifestMetas =
+                writeManifestReplacements(assignment, manifestFile);
+        Pair<String, Long> baseManifestList =
+                writeBaseManifestList(
+                        assignment.manifestMetas, rewrittenManifestMetas, manifestList);
+        Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
+        RewrittenIndexManifest rewrittenIndexManifest =
+                rewriteIndexManifest(assignment.snapshot, assignment, context);
+
+        boolean success;
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
+            beforeCommit.run();
+            success =
+                    commit.replaceManifestList(
+                            assignment.snapshot,
+                            assignment.snapshot.totalRecordCount(),
+                            baseManifestList,
+                            deltaManifestList,
+                            rewrittenIndexManifest.indexManifest,
+                            assignment.nextRowId);
+        }
+        return new CommitAssignmentResult(success, rewrittenIndexManifest.indexFileCount);
+    }
+
+    private void advanceAssignment(
+            AssignmentPlan assignment,
+            Snapshot latest,
+            ManifestFile manifestFile,
+            ManifestList manifestList,
+            ReassignContext context) {
+        checkState(
+                latest.id() > assignment.snapshot.id(),
+                "Cannot advance row-id assignment from snapshot %s to %s.",
+                assignment.snapshot.id(),
+                latest.id());
+
+        Set<BinaryRow> touchedUnplannedPartitions = new HashSet<>();
+        for (long id = assignment.snapshot.id() + 1; id <= latest.id(); id++) {
+            Snapshot snapshot;
+            try {
+                snapshot = table.snapshotManager().tryGetSnapshot(id);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        String.format(
+                                "Abort row-id reassignment because snapshot %s cannot be read.",
+                                id),
+                        e);
+            }
+
+            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT
+                    || snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+                throw new RuntimeException(
+                        String.format(
+                                "Abort row-id reassignment because %s snapshot %s was committed after snapshot %s.",
+                                snapshot.commitKind(), snapshot.id(), assignment.snapshot.id()));
+            }
+            if (snapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
+                continue;
+            }
+            checkState(
+                    snapshot.commitKind() == Snapshot.CommitKind.APPEND,
+                    "Unsupported snapshot kind %s while advancing row-id assignment.",
+                    snapshot.commitKind());
+
+            for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
+                for (ManifestEntry entry :
+                        readPlanningManifestEntries(manifestFile, manifestMeta, context)) {
+                    checkState(
+                            entry.kind() == FileKind.ADD,
+                            "APPEND snapshot %s contains non-ADD manifest entry %s.",
+                            snapshot.id(),
+                            entry);
+                    SourcedManifestEntry sourced = new SourcedManifestEntry(manifestMeta, entry);
+                    if (assignment.containsPartition(entry.partition())) {
+                        assignment.add(sourced);
+                    } else {
+                        touchedUnplannedPartitions.add(entry.partition());
+                    }
+                }
+            }
+        }
+
+        List<ManifestFileMeta> latestManifestMetas = manifestList.readDataManifests(latest);
+        if (!touchedUnplannedPartitions.isEmpty()) {
+            Map<BinaryRow, List<SourcedManifestEntry>> touchedEntries =
+                    currentEntriesByPartition(
+                            latestManifestMetas, touchedUnplannedPartitions, manifestFile);
+            for (Map.Entry<BinaryRow, List<SourcedManifestEntry>> partition :
+                    touchedEntries.entrySet()) {
+                List<ManifestEntry> entries = new ArrayList<>(partition.getValue().size());
+                for (SourcedManifestEntry sourced : partition.getValue()) {
+                    entries.add(sourced.entry);
+                }
+                if (!partitionRowIdsAreContiguous(entries)) {
+                    assignment.addAll(partition.getValue());
+                }
+            }
+        }
+
+        relocatePlannedFiles(assignment, latestManifestMetas, manifestFile, context);
+        context.retainLatest(latestManifestMetas, latest.indexManifest());
+        assignment.snapshot = latest;
+        assignment.manifestMetas = latestManifestMetas;
+        recalculateAssignment(assignment, requireNextRowId(latest));
+    }
+
+    private Map<BinaryRow, List<SourcedManifestEntry>> currentEntriesByPartition(
+            List<ManifestFileMeta> manifestMetas,
+            Set<BinaryRow> partitions,
+            ManifestFile manifestFile) {
+        Map<BinaryRow, List<SourcedManifestEntry>> result = new LinkedHashMap<>();
+        PartitionPredicate touchedPartitionPredicate =
+                PartitionPredicate.fromMultiple(table.schema().logicalPartitionType(), partitions);
+        checkState(touchedPartitionPredicate != null, "Touched partition predicate is null.");
+        List<PartitionPredicate> predicates = new ArrayList<>();
+        if (partitionPredicate != null) {
+            predicates.add(partitionPredicate);
+        }
+        predicates.add(touchedPartitionPredicate);
+        PartitionPredicate effectivePartitionPredicate = PartitionPredicate.and(predicates);
+        checkState(effectivePartitionPredicate != null, "Effective partition predicate is null.");
+        for (List<ManifestFileMeta> manifestGroup : manifestGroupsByPartition(manifestMetas)) {
+            if (!manifestGroupMayContainPartitions(manifestGroup, effectivePartitionPredicate)) {
+                continue;
+            }
+            CurrentManifest currentManifest =
+                    currentManifest(manifestGroup, manifestFile, effectivePartitionPredicate);
+            for (SourcedManifestEntry entry : currentManifest.currentEntries) {
+                if (partitions.contains(entry.entry.partition())) {
+                    result.computeIfAbsent(entry.entry.partition(), ignored -> new ArrayList<>())
+                            .add(entry);
+                }
+            }
+        }
+        return result;
+    }
+
+    private boolean manifestGroupMayContainPartitions(
+            List<ManifestFileMeta> manifestGroup, PartitionPredicate effectivePartitionPredicate) {
+        int partitionFieldCount = table.schema().logicalPartitionType().getFieldCount();
+        for (ManifestFileMeta manifestMeta : manifestGroup) {
+            if (!containsPartitionStats(manifestMeta, partitionFieldCount)) {
+                return true;
+            }
+
+            SimpleStats partitionStats = manifestMeta.partitionStats();
+            if (effectivePartitionPredicate.test(
+                    manifestMeta.numAddedFiles() + manifestMeta.numDeletedFiles(),
+                    partitionStats.minValues(),
+                    partitionStats.maxValues(),
+                    partitionStats.nullCounts())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void relocatePlannedFiles(
+            AssignmentPlan assignment,
+            List<ManifestFileMeta> latestManifestMetas,
+            ManifestFile manifestFile,
+            ReassignContext context) {
+        Set<String> previousManifestFiles = manifestFileNames(assignment.manifestMetas);
+        Set<String> latestManifestFiles = manifestFileNames(latestManifestMetas);
+        Set<FileEntry.Identifier> unresolved = new HashSet<>();
+        for (Map.Entry<FileEntry.Identifier, SourcedManifestEntry> planned :
+                assignment.plannedFiles.entrySet()) {
+            ManifestFileMeta source = planned.getValue().manifest;
+            if (source == null || !latestManifestFiles.contains(source.fileName())) {
+                planned.getValue().manifest = null;
+                unresolved.add(planned.getKey());
+            }
+        }
+
+        if (unresolved.isEmpty()) {
+            return;
+        }
+
+        for (ManifestFileMeta manifestMeta : latestManifestMetas) {
+            if (unresolved.isEmpty()) {
+                break;
+            }
+            if (previousManifestFiles.contains(manifestMeta.fileName())) {
+                continue;
+            }
+            for (ManifestEntry entry :
+                    readPlanningManifestEntries(manifestFile, manifestMeta, context)) {
+                if (entry.kind() != FileKind.ADD) {
+                    continue;
+                }
+                FileEntry.Identifier identifier = entry.identifier();
+                if (unresolved.remove(identifier)) {
+                    assignment.plannedFiles.get(identifier).manifest = manifestMeta;
+                }
+            }
+        }
+        checkState(
+                unresolved.isEmpty(),
+                "Cannot locate planned files %s in the latest APPEND manifests.",
+                unresolved);
+    }
+
+    private Set<String> manifestFileNames(List<ManifestFileMeta> manifestMetas) {
+        Set<String> result = new HashSet<>();
+        for (ManifestFileMeta manifestMeta : manifestMetas) {
+            result.add(manifestMeta.fileName());
+        }
+        return result;
     }
 
     private Pair<String, Long> writeBaseManifestList(
@@ -454,81 +714,91 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private Map<String, List<ManifestFileMeta>> writeManifestReplacements(
-            CurrentManifest currentManifest,
-            Assignment assignment,
-            Set<BinaryRow> partitionsToReassign,
-            ManifestFile manifestFile,
-            ReassignContext context) {
-        Set<String> manifestsToRewrite =
-                manifestsToRewrite(currentManifest.currentEntries, partitionsToReassign);
-        Map<FileEntry.Identifier, ManifestEntry> reassignedEntries =
-                entriesByIdentifier(assignment.entries);
+            AssignmentPlan assignment, ManifestFile manifestFile) {
+        Map<String, Integer> assignmentsByManifest = new HashMap<>();
+        for (Map.Entry<FileEntry.Identifier, SourcedManifestEntry> planned :
+                assignment.plannedFiles.entrySet()) {
+            ManifestFileMeta manifest = planned.getValue().manifest;
+            Long reassignedFirstRowId = planned.getValue().reassignedFirstRowId;
+            checkState(
+                    manifest != null,
+                    "Cannot locate manifest for planned file %s.",
+                    planned.getKey());
+            checkState(
+                    reassignedFirstRowId != null,
+                    "Cannot find reassigned first row ID for planned file %s.",
+                    planned.getKey());
+            assignmentsByManifest.merge(manifest.fileName(), 1, Integer::sum);
+        }
 
         Map<String, List<ManifestFileMeta>> rewrittenManifestMetas = new HashMap<>();
-        for (ManifestFileMeta manifestMeta : currentManifest.manifestMetas) {
-            if (!manifestsToRewrite.contains(manifestMeta.fileName())) {
+        for (ManifestFileMeta manifestMeta : assignment.manifestMetas) {
+            Integer expectedAssignments = assignmentsByManifest.remove(manifestMeta.fileName());
+            if (expectedAssignments == null) {
                 continue;
             }
 
-            List<ManifestEntry> rewrittenEntries = new ArrayList<>();
-            List<ManifestEntry> entries = readManifestEntries(manifestFile, manifestMeta, context);
-            for (ManifestEntry entry : entries) {
+            List<ManifestEntry> entries =
+                    manifestFile.read(manifestMeta.fileName(), manifestMeta.fileSize());
+            Set<FileEntry.Identifier> rewrittenIdentifiers = new HashSet<>();
+            for (int i = 0; i < entries.size(); i++) {
+                ManifestEntry entry = entries.get(i);
                 if (entry.kind() == FileKind.ADD) {
-                    ManifestEntry reassignedEntry = reassignedEntries.get(entry.identifier());
-                    if (reassignedEntry != null) {
-                        entry = reassignedEntry;
+                    SourcedManifestEntry planned = assignment.plannedFiles.get(entry.identifier());
+                    if (planned != null
+                            && planned.manifest != null
+                            && planned.manifest.fileName().equals(manifestMeta.fileName())) {
+                        checkState(
+                                rewrittenIdentifiers.add(entry.identifier()),
+                                "Duplicate planned file %s in manifest %s.",
+                                entry.identifier(),
+                                manifestMeta.fileName());
+                        entries.set(i, entry.assignFirstRowId(planned.reassignedFirstRowId));
                     }
                 }
-                rewrittenEntries.add(entry);
             }
-            rewrittenManifestMetas.put(
-                    manifestMeta.fileName(), manifestFile.write(rewrittenEntries));
+            checkState(
+                    rewrittenIdentifiers.size() == expectedAssignments,
+                    "Expected %s planned files in manifest %s, but found %s.",
+                    expectedAssignments,
+                    manifestMeta.fileName(),
+                    rewrittenIdentifiers.size());
+            rewrittenManifestMetas.put(manifestMeta.fileName(), manifestFile.write(entries));
         }
+        checkState(
+                assignmentsByManifest.isEmpty(),
+                "Cannot find planned manifests %s in the latest snapshot.",
+                assignmentsByManifest.keySet());
         return rewrittenManifestMetas;
     }
 
-    private Set<String> manifestsToRewrite(
-            List<SourcedManifestEntry> currentEntries, Set<BinaryRow> partitionsToReassign) {
-        Set<String> manifestsToRewrite = new HashSet<>();
-        for (SourcedManifestEntry currentEntry : currentEntries) {
-            if (partitionsToReassign.contains(currentEntry.entry.partition())) {
-                manifestsToRewrite.add(currentEntry.manifest.fileName());
-            }
-        }
-        return manifestsToRewrite;
-    }
-
-    private Map<FileEntry.Identifier, ManifestEntry> entriesByIdentifier(
-            List<ManifestEntry> entries) {
-        Map<FileEntry.Identifier, ManifestEntry> result = new HashMap<>();
-        for (ManifestEntry entry : entries) {
-            ManifestEntry previous = result.put(entry.identifier(), entry);
-            checkState(previous == null, "Duplicate current manifest entry for file %s.", entry);
-        }
-        return result;
-    }
-
-    private Map<BinaryRow, List<ManifestEntry>> entriesByPartition(List<ManifestEntry> entries) {
-        List<ManifestEntry> sorted = new ArrayList<>(entries);
-        Collections.sort(sorted, entryComparator());
+    private Map<BinaryRow, List<ManifestEntry>> entriesByPartition(
+            List<SourcedManifestEntry> entries) {
+        Comparator<ManifestEntry> comparator = entryComparator();
+        Collections.sort(entries, (left, right) -> comparator.compare(left.entry, right.entry));
 
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition = new LinkedHashMap<>();
-        for (ManifestEntry entry : sorted) {
-            List<String> writeCols = entry.file().writeCols();
-            checkState(
-                    writeCols == null || !writeCols.contains(SpecialFields.ROW_ID.name()),
-                    "Cannot reassign row IDs for file '%s' because it physically stores the row-id field.",
-                    entry.file().fileName());
-            checkState(
-                    entry.file().firstRowId() != null,
-                    "File '%s' in table '%s' does not have first row id.",
-                    entry.file().fileName(),
-                    table.name());
+        for (SourcedManifestEntry sourcedEntry : entries) {
+            ManifestEntry entry = sourcedEntry.entry;
+            validatePlanningEntry(entry);
             entriesByPartition
                     .computeIfAbsent(entry.partition(), k -> new ArrayList<>())
                     .add(entry);
         }
         return entriesByPartition;
+    }
+
+    private void validatePlanningEntry(ManifestEntry entry) {
+        List<String> writeCols = entry.file().writeCols();
+        checkState(
+                writeCols == null || !writeCols.contains(SpecialFields.ROW_ID.name()),
+                "Cannot reassign row IDs for file '%s' because it physically stores the row-id field.",
+                entry.file().fileName());
+        checkState(
+                entry.file().firstRowId() != null,
+                "File '%s' in table '%s' does not have first row id.",
+                entry.file().fileName(),
+                table.name());
     }
 
     private Set<BinaryRow> partitionsToReassign(
@@ -576,38 +846,54 @@ public class DataEvolutionRowIdReassigner {
         return logicalRanges;
     }
 
-    private Assignment assign(
-            Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
-            Set<BinaryRow> partitionsToReassign,
-            long firstRowId) {
-        List<ManifestEntry> entries = new ArrayList<>();
-        Map<BinaryRow, RowRangeMappingIndex> rowIdMappings = new LinkedHashMap<>();
+    private void recalculateAssignment(AssignmentPlan assignment, long firstRowId) {
+        assignment.rowIdMappings.clear();
+        for (SourcedManifestEntry plannedFile : assignment.plannedFiles.values()) {
+            plannedFile.reassignedFirstRowId = null;
+        }
+        List<BinaryRow> partitions = new ArrayList<>(assignment.entriesByPartition.keySet());
+        RecordComparator partitionComparator = partitionComparator();
+        Collections.sort(partitions, partitionComparator::compare);
+
         long nextRowId = firstRowId;
         long logicalRowCount = 0;
-        long reassignedFileCount = 0;
-        for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : entriesByPartition.entrySet()) {
-            if (partitionsToReassign.contains(entry.getKey())) {
-                long partitionFirstRowId = nextRowId;
-                PartitionAssignment partitionAssignment =
-                        assignPartition(entry.getValue(), nextRowId);
-                entries.addAll(partitionAssignment.entries);
-                rowIdMappings.put(entry.getKey(), partitionAssignment.rowIdMappings);
-                nextRowId = partitionAssignment.nextRowId;
-                logicalRowCount += nextRowId - partitionFirstRowId;
-                reassignedFileCount += partitionAssignment.entries.size();
+        for (BinaryRow partition : partitions) {
+            List<SourcedManifestEntry> sourcedEntries =
+                    assignment.entriesByPartition.get(partition);
+            List<ManifestEntry> entries = new ArrayList<>(sourcedEntries.size());
+            for (SourcedManifestEntry sourcedEntry : sourcedEntries) {
+                validatePlanningEntry(sourcedEntry.entry);
+                entries.add(sourcedEntry.entry);
             }
+
+            long partitionFirstRowId = nextRowId;
+            PartitionAssignment partitionAssignment =
+                    assignPartition(entries, assignment.plannedFiles, nextRowId);
+            assignment.rowIdMappings.put(partition, partitionAssignment.rowIdMappings);
+            nextRowId = partitionAssignment.nextRowId;
+            logicalRowCount += nextRowId - partitionFirstRowId;
         }
 
-        return new Assignment(
-                entries, rowIdMappings, nextRowId, logicalRowCount, reassignedFileCount);
+        for (Map.Entry<FileEntry.Identifier, SourcedManifestEntry> planned :
+                assignment.plannedFiles.entrySet()) {
+            checkState(
+                    planned.getValue().reassignedFirstRowId != null,
+                    "Cannot find assignment for planned file %s.",
+                    planned.getKey());
+        }
+        assignment.firstAssignedRowId = firstRowId;
+        assignment.nextRowId = nextRowId;
+        assignment.logicalRowCount = logicalRowCount;
     }
 
-    private PartitionAssignment assignPartition(List<ManifestEntry> entries, long firstRowId) {
+    private PartitionAssignment assignPartition(
+            List<ManifestEntry> entries,
+            Map<FileEntry.Identifier, SourcedManifestEntry> plannedFiles,
+            long firstRowId) {
         RangeHelper<ManifestEntry> rangeHelper =
                 new RangeHelper<>(entry -> entry.file().nonNullRowIdRange());
         List<List<ManifestEntry>> groups = rangeHelper.mergeOverlappingRanges(entries);
 
-        List<ManifestEntry> reassigned = new ArrayList<>(entries.size());
         List<RowRangeMappingIndex.Mapping> mappings = new ArrayList<>();
         long nextRowId = firstRowId;
 
@@ -621,14 +907,22 @@ public class DataEvolutionRowIdReassigner {
             for (ManifestEntry entry : group) {
                 long oldFirstRowId = entry.file().nonNullFirstRowId();
                 long newFirstRowId = nextRowId + oldFirstRowId - oldLogicalRange.from;
-                reassigned.add(entry.assignFirstRowId(newFirstRowId));
+                SourcedManifestEntry plannedFile = plannedFiles.get(entry.identifier());
+                checkState(
+                        plannedFile != null,
+                        "Cannot find planned manifest entry for file %s.",
+                        entry.identifier());
+                checkState(
+                        plannedFile.reassignedFirstRowId == null,
+                        "Duplicate current manifest entry for file %s.",
+                        entry.identifier());
+                plannedFile.reassignedFirstRowId = newFirstRowId;
             }
 
             nextRowId += oldLogicalRange.count();
         }
 
-        return new PartitionAssignment(
-                reassigned, RowRangeMappingIndex.create(mappings), nextRowId);
+        return new PartitionAssignment(RowRangeMappingIndex.create(mappings), nextRowId);
     }
 
     private Range oldLogicalRange(List<ManifestEntry> group) {
@@ -743,14 +1037,31 @@ public class DataEvolutionRowIdReassigner {
                 indexManifestFile.writeWithoutRolling(rewritten), globalIndexFileCount);
     }
 
-    private List<ManifestEntry> readManifestEntries(
+    private List<ManifestEntry> readPlanningManifestEntries(
             ManifestFile manifestFile, ManifestFileMeta manifestMeta, ReassignContext context) {
-        return context.manifestEntries.computeIfAbsent(
+        // Rewrites reread full entries so this retry cache can safely omit value stats.
+        return context.planningManifestEntries.computeIfAbsent(
                 manifestMeta,
                 ignored ->
                         Collections.unmodifiableList(
-                                manifestFile.read(
-                                        manifestMeta.fileName(), manifestMeta.fileSize())));
+                                readPlanningManifestEntries(
+                                        manifestFile, manifestMeta, partitionPredicate)));
+    }
+
+    private List<ManifestEntry> readPlanningManifestEntries(
+            ManifestFile manifestFile,
+            ManifestFileMeta manifestMeta,
+            @Nullable PartitionPredicate effectivePartitionPredicate) {
+        return manifestFile.read(
+                manifestMeta.fileName(),
+                manifestMeta.fileSize(),
+                effectivePartitionPredicate,
+                null,
+                Filter.alwaysTrue(),
+                entry ->
+                        effectivePartitionPredicate == null
+                                || effectivePartitionPredicate.test(entry.partition()),
+                ManifestEntry::copyWithoutStats);
     }
 
     private List<IndexManifestEntry> readIndexManifestEntries(
@@ -901,77 +1212,93 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private static class ReassignContext {
-        private final Map<ManifestFileMeta, List<ManifestEntry>> manifestEntries = new HashMap<>();
+        private final Map<ManifestFileMeta, List<ManifestEntry>> planningManifestEntries =
+                new HashMap<>();
         private final Map<String, List<IndexManifestEntry>> indexManifestEntries = new HashMap<>();
-    }
 
-    private static class Assignment {
-        private final List<ManifestEntry> entries;
-        private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
-        private final long nextRowId;
-        private final long logicalRowCount;
-        private final long reassignedFileCount;
-
-        private Assignment(
-                List<ManifestEntry> entries,
-                Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
-                long nextRowId,
-                long logicalRowCount,
-                long reassignedFileCount) {
-            this.entries = entries;
-            this.rowIdMappings = rowIdMappings;
-            this.nextRowId = nextRowId;
-            this.logicalRowCount = logicalRowCount;
-            this.reassignedFileCount = reassignedFileCount;
+        private void retainLatest(
+                List<ManifestFileMeta> manifestMetas, @Nullable String indexManifest) {
+            planningManifestEntries.keySet().retainAll(new HashSet<>(manifestMetas));
+            if (indexManifest == null) {
+                indexManifestEntries.clear();
+            } else {
+                indexManifestEntries.keySet().retainAll(Collections.singleton(indexManifest));
+            }
         }
     }
 
     private static class AssignmentPlan {
-        private final Map<String, List<ManifestFileMeta>> rewrittenManifestMetas;
+        private Snapshot snapshot;
+        private List<ManifestFileMeta> manifestMetas;
+        private final Map<BinaryRow, List<SourcedManifestEntry>> entriesByPartition;
+        private final Map<FileEntry.Identifier, SourcedManifestEntry> plannedFiles;
         private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
-        private final long nextRowId;
-        private final long logicalRowCount;
-        private final long reassignedFileCount;
+        private long firstAssignedRowId;
+        private long nextRowId;
+        private long logicalRowCount;
         private final boolean hasCurrentFiles;
 
         private AssignmentPlan(
-                Map<String, List<ManifestFileMeta>> rewrittenManifestMetas,
-                Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
-                long nextRowId,
-                long logicalRowCount,
-                long reassignedFileCount,
+                Snapshot snapshot,
+                List<ManifestFileMeta> manifestMetas,
+                Map<BinaryRow, List<SourcedManifestEntry>> entriesByPartition,
                 boolean hasCurrentFiles) {
-            this.rewrittenManifestMetas = rewrittenManifestMetas;
-            this.rowIdMappings = rowIdMappings;
-            this.nextRowId = nextRowId;
-            this.logicalRowCount = logicalRowCount;
-            this.reassignedFileCount = reassignedFileCount;
+            this.snapshot = snapshot;
+            this.manifestMetas = manifestMetas;
+            this.entriesByPartition = new LinkedHashMap<>();
+            this.plannedFiles = new LinkedHashMap<>();
+            this.rowIdMappings = new LinkedHashMap<>();
             this.hasCurrentFiles = hasCurrentFiles;
+            for (List<SourcedManifestEntry> entries : entriesByPartition.values()) {
+                addAll(entries);
+            }
+        }
+
+        private boolean containsPartition(BinaryRow partition) {
+            return entriesByPartition.containsKey(partition);
+        }
+
+        private void addAll(List<SourcedManifestEntry> entries) {
+            for (SourcedManifestEntry entry : entries) {
+                add(entry);
+            }
+        }
+
+        private void add(SourcedManifestEntry entry) {
+            FileEntry.Identifier identifier = entry.entry.identifier();
+            checkState(
+                    !plannedFiles.containsKey(identifier),
+                    "Duplicate planned manifest entry for file %s.",
+                    entry.entry);
+            plannedFiles.put(identifier, entry);
+            entriesByPartition
+                    .computeIfAbsent(entry.entry.partition(), ignored -> new ArrayList<>())
+                    .add(entry);
+        }
+    }
+
+    private static class CommitAssignmentResult {
+        private final boolean success;
+        private final long indexFileCount;
+
+        private CommitAssignmentResult(boolean success, long indexFileCount) {
+            this.success = success;
+            this.indexFileCount = indexFileCount;
         }
     }
 
     private static class CurrentManifest {
-        private final List<ManifestFileMeta> manifestMetas;
         private final List<SourcedManifestEntry> currentEntries;
 
-        private CurrentManifest(
-                List<ManifestFileMeta> manifestMetas, List<SourcedManifestEntry> currentEntries) {
-            this.manifestMetas = manifestMetas;
+        private CurrentManifest(List<SourcedManifestEntry> currentEntries) {
             this.currentEntries = currentEntries;
-        }
-
-        private List<ManifestEntry> entries() {
-            List<ManifestEntry> entries = new ArrayList<>(currentEntries.size());
-            for (SourcedManifestEntry currentEntry : currentEntries) {
-                entries.add(currentEntry.entry);
-            }
-            return entries;
         }
     }
 
     private static class SourcedManifestEntry {
-        private final ManifestFileMeta manifest;
+        @Nullable private ManifestFileMeta manifest;
         private final ManifestEntry entry;
+        @Nullable private Long reassignedFirstRowId;
 
         private SourcedManifestEntry(ManifestFileMeta manifest, ManifestEntry entry) {
             this.manifest = manifest;
@@ -983,28 +1310,28 @@ public class DataEvolutionRowIdReassigner {
         private final ManifestFileMeta manifest;
         private final BinaryRow minPartition;
         private final BinaryRow maxPartition;
+        private final boolean containsNullPartition;
         private final int originalIndex;
 
         private PartitionManifestRange(
                 ManifestFileMeta manifest,
                 BinaryRow minPartition,
                 BinaryRow maxPartition,
+                boolean containsNullPartition,
                 int originalIndex) {
             this.manifest = manifest;
             this.minPartition = minPartition;
             this.maxPartition = maxPartition;
+            this.containsNullPartition = containsNullPartition;
             this.originalIndex = originalIndex;
         }
     }
 
     private static class PartitionAssignment {
-        private final List<ManifestEntry> entries;
         private final RowRangeMappingIndex rowIdMappings;
         private final long nextRowId;
 
-        private PartitionAssignment(
-                List<ManifestEntry> entries, RowRangeMappingIndex rowIdMappings, long nextRowId) {
-            this.entries = entries;
+        private PartitionAssignment(RowRangeMappingIndex rowIdMappings, long nextRowId) {
             this.rowIdMappings = rowIdMappings;
             this.nextRowId = nextRowId;
         }
