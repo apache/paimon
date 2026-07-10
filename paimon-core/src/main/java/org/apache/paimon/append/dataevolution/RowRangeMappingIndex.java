@@ -90,15 +90,6 @@ final class RowRangeMappingIndex {
         return create(shifted);
     }
 
-    long maxNewEndExclusive() {
-        long result = Long.MIN_VALUE;
-        for (Mapping mapping : mappings) {
-            long count = Math.addExact(Math.subtractExact(mapping.oldEnd, mapping.oldStart), 1L);
-            result = Math.max(result, Math.addExact(mapping.newStart, count));
-        }
-        return result;
-    }
-
     Optional<Range> map(Range oldRange) {
         checkArgument(oldRange != null, "Old row range cannot be null.");
         checkArgument(oldRange.from <= oldRange.to, "Invalid old row range %s.", oldRange);
