@@ -70,6 +70,35 @@ final class RowRangeMappingIndex {
         return new Mapping(oldStart, oldEnd, newStart);
     }
 
+    List<Range> oldRanges() {
+        List<Range> ranges = new ArrayList<>(mappings.size());
+        for (Mapping mapping : mappings) {
+            ranges.add(new Range(mapping.oldStart, mapping.oldEnd));
+        }
+        return ranges;
+    }
+
+    RowRangeMappingIndex shiftNewStarts(long offset) {
+        List<Mapping> shifted = new ArrayList<>(mappings.size());
+        for (Mapping mapping : mappings) {
+            shifted.add(
+                    mapping(
+                            mapping.oldStart,
+                            mapping.oldEnd,
+                            Math.addExact(mapping.newStart, offset)));
+        }
+        return create(shifted);
+    }
+
+    long maxNewEndExclusive() {
+        long result = Long.MIN_VALUE;
+        for (Mapping mapping : mappings) {
+            long count = Math.addExact(Math.subtractExact(mapping.oldEnd, mapping.oldStart), 1L);
+            result = Math.max(result, Math.addExact(mapping.newStart, count));
+        }
+        return result;
+    }
+
     Optional<Range> map(Range oldRange) {
         checkArgument(oldRange != null, "Old row range cannot be null.");
         checkArgument(oldRange.from <= oldRange.to, "Invalid old row range %s.", oldRange);
