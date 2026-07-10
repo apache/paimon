@@ -167,8 +167,9 @@ public class DataEvolutionRowIdReassigner {
 
             Snapshot newLatest = table.snapshotManager().latestSnapshot();
             checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
-            advanceAssignmentPlan(
-                    assignmentPlan, latest, newLatest, manifestFile, manifestList, context);
+            assignmentPlan =
+                    advanceAssignmentPlan(
+                            assignmentPlan, latest, newLatest, manifestFile, manifestList, context);
             LOG.info(
                     "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
                     table.name(),
@@ -516,7 +517,7 @@ public class DataEvolutionRowIdReassigner {
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);
     }
 
-    private void advanceAssignmentPlan(
+    private AssignmentPlan advanceAssignmentPlan(
             AssignmentPlan assignmentPlan,
             Snapshot previous,
             Snapshot latest,
@@ -624,14 +625,13 @@ public class DataEvolutionRowIdReassigner {
             }
         }
 
-        assignmentPlan.rowIdMappings.clear();
-        assignmentPlan.rowIdMappings.putAll(
-                createRelativeRowIdMappingsFromRanges(logicalRangesByPartition));
-        assignmentPlan.manifestMetasToRewrite.clear();
-        assignmentPlan.manifestMetasToRewrite.addAll(
+        Map<BinaryRow, RowRangeMappingIndex> rowIdMappings =
+                createRelativeRowIdMappingsFromRanges(logicalRangesByPartition);
+        List<ManifestFileMeta> manifestMetasToRewrite =
                 findManifestMetasToRewrite(
-                        latestManifestMetas, assignmentPlan.rowIdMappings, manifestFile, context));
+                        latestManifestMetas, rowIdMappings, manifestFile, context);
         context.retainLatest(latestManifestMetas, latest.indexManifest());
+        return new AssignmentPlan(manifestMetasToRewrite, rowIdMappings);
     }
 
     private Map<BinaryRow, List<SourcedManifestEntry>> currentEntriesByPartition(
