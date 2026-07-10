@@ -568,6 +568,47 @@ class TableWriteTest(unittest.TestCase):
             actual.sort_by(sort_keys),
         )
 
+    def test_column_subset_write_rejects_int64_for_int32(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'default.test_column_subset_reject_int64', schema, False)
+        table = self.catalog.get_table(
+            'default.test_column_subset_reject_int64')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['id'])
+        with self.assertRaises(ValueError) as e:
+            table_write.write_arrow(pa.Table.from_pydict(
+                {'id': [1]}))
+        self.assertTrue(str(e.exception).startswith(
+            "Input schema isn't consistent with table schema and write cols."))
+
+    def test_validate_schema_allows_binary_family_for_write_cols(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'default.test_validate_binary_family', schema, False)
+        table = self.catalog.get_table('default.test_validate_binary_family')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_write._validate_pyarrow_schema(pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.binary(4)),
+        ]))
+
+        table_write.with_write_type(['payload'])
+        table_write._validate_pyarrow_schema(pa.schema([
+            ('payload', pa.binary(4)),
+        ]))
+
     @parameterized.expand([('parquet',), ('orc',), ('avro',)])
     def test_write_time_type(self, file_format):
         time_schema = pa.schema([
