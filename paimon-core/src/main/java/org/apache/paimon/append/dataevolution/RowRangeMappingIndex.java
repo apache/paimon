@@ -137,6 +137,14 @@ final class RowRangeMappingIndex {
         return Optional.of(new Range(newFrom, newTo));
     }
 
+    boolean overlaps(Range oldRange) {
+        checkArgument(oldRange != null, "Old row range cannot be null.");
+        checkArgument(oldRange.from <= oldRange.to, "Invalid old row range %s.", oldRange);
+
+        int index = lowerBound(oldEnds, oldRange.from);
+        return index < mappings.size() && mappings.get(index).oldStart <= oldRange.to;
+    }
+
     private static int lowerBound(long[] sorted, long target) {
         int left = 0;
         int right = sorted.length;

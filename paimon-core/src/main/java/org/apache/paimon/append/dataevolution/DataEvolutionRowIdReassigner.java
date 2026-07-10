@@ -863,6 +863,10 @@ public class DataEvolutionRowIdReassigner {
 
             Optional<Range> newRange = mappingIndex.map(globalIndex.rowRange());
             if (!newRange.isPresent()) {
+                if (!mappingIndex.overlaps(globalIndex.rowRange())) {
+                    rewritten.add(entry);
+                    continue;
+                }
                 LOG.warn(
                         "Drop global index file '{}' from table {} during row-id reassignment because its row range {} cannot be rewritten safely.",
                         indexFile.fileName(),

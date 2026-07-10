@@ -887,6 +887,47 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
+    public void testReassignKeepsConcurrentDisjointGlobalIndexRange() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        createBTreeIndex(table);
+        Snapshot before = table.snapshotManager().latestSnapshot();
+
+        AtomicBoolean indexed = new AtomicBoolean();
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                table,
+                                null,
+                                () -> {
+                                    if (indexed.compareAndSet(false, true)) {
+                                        try {
+                                            writeOneRow(table, "a", 100);
+                                            appendGlobalIndexRange(table, "pt=a/", new Range(5, 5));
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-disjoint-global-index");
+
+        assertThat(indexed).isTrue();
+        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.firstAssignedRowId).isEqualTo(6L);
+        assertThat(result.nextRowId).isEqualTo(11L);
+        assertThat(result.indexFileCount).isEqualTo(5L);
+        assertThat(globalIndexRanges(table))
+                .containsExactly(
+                        new Range(5, 5),
+                        new Range(6, 6),
+                        new Range(7, 7),
+                        new Range(8, 8),
+                        new Range(9, 9),
+                        new Range(10, 10));
+        assertThat(readTableRows(table))
+                .containsExactly("0|a|v0", "100|a|v100", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
+    }
+
+    @Test
     public void testDropUnsafeGlobalIndexEntryWhenRangeCannotBeRewrittenByMetadataOnly()
             throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
@@ -1928,6 +1969,52 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         }
 
         String staleIndexManifest = indexManifestFile.writeWithoutRolling(rewritten);
+        replaceLatestSnapshotIndexManifest(table, latest, staleIndexManifest);
+    }
+
+    private void appendGlobalIndexRange(FileStoreTable table, String partition, Range rowRange)
+            throws Exception {
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
+        List<IndexManifestEntry> entries = indexManifestFile.read(latest.indexManifest());
+        IndexManifestEntry template = null;
+        for (IndexManifestEntry entry : entries) {
+            if (table.store()
+                    .pathFactory()
+                    .getPartitionString(entry.partition())
+                    .equals(partition)) {
+                template = entry;
+                break;
+            }
+        }
+        assertThat(template).isNotNull();
+        IndexFileMeta indexFile = template.indexFile();
+        GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
+        assertThat(globalIndex).isNotNull();
+        entries.add(
+                new IndexManifestEntry(
+                        template.kind(),
+                        template.partition(),
+                        template.bucket(),
+                        new IndexFileMeta(
+                                indexFile.indexType(),
+                                indexFile.fileName(),
+                                indexFile.fileSize(),
+                                indexFile.rowCount(),
+                                indexFile.dvRanges(),
+                                indexFile.externalPath(),
+                                new GlobalIndexMeta(
+                                        rowRange.from,
+                                        rowRange.to,
+                                        globalIndex.indexFieldId(),
+                                        globalIndex.extraFieldIds(),
+                                        globalIndex.indexMeta()))));
+        replaceLatestSnapshotIndexManifest(
+                table, latest, indexManifestFile.writeWithoutRolling(entries));
+    }
+
+    private void replaceLatestSnapshotIndexManifest(
+            FileStoreTable table, Snapshot latest, String indexManifest) throws Exception {
         Snapshot staleSnapshot =
                 new Snapshot(
                         latest.version(),
@@ -1939,7 +2026,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         latest.deltaManifestListSize(),
                         latest.changelogManifestList(),
                         latest.changelogManifestListSize(),
-                        staleIndexManifest,
+                        indexManifest,
                         latest.commitUser(),
                         latest.commitIdentifier(),
                         latest.commitKind(),
