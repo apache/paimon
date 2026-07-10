@@ -221,14 +221,13 @@ public class DataEvolutionRowIdReassigner {
             return Optional.empty();
         }
 
-        Pair<Map<BinaryRow, RowRangeMappingIndex>, Long> relativeRowIdMappings =
+        RelativeRowIdMappings relativeRowIdMappings =
                 createRelativeRowIdMappings(entriesToReassignByPartition);
         return Optional.of(
                 new AssignmentPlan(
                         findManifestMetasToRewrite(
-                                manifestMetas, relativeRowIdMappings.getLeft(), manifestFile),
-                        relativeRowIdMappings.getLeft(),
-                        relativeRowIdMappings.getRight()));
+                                manifestMetas, relativeRowIdMappings.mappings, manifestFile),
+                        relativeRowIdMappings));
     }
 
     private List<List<ManifestFileMeta>> manifestGroupsByPartition(
@@ -526,13 +525,13 @@ public class DataEvolutionRowIdReassigner {
         }
         return new AssignmentPlan(
                 new ArrayList<>(manifestMetasToRewrite.values()),
-                assignmentPlan.rowIdMappings,
-                assignmentPlan.totalOffset);
+                assignmentPlan.relativeRowIdMappings);
     }
 
     private boolean appendedEntryNeedsReassign(
             AssignmentPlan assignmentPlan, ManifestEntry appendedEntry) {
-        RowRangeMappingIndex mapping = assignmentPlan.rowIdMappings.get(appendedEntry.partition());
+        RowRangeMappingIndex mapping =
+                assignmentPlan.relativeRowIdMappings.mappings.get(appendedEntry.partition());
         if (mapping == null) {
             return false;
         }
@@ -722,7 +721,7 @@ public class DataEvolutionRowIdReassigner {
         return logicalRanges;
     }
 
-    private Pair<Map<BinaryRow, RowRangeMappingIndex>, Long> createRelativeRowIdMappings(
+    private RelativeRowIdMappings createRelativeRowIdMappings(
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition) {
         Map<BinaryRow, List<Range>> logicalRangesByPartition = new LinkedHashMap<>();
         for (Map.Entry<BinaryRow, List<ManifestEntry>> partition : entriesByPartition.entrySet()) {
@@ -734,7 +733,7 @@ public class DataEvolutionRowIdReassigner {
         return createRelativeRowIdMappingsFromRanges(logicalRangesByPartition);
     }
 
-    private Pair<Map<BinaryRow, RowRangeMappingIndex>, Long> createRelativeRowIdMappingsFromRanges(
+    private RelativeRowIdMappings createRelativeRowIdMappingsFromRanges(
             Map<BinaryRow, List<Range>> logicalRangesByPartition) {
         List<BinaryRow> partitions = new ArrayList<>(logicalRangesByPartition.keySet());
         RecordComparator partitionComparator = partitionComparator();
@@ -757,7 +756,7 @@ public class DataEvolutionRowIdReassigner {
             }
             result.put(partition, RowRangeMappingIndex.create(mappings));
         }
-        return Pair.of(result, nextOffset);
+        return new RelativeRowIdMappings(result, nextOffset);
     }
 
     private Range oldLogicalRange(List<ManifestEntry> group) {
@@ -1027,18 +1026,26 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
+    private static class RelativeRowIdMappings {
+        private final Map<BinaryRow, RowRangeMappingIndex> mappings;
+        private final long totalOffset;
+
+        private RelativeRowIdMappings(
+                Map<BinaryRow, RowRangeMappingIndex> mappings, long totalOffset) {
+            this.mappings = Collections.unmodifiableMap(new LinkedHashMap<>(mappings));
+            this.totalOffset = totalOffset;
+        }
+    }
+
     private static class AssignmentPlan {
         private final List<ManifestFileMeta> manifestMetasToRewrite;
-        private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
-        private final long totalOffset;
+        private final RelativeRowIdMappings relativeRowIdMappings;
 
         private AssignmentPlan(
                 List<ManifestFileMeta> manifestMetasToRewrite,
-                Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
-                long totalOffset) {
+                RelativeRowIdMappings relativeRowIdMappings) {
             this.manifestMetasToRewrite = new ArrayList<>(manifestMetasToRewrite);
-            this.rowIdMappings = new LinkedHashMap<>(rowIdMappings);
-            this.totalOffset = totalOffset;
+            this.relativeRowIdMappings = relativeRowIdMappings;
         }
 
         private Assignment createAssignment(Snapshot snapshot) {
@@ -1048,7 +1055,8 @@ public class DataEvolutionRowIdReassigner {
                     "Next row id cannot be null for snapshot %s.",
                     snapshot.id());
             Map<BinaryRow, RowRangeMappingIndex> absoluteRowIdMappings = new LinkedHashMap<>();
-            for (Map.Entry<BinaryRow, RowRangeMappingIndex> mapping : rowIdMappings.entrySet()) {
+            for (Map.Entry<BinaryRow, RowRangeMappingIndex> mapping :
+                    relativeRowIdMappings.mappings.entrySet()) {
                 absoluteRowIdMappings.put(
                         mapping.getKey(), mapping.getValue().shiftNewStarts(firstAssignedRowId));
             }
@@ -1057,7 +1065,7 @@ public class DataEvolutionRowIdReassigner {
                     manifestMetasToRewrite,
                     absoluteRowIdMappings,
                     firstAssignedRowId,
-                    Math.addExact(firstAssignedRowId, totalOffset));
+                    Math.addExact(firstAssignedRowId, relativeRowIdMappings.totalOffset));
         }
     }
 
