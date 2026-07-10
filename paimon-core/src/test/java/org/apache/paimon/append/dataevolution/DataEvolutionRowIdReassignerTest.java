@@ -26,11 +26,15 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -1648,12 +1652,24 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                 () ->
                                         new IllegalStateException(
                                                 "Cannot find file in partition " + partitionPath));
-        DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(
+        DataFilePathFactory pathFactory =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(
+                                compactBefore.partition(), compactBefore.bucket());
+        Path compactAfterPath = pathFactory.newPath();
+        table.fileIO().copyFile(pathFactory.toPath(compactBefore.file()), compactAfterPath, false);
+        DataFileMeta compactAfter = compactBefore.file().rename(compactAfterPath.getName());
+        CommitMessage message =
+                new CommitMessageImpl(
                         compactBefore.partition(),
-                        Collections.singletonList(compactBefore.file()),
-                        false);
-        CommitMessage message = task.doCompact(table, "test-compact-before-reassign");
+                        compactBefore.bucket(),
+                        compactBefore.totalBuckets(),
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.singletonList(compactBefore.file()),
+                                Collections.singletonList(compactAfter),
+                                Collections.emptyList()));
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
         }

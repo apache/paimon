@@ -136,6 +136,7 @@ public class DataEvolutionRowIdReassigner {
                     latest.id(), nextRowId, "no partition requires row-id reassignment");
         }
         AssignmentPlan assignmentPlan = optionalPlan.get();
+        context.clearPlanningManifestEntries();
 
         for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
             Assignment assignment = assignmentPlan.createAssignment(latest);
@@ -540,7 +541,8 @@ public class DataEvolutionRowIdReassigner {
                     "Cannot advance row-id assignment because planned manifest %s no longer exists after APPEND manifest merge.",
                     plannedManifestFile);
         }
-        context.retainLatest(latestManifestMetas, latest.indexManifest());
+        context.clearPlanningManifestEntries();
+        context.retainIndexManifest(latest.indexManifest());
         return new AssignmentPlan(
                 new ArrayList<>(manifestMetasToRewrite.values()), assignmentPlan.rowIdMappings);
     }
@@ -557,14 +559,11 @@ public class DataEvolutionRowIdReassigner {
             return true;
         }
 
-        for (Range plannedRange : mapping.oldRanges()) {
-            checkState(
-                    !rangesOverlap(plannedRange, appendedRange),
-                    "Cannot advance row-id assignment because appended row-id range %s partially overlaps planned range %s in partition %s.",
-                    appendedRange,
-                    plannedRange,
-                    appendedEntry.partition());
-        }
+        checkState(
+                !mapping.overlaps(appendedRange),
+                "Cannot advance row-id assignment because appended row-id range %s partially overlaps planned ranges in partition %s.",
+                appendedRange,
+                appendedEntry.partition());
         return false;
     }
 
@@ -740,10 +739,6 @@ public class DataEvolutionRowIdReassigner {
             logicalRanges.add(oldLogicalRange(group));
         }
         return logicalRanges;
-    }
-
-    private boolean rangesOverlap(Range left, Range right) {
-        return left.from <= right.to && right.from <= left.to;
     }
 
     private Map<BinaryRow, RowRangeMappingIndex> createRelativeRowIdMappings(
@@ -1080,9 +1075,11 @@ public class DataEvolutionRowIdReassigner {
                 new HashMap<>();
         private final Map<String, List<IndexManifestEntry>> indexManifestEntries = new HashMap<>();
 
-        private void retainLatest(
-                List<ManifestFileMeta> manifestMetas, @Nullable String indexManifest) {
-            planningManifestEntries.keySet().retainAll(new HashSet<>(manifestMetas));
+        private void clearPlanningManifestEntries() {
+            planningManifestEntries.clear();
+        }
+
+        private void retainIndexManifest(@Nullable String indexManifest) {
             if (indexManifest == null) {
                 indexManifestEntries.clear();
             } else {
