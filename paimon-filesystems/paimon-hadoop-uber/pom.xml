@@ -636,7 +636,7 @@
     <build>
         <plugins>
 
-            <!-- Relocate all OBS related classes -->
+            <!-- Relocate all Hadoop related classes -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
