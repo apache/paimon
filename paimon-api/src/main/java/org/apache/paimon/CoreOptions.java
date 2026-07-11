@@ -2067,6 +2067,26 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.");
 
+    public static final ConfigOption<Integer> SORT_COMPACTION_WARN_INPUT_FILES =
+            key("sort-compaction.warn-input-files")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "Warn threshold for the number of input files in a sort compact plan. "
+                                    + "Each input file is embedded in the Flink job graph via the "
+                                    + "planned DataSplits. Consider compacting in smaller partition "
+                                    + "batches when this threshold is exceeded.");
+
+    public static final ConfigOption<Integer> SORT_COMPACTION_MAX_INPUT_FILES =
+            key("sort-compaction.max-input-files")
+                    .intType()
+                    .defaultValue(500_000)
+                    .withDescription(
+                            "Maximum number of input files allowed in a sort compact plan. Each "
+                                    + "input file is embedded in the Flink job graph via the planned "
+                                    + "DataSplits. Compact in smaller partition batches when this "
+                                    + "limit is exceeded.");
+
     public static final ConfigOption<Duration> RECORD_LEVEL_EXPIRE_TIME =
             key("record-level.expire-time")
                     .durationType()
@@ -2862,6 +2882,14 @@ public class CoreOptions implements Serializable {
 
     public Integer getLocalSampleMagnification() {
         return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
+    }
+
+    public int sortCompactionWarnInputFiles() {
+        return options.get(SORT_COMPACTION_WARN_INPUT_FILES);
+    }
+
+    public int sortCompactionMaxInputFiles() {
+        return options.get(SORT_COMPACTION_MAX_INPUT_FILES);
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {

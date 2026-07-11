@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.SortCompactCommitMessageRewriter;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
@@ -633,11 +634,18 @@ public class CompactProcedure extends BaseProcedure {
         if (table.coreOptions().dataEvolutionEnabled()) {
             throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");
         }
+        if (table.coreOptions().rowTrackingEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Sort compact is unsupported for row tracking tables.");
+        }
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
-        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
+        SnapshotReader.Plan plan = snapshotReader.read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(dataSplits);
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
         Dataset<Row> datasetForWrite =
                 packedSplits.values().stream()
@@ -653,10 +661,28 @@ public class CompactProcedure extends BaseProcedure {
                         .reduce(Dataset::union)
                         .orElse(null);
         if (datasetForWrite != null) {
-            PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
-            // Use dynamic partition overwrite
-            writer.writeBuilder().withOverwrite();
-            writer.commit(writer.write(datasetForWrite));
+            // Capture compact-before metadata before the Spark write. The write stage can run for
+            // a long time, during which the base snapshot may expire.
+            SortCompactCommitMessageRewriter rewriter =
+                    new SortCompactCommitMessageRewriter(
+                            table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits);
+
+            // Write the sorted rows in write-only mode. Do not use overwrite, otherwise the
+            // commit would be an OVERWRITE commit which drops data appended concurrently since
+            // the base snapshot. The written append commit messages are re-organized into
+            // compact commit messages so that the commit becomes a normal COMPACT commit.
+            PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
+            Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
+            List<CommitMessage> writtenMessages = JavaConverters.seqAsJavaList(commitMessages);
+            SortCompactSparkCommit.commit(
+                    rewriter,
+                    compactMessages ->
+                            writer.commitTable(
+                                    JavaConverters.asScalaBuffer(compactMessages).toSeq()),
+                    compactMessages ->
+                            writer.postCommit(
+                                    JavaConverters.asScalaBuffer(compactMessages).toSeq()),
+                    writtenMessages);
         }
     }
 

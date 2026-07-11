@@ -41,6 +41,7 @@ import java.nio.file.Path;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,6 +137,27 @@ public class FlinkSourceBuilderTest {
         SourceTransformation<?, ?, ?> transformation =
                 (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
         assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testCustomReadTypeCannotBeCombinedWithProjection() throws Exception {
+        Table table = createTable("custom_read_type", false, -1, true);
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(
+                        () ->
+                                new FlinkSourceBuilder(table)
+                                        .readType(table.rowType())
+                                        .projection(new int[] {0}))
+                .withMessage("Projection cannot be used together with a custom read type.");
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(
+                        () ->
+                                new FlinkSourceBuilder(table)
+                                        .projection(new int[] {0})
+                                        .readType(table.rowType()))
+                .withMessage("A custom read type cannot be used together with projection.");
     }
 
     @Test

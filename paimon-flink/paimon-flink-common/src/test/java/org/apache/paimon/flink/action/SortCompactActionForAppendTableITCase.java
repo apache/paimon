@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.SortCompactCommitMessageRewriter;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -37,6 +39,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -47,8 +50,10 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
@@ -330,6 +335,116 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .withOrderColumns(Collections.singletonList("f0"));
 
         sortCompactAction.run();
+        // empty table: sort compact is a no-op and must not produce any snapshot (in particular
+        // no OVERWRITE snapshot)
+        Assertions.assertThat(getTable().snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testSortCompactRejectsRowTrackingTable() throws Exception {
+        catalog.createDatabase(database, true);
+        Schema rowTrackingSchema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.TINYINT())
+                        .column("f1", DataTypes.INT())
+                        .option("bucket", "-1")
+                        .option("row-tracking.enabled", "true")
+                        .build();
+        catalog.createTable(identifier(), rowTrackingSchema, true);
+
+        SortCompactAction sortCompactAction =
+                new SortCompactAction(
+                                database,
+                                tableName,
+                                Collections.singletonMap("warehouse", warehouse),
+                                Collections.emptyMap())
+                        .withOrderStrategy("order")
+                        .withOrderColumns(Collections.singletonList("f1"));
+
+        Assertions.assertThatThrownBy(sortCompactAction::run)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Sort compact is unsupported for row tracking tables");
+    }
+
+    @Test
+    public void testSortCompactProducesCompactCommit() throws Exception {
+        prepareData(300, 2);
+        order(Arrays.asList("f1", "f2"));
+
+        // sort compact must produce a COMPACT snapshot, not an OVERWRITE snapshot
+        Assertions.assertThat(getTable().snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+    }
+
+    @Test
+    public void testSortCompactDoesNotOverwriteConcurrentAppend() throws Exception {
+        // S0: prepare data and run sort compact, which produces a COMPACT snapshot
+        prepareData(300, 2);
+        order(Arrays.asList("f1", "f2"));
+        Snapshot compactSnapshot = getTable().snapshotManager().latestSnapshot();
+        Assertions.assertThat(compactSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        int filesAfterCompact = getTable().store().newScan().plan().files().size();
+
+        // S1: append more data after the sort compact
+        commit(writeData(100));
+
+        // the newly appended data must still be visible: a COMPACT commit only removes the
+        // compactBefore files and must not drop data appended after the base snapshot
+        Assertions.assertThat(getTable().snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.APPEND);
+        // new files have been added on top of the compacted files
+        Assertions.assertThat(getTable().store().newScan().plan().files().size())
+                .isGreaterThan(filesAfterCompact);
+    }
+
+    @Test
+    public void testSortCompactConcurrentAppendBeforeCommit() throws Exception {
+        // S0: capture the sort compact plan before any concurrent append
+        prepareData(300, 2);
+        FileStoreTable table = getTable();
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+        Set<String> filesBeforeAppend = fileNames(table);
+
+        // Simulate the sort compact write stage (append-style commit messages, not yet committed)
+        List<CommitMessage> writtenMessages;
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            for (int i = 0; i < 50; i++) {
+                batchTableWrite.write(data(0, i, i));
+            }
+            writtenMessages = batchTableWrite.prepareCommit();
+        }
+
+        // S1: append new data before the sort compact commit lands
+        commit(writeData(100));
+        Snapshot appendSnapshot = table.snapshotManager().latestSnapshot();
+        Assertions.assertThat(appendSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        Set<String> appendOnlyFiles = new HashSet<>(fileNames(table));
+        appendOnlyFiles.removeAll(filesBeforeAppend);
+        Assertions.assertThat(appendOnlyFiles).isNotEmpty();
+
+        // Commit the sort compact from the S0 plan
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(table, baseSnapshotId, dataSplits);
+        List<CommitMessage> compactMessages = rewriter.rewrite(writtenMessages);
+        BatchTableCommit batchCommit = table.newBatchWriteBuilder().newCommit();
+        batchCommit.commit(compactMessages);
+        batchCommit.close();
+
+        Snapshot compactSnapshot = table.snapshotManager().latestSnapshot();
+        Assertions.assertThat(compactSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        // S1 data appended before compact commit must remain visible
+        Assertions.assertThat(fileNames(table)).containsAll(appendOnlyFiles);
+    }
+
+    private static Set<String> fileNames(FileStoreTable table) {
+        Set<String> names = new HashSet<>();
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            names.add(entry.file().fileName());
+        }
+        return names;
     }
 
     private void zorder(List<String> columns) throws Exception {

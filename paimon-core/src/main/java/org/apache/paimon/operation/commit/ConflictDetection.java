@@ -66,6 +66,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
@@ -242,6 +243,18 @@ public class ConflictDetection {
         }
 
         exception = checkGlobalIndexRowIdExistence(baseEntries, deltaIndexEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        exception =
+                checkHashIndexConflicts(
+                        latestSnapshot,
+                        baseEntries,
+                        deltaEntries,
+                        deltaIndexEntries,
+                        baseCommitUser,
+                        commitKind);
         if (exception.isPresent()) {
             return exception;
         }
@@ -685,6 +698,129 @@ public class ConflictDetection {
             }
         }
         return result;
+    }
+
+    private Optional<RuntimeException> checkHashIndexConflicts(
+            Snapshot latestSnapshot,
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries,
+            String baseCommitUser,
+            CommitKind commitKind) {
+        if (commitKind != CommitKind.COMPACT
+                || bucketMode != BucketMode.HASH_DYNAMIC
+                || indexFileHandler == null) {
+            return Optional.empty();
+        }
+
+        // Buckets whose hash index is being removed by this compact. For these buckets the compact
+        // rewrites an existing bucket, so the old hash index (captured from the base snapshot) is
+        // deleted and a fresh one is added. The DELETE check below guards these buckets; the ADD
+        // check must skip them to avoid false conflicts against the still-present old hash index.
+        Set<Pair<BinaryRow, Integer>> deletedHashIndexBuckets = new HashSet<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (entry.kind() == FileKind.DELETE
+                    && HASH_INDEX.equals(entry.indexFile().indexType())) {
+                deletedHashIndexBuckets.add(Pair.of(entry.partition(), entry.bucket()));
+            }
+        }
+
+        Set<Pair<BinaryRow, Integer>> bucketsToCheck = new HashSet<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (!HASH_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+
+            Pair<BinaryRow, Integer> bucketKey = Pair.of(entry.partition(), entry.bucket());
+            if (entry.kind() == FileKind.DELETE) {
+                bucketsToCheck.add(bucketKey);
+            } else if (entry.kind() == FileKind.ADD
+                    && !deletedHashIndexBuckets.contains(bucketKey)) {
+                bucketsToCheck.add(bucketKey);
+            }
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> currentHashIndexes =
+                indexFileHandler.scanBuckets(latestSnapshot, HASH_INDEX, bucketsToCheck);
+
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (!HASH_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+
+            BinaryRow partition = entry.partition();
+            int bucket = entry.bucket();
+            Pair<BinaryRow, Integer> bucketKey = Pair.of(partition, bucket);
+            if (entry.kind() == FileKind.DELETE) {
+                // The compact rewrites a bucket which already existed at plan time. Its old hash
+                // index was captured from the base snapshot and is being removed. If a concurrent
+                // append has replaced it since the compact was planned, give up committing.
+                Optional<IndexFileMeta> currentHashIndex =
+                        singleHashIndex(currentHashIndexes.get(bucketKey));
+                if (currentHashIndex.isPresent()
+                        && !currentHashIndex
+                                .get()
+                                .fileName()
+                                .equals(entry.indexFile().fileName())) {
+                    return hashIndexConflict(
+                            partition, bucket, baseCommitUser, baseEntries, deltaEntries);
+                }
+            } else if (entry.kind() == FileKind.ADD
+                    && !deletedHashIndexBuckets.contains(bucketKey)) {
+                // The compact writes a fresh hash index for an output bucket which did not exist at
+                // plan time (no compact-before, so no DELETE). The BucketedCombiner replaces hash
+                // index entries by bucket, so if a concurrent append has already created this
+                // bucket and its hash index, this ADD would overwrite that index while leaving the
+                // append's data files visible, corrupting later upsert routing. Give up committing.
+                Optional<IndexFileMeta> currentHashIndex =
+                        singleHashIndex(currentHashIndexes.get(bucketKey));
+                if (currentHashIndex.isPresent()
+                        && !currentHashIndex
+                                .get()
+                                .fileName()
+                                .equals(entry.indexFile().fileName())) {
+                    return hashIndexConflict(
+                            partition, bucket, baseCommitUser, baseEntries, deltaEntries);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<IndexFileMeta> singleHashIndex(
+            @Nullable List<IndexFileMeta> hashIndexes) {
+        if (hashIndexes == null || hashIndexes.isEmpty()) {
+            return Optional.empty();
+        }
+        if (hashIndexes.size() > 1) {
+            throw new IllegalArgumentException(
+                    "Find multiple hash index files for one bucket: " + hashIndexes);
+        }
+        return Optional.of(hashIndexes.get(0));
+    }
+
+    private Optional<RuntimeException> hashIndexConflict(
+            BinaryRow partition,
+            int bucket,
+            String baseCommitUser,
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries) {
+        String partitionInfo = partToSimpleString(partitionType, partition, "-", 200);
+        Pair<RuntimeException, RuntimeException> conflictException =
+                createConflictException(
+                        "Hash index conflict detected for sort compact! "
+                                + "The hash index of partition "
+                                + partitionInfo
+                                + " bucket "
+                                + bucket
+                                + " has been updated by a concurrent append since the "
+                                + "compact was planned. Give up committing.",
+                        baseCommitUser,
+                        baseEntries,
+                        deltaEntries,
+                        null);
+        LOG.warn("", conflictException.getLeft());
+        return Optional.of(conflictException.getRight());
     }
 
     Optional<RuntimeException> checkRowIdExistence(

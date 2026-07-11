@@ -35,6 +35,9 @@ public class PrimaryKeyTableRawFileSplitReadProvider extends RawFileSplitReadPro
 
     @Override
     public boolean match(Split split, Context context) {
+        if (context.keyValueSequenceNumberEnabled()) {
+            return false;
+        }
         if (!(split instanceof DataSplit)) {
             return false;
         }

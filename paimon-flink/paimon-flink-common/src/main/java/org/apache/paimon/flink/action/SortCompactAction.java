@@ -20,13 +20,18 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.append.SortCompactSequenceUtils;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -38,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -61,12 +67,13 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     public void run() throws Exception {
-        build();
-        execute("Sort Compact Job");
+        if (buildImpl()) {
+            execute("Sort Compact Job");
+        }
     }
 
     @Override
-    public void build() throws Exception {
+    protected boolean buildImpl() throws Exception {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {
@@ -80,21 +87,59 @@ public class SortCompactAction extends CompactAction {
             throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");
         }
 
+        if (fileStoreTable.coreOptions().rowTrackingEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Sort compact is unsupported for row tracking tables.");
+        }
+
         if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE
                 && fileStoreTable.bucketMode() != BucketMode.HASH_DYNAMIC) {
             throw new IllegalArgumentException("Sort Compact only supports bucket=-1 yet.");
         }
+
+        // Capture the base snapshot and the planned input splits. The old files in these splits
+        // become compactBefore of the compact commit, so that sort compact is committed as a
+        // normal COMPACT commit (instead of OVERWRITE) and does not drop data appended
+        // concurrently since the base snapshot.
+        PartitionPredicate partitionPredicate = getPartitionPredicate();
+        SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        SnapshotReader.Plan plan = snapshotReader.read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+        if (dataSplits.isEmpty()) {
+            // empty table or no matching partitions: no-op job with no commit
+            return false;
+        }
+
+        // Pin the source to the captured base snapshot so that the sort compact reads exactly
+        // the planned data, while the sink stays write-only.
+        Map<String, String> sourceOptions = new HashMap<>();
+        sourceOptions.put(
+                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                String.valueOf(baseSnapshotId == null ? 0L : baseSnapshotId));
+        RowType sortRowType = fileStoreTable.rowType();
+        if (fileStoreTable.coreOptions().snapshotSequenceOrdering()
+                && !fileStoreTable.primaryKeys().isEmpty()) {
+            sourceOptions.put(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true");
+            sortRowType = SortCompactSequenceUtils.rowTypeWithKeyValueSequenceNumber(sortRowType);
+        }
+        FileStoreTable sourceTable = fileStoreTable.copy(sourceOptions);
+
         Map<String, String> tableConfig = fileStoreTable.options();
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(fileStoreTable)
+                new FlinkSourceBuilder(sourceTable)
                         .sourceName(
                                 ObjectIdentifier.of(
                                                 catalogName,
                                                 identifier.getDatabaseName(),
                                                 identifier.getObjectName())
-                                        .asSummaryString());
+                                        .asSummaryString())
+                        .readType(sortRowType);
 
-        sourceBuilder.partitionPredicate(getPartitionPredicate());
+        sourceBuilder.partitionPredicate(partitionPredicate);
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
@@ -129,17 +174,14 @@ public class SortCompactAction extends CompactAction {
 
         TableSorter sorter =
                 TableSorter.getSorter(
-                        env,
-                        source,
-                        fileStoreTable.coreOptions(),
-                        fileStoreTable.rowType(),
-                        sortInfo);
+                        env, source, fileStoreTable.coreOptions(), sortRowType, sortInfo);
 
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)
+                .withSortCompactInput(baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits)
                 .forRowData(sorter.sort())
-                .overwrite()
                 .build();
+        return true;
     }
 
     public SortCompactAction withOrderStrategy(String sortStrategy) {

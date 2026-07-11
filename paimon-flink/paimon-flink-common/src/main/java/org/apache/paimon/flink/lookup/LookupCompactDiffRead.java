@@ -49,7 +49,8 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
                         mergeRead,
                         split ->
                                 KeyValueTableRead.unwrap(
-                                        mergeRead.createReader(split), schema.options()));
+                                        mergeRead.createReader(split),
+                                        mergeRead.keyValueSequenceNumberEnabled()));
     }
 
     @Override

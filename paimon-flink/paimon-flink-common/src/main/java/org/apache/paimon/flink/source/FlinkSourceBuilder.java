@@ -92,6 +92,8 @@ public class FlinkSourceBuilder {
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
     private boolean skipPreloadTargetSnapshot;
 
+    @Nullable private org.apache.paimon.types.RowType readType;
+
     public FlinkSourceBuilder(Table table) {
         this.table = table;
         this.sourceName = table.name();
@@ -142,6 +144,8 @@ public class FlinkSourceBuilder {
     }
 
     public FlinkSourceBuilder projection(int[][] projectedFields) {
+        checkArgument(
+                readType == null, "Projection cannot be used together with a custom read type.");
         this.projectedFields = projectedFields;
         return this;
     }
@@ -163,6 +167,14 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder sourceParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
+        return this;
+    }
+
+    public FlinkSourceBuilder readType(org.apache.paimon.types.RowType readType) {
+        checkArgument(
+                projectedFields == null,
+                "A custom read type cannot be used together with projection.");
+        this.readType = readType;
         return this;
     }
 
@@ -269,7 +281,9 @@ public class FlinkSourceBuilder {
     }
 
     private TypeInformation<RowData> produceTypeInfo() {
-        RowType rowType = toLogicalType(table.rowType());
+        org.apache.paimon.types.RowType paimonRowType =
+                readType != null ? readType : table.rowType();
+        RowType rowType = toLogicalType(paimonRowType);
         LogicalType produceType =
                 Optional.ofNullable(projectedFields)
                         .map(Projection::of)
@@ -279,6 +293,9 @@ public class FlinkSourceBuilder {
     }
 
     private @Nullable org.apache.paimon.types.RowType projectedRowType() {
+        if (readType != null) {
+            return readType;
+        }
         return Optional.ofNullable(projectedFields)
                 .map(Projection::of)
                 .map(p -> p.project(table.rowType()))
@@ -299,7 +316,9 @@ public class FlinkSourceBuilder {
 
     /** Build source {@link DataStream} with {@link RowData}. */
     public DataStream<Row> buildForRow() {
-        DataType rowType = fromLogicalToDataType(toLogicalType(table.rowType()));
+        org.apache.paimon.types.RowType paimonRowType =
+                readType != null ? readType : table.rowType();
+        DataType rowType = fromLogicalToDataType(toLogicalType(paimonRowType));
         DataType[] fieldDataTypes = rowType.getChildren().toArray(new DataType[0]);
 
         DataFormatConverters.RowConverter converter =

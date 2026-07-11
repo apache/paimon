@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
 import org.apache.paimon.table.source.splitread.IncrementalDiffReadProvider;
 import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
@@ -143,8 +144,10 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
+        SplitReadProvider.Context context =
+                new SplitReadProvider.Context(forceKeepDelete, keyValueSequenceNumberEnabled());
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(split, new SplitReadProvider.Context(forceKeepDelete))) {
+            if (readProvider.match(split, context)) {
                 return readProvider.get().get().createReader(split);
             }
         }
@@ -152,19 +155,33 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         throw new RuntimeException("Should not happen.");
     }
 
+    private boolean keyValueSequenceNumberEnabled() {
+        return keyValueSequenceNumberEnabled(schema().options(), readType);
+    }
+
+    public static boolean keyValueSequenceNumberEnabled(
+            Map<String, String> schemaOptions, @Nullable RowType readType) {
+        if (Boolean.parseBoolean(
+                schemaOptions.getOrDefault(
+                        CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "false"))) {
+            return true;
+        }
+        return readType != null
+                && readType.getFieldNames().contains(SpecialFields.SEQUENCE_NUMBER.name());
+    }
+
     public static RecordReader<InternalRow> unwrap(
             RecordReader<KeyValue> reader, Map<String, String> schemaOptions) {
+        return unwrap(reader, keyValueSequenceNumberEnabled(schemaOptions, null));
+    }
+
+    public static RecordReader<InternalRow> unwrap(
+            RecordReader<KeyValue> reader, boolean keyValueSequenceNumberEnabled) {
         return new RecordReader<InternalRow>() {
 
             @Nullable
             @Override
             public RecordIterator<InternalRow> readBatch() throws IOException {
-                boolean keyValueSequenceNumberEnabled =
-                        Boolean.parseBoolean(
-                                schemaOptions.getOrDefault(
-                                        CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(),
-                                        "false"));
-
                 RecordIterator<KeyValue> batch = reader.readBatch();
                 return batch == null
                         ? null

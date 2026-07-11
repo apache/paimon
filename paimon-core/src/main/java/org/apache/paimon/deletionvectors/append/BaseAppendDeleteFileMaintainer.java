@@ -80,6 +80,13 @@ public interface BaseAppendDeleteFileMaintainer {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX).stream()
                         .filter(e -> e.partition().equals(partition))
                         .collect(Collectors.toList());
+        return forUnawareAppend(indexFileHandler, partition, manifestEntries);
+    }
+
+    static AppendDeleteFileMaintainer forUnawareAppend(
+            IndexFileHandler indexFileHandler,
+            BinaryRow partition,
+            List<IndexManifestEntry> manifestEntries) {
         Map<String, DeletionFile> deletionFiles = new HashMap<>();
         for (IndexManifestEntry file : manifestEntries) {
             LinkedHashMap<String, DeletionVectorMeta> dvMetas = file.indexFile().dvRanges();

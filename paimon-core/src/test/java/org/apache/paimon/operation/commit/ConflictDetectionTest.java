@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
@@ -30,6 +31,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,11 +47,14 @@ import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
 
@@ -759,6 +764,84 @@ class ConflictDetectionTest {
                         Snapshot.CommitKind.APPEND);
 
         assertThat(exception).isNotPresent();
+    }
+
+    @Test
+    void testCheckHashIndexConflictForSortCompact() {
+        IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
+        Snapshot latestSnapshot = snapshot(2);
+        IndexFileMeta currentHashIndex = createHashIndexFile("hash-v2");
+        when(indexFileHandler.scanBuckets(
+                        latestSnapshot, HASH_INDEX, Collections.singleton(Pair.of(EMPTY_ROW, 0))))
+                .thenReturn(
+                        Collections.singletonMap(
+                                Pair.of(EMPTY_ROW, 0),
+                                Collections.singletonList(currentHashIndex)));
+
+        ConflictDetection detection = createHashDynamicConflictDetection(indexFileHandler);
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        latestSnapshot,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createHashIndexEntry("hash-v1", DELETE, EMPTY_ROW, 0)),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get()).hasMessageContaining("Hash index conflict");
+    }
+
+    @Test
+    void testCheckHashIndexNoConflictWhenUnchanged() {
+        IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
+        Snapshot latestSnapshot = snapshot(2);
+        IndexFileMeta hashIndex = createHashIndexFile("hash-v1");
+        when(indexFileHandler.scanBuckets(
+                        latestSnapshot, HASH_INDEX, Collections.singleton(Pair.of(EMPTY_ROW, 0))))
+                .thenReturn(
+                        Collections.singletonMap(
+                                Pair.of(EMPTY_ROW, 0), Collections.singletonList(hashIndex)));
+
+        ConflictDetection detection = createHashDynamicConflictDetection(indexFileHandler);
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        latestSnapshot,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createHashIndexEntry("hash-v1", DELETE, EMPTY_ROW, 0)),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isNotPresent();
+    }
+
+    private ConflictDetection createHashDynamicConflictDetection(
+            IndexFileHandler indexFileHandler) {
+        return new ConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                null,
+                null,
+                BucketMode.HASH_DYNAMIC,
+                false,
+                false,
+                false,
+                indexFileHandler,
+                null,
+                null);
+    }
+
+    private IndexManifestEntry createHashIndexEntry(
+            String fileName, FileKind kind, BinaryRow partition, int bucket) {
+        return new IndexManifestEntry(kind, partition, bucket, createHashIndexFile(fileName));
+    }
+
+    private IndexFileMeta createHashIndexFile(String fileName) {
+        return new IndexFileMeta(HASH_INDEX, fileName, 1, 1, (GlobalIndexMeta) null, null);
     }
 
     private ConflictDetection createConflictDetection() {

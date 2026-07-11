@@ -36,6 +36,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
@@ -78,6 +79,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType valueType;
     private final String commitUser;
     private final KvCompactionManagerFactory compactManagerFactory;
+
+    private boolean sortCompactWrite;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -181,6 +184,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
+    public KeyValueFileStoreWrite withSortCompactWrite(boolean sortCompactWrite) {
+        this.sortCompactWrite = sortCompactWrite;
+        return this;
+    }
+
+    @Override
     public KeyValueFileStoreWrite withIOManager(IOManager ioManager) {
         super.withIOManager(ioManager);
         compactManagerFactory.withIOManager(ioManager);
@@ -227,21 +236,35 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         dvMaintainer,
                         ignorePreviousFiles);
 
-        return new MergeTreeWriter(
-                options.writeBufferSpillable(),
-                options.writeBufferSpillDiskSize(),
-                options.localSortMaxNumFileHandles(),
-                options.spillCompressOptions(),
-                ioManager,
-                compactManager,
-                restoredMaxSeqNumber,
-                keyComparator,
-                mfFactory.create(),
-                writerFactory,
-                options.commitForceCompact(),
-                options.changelogProducer(),
-                restoreIncrement,
-                UserDefinedSeqComparator.create(valueType, options));
+        MergeTreeWriter writer =
+                new MergeTreeWriter(
+                        options.writeBufferSpillable(),
+                        options.writeBufferSpillDiskSize(),
+                        options.localSortMaxNumFileHandles(),
+                        options.spillCompressOptions(),
+                        ioManager,
+                        compactManager,
+                        restoredMaxSeqNumber,
+                        keyComparator,
+                        mfFactory.create(),
+                        writerFactory,
+                        options.commitForceCompact(),
+                        // Sort compact only rewrites (re-sorts) existing data, so it must not emit
+                        // per-row input changelog. Those write-stage changelog files would be
+                        // spurious (existing rows re-emitted as inserts) and are dropped by
+                        // SortCompactCommitMessageRewriter, leaking on disk. Full-compaction
+                        // changelog is produced by the compact manager, not the input changelog
+                        // writer, so it is unaffected by forcing NONE here.
+                        sortCompactWrite
+                                ? CoreOptions.ChangelogProducer.NONE
+                                : options.changelogProducer(),
+                        restoreIncrement,
+                        UserDefinedSeqComparator.create(valueType, options));
+        if (sortCompactWrite) {
+            writer.withPreserveInputSequence(true);
+            writer.withDataFileSource(FileSource.COMPACT);
+        }
+        return writer;
     }
 
     @Override
