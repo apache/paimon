@@ -431,6 +431,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotRenamingPrimaryKeyVectorIndexColumn(oldTableSchema, rename.fieldNames());
                 assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
@@ -833,21 +834,6 @@ public class SchemaManager implements Serializable {
             newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
         }
 
-        // primary-key vector index column rename
-        String vectorIndexColumnsStr = options.get(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
-        Set<String> vectorIndexColumns = Collections.emptySet();
-        if (!StringUtils.isNullOrWhitespaceOnly(vectorIndexColumnsStr)) {
-            List<String> vectorColumns =
-                    Arrays.stream(vectorIndexColumnsStr.split(","))
-                            .map(String::trim)
-                            .collect(Collectors.toList());
-            vectorIndexColumns = new HashSet<>(vectorColumns);
-            List<String> newVectorColumns =
-                    applyNotNestedColumnRename(vectorColumns, renameMappings);
-            newOptions.put(
-                    CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), String.join(",", newVectorColumns));
-        }
-
         // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field
         // name, while the option value doesn't contain field names.
         List<Function<String, String>> fieldNameToOptionKeys =
@@ -905,26 +891,6 @@ public class SchemaManager implements Serializable {
                                     + "."
                                     + matchedSuffix,
                             String.join(",", newValueFields));
-                }
-            }
-        }
-
-        // A vector field owns both pk-vector options and algorithm-specific options below its
-        // fields.<column>. namespace. Move the complete namespace after the specialized option
-        // rewrites above so keys handled by case 3 are not processed twice.
-        for (RenameColumn rename : renameColumns) {
-            String fieldName = rename.fieldNames()[0];
-            if (!vectorIndexColumns.contains(fieldName)) {
-                continue;
-            }
-            String oldPrefix = FIELDS_PREFIX + "." + fieldName + ".";
-            String newPrefix = FIELDS_PREFIX + "." + rename.newName() + ".";
-            for (String key : options.keySet()) {
-                if (key.startsWith(oldPrefix)) {
-                    String value = newOptions.remove(key);
-                    if (value != null) {
-                        newOptions.put(newPrefix + key.substring(oldPrefix.length()), value);
-                    }
                 }
             }
         }
@@ -1007,6 +973,19 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotRenamingPrimaryKeyVectorIndexColumn(
+            TableSchema schema, String[] fieldNames) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        if (new CoreOptions(schema.options()).primaryKeyVectorIndexColumns().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot rename primary-key vector index column: [%s]", fieldName));
         }
     }
 

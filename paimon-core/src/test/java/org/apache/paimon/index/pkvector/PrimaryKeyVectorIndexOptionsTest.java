@@ -173,28 +173,6 @@ class PrimaryKeyVectorIndexOptionsTest {
     }
 
     @Test
-    void testDefinitionIdIsStableAcrossFieldRename() {
-        Map<String, String> firstOptions = new HashMap<>();
-        firstOptions.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
-        firstOptions.put("fields.embedding.pk-vector.index.type", "ivf-pq");
-        firstOptions.put("fields.embedding.ivf-pq.nlist", "64");
-        Map<String, String> renamedOptions = new HashMap<>();
-        renamedOptions.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "renamed_embedding");
-        renamedOptions.put("fields.renamed_embedding.pk-vector.index.type", "ivf-pq");
-        renamedOptions.put("fields.renamed_embedding.ivf-pq.nlist", "64");
-
-        assertThat(
-                        PrimaryKeyVectorIndexOptions.definitionId(
-                                7, "VECTOR<FLOAT, 8>", new CoreOptions(firstOptions), "embedding"))
-                .isEqualTo(
-                        PrimaryKeyVectorIndexOptions.definitionId(
-                                7,
-                                "VECTOR<FLOAT, 8>",
-                                new CoreOptions(renamedOptions),
-                                "renamed_embedding"));
-    }
-
-    @Test
     void testDefinitionIdIgnoresShadowedTableDefault() {
         Map<String, String> firstOptions = new HashMap<>();
         firstOptions.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
