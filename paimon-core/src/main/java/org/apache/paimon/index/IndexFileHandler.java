@@ -145,6 +145,23 @@ public class IndexFileHandler {
         return result;
     }
 
+    public List<IndexFileMeta> scanSourceIndexes(
+            Snapshot snapshot, BinaryRow partition, int bucket) {
+        List<IndexFileMeta> result = new ArrayList<>();
+        for (IndexManifestEntry entry :
+                scan(
+                        snapshot,
+                        candidate ->
+                                candidate.partition().equals(partition)
+                                        && candidate.bucket() == bucket
+                                        && candidate.indexFile().globalIndexMeta() != null
+                                        && candidate.indexFile().globalIndexMeta().sourceMeta()
+                                                != null)) {
+            result.add(entry.indexFile());
+        }
+        return result;
+    }
+
     public Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scan(
             long snapshot, String indexType, Set<BinaryRow> partitions) {
         return scan(snapshotManager.snapshot(snapshot), indexType, partitions);

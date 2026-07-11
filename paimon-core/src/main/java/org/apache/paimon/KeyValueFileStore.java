@@ -24,6 +24,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
@@ -38,6 +39,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -169,6 +171,19 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.deletionVectorsEnabled()) {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
+        BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory = null;
+        if (options.primaryKeyVectorIndexEnabled()) {
+            String vectorColumn = options.primaryKeyVectorIndexColumn();
+            DataField vectorField = schema.nameToFieldMap().get(vectorColumn);
+            vectorIndexMaintainerFactory =
+                    new BucketedVectorIndexMaintainer.Factory(
+                                    newIndexFileHandler(),
+                                    newReaderFactoryBuilder(),
+                                    vectorField,
+                                    options.primaryKeyVectorDistanceMetric(vectorColumn),
+                                    options.primaryKeyVectorIndexType(vectorColumn))
+                            .withIndexOptions(options.primaryKeyVectorIndexOptions(vectorColumn));
+        }
         return new KeyValueFileStoreWrite(
                 fileIO,
                 schemaManager,
@@ -187,6 +202,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newScan(),
                 indexFactory,
                 dvMaintainerFactory,
+                vectorIndexMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
                 tableName);

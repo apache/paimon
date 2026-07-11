@@ -42,13 +42,15 @@ public class ScanCoordinationResponse implements CoordinationResponse {
     @Nullable private final List<byte[]> dataFiles;
     @Nullable private final byte[] dynamicBucketIndex;
     @Nullable private final List<byte[]> deleteVectorsIndex;
+    @Nullable private final List<byte[]> vectorIndexPayloads;
 
     public ScanCoordinationResponse(
             @Nullable Snapshot snapshot,
             @Nullable Integer totalBuckets,
             @Nullable List<DataFileMeta> dataFiles,
             @Nullable IndexFileMeta dynamicBucketIndex,
-            @Nullable List<IndexFileMeta> deleteVectorsIndex)
+            @Nullable List<IndexFileMeta> deleteVectorsIndex,
+            @Nullable List<IndexFileMeta> vectorIndexPayloads)
             throws IOException {
         this.snapshot = snapshot;
         this.totalBuckets = totalBuckets;
@@ -77,6 +79,15 @@ public class ScanCoordinationResponse implements CoordinationResponse {
             }
         } else {
             this.deleteVectorsIndex = null;
+        }
+
+        if (vectorIndexPayloads != null) {
+            this.vectorIndexPayloads = new ArrayList<>(vectorIndexPayloads.size());
+            for (IndexFileMeta indexFile : vectorIndexPayloads) {
+                this.vectorIndexPayloads.add(indexSerializer.serializeToBytes(indexFile));
+            }
+        } else {
+            this.vectorIndexPayloads = null;
         }
     }
 
@@ -119,6 +130,19 @@ public class ScanCoordinationResponse implements CoordinationResponse {
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         List<IndexFileMeta> metas = new ArrayList<>(deleteVectorsIndex.size());
         for (byte[] file : deleteVectorsIndex) {
+            metas.add(serializer.deserializeFromBytes(file));
+        }
+        return metas;
+    }
+
+    @Nullable
+    public List<IndexFileMeta> extractVectorIndexPayloads() throws IOException {
+        if (vectorIndexPayloads == null) {
+            return null;
+        }
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        List<IndexFileMeta> metas = new ArrayList<>(vectorIndexPayloads.size());
+        for (byte[] file : vectorIndexPayloads) {
             metas.add(serializer.deserializeFromBytes(file));
         }
         return metas;

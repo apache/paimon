@@ -96,7 +96,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             CoreOptions options,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
             String tableName) {
-        super(snapshotManager, scan, options, partitionType, null, dvMaintainerFactory, tableName);
+        super(
+                snapshotManager,
+                scan,
+                options,
+                partitionType,
+                null,
+                dvMaintainerFactory,
+                null,
+                tableName);
         this.fileIO = fileIO;
         this.readForCompact = readForCompact;
         this.schemaId = schemaId;
