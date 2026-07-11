@@ -366,6 +366,51 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
+    public void testColumnMaskingCrossColumnWithProjection() {
+        String maskingTable = "cross_column_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (first_name STRING, last_name STRING, display STRING, other_col STRING)"
+                                + " WITH ('query-auth.enabled' = 'true', 'source.split.target-size' = '1 b')",
+                        DATABASE_NAME, maskingTable));
+        // two commits so the scan yields multiple splits
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('john', 'doe', 'ignored', 'o1')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('jane', 'roe', 'ignored', 'o2')",
+                        DATABASE_NAME, maskingTable));
+
+        // the mask on "display" reads OTHER columns: concat_ws('-', first_name, last_name)
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "first_name", DataTypes.STRING()),
+                                new FieldRef(1, "last_name", DataTypes.STRING()))));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        // project only the masked target: its input columns must be read regardless
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT display FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("john-doe"), Row.of("jane-roe"));
+        // a projection without the masked column is unaffected
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT other_col FROM %s.%s",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("o1"), Row.of("o2"));
+    }
+
+    @Test
     public void testRowFilter() {
         String filterTable = "row_filter_table";
         batchSql(
@@ -758,7 +803,8 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                                 "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
                                                 DATABASE_NAME, combinedTable)))
                 .rootCause()
-                .hasMessageContaining("Unable to read data without column non_existent_column");
+                .hasMessageContaining(
+                        "Row filter references column 'non_existent_column' which does not exist");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(
