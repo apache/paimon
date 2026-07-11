@@ -171,6 +171,35 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testRejectRenamePrimaryKeyVectorIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(
+                                        1, "embedding", DataTypes.VECTOR(8, DataTypes.FLOAT()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"embedding"}, "renamed_embedding")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key vector index column: [embedding]");
+    }
+
+    @Test
     public void testResetSequenceGroupForAggregateFunction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");

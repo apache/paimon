@@ -1206,6 +1206,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-vector.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. The first release supports exactly one column.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

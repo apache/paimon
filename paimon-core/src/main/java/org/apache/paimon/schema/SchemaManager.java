@@ -431,6 +431,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotRenamingPrimaryKeyVectorIndexColumn(oldTableSchema, rename.fieldNames());
                 assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
@@ -972,6 +973,19 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotRenamingPrimaryKeyVectorIndexColumn(
+            TableSchema schema, String[] fieldNames) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        if (new CoreOptions(schema.options()).primaryKeyVectorIndexColumns().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot rename primary-key vector index column: [%s]", fieldName));
         }
     }
 
