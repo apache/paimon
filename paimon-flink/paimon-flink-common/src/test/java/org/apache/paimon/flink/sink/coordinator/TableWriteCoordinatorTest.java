@@ -24,12 +24,20 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pkvector.PkVectorSourceFile;
+import org.apache.paimon.index.pkvector.PkVectorSourceMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SegmentsCache;
 
@@ -39,6 +47,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -75,10 +84,50 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // scan should scan snapshot 2
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(latest.id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(initSnapshot ? 2 : 1);
+    }
+
+    @Test
+    public void testScanVectorIndexPayloads() throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        Schema schema = Schema.newBuilder().column("f0", DataTypes.INT()).build();
+        catalog.createDatabase("db", false);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+        write(table, GenericRow.of(1));
+
+        PkVectorSourceMeta sourceMeta =
+                new PkVectorSourceMeta(
+                        Collections.singletonList(new PkVectorSourceFile("data", 1)));
+        IndexFileMeta ann =
+                new IndexFileMeta(
+                        "test-vector-ann",
+                        "ann",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 0, null, new byte[0], sourceMeta.serialize()),
+                        null);
+        try (TableCommitImpl commit = table.newCommit("vector-index")) {
+            commit.commit(
+                    100,
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    EMPTY_ROW,
+                                    0,
+                                    1,
+                                    DataIncrement.indexIncrement(Collections.singletonList(ann)),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        ScanCoordinationRequest request =
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, true);
+        ScanCoordinationResponse scan = coordinator.scan(request);
+
+        assertThat(scan.extractVectorIndexPayloads()).containsExactly(ann);
     }
 
     @Test
@@ -120,7 +169,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // scan results remain correct after warming
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(table.latestSnapshot().get().id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(2);
@@ -170,7 +219,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
         // manifest, proving the bucket filter is active (and leaving the stale bucket state on the
         // shared scan)
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
         coordinator.scan(request);
         long filteredCacheBytes = table.getManifestCache().totalCacheBytes();
         assertThat(filteredCacheBytes).isGreaterThan(0);

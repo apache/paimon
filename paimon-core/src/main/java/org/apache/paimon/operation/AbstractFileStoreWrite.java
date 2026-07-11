@@ -29,6 +29,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -83,6 +84,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final DynamicBucketIndexMaintainer.Factory dbMaintainerFactory;
     @Nullable private final BucketedDvMaintainer.Factory dvMaintainerFactory;
+    @Nullable private final BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory;
     private final int numBuckets;
     private final RowType partitionType;
 
@@ -109,6 +111,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory,
             String tableName,
             CoreOptions options,
             RowType partitionType) {
@@ -117,11 +120,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             indexFileHandler = dbMaintainerFactory.indexFileHandler();
         } else if (dvMaintainerFactory != null) {
             indexFileHandler = dvMaintainerFactory.indexFileHandler();
+        } else if (vectorIndexMaintainerFactory != null) {
+            indexFileHandler = vectorIndexMaintainerFactory.indexFileHandler();
         }
         this.snapshotManager = snapshotManager;
         this.restore = new FileSystemWriteRestore(options, snapshotManager, scan, indexFileHandler);
         this.dbMaintainerFactory = dbMaintainerFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
+        this.vectorIndexMaintainerFactory = vectorIndexMaintainerFactory;
         this.numBuckets = options.bucket();
         this.partitionType = partitionType;
         this.writers = new HashMap<>();
@@ -241,6 +247,33 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     newFilesIncrement
                             .newIndexFiles()
                             .addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
+                }
+                if (writerContainer.vectorIndexMaintainer != null) {
+                    BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit =
+                            writerContainer.vectorIndexMaintainer.prepareCommit(
+                                    newFilesIncrement, compactIncrement);
+                    vectorCommit
+                            .appendIncrement()
+                            .ifPresent(
+                                    vectorIncrement -> {
+                                        newFilesIncrement
+                                                .newIndexFiles()
+                                                .addAll(vectorIncrement.newIndexFiles());
+                                        newFilesIncrement
+                                                .deletedIndexFiles()
+                                                .addAll(vectorIncrement.deletedIndexFiles());
+                                    });
+                    vectorCommit
+                            .compactIncrement()
+                            .ifPresent(
+                                    vectorIncrement -> {
+                                        compactIncrement
+                                                .newIndexFiles()
+                                                .addAll(vectorIncrement.newIndexFiles());
+                                        compactIncrement
+                                                .deletedIndexFiles()
+                                                .addAll(vectorIncrement.deletedIndexFiles());
+                                    });
                 }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
@@ -375,6 +408,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.writer.maxSequenceNumber(),
                                 writerContainer.dynamicBucketMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
+                                writerContainer.vectorIndexMaintainer,
                                 increment));
             }
         }
@@ -407,6 +441,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.totalBuckets,
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
+                            state.vectorIndexMaintainer,
                             state.baseSnapshotId);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
@@ -473,6 +508,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         ? null
                         : dvMaintainerFactory.create(
                                 partition, bucket, restored.deleteVectorsIndex());
+        BucketedVectorIndexMaintainer vectorIndexMaintainer =
+                vectorIndexMaintainerFactory == null
+                        ? null
+                        : vectorIndexMaintainerFactory.create(
+                                partition,
+                                bucket,
+                                restored.dataFiles(),
+                                restored.vectorIndexPayloads());
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {
@@ -497,6 +540,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 firstNonNull(restored.totalBuckets(), numBuckets),
                 indexMaintainer,
                 dvMaintainer,
+                vectorIndexMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
     }
 
@@ -558,7 +602,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partition,
                             bucket,
                             dbMaintainerFactory != null,
-                            dvMaintainerFactory != null);
+                            dvMaintainerFactory != null,
+                            vectorIndexMaintainerFactory != null);
         } catch (RuntimeException e) {
             throw new RuntimeException(
                     String.format(
@@ -621,6 +666,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         public final int totalBuckets;
         @Nullable public final DynamicBucketIndexMaintainer dynamicBucketMaintainer;
         @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
+        @Nullable public final BucketedVectorIndexMaintainer vectorIndexMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
 
@@ -629,11 +675,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 int totalBuckets,
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedVectorIndexMaintainer vectorIndexMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
+            this.vectorIndexMaintainer = vectorIndexMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
