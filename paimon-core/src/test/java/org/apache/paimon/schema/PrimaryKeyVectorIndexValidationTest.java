@@ -126,12 +126,9 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testRequiresCompleteDefinition() {
+    void testIndexNameIsNotRequired() {
         Map<String, String> options = enabledOptions();
-        options.remove(CoreOptions.PK_VECTOR_INDEX_NAME.key());
-
-        assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("pk-vector.index.name must be configured");
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
     }
 
     @Test
@@ -183,7 +180,6 @@ class PrimaryKeyVectorIndexValidationTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_NAME.key(), "embedding_index");
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMN.key(), "embedding");
         options.put(CoreOptions.PK_VECTOR_INDEX_TYPE.key(), "ivf-pq");
         return options;

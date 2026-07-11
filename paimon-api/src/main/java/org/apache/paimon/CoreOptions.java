@@ -2726,12 +2726,6 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
-    public static final ConfigOption<String> PK_VECTOR_INDEX_NAME =
-            key("pk-vector.index.name")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Name of the bucket-local primary-key vector index.");
-
     public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMN =
             key("pk-vector.index.column")
                     .stringType()
@@ -4335,14 +4329,8 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean primaryKeyVectorIndexEnabled() {
-        return options.getOptional(PK_VECTOR_INDEX_NAME).isPresent()
-                || options.getOptional(PK_VECTOR_INDEX_COLUMN).isPresent()
+        return options.getOptional(PK_VECTOR_INDEX_COLUMN).isPresent()
                 || options.getOptional(PK_VECTOR_INDEX_TYPE).isPresent();
-    }
-
-    @Nullable
-    public String primaryKeyVectorIndexName() {
-        return options.get(PK_VECTOR_INDEX_NAME);
     }
 
     @Nullable

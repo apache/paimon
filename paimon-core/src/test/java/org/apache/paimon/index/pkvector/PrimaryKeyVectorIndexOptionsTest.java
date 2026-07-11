@@ -62,6 +62,25 @@ class PrimaryKeyVectorIndexOptionsTest {
     }
 
     @Test
+    void testDefinitionIdIsStableAndDefinitionSensitive() {
+        CoreOptions first = coreOptions("{\"nlist\":64,\"pq.m\":8}");
+        CoreOptions reordered = coreOptions("{\"pq.m\":8,\"nlist\":64}");
+        String definitionId =
+                PrimaryKeyVectorIndexOptions.definitionId(7, "VECTOR<FLOAT, 8>", first);
+
+        assertThat(PrimaryKeyVectorIndexOptions.definitionId(7, "VECTOR<FLOAT, 8>", reordered))
+                .isEqualTo(definitionId);
+        assertThat(PrimaryKeyVectorIndexOptions.definitionId(8, "VECTOR<FLOAT, 8>", first))
+                .isNotEqualTo(definitionId);
+        assertThat(PrimaryKeyVectorIndexOptions.definitionId(7, "VECTOR<FLOAT, 16>", first))
+                .isNotEqualTo(definitionId);
+        assertThat(
+                        PrimaryKeyVectorIndexOptions.definitionId(
+                                7, "VECTOR<FLOAT, 8>", coreOptions("{\"nlist\":65,\"pq.m\":8}")))
+                .isNotEqualTo(definitionId);
+    }
+
+    @Test
     void testRejectsNonObjectOptions() {
         assertThatThrownBy(() -> PrimaryKeyVectorIndexOptions.resolve(coreOptions("[1,2]")))
                 .isInstanceOf(IllegalArgumentException.class)

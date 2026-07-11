@@ -891,12 +891,8 @@ public class SchemaValidation {
             return;
         }
 
-        String indexName = options.primaryKeyVectorIndexName();
         String indexColumn = options.primaryKeyVectorIndexColumn();
         String indexType = options.primaryKeyVectorIndexType();
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexName),
-                "pk-vector.index.name must be configured when a primary-key vector index is defined.");
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexColumn),
                 "pk-vector.index.column must be configured when a primary-key vector index is defined.");

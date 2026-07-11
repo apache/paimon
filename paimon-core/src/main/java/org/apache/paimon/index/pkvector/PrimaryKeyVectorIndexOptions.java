@@ -21,6 +21,7 @@ package org.apache.paimon.index.pkvector;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -45,10 +46,25 @@ public final class PrimaryKeyVectorIndexOptions {
     }
 
     public static byte[] hash(CoreOptions coreOptions) {
-        String canonicalJson = JsonSerdeUtil.toJson(algorithmOptions(coreOptions));
+        return sha256(JsonSerdeUtil.toJson(algorithmOptions(coreOptions)));
+    }
+
+    public static String definitionId(
+            int vectorFieldId, String vectorTypeFingerprint, CoreOptions coreOptions) {
+        checkArgument(
+                vectorTypeFingerprint != null && !vectorTypeFingerprint.trim().isEmpty(),
+                "Vector type fingerprint must not be empty.");
+        TreeMap<String, String> definition = new TreeMap<>();
+        definition.put("field-id", Integer.toString(vectorFieldId));
+        definition.put("field-type", vectorTypeFingerprint);
+        definition.putAll(algorithmOptions(coreOptions));
+        return StringUtils.byteToHexString(sha256(JsonSerdeUtil.toJson(definition)));
+    }
+
+    private static byte[] sha256(String value) {
         try {
             return MessageDigest.getInstance("SHA-256")
-                    .digest(canonicalJson.getBytes(StandardCharsets.UTF_8));
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available.", e);
         }
