@@ -891,14 +891,24 @@ public class SchemaValidation {
             return;
         }
 
-        String indexColumn = options.primaryKeyVectorIndexColumn();
-        String indexType = options.primaryKeyVectorIndexType();
+        List<String> indexColumns = options.primaryKeyVectorIndexColumns();
+        checkArgument(
+                new HashSet<>(indexColumns).size() == indexColumns.size(),
+                "pk-vector.index.columns must not contain duplicate columns, but is %s.",
+                indexColumns);
+        checkArgument(
+                indexColumns.size() == 1,
+                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        String indexType = options.primaryKeyVectorIndexType(indexColumn);
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexColumn),
-                "pk-vector.index.column must be configured when a primary-key vector index is defined.");
+                "pk-vector.index.columns must contain a non-empty column.");
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexType),
-                "pk-vector.index.type must be configured when a primary-key vector index is defined.");
+                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
+                indexColumn);
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
                 "Primary-key vector index requires a primary-key table.");
@@ -921,7 +931,7 @@ public class SchemaValidation {
         checkArgument(
                 !options.pkClusteringOverride(),
                 "Primary-key vector index does not support pk-clustering-override.");
-        PrimaryKeyVectorIndexOptions.resolve(options);
+        PrimaryKeyVectorIndexOptions.resolve(options, indexColumn);
 
         DataField vectorField =
                 schema.fields().stream()
@@ -930,38 +940,40 @@ public class SchemaValidation {
                         .orElse(null);
         checkArgument(
                 vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
-                "pk-vector.index.column '%s' must reference a VECTOR column.",
+                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
                 indexColumn);
         checkArgument(
                 ((VectorType) vectorField.type()).getElementType().getTypeRoot()
                         == DataTypeRoot.FLOAT,
-                "pk-vector.index.column '%s' must use FLOAT elements.",
+                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
                 indexColumn);
         checkArgument(
                 Arrays.asList("l2", "cosine", "inner_product")
-                        .contains(options.primaryKeyVectorDistanceMetric()),
-                "pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
-                options.primaryKeyVectorDistanceMetric());
+                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
+                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                indexColumn,
+                options.primaryKeyVectorDistanceMetric(indexColumn));
         checkArgument(
-                options.primaryKeyVectorL0MaxSegments() > 0,
+                options.primaryKeyVectorL0MaxSegments(indexColumn) > 0,
                 "pk-vector.l0.max-segments must be greater than 0.");
         checkArgument(
-                options.primaryKeyVectorL0MaxRows() > 0,
+                options.primaryKeyVectorL0MaxRows(indexColumn) > 0,
                 "pk-vector.l0.max-rows must be greater than 0.");
         checkArgument(
-                options.primaryKeyVectorAnnMinRows() > 0,
+                options.primaryKeyVectorAnnMinRows(indexColumn) > 0,
                 "pk-vector.ann.min-rows must be greater than 0.");
         checkArgument(
-                options.primaryKeyVectorAnnMaxRows() > 0,
+                options.primaryKeyVectorAnnMaxRows(indexColumn) > 0,
                 "pk-vector.ann.max-rows must be greater than 0.");
         checkArgument(
-                options.primaryKeyVectorAnnMaxRows() >= options.primaryKeyVectorAnnMinRows(),
+                options.primaryKeyVectorAnnMaxRows(indexColumn)
+                        >= options.primaryKeyVectorAnnMinRows(indexColumn),
                 "pk-vector.ann.max-rows must be greater than or equal to pk-vector.ann.min-rows.");
         checkArgument(
-                options.primaryKeyVectorAnnMaxSourceFiles() > 0,
+                options.primaryKeyVectorAnnMaxSourceFiles(indexColumn) > 0,
                 "pk-vector.ann.max-source-files must be greater than 0.");
         checkArgument(
-                options.primaryKeyVectorRefineFactor() > 0,
+                options.primaryKeyVectorRefineFactor(indexColumn) > 0,
                 "pk-vector.refine-factor must be greater than 0.");
     }
 

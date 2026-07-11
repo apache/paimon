@@ -2726,36 +2726,17 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
-    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMN =
-            key("pk-vector.index.column")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("VECTOR column indexed by the primary-key vector index.");
-
-    public static final ConfigOption<String> PK_VECTOR_INDEX_TYPE =
-            key("pk-vector.index.type")
+    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
+            key("pk-vector.index.columns")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Vector index algorithm identifier, for example 'ivf-pq'. "
-                                    + "The implementation validates it through the vector-index SPI.");
-
-    public static final ConfigOption<String> PK_VECTOR_INDEX_OPTIONS =
-            key("pk-vector.index.options")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Algorithm-specific options as a JSON object. Unqualified keys are "
-                                    + "scoped to pk-vector.index.type; fully qualified index or "
-                                    + "fields.<column> keys are preserved.");
-
-    public static final ConfigOption<String> PK_VECTOR_DISTANCE_METRIC =
-            key("pk-vector.distance.metric")
-                    .stringType()
-                    .defaultValue("inner_product")
-                    .withDescription(
-                            "Distance metric persisted by the primary-key vector index. "
-                                    + "Supported values are l2, cosine, and inner_product.");
+                            "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
+                                    + "Each column owns one index and must define "
+                                    + "fields.<column>.pk-vector.index.type. Index options and distance "
+                                    + "metric are also field-scoped. Operational defaults can be "
+                                    + "overridden through fields.<column>.pk-vector.* options. The first "
+                                    + "release supports exactly one column.");
 
     public static final ConfigOption<Integer> PK_VECTOR_L0_MAX_SEGMENTS =
             key("pk-vector.l0.max-segments")
@@ -4329,51 +4310,71 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean primaryKeyVectorIndexEnabled() {
-        return options.getOptional(PK_VECTOR_INDEX_COLUMN).isPresent()
-                || options.getOptional(PK_VECTOR_INDEX_TYPE).isPresent();
+        return options.getOptional(PK_VECTOR_INDEX_COLUMNS).isPresent();
+    }
+
+    public List<String> primaryKeyVectorIndexColumns() {
+        String columns = options.get(PK_VECTOR_INDEX_COLUMNS);
+        if (columns == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(columns.split(",", -1)).map(String::trim).collect(Collectors.toList());
     }
 
     @Nullable
-    public String primaryKeyVectorIndexColumn() {
-        return options.get(PK_VECTOR_INDEX_COLUMN);
+    public String primaryKeyVectorIndexType(String column) {
+        return options.get("fields." + column + ".pk-vector.index.type");
     }
 
     @Nullable
-    public String primaryKeyVectorIndexType() {
-        return options.get(PK_VECTOR_INDEX_TYPE);
+    public String primaryKeyVectorIndexOptions(String column) {
+        return options.get("fields." + column + ".pk-vector.index.options");
+    }
+
+    public String primaryKeyVectorDistanceMetric(String column) {
+        String metric = options.get("fields." + column + ".pk-vector.distance.metric");
+        return (metric == null ? "inner_product" : metric)
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_');
     }
 
     @Nullable
-    public String primaryKeyVectorIndexOptions() {
-        return options.get(PK_VECTOR_INDEX_OPTIONS);
+    private String primaryKeyVectorFieldOption(String column, ConfigOption<?> option) {
+        return options.get("fields." + column + "." + option.key());
     }
 
-    public String primaryKeyVectorDistanceMetric() {
-        return options.get(PK_VECTOR_DISTANCE_METRIC).toLowerCase(Locale.ROOT).replace('-', '_');
+    private <T> T primaryKeyVectorOption(String column, ConfigOption<T> option) {
+        String fieldValue = primaryKeyVectorFieldOption(column, option);
+        if (fieldValue == null) {
+            return options.get(option);
+        }
+        Options fieldOptions = new Options();
+        fieldOptions.setString(option.key(), fieldValue);
+        return fieldOptions.get(option);
     }
 
-    public int primaryKeyVectorL0MaxSegments() {
-        return options.get(PK_VECTOR_L0_MAX_SEGMENTS);
+    public int primaryKeyVectorL0MaxSegments(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_L0_MAX_SEGMENTS);
     }
 
-    public long primaryKeyVectorL0MaxRows() {
-        return options.get(PK_VECTOR_L0_MAX_ROWS);
+    public long primaryKeyVectorL0MaxRows(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_L0_MAX_ROWS);
     }
 
-    public long primaryKeyVectorAnnMinRows() {
-        return options.get(PK_VECTOR_ANN_MIN_ROWS);
+    public long primaryKeyVectorAnnMinRows(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MIN_ROWS);
     }
 
-    public long primaryKeyVectorAnnMaxRows() {
-        return options.get(PK_VECTOR_ANN_MAX_ROWS);
+    public long primaryKeyVectorAnnMaxRows(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MAX_ROWS);
     }
 
-    public int primaryKeyVectorAnnMaxSourceFiles() {
-        return options.get(PK_VECTOR_ANN_MAX_SOURCE_FILES);
+    public int primaryKeyVectorAnnMaxSourceFiles(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MAX_SOURCE_FILES);
     }
 
-    public int primaryKeyVectorRefineFactor() {
-        return options.get(PK_VECTOR_REFINE_FACTOR);
+    public int primaryKeyVectorRefineFactor(String column) {
+        return primaryKeyVectorOption(column, PK_VECTOR_REFINE_FACTOR);
     }
 
     /** Specifies the merge engine for table with primary key. */

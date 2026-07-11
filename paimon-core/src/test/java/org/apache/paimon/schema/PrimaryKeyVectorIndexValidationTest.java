@@ -37,9 +37,55 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PrimaryKeyVectorIndexValidationTest {
 
     @Test
+    void testValidPluralPrimaryKeyVectorIndexConfiguration() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), " embedding ");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testRejectsMultiplePrimaryKeyVectorIndexColumnsForFirstRelease() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,other_embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("exactly one column")
+                .hasMessageContaining("pk-vector.index.columns");
+    }
+
+    @Test
+    void testRejectsDuplicatePrimaryKeyVectorIndexColumns() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,embedding");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-vector.index.columns")
+                .hasMessageContaining("duplicate");
+    }
+
+    @Test
     void testValidPrimaryKeyVectorIndex() {
         assertThatCode(() -> validateTableSchema(schema(enabledOptions())))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testRequiresFieldScopedIndexType() {
+        Map<String, String> options = enabledOptions();
+        options.remove("fields.embedding.pk-vector.index.type");
+        options.put("pk-vector.index.type", "ivf-pq");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("fields.embedding.pk-vector.index.type");
     }
 
     @Test
@@ -119,7 +165,8 @@ class PrimaryKeyVectorIndexValidationTest {
     @Test
     void testRequiresVectorColumn() {
         Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMN.key(), "payload");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "payload");
+        options.put("fields.payload.pk-vector.index.type", "ivf-pq");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining("must reference a VECTOR column");
@@ -153,7 +200,7 @@ class PrimaryKeyVectorIndexValidationTest {
     @Test
     void testRejectsUnsupportedDistanceMetric() {
         Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_VECTOR_DISTANCE_METRIC.key(), "manhattan");
+        options.put("fields.embedding.pk-vector.distance.metric", "manhattan");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining("pk-vector.distance.metric")
@@ -180,8 +227,8 @@ class PrimaryKeyVectorIndexValidationTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMN.key(), "embedding");
-        options.put(CoreOptions.PK_VECTOR_INDEX_TYPE.key(), "ivf-pq");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         return options;
     }
 

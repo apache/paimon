@@ -1224,28 +1224,10 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Minimum live rows required before a bucket vector segment is built as ANN.</td>
         </tr>
         <tr>
-            <td><h5>pk-vector.distance.metric</h5></td>
-            <td style="word-wrap: break-word;">"inner_product"</td>
-            <td>String</td>
-            <td>Distance metric persisted by the primary-key vector index. Supported values are l2, cosine, and inner_product.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.index.column</h5></td>
+            <td><h5>pk-vector.index.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>VECTOR column indexed by the primary-key vector index.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.index.options</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Algorithm-specific options as a JSON object. Unqualified keys are scoped to pk-vector.index.type; fully qualified index or fields.&lt;column&gt; keys are preserved.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.index.type</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Vector index algorithm identifier, for example 'ivf-pq'. The implementation validates it through the vector-index SPI.</td>
+            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. Operational defaults can be overridden through fields.&lt;column&gt;.pk-vector.* options. The first release supports exactly one column.</td>
         </tr>
         <tr>
             <td><h5>pk-vector.l0.max-rows</h5></td>
