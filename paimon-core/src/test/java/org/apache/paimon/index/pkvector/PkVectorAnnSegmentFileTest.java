@@ -42,6 +42,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.ANN;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,9 +70,11 @@ class PkVectorAnnSegmentFileTest {
         try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
             segment =
                     new PkVectorAnnSegmentFile(fileIO, pathFactory)
-                            .buildSingleSource(
-                                    dataFile("data-1"),
-                                    rawReader,
+                            .build(
+                                    Collections.singletonList(
+                                            new PkVectorAnnSegmentFile.Source(
+                                                    dataFile("data-1"), rawReader)),
+                                    ROW_POSITION,
                                     vectorField,
                                     options,
                                     "definition",
@@ -79,8 +82,7 @@ class PkVectorAnnSegmentFileTest {
                                     "l2",
                                     "test-vector-ann",
                                     new byte[] {1, 2},
-                                    42,
-                                    position -> false);
+                                    42);
         }
 
         assertThat(segment.indexType()).isEqualTo(PkVectorAnnSegmentFile.PK_VECTOR_ANN);
@@ -116,9 +118,13 @@ class PkVectorAnnSegmentFileTest {
         try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
             segment =
                     new PkVectorAnnSegmentFile(fileIO, pathFactory)
-                            .buildSingleSource(
-                                    dataFile("data-1", 3),
-                                    rawReader,
+                            .build(
+                                    Collections.singletonList(
+                                            new PkVectorAnnSegmentFile.Source(
+                                                    dataFile("data-1", 3),
+                                                    rawReader,
+                                                    position -> position == 0)),
+                                    ROW_POSITION,
                                     vectorField,
                                     options,
                                     "definition",
@@ -126,8 +132,7 @@ class PkVectorAnnSegmentFileTest {
                                     "l2",
                                     "test-vector-ann",
                                     new byte[] {1, 2},
-                                    42,
-                                    position -> position == 0);
+                                    42);
         }
 
         PkVectorSegmentMeta metadata =
@@ -154,9 +159,11 @@ class PkVectorAnnSegmentFileTest {
         IndexFileMeta segment;
         try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
             segment =
-                    annFile.buildSingleSource(
-                            dataFile("data-1", 3),
-                            rawReader,
+                    annFile.build(
+                            Collections.singletonList(
+                                    new PkVectorAnnSegmentFile.Source(
+                                            dataFile("data-1", 3), rawReader)),
+                            ROW_POSITION,
                             vectorField,
                             options,
                             "definition",
@@ -164,8 +171,7 @@ class PkVectorAnnSegmentFileTest {
                             "l2",
                             "test-vector-ann",
                             new byte[] {1, 2},
-                            42,
-                            position -> false);
+                            42);
         }
         PkVectorSegmentMeta metadata =
                 PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
@@ -217,10 +223,11 @@ class PkVectorAnnSegmentFileTest {
         try (RawVectorSidecarReader raw1 = new RawVectorSidecarReader(fileIO, raw1Path);
                 RawVectorSidecarReader raw2 = new RawVectorSidecarReader(fileIO, raw2Path)) {
             segment =
-                    annFile.buildMultiSource(
+                    annFile.build(
                             Arrays.asList(
                                     new PkVectorAnnSegmentFile.Source(dataFile("data-1"), raw1),
                                     new PkVectorAnnSegmentFile.Source(dataFile("data-2"), raw2)),
+                            FILE_POSITION,
                             vectorField,
                             options,
                             "definition",

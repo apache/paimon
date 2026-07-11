@@ -41,15 +41,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.LongPredicate;
 
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.ANN;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -62,84 +59,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         super(fileIO, pathFactory);
     }
 
-    public IndexFileMeta buildSingleSource(
-            DataFileMeta sourceFile,
-            RawVectorSidecarReader rawVectors,
-            DataField vectorField,
-            Options indexOptions,
-            String indexDefinitionId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
-            byte[] optionsHash,
-            long buildSnapshotId,
-            LongPredicate excludedPosition)
-            throws IOException {
-        return build(
-                Collections.singletonList(new Source(sourceFile, rawVectors, excludedPosition)),
-                ROW_POSITION,
-                vectorField,
-                indexOptions,
-                indexDefinitionId,
-                vectorTypeFingerprint,
-                metric,
-                algorithm,
-                optionsHash,
-                buildSnapshotId);
-    }
-
-    public IndexFileMeta buildMultiSource(
-            List<Source> sources,
-            DataField vectorField,
-            Options indexOptions,
-            String indexDefinitionId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
-            byte[] optionsHash,
-            long buildSnapshotId)
-            throws IOException {
-        checkArgument(
-                sources.size() > 1,
-                "A multi-source ANN segment must reference at least two source files.");
-        return build(
-                sources,
-                FILE_POSITION,
-                vectorField,
-                indexOptions,
-                indexDefinitionId,
-                vectorTypeFingerprint,
-                metric,
-                algorithm,
-                optionsHash,
-                buildSnapshotId);
-    }
-
-    IndexFileMeta buildSources(
-            List<Source> sources,
-            DataField vectorField,
-            Options indexOptions,
-            String indexDefinitionId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
-            byte[] optionsHash,
-            long buildSnapshotId)
-            throws IOException {
-        return build(
-                sources,
-                sources.size() == 1 ? ROW_POSITION : FILE_POSITION,
-                vectorField,
-                indexOptions,
-                indexDefinitionId,
-                vectorTypeFingerprint,
-                metric,
-                algorithm,
-                optionsHash,
-                buildSnapshotId);
-    }
-
-    private IndexFileMeta build(
+    public IndexFileMeta build(
             List<Source> sources,
             PkVectorSegmentMeta.OrdinalLayout ordinalLayout,
             DataField vectorField,
