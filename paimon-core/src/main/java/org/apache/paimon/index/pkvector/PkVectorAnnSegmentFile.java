@@ -60,7 +60,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
 
     public IndexFileMeta build(
             List<Source> sources,
-            PkVectorSegmentMeta.OrdinalLayout ordinalLayout,
+            PkVectorAnnSegmentMeta.OrdinalLayout ordinalLayout,
             DataField vectorField,
             Options indexOptions,
             String indexDefinitionId,
@@ -69,7 +69,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             throws IOException {
         checkArgument(!sources.isEmpty(), "An ANN segment must reference source files.");
         long totalRowCount = 0;
-        List<PkVectorSegmentMeta.SourceFile> sourceFiles = new ArrayList<>(sources.size());
+        List<PkVectorSourceFile> sourceFiles = new ArrayList<>(sources.size());
         for (Source source : sources) {
             totalRowCount = Math.addExact(totalRowCount, source.sourceFile.rowCount());
             sourceFiles.add(source.sourceFile);
@@ -151,8 +151,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             ResultEntry result = results.get(0);
             Path payloadPath = fileWriter.path(result.fileName());
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
-            PkVectorSegmentMeta metadata =
-                    new PkVectorSegmentMeta(
+            PkVectorAnnSegmentMeta metadata =
+                    new PkVectorAnnSegmentMeta(
                             indexDefinitionId, sourceFiles, ordinalLayout, payloadMetadata);
             IndexFileMeta segment =
                     new IndexFileMeta(
@@ -175,8 +175,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
     }
 
-    private static PkVectorSegmentMeta.SourceFile sourceMetadata(DataFileMeta sourceFile) {
-        return new PkVectorSegmentMeta.SourceFile(sourceFile.fileName(), sourceFile.rowCount());
+    private static PkVectorSourceFile sourceMetadata(DataFileMeta sourceFile) {
+        return new PkVectorSourceFile(sourceFile.fileName(), sourceFile.rowCount());
     }
 
     private static String normalizeMetric(String metric) {
@@ -215,7 +215,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
     /** One raw vector source used while building an ANN segment. */
     public static class Source {
 
-        private final PkVectorSegmentMeta.SourceFile sourceFile;
+        private final PkVectorSourceFile sourceFile;
         @Nullable private final RawVectorSidecarReader rawVectors;
         @Nullable private final ReaderFactory readerFactory;
         private final LongPredicate excludedPosition;
@@ -232,7 +232,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
 
         Source(
-                PkVectorSegmentMeta.SourceFile sourceFile,
+                PkVectorSourceFile sourceFile,
                 RawVectorSidecarReader rawVectors,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
@@ -242,7 +242,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
 
         private Source(
-                PkVectorSegmentMeta.SourceFile sourceFile,
+                PkVectorSourceFile sourceFile,
                 ReaderFactory readerFactory,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
@@ -251,7 +251,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             this.excludedPosition = excludedPosition;
         }
 
-        static Source lazy(PkVectorSegmentMeta.SourceFile sourceFile, ReaderFactory readerFactory) {
+        static Source lazy(PkVectorSourceFile sourceFile, ReaderFactory readerFactory) {
             return new Source(sourceFile, readerFactory, position -> false);
         }
 

@@ -45,8 +45,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
+import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION;
+import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Searches one ANN payload and maps its segment-local ids back to source row positions. */
@@ -84,7 +84,7 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<Candidate> search(
             IndexFileMeta segment,
-            PkVectorSegmentMeta metadata,
+            PkVectorAnnSegmentMeta metadata,
             float[] query,
             int limit,
             @Nullable DeletionVector deletionVector,
@@ -101,7 +101,7 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<Candidate> search(
             IndexFileMeta segment,
-            PkVectorSegmentMeta metadata,
+            PkVectorAnnSegmentMeta metadata,
             float[] query,
             int limit,
             Map<String, DeletionVector> deletionVectors,
@@ -188,15 +188,14 @@ public class PkVectorAnnSegmentSearcher {
 
     @Nullable
     private static RoaringNavigableMap64 liveRowPositions(
-            List<PkVectorSegmentMeta.SourceFile> sourceFiles,
-            Map<String, DeletionVector> deletionVectors) {
+            List<PkVectorSourceFile> sourceFiles, Map<String, DeletionVector> deletionVectors) {
         if (deletionVectors.isEmpty()) {
             return null;
         }
         RoaringNavigableMap64 live = new RoaringNavigableMap64();
         RoaringNavigableMap64 deleted = new RoaringNavigableMap64();
         long fileOffset = 0;
-        for (PkVectorSegmentMeta.SourceFile sourceFile : sourceFiles) {
+        for (PkVectorSourceFile sourceFile : sourceFiles) {
             if (sourceFile.rowCount() > 0) {
                 live.addRange(new Range(fileOffset, fileOffset + sourceFile.rowCount() - 1));
             }
@@ -211,18 +210,17 @@ public class PkVectorAnnSegmentSearcher {
         return live;
     }
 
-    private static long totalRowCount(List<PkVectorSegmentMeta.SourceFile> sourceFiles) {
+    private static long totalRowCount(List<PkVectorSourceFile> sourceFiles) {
         long total = 0;
-        for (PkVectorSegmentMeta.SourceFile sourceFile : sourceFiles) {
+        for (PkVectorSourceFile sourceFile : sourceFiles) {
             total = Math.addExact(total, sourceFile.rowCount());
         }
         return total;
     }
 
-    private static FilePosition filePosition(
-            List<PkVectorSegmentMeta.SourceFile> sourceFiles, long ordinal) {
+    private static FilePosition filePosition(List<PkVectorSourceFile> sourceFiles, long ordinal) {
         long fileOffset = 0;
-        for (PkVectorSegmentMeta.SourceFile sourceFile : sourceFiles) {
+        for (PkVectorSourceFile sourceFile : sourceFiles) {
             long nextOffset = fileOffset + sourceFile.rowCount();
             if (ordinal < nextOffset) {
                 return new FilePosition(sourceFile.fileName(), ordinal - fileOffset);

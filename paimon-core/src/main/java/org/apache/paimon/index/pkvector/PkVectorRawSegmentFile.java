@@ -34,12 +34,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Collections;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -126,14 +124,10 @@ public class PkVectorRawSegmentFile extends IndexFile {
                     sourceFile.fileName(),
                     sourceFile.rowCount());
 
-            PkVectorSegmentMeta metadata =
-                    new PkVectorSegmentMeta(
+            PkVectorRawSegmentMeta metadata =
+                    new PkVectorRawSegmentMeta(
                             indexDefinitionId,
-                            Collections.singletonList(
-                                    new PkVectorSegmentMeta.SourceFile(
-                                            sourceFile.fileName(), sourceFile.rowCount())),
-                            ROW_POSITION,
-                            new byte[0]);
+                            new PkVectorSourceFile(sourceFile.fileName(), sourceFile.rowCount()));
             Path path = rawWriter.path();
             IndexFileMeta segment =
                     new IndexFileMeta(

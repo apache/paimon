@@ -42,8 +42,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
+import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION;
+import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests ANN payload construction through the vector GlobalIndexer SPI. */
@@ -84,8 +84,8 @@ class PkVectorAnnSegmentFileTest {
         assertThat(segment.indexType()).isEqualTo(PkVectorAnnSegmentFile.PK_VECTOR_ANN);
         assertThat(segment.rowCount()).isEqualTo(2);
         assertThat(fileIO.exists(pathFactory.toPath(segment))).isTrue();
-        PkVectorSegmentMeta metadata =
-                PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        PkVectorAnnSegmentMeta metadata =
+                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         assertThat(metadata.ordinalLayout()).isEqualTo(ROW_POSITION);
         assertThat(metadata.sourceFiles()).hasSize(1);
         assertThat(metadata.sourceFiles().get(0).fileName()).isEqualTo("data-1");
@@ -125,8 +125,8 @@ class PkVectorAnnSegmentFileTest {
                                     "test-vector-ann");
         }
 
-        PkVectorSegmentMeta metadata =
-                PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        PkVectorAnnSegmentMeta metadata =
+                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         assertThat(segment.rowCount()).isEqualTo(1);
     }
 
@@ -159,8 +159,8 @@ class PkVectorAnnSegmentFileTest {
                             "l2",
                             "test-vector-ann");
         }
-        PkVectorSegmentMeta metadata =
-                PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        PkVectorAnnSegmentMeta metadata =
+                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         ExecutorService executor = Executors.newSingleThreadExecutor();
         BitmapDeletionVector deletionVector = new BitmapDeletionVector();
         deletionVector.delete(0);
@@ -228,12 +228,12 @@ class PkVectorAnnSegmentFileTest {
                             "test-vector-ann");
         }
 
-        PkVectorSegmentMeta metadata =
-                PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        PkVectorAnnSegmentMeta metadata =
+                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         assertThat(metadata.ordinalLayout())
-                .isEqualTo(PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION);
+                .isEqualTo(PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION);
         assertThat(metadata.sourceFiles())
-                .extracting(PkVectorSegmentMeta.SourceFile::fileName)
+                .extracting(PkVectorSourceFile::fileName)
                 .containsExactly("data-1", "data-2");
 
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
