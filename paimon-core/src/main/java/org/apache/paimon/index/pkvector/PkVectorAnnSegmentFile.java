@@ -70,6 +70,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             totalRowCount = Math.addExact(totalRowCount, source.sourceFile.rowCount());
             sourceFiles.add(source.sourceFile);
         }
+        checkArgument(totalRowCount > 0, "An ANN segment must reference at least one source row.");
 
         GlobalIndexer indexer = GlobalIndexer.create(indexType, vectorField, indexOptions);
         checkArgument(
@@ -154,7 +155,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                             liveRowCount,
                             new GlobalIndexMeta(
                                     0,
-                                    totalRowCount,
+                                    totalRowCount - 1,
                                     vectorField.id(),
                                     null,
                                     payloadMetadata,

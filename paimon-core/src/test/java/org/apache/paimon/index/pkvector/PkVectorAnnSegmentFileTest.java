@@ -44,6 +44,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests ANN construction from generic vector readers. */
 class PkVectorAnnSegmentFileTest {
@@ -92,6 +93,8 @@ class PkVectorAnnSegmentFileTest {
                         indexOptions(),
                         "l2",
                         "test-vector-ann");
+        assertThat(segment.globalIndexMeta().rowRangeStart()).isZero();
+        assertThat(segment.globalIndexMeta().rowRangeEnd()).isEqualTo(3);
         PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(segment);
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
         data2Deletes.delete(0);
@@ -124,6 +127,26 @@ class PkVectorAnnSegmentFileTest {
                         org.assertj.core.groups.Tuple.tuple("data-2", 1L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 0L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 1L));
+    }
+
+    @Test
+    void testRejectsSourcesWithoutRows() {
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        assertThatThrownBy(
+                        () ->
+                                annFile(fileIO)
+                                        .build(
+                                                Collections.singletonList(
+                                                        new PkVectorAnnSegmentFile.Source(
+                                                                dataFile("empty", 0),
+                                                                new ArrayReader(new float[0][]))),
+                                                vectorField(),
+                                                indexOptions(),
+                                                "l2",
+                                                "test-vector-ann"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one source row");
     }
 
     private PkVectorAnnSegmentFile annFile(LocalFileIO fileIO) {
