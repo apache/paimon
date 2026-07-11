@@ -26,6 +26,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.pkvector.PrimaryKeyVectorIndexOptions;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -168,6 +169,66 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @Test
+    public void testRenamePrimaryKeyVectorIndexColumnOptions() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+        options.put("fields.embedding.pk-vector.distance.metric", "cosine");
+        options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":64,\"pq.m\":8}");
+        options.put("fields.embedding.pk-vector.ann.min-rows", "20000");
+        options.put("fields.embedding.ivf-pq.nprobe", "16");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(
+                                        1, "embedding", DataTypes.VECTOR(8, DataTypes.FLOAT()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        TableSchema before = manager.createTable(schema);
+        DataField beforeVector = before.fields().get(1);
+        String beforeDefinitionId =
+                PrimaryKeyVectorIndexOptions.definitionId(
+                        beforeVector.id(),
+                        beforeVector.type().asSQLString(),
+                        new CoreOptions(before.options()),
+                        beforeVector.name());
+
+        manager.commitChanges(
+                SchemaChange.renameColumn(new String[] {"embedding"}, "renamed_embedding"));
+
+        TableSchema after = manager.latest().get();
+        assertThat(after.options())
+                .containsEntry(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "renamed_embedding")
+                .containsEntry("fields.renamed_embedding.pk-vector.index.type", "ivf-pq")
+                .containsEntry("fields.renamed_embedding.pk-vector.distance.metric", "cosine")
+                .containsEntry(
+                        "fields.renamed_embedding.pk-vector.index.options",
+                        "{\"nlist\":64,\"pq.m\":8}")
+                .containsEntry("fields.renamed_embedding.pk-vector.ann.min-rows", "20000")
+                .containsEntry("fields.renamed_embedding.ivf-pq.nprobe", "16")
+                .doesNotContainKeys(
+                        "fields.embedding.pk-vector.index.type",
+                        "fields.embedding.pk-vector.distance.metric",
+                        "fields.embedding.pk-vector.index.options",
+                        "fields.embedding.pk-vector.ann.min-rows",
+                        "fields.embedding.ivf-pq.nprobe");
+        DataField afterVector = after.fields().get(1);
+        assertThat(
+                        PrimaryKeyVectorIndexOptions.definitionId(
+                                afterVector.id(),
+                                afterVector.type().asSQLString(),
+                                new CoreOptions(after.options()),
+                                afterVector.name()))
+                .isEqualTo(beforeDefinitionId);
     }
 
     @Test
