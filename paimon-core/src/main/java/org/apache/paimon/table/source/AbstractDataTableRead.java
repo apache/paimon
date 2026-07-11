@@ -18,10 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.predicate.Transform;
@@ -34,15 +34,13 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-
-import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
@@ -52,8 +50,23 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     private Predicate predicate;
     private final TableSchema schema;
 
-    public AbstractDataTableRead(TableSchema schema) {
+    // The read type the subclass reads with; differs from readType only when widened for
+    // auth, and is fixed once a reader exists (split reads cache their format readers).
+    @Nullable private RowType appliedReadType;
+
+    // blob-view columns that only resolve through the dedicated blob-view read path
+    private final Set<String> resolvedBlobViewFields;
+
+    public AbstractDataTableRead(@Nullable TableSchema schema) {
         this.schema = schema;
+        Set<String> blobViewFields = Collections.emptySet();
+        if (schema != null) {
+            CoreOptions options = CoreOptions.fromMap(schema.options());
+            if (options.blobViewResolveEnabled()) {
+                blobViewFields = options.blobViewField();
+            }
+        }
+        this.resolvedBlobViewFields = blobViewFields;
     }
 
     public abstract void applyReadType(RowType readType);
@@ -90,6 +103,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withReadType(RowType readType) {
         this.readType = readType;
+        this.appliedReadType = readType;
         applyReadType(readType);
         return this;
     }
@@ -123,16 +137,15 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        // A TableRead can be reused for multiple splits. Authentication may have expanded an
-        // explicitly configured physical projection for the previous split, so restore it before
-        // applying the current split's authorization dependencies. Without an explicit projection,
-        // the underlying reader must retain its own default read type.
+        // a TableRead is reused across splits; auth may have widened the projection for the
+        // previous one, so restore the requested type before deciding this split's widening
         if (readType != null) {
             applyReadType(readType);
+            appliedReadType = null;
         }
         RecordReader<InternalRow> reader;
         if (authResult == null) {
-            reader = reader(split);
+            reader = backProject(readSplit(split));
         } else {
             reader = authedReader(split, authResult);
         }
@@ -143,52 +156,113 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return reader;
     }
 
+    private RecordReader<InternalRow> readSplit(Split split) throws IOException {
+        return reader(split);
+    }
+
     private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
             throws IOException {
-        RecordReader<InternalRow> reader;
+        List<String> readFields = currentReadType().getFieldNames();
+        Set<String> ruleFields = authResult.requiredAuthFields(readFields);
+        RowType widened = widenedReadType(authResult, ruleFields);
+        if (widened != null && !widened.equals(appliedReadType)) {
+            applyReadType(widened);
+            appliedReadType = widened;
+        }
+        // the split read emits appliedReadType; rules are remapped against it by name
+        RowType outputType = appliedReadType != null ? appliedReadType : currentReadType();
+        if (widened != null && !widened.equals(outputType)) {
+            // rules changed after the read schema was fixed: fail clearly if they no longer fit
+            List<String> outputFields = outputType.getFieldNames();
+            for (String field : widened.getFieldNames()) {
+                if (!outputFields.contains(field)) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "Query auth rules changed and now require column '%s', but the "
+                                            + "read schema is already fixed to %s. Recreate the "
+                                            + "reader to apply the new rules.",
+                                    field, outputFields));
+                }
+            }
+        }
+        // masks apply only to columns readable from the query: the ones it projects plus the
+        // ones the rules pulled in; a mask on anything else is inert
+        Map<String, Transform> masking = authResult.extractColumnMasking();
+        Map<String, Transform> selectedMasking = Collections.emptyMap();
+        if (!masking.isEmpty()) {
+            Set<String> activeFields = new HashSet<>(readFields);
+            activeFields.addAll(ruleFields);
+            selectedMasking = new HashMap<>();
+            for (Map.Entry<String, Transform> mask : masking.entrySet()) {
+                if (activeFields.contains(mask.getKey())) {
+                    selectedMasking.put(mask.getKey(), mask.getValue());
+                }
+            }
+        }
+        RecordReader<InternalRow> reader =
+                authResult.doAuth(
+                        readSplit(split),
+                        outputType,
+                        authResult.extractPredicate(),
+                        selectedMasking);
+        return backProject(reader);
+    }
+
+    /**
+     * Project auth-widened rows back to the query's read type — on every split, since the widened
+     * read schema stays in effect even for splits without auth rules.
+     */
+    private RecordReader<InternalRow> backProject(RecordReader<InternalRow> reader) {
+        if (appliedReadType == null || appliedReadType == readType) {
+            return reader;
+        }
+        ProjectedRow backRow =
+                ProjectedRow.from(
+                        appliedReadType.projectIndexes(currentReadType().getFieldNames()));
+        return reader.transform(backRow::replaceRow);
+    }
+
+    /**
+     * The read type widened with the unprojected columns the auth rules read (mirrors the
+     * row-filter augmentation of #8447), or null when the projection already covers them. The
+     * projected fields are kept as-is to preserve nested pruning.
+     */
+    @Nullable
+    private RowType widenedReadType(TableQueryAuthResult authResult, Set<String> ruleFields) {
         RowType tableType = schema.logicalRowType();
-        RowType readType = this.readType == null ? tableType : this.readType;
-        Predicate authPredicate = authResult.extractPredicate();
-        Map<String, Transform> columnMasking = authResult.extractColumnMasking();
-        ProjectedRow backRow = null;
-        List<String> readFields = readType.getFieldNames();
-        Set<String> readFieldSet = new HashSet<>(readFields);
-        Map<String, Transform> selectedColumnMasking = new HashMap<>();
-        for (Map.Entry<String, Transform> mask : columnMasking.entrySet()) {
-            if (readFieldSet.contains(mask.getKey())) {
-                selectedColumnMasking.put(mask.getKey(), mask.getValue());
+        RowType readType = currentReadType();
+        Set<String> maskTargets = authResult.extractColumnMasking().keySet();
+        for (String name : readType.getFieldNames()) {
+            if (!ruleFields.contains(name) && !maskTargets.contains(name)) {
+                continue;
+            }
+            if (!tableType.containsField(name)) {
+                continue;
+            }
+            // rules must not touch a nested-pruned column (partial value)
+            DataField tableField = tableType.getField(name);
+            if (!readType.getField(name).type().equals(tableField.type())) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Query auth rules involve column '%s', which the query "
+                                        + "projects with a pruned type %s instead of its "
+                                        + "table type %s; cannot apply the rules to a "
+                                        + "partial column.",
+                                name, readType.getField(name).type(), tableField.type()));
             }
         }
-        Set<String> authFields = new HashSet<>();
-        if (authPredicate != null) {
-            authFields.addAll(collectFieldNames(authPredicate));
-        }
-        for (Map.Entry<String, Transform> mask : selectedColumnMasking.entrySet()) {
-            authFields.add(mask.getKey());
-            for (Object input : mask.getValue().inputs()) {
-                if (input instanceof FieldRef) {
-                    authFields.add(((FieldRef) input).name());
-                }
+        for (String name : ruleFields) {
+            if (resolvedBlobViewFields.contains(name) && !readType.containsField(name)) {
+                // auth-added columns bypass blob-view resolution
+                throw new IllegalStateException(
+                        String.format(
+                                "Query auth rules read blob-view column '%s', which the query "
+                                        + "does not project; such columns cannot be resolved. "
+                                        + "Project the column or adjust the rule.",
+                                name));
             }
         }
-        if (!authFields.isEmpty()) {
-            List<DataField> expandedFields = new ArrayList<>(readType.getFields());
-            for (DataField field : tableType.getFields()) {
-                if (authFields.contains(field.name()) && !readFieldSet.contains(field.name())) {
-                    expandedFields.add(field);
-                }
-            }
-            if (expandedFields.size() > readType.getFieldCount()) {
-                readType = readType.copy(expandedFields);
-                applyReadType(readType);
-                backRow = ProjectedRow.from(readType.projectIndexes(readFields));
-            }
-        }
-        reader = authResult.doAuth(reader(split), readType, authPredicate, selectedColumnMasking);
-        if (backRow != null) {
-            reader = reader.transform(backRow::replaceRow);
-        }
-        return reader;
+        return TableQueryAuthResult.appendMissingFields(tableType, readType, ruleFields);
     }
 
     private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {

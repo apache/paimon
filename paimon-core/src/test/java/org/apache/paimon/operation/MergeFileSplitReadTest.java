@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
@@ -44,6 +45,8 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.splitread.IncrementalDiffSplitRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -324,6 +327,58 @@ public class MergeFileSplitReadTest {
     }
 
     @Test
+    public void testRepeatedReadTypeResetsOuterProjection() throws Exception {
+        // a second withReadType that needs no adjustment must clear the outer projection
+        TestKeyValueGenerator gen = new TestKeyValueGenerator();
+        List<KeyValue> data = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            data.add(gen.next());
+        }
+        TestFileStore store =
+                createStore(
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory(),
+                        Collections.singletonMap(CoreOptions.SEQUENCE_FIELD.key(), "orderId"));
+        store.commitData(data, gen::getPartition, kv -> 0);
+
+        FileStoreScan scan = store.newScan();
+        Long snapshotId = store.snapshotManager().latestSnapshotId();
+        Map<BinaryRow, List<ManifestEntry>> filesGroupedByPartition =
+                scan.withSnapshot(snapshotId).plan().files().stream()
+                        .collect(Collectors.groupingBy(ManifestEntry::partition));
+
+        MergeFileSplitRead read = store.newRead();
+        // adjusted internally to include the sequence field: outer projection set
+        read.withReadType(TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr"));
+        // contains the sequence field, no adjustment: previous outer projection cleared
+        read.withReadType(
+                TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr", "orderId"));
+
+        for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : filesGroupedByPartition.entrySet()) {
+            RecordReader<KeyValue> reader =
+                    read.createReader(
+                            DataSplit.builder()
+                                    .withSnapshot(snapshotId)
+                                    .withPartition(entry.getKey())
+                                    .withBucket(0)
+                                    .withDataFiles(
+                                            entry.getValue().stream()
+                                                    .map(ManifestEntry::file)
+                                                    .collect(Collectors.toList()))
+                                    .withBucketPath("not used")
+                                    .build());
+            RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader);
+            while (iterator.hasNext()) {
+                assertThat(iterator.next().value().getFieldCount()).isEqualTo(4);
+            }
+            iterator.close();
+        }
+    }
+
+    @Test
     public void testPostponeReader() throws Exception {
         RowType keyType =
                 RowType.of(
@@ -391,6 +446,70 @@ public class MergeFileSplitReadTest {
         return new KeyValue().replace(GenericRow.of(key), sequenceNumber, kind, row);
     }
 
+    @Test
+    public void testIncrementalDiffReadOnProjectedMergeRead() throws Exception {
+        // the diff read projects the merge read's output; when the shared merge read
+        // is itself projected, the projection base must be its actual output type
+        TestKeyValueGenerator gen = new TestKeyValueGenerator();
+        List<KeyValue> before = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            before.add(gen.next());
+        }
+        List<KeyValue> after = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            after.add(gen.next());
+        }
+        TestFileStore store =
+                createStore(
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory());
+        store.commitData(before, gen::getPartition, kv -> 0);
+        store.commitData(after, gen::getPartition, kv -> 0);
+
+        FileStoreScan scan = store.newScan();
+        Long snapshotId = store.snapshotManager().latestSnapshotId();
+        Map<BinaryRow, List<ManifestEntry>> filesByPartition =
+                scan.withSnapshot(snapshotId).plan().files().stream()
+                        .collect(Collectors.groupingBy(ManifestEntry::partition));
+
+        MergeFileSplitRead mergeRead = store.newRead();
+        // out-of-table-order projection, pushed into the shared merge read
+        RowType projection = TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr");
+        mergeRead.withReadType(projection);
+        SplitRead<InternalRow> diffRead = new IncrementalDiffSplitRead(mergeRead);
+        diffRead.withReadType(projection);
+
+        for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : filesByPartition.entrySet()) {
+            List<DataFileMeta> files =
+                    entry.getValue().stream().map(ManifestEntry::file).collect(Collectors.toList());
+            IncrementalSplit split =
+                    new IncrementalSplit(
+                            snapshotId,
+                            entry.getKey(),
+                            0,
+                            1,
+                            Collections.emptyList(),
+                            null,
+                            files,
+                            null,
+                            false);
+            RecordReaderIterator<InternalRow> iterator =
+                    new RecordReaderIterator<>(diffRead.createReader(split));
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                assertThat(row.getFieldCount()).isEqualTo(3);
+                // shopId INT, dt STRING(len 8), hr INT: misprojection would misplace types
+                assertThat(row.getString(1).toString()).hasSize(8);
+                row.getInt(0);
+                row.getInt(2);
+            }
+            iterator.close();
+        }
+    }
+
     private List<KeyValue> writeThenRead(
             List<KeyValue> data,
             RowType readKeyType,
@@ -446,7 +565,8 @@ public class MergeFileSplitReadTest {
             KeyValueFieldsExtractor extractor,
             MergeFunctionFactory<KeyValue> mfFactory)
             throws Exception {
-        return createStore(1, partitionType, keyType, valueType, extractor, mfFactory);
+        return createStore(
+                1, partitionType, keyType, valueType, extractor, mfFactory, Collections.emptyMap());
     }
 
     private TestFileStore createStore(
@@ -456,6 +576,36 @@ public class MergeFileSplitReadTest {
             RowType valueType,
             KeyValueFieldsExtractor extractor,
             MergeFunctionFactory<KeyValue> mfFactory)
+            throws Exception {
+        return createStore(
+                numBuckets,
+                partitionType,
+                keyType,
+                valueType,
+                extractor,
+                mfFactory,
+                Collections.emptyMap());
+    }
+
+    private TestFileStore createStore(
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            KeyValueFieldsExtractor extractor,
+            MergeFunctionFactory<KeyValue> mfFactory,
+            Map<String, String> options)
+            throws Exception {
+        return createStore(1, partitionType, keyType, valueType, extractor, mfFactory, options);
+    }
+
+    private TestFileStore createStore(
+            int numBuckets,
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            KeyValueFieldsExtractor extractor,
+            MergeFunctionFactory<KeyValue> mfFactory,
+            Map<String, String> options)
             throws Exception {
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
@@ -476,7 +626,7 @@ public class MergeFileSplitReadTest {
                                                                                 "")),
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
-                        Collections.emptyMap(),
+                        options,
                         null);
         TableSchema tableSchema = schemaManager.createTable(schema);
         return new TestFileStore.Builder(
