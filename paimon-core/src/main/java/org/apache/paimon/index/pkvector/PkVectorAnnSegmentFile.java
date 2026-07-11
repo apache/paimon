@@ -62,9 +62,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             List<Source> sources,
             DataField vectorField,
             Options indexOptions,
-            String indexDefinitionId,
             String metric,
-            String algorithm)
+            String indexType)
             throws IOException {
         checkArgument(!sources.isEmpty(), "An ANN segment must reference source files.");
         long totalRowCount = 0;
@@ -74,11 +73,11 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             sourceFiles.add(source.sourceFile);
         }
 
-        GlobalIndexer indexer = GlobalIndexer.create(algorithm, vectorField, indexOptions);
+        GlobalIndexer indexer = GlobalIndexer.create(indexType, vectorField, indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
-                algorithm);
+                indexType);
         String indexerMetric = normalizeMetric(((VectorGlobalIndexer) indexer).metric());
         checkArgument(
                 normalizeMetric(metric).equals(indexerMetric),
@@ -94,7 +93,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             checkArgument(
                     writer instanceof GlobalIndexSingleColumnWriter,
                     "Index algorithm %s does not create a single-column writer.",
-                    algorithm);
+                    indexType);
             GlobalIndexSingleColumnWriter singleColumnWriter =
                     (GlobalIndexSingleColumnWriter) writer;
             long liveRowCount = 0;
@@ -150,7 +149,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             Path payloadPath = fileWriter.path(result.fileName());
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
             PkVectorAnnSegmentMeta metadata =
-                    new PkVectorAnnSegmentMeta(indexDefinitionId, sourceFiles, payloadMetadata);
+                    new PkVectorAnnSegmentMeta(indexType, sourceFiles, payloadMetadata);
             IndexFileMeta segment =
                     new IndexFileMeta(
                             PK_VECTOR_ANN,

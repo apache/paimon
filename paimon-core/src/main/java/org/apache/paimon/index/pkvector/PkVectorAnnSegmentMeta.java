@@ -35,22 +35,20 @@ public final class PkVectorAnnSegmentMeta {
 
     private static final int VERSION = 1;
 
-    private final String indexDefinitionId;
+    private final String indexType;
     private final List<PkVectorSourceFile> sourceFiles;
     private final byte[] payloadMetadata;
 
     public PkVectorAnnSegmentMeta(
-            String indexDefinitionId,
-            List<PkVectorSourceFile> sourceFiles,
-            byte[] payloadMetadata) {
-        this.indexDefinitionId = Objects.requireNonNull(indexDefinitionId);
+            String indexType, List<PkVectorSourceFile> sourceFiles, byte[] payloadMetadata) {
+        this.indexType = Objects.requireNonNull(indexType);
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         this.payloadMetadata = Arrays.copyOf(payloadMetadata, payloadMetadata.length);
         checkArgument(!this.sourceFiles.isEmpty(), "An ANN segment must reference source files.");
     }
 
-    public String indexDefinitionId() {
-        return indexDefinitionId;
+    public String indexType() {
+        return indexType;
     }
 
     public List<PkVectorSourceFile> sourceFiles() {
@@ -65,7 +63,7 @@ public final class PkVectorAnnSegmentMeta {
         try {
             DataOutputSerializer output = new DataOutputSerializer(128);
             output.writeInt(VERSION);
-            output.writeUTF(indexDefinitionId);
+            output.writeUTF(indexType);
             output.writeInt(sourceFiles.size());
             for (PkVectorSourceFile sourceFile : sourceFiles) {
                 output.writeUTF(sourceFile.fileName());
@@ -85,7 +83,7 @@ public final class PkVectorAnnSegmentMeta {
             int version = input.readInt();
             checkArgument(
                     version == VERSION, "Unsupported ANN vector segment version: %s.", version);
-            String indexDefinitionId = input.readUTF();
+            String indexType = input.readUTF();
             int sourceFileCount = input.readInt();
             checkArgument(sourceFileCount > 0, "An ANN segment must reference source files.");
             List<PkVectorSourceFile> sourceFiles = new ArrayList<>(sourceFileCount);
@@ -100,7 +98,7 @@ public final class PkVectorAnnSegmentMeta {
             checkArgument(
                     input.available() == 0,
                     "Unexpected trailing bytes in ANN vector segment metadata.");
-            return new PkVectorAnnSegmentMeta(indexDefinitionId, sourceFiles, payloadMetadata);
+            return new PkVectorAnnSegmentMeta(indexType, sourceFiles, payloadMetadata);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to deserialize ANN vector segment metadata.", e);

@@ -59,7 +59,6 @@ public class PkVectorAnnSegmentSearcher {
     private final PkVectorAnnSegmentFile annSegmentFile;
     private final DataField vectorField;
     private final Options indexOptions;
-    private final String algorithm;
     private final String metric;
     private final ExecutorService executor;
 
@@ -68,14 +67,12 @@ public class PkVectorAnnSegmentSearcher {
             PkVectorAnnSegmentFile annSegmentFile,
             DataField vectorField,
             Options indexOptions,
-            String algorithm,
             String metric,
             ExecutorService executor) {
         this.fileIO = fileIO;
         this.annSegmentFile = annSegmentFile;
         this.vectorField = vectorField;
         this.indexOptions = indexOptions;
-        this.algorithm = algorithm;
         this.metric = normalizeMetric(metric);
         this.executor = executor;
     }
@@ -109,11 +106,12 @@ public class PkVectorAnnSegmentSearcher {
                 PkVectorAnnSegmentFile.PK_VECTOR_ANN.equals(segment.indexType()),
                 "Vector segment %s is not an ANN payload.",
                 segment.fileName());
-        GlobalIndexer indexer = GlobalIndexer.create(algorithm, vectorField, indexOptions);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(metadata.indexType(), vectorField, indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
-                algorithm);
+                metadata.indexType());
         String readerMetric = normalizeMetric(((VectorGlobalIndexer) indexer).metric());
         checkArgument(
                 metric.equals(readerMetric),

@@ -34,7 +34,7 @@ class PkVectorAnnSegmentMetaTest {
     void testRoundTrip() {
         PkVectorAnnSegmentMeta metadata =
                 new PkVectorAnnSegmentMeta(
-                        "index-definition",
+                        "test-vector-ann",
                         Arrays.asList(
                                 new PkVectorSourceFile("data-1", 100),
                                 new PkVectorSourceFile("data-2", 50)),
@@ -42,7 +42,7 @@ class PkVectorAnnSegmentMetaTest {
 
         PkVectorAnnSegmentMeta restored = PkVectorAnnSegmentMeta.deserialize(metadata.serialize());
 
-        assertThat(restored.indexDefinitionId()).isEqualTo("index-definition");
+        assertThat(restored.indexType()).isEqualTo("test-vector-ann");
         assertThat(restored.sourceFiles()).isEqualTo(metadata.sourceFiles());
         assertThat(restored.payloadMetadata()).containsExactly(1, 2, 3);
     }

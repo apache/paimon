@@ -64,7 +64,6 @@ class PkVectorAnnSegmentFileTest {
                                                 position -> position == 0)),
                                 vectorField(),
                                 indexOptions(),
-                                "definition",
                                 "l2",
                                 "test-vector-ann");
 
@@ -72,6 +71,7 @@ class PkVectorAnnSegmentFileTest {
         assertThat(segment.rowCount()).isEqualTo(1);
         PkVectorAnnSegmentMeta metadata =
                 PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        assertThat(metadata.indexType()).isEqualTo("test-vector-ann");
         assertThat(metadata.sourceFiles())
                 .extracting(PkVectorSourceFile::fileName)
                 .containsExactly("data-1");
@@ -92,11 +92,11 @@ class PkVectorAnnSegmentFileTest {
                                         new ArrayReader(new float[][] {{0, 0}, {2, 0}}))),
                         vectorField(),
                         indexOptions(),
-                        "definition",
                         "l2",
                         "test-vector-ann");
         PkVectorAnnSegmentMeta metadata =
                 PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
+        assertThat(metadata.indexType()).isEqualTo("test-vector-ann");
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
         data2Deletes.delete(0);
         Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
@@ -108,13 +108,7 @@ class PkVectorAnnSegmentFileTest {
         try {
             candidates =
                     new PkVectorAnnSegmentSearcher(
-                                    fileIO,
-                                    annFile,
-                                    vectorField(),
-                                    indexOptions(),
-                                    "test-vector-ann",
-                                    "l2",
-                                    executor)
+                                    fileIO, annFile, vectorField(), indexOptions(), "l2", executor)
                             .search(
                                     segment,
                                     metadata,

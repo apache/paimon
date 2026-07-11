@@ -21,11 +21,7 @@ package org.apache.paimon.index.pkvector;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +29,7 @@ import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Resolves and fingerprints algorithm options for the primary-key vector index. */
+/** Resolves algorithm options for the primary-key vector index. */
 public final class PrimaryKeyVectorIndexOptions {
 
     private PrimaryKeyVectorIndexOptions() {}
@@ -50,35 +46,6 @@ public final class PrimaryKeyVectorIndexOptions {
         return resolved;
     }
 
-    public static byte[] hash(CoreOptions coreOptions) {
-        return hash(coreOptions, singleColumn(coreOptions));
-    }
-
-    public static byte[] hash(CoreOptions coreOptions, String field) {
-        return sha256(JsonSerdeUtil.toJson(fingerprintOptions(coreOptions, field)));
-    }
-
-    public static String definitionId(
-            int vectorFieldId, String vectorTypeFingerprint, CoreOptions coreOptions) {
-        return definitionId(
-                vectorFieldId, vectorTypeFingerprint, coreOptions, singleColumn(coreOptions));
-    }
-
-    public static String definitionId(
-            int vectorFieldId,
-            String vectorTypeFingerprint,
-            CoreOptions coreOptions,
-            String field) {
-        checkArgument(
-                vectorTypeFingerprint != null && !vectorTypeFingerprint.trim().isEmpty(),
-                "Vector type fingerprint must not be empty.");
-        TreeMap<String, String> definition = new TreeMap<>();
-        definition.put("field-id", Integer.toString(vectorFieldId));
-        definition.put("field-type", vectorTypeFingerprint);
-        definition.putAll(fingerprintOptions(coreOptions, field));
-        return StringUtils.byteToHexString(sha256(JsonSerdeUtil.toJson(definition)));
-    }
-
     public static String singleColumn(CoreOptions coreOptions) {
         List<String> columns = coreOptions.primaryKeyVectorIndexColumns();
         checkArgument(
@@ -86,15 +53,6 @@ public final class PrimaryKeyVectorIndexOptions {
                 "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
                 columns);
         return columns.get(0);
-    }
-
-    private static byte[] sha256(String value) {
-        try {
-            return MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available.", e);
-        }
     }
 
     private static Map<String, String> algorithmOptions(CoreOptions coreOptions, String field) {
@@ -150,22 +108,5 @@ public final class PrimaryKeyVectorIndexOptions {
         }
         options.put(algorithmPrefix + "metric", coreOptions.primaryKeyVectorDistanceMetric(field));
         return options;
-    }
-
-    private static Map<String, String> fingerprintOptions(CoreOptions coreOptions, String field) {
-        String fieldPrefix = "fields." + field + ".";
-        TreeMap<String, String> fingerprint = new TreeMap<>();
-        Map<String, String> options = algorithmOptions(coreOptions, field);
-        for (Map.Entry<String, String> entry : options.entrySet()) {
-            if (!entry.getKey().startsWith(fieldPrefix)) {
-                fingerprint.put(entry.getKey(), entry.getValue());
-            }
-        }
-        for (Map.Entry<String, String> entry : options.entrySet()) {
-            if (entry.getKey().startsWith(fieldPrefix)) {
-                fingerprint.put(entry.getKey().substring(fieldPrefix.length()), entry.getValue());
-            }
-        }
-        return fingerprint;
     }
 }
