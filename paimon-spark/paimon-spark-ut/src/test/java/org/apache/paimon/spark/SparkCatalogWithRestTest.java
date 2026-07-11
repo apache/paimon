@@ -365,6 +365,41 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
+    public void testColumnMaskingCrossColumnWithProjection() {
+        spark.sql(
+                "CREATE TABLE t_cross_column_masking (first_name STRING, last_name STRING, display STRING, other_col STRING)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true', 'source.split.target-size'='1 b')");
+        // two commits so the scan yields multiple splits
+        spark.sql("INSERT INTO t_cross_column_masking VALUES ('john', 'doe', 'ignored', 'o1')");
+        spark.sql("INSERT INTO t_cross_column_masking VALUES ('jane', 'roe', 'ignored', 'o2')");
+
+        // the mask on "display" reads OTHER columns: concat_ws('-', first_name, last_name)
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "first_name", DataTypes.STRING()),
+                                new FieldRef(1, "last_name", DataTypes.STRING()))));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_cross_column_masking"), columnMasking);
+
+        // project only the masked target: its input columns must be read regardless
+        assertThat(
+                        spark.sql("SELECT display FROM t_cross_column_masking ORDER BY other_col")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[john-doe], [jane-roe]]");
+        // a projection without the masked column is unaffected
+        assertThat(
+                        spark.sql("SELECT other_col FROM t_cross_column_masking ORDER BY other_col")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[o1], [o2]]");
+    }
+
+    @Test
     public void testRowFilter() {
         spark.sql(
                 "CREATE TABLE t_row_filter (id INT, name STRING, age INT, department STRING) TBLPROPERTIES"
@@ -863,7 +898,8 @@ public class SparkCatalogWithRestTest {
                                 spark.sql(
                                                 "SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
                                         .collectAsList())
-                .hasMessageContaining("Unable to read data without column non_existent_column");
+                .hasMessageContaining(
+                        "Row filter references column 'non_existent_column' which does not exist");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(
