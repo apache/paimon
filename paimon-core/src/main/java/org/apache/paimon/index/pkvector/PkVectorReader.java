@@ -16,27 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io;
-
-import org.apache.paimon.data.InternalArray;
-
-import javax.annotation.Nullable;
+package org.apache.paimon.index.pkvector;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Optional;
 
-/** Synchronous vector sidecar owned by one key-value data-file writer. */
-public interface KeyValueVectorSidecarWriter extends Closeable {
+/** Sequential vectors in physical data-file row order. */
+public interface PkVectorReader extends Closeable {
 
-    void write(@Nullable InternalArray vector) throws IOException;
+    int dimension();
 
-    void complete(DataFileMeta sourceFile) throws IOException;
+    long rowCount();
 
-    void abort();
-
-    /** Lightweight cleanup retained by a rolling writer after this sidecar is completed. */
-    default Optional<FileWriterAbortExecutor> abortExecutor() {
-        return Optional.empty();
-    }
+    /** Reads the next physical row and returns whether it contains a non-null vector. */
+    boolean readNextVector(float[] reuse) throws IOException;
 }

@@ -102,35 +102,34 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             long fileOffset = 0;
             int dimension = -1;
             for (Source source : sources) {
-                RawVectorSidecarReader rawVectors = source.openReader();
+                PkVectorReader vectors = source.openReader();
                 try {
                     checkArgument(
-                            rawVectors.rowCount() == source.sourceFile.rowCount(),
-                            "Raw vector row count %s does not match source file %s row count %s.",
-                            rawVectors.rowCount(),
+                            vectors.rowCount() == source.sourceFile.rowCount(),
+                            "Vector row count %s does not match source file %s row count %s.",
+                            vectors.rowCount(),
                             source.sourceFile.fileName(),
                             source.sourceFile.rowCount());
                     if (dimension < 0) {
-                        dimension = rawVectors.dimension();
+                        dimension = vectors.dimension();
                     }
                     checkArgument(
-                            rawVectors.dimension() == dimension,
-                            "Raw vector source %s dimension %s does not match dimension %s.",
+                            vectors.dimension() == dimension,
+                            "Vector source %s dimension %s does not match dimension %s.",
                             source.sourceFile.fileName(),
-                            rawVectors.dimension(),
+                            vectors.dimension(),
                             dimension);
                     if (vectorField.type() instanceof VectorType) {
                         checkArgument(
                                 ((VectorType) vectorField.type()).getLength() == dimension,
-                                "Vector field dimension %s does not match raw vector dimension %s.",
+                                "Vector field dimension %s does not match source vector dimension %s.",
                                 ((VectorType) vectorField.type()).getLength(),
                                 dimension);
                     }
 
                     float[] vector = new float[dimension];
-                    rawVectors.rewind();
-                    for (long rowPosition = 0; rowPosition < rawVectors.rowCount(); rowPosition++) {
-                        boolean present = rawVectors.readNextVector(vector);
+                    for (long rowPosition = 0; rowPosition < vectors.rowCount(); rowPosition++) {
+                        boolean present = vectors.readNextVector(vector);
                         if (!present || source.excludedPosition.test(rowPosition)) {
                             continue;
                         }
@@ -138,7 +137,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                         liveRowCount++;
                     }
                 } finally {
-                    source.closeReader(rawVectors);
+                    source.closeReader(vectors);
                 }
                 fileOffset += source.sourceFile.rowCount();
             }
@@ -212,31 +211,29 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
     }
 
-    /** One raw vector source used while building an ANN segment. */
+    /** One vector source used while building an ANN segment. */
     public static class Source {
 
         private final PkVectorSourceFile sourceFile;
-        @Nullable private final RawVectorSidecarReader rawVectors;
+        @Nullable private final PkVectorReader vectors;
         @Nullable private final ReaderFactory readerFactory;
         private final LongPredicate excludedPosition;
 
-        public Source(DataFileMeta sourceFile, RawVectorSidecarReader rawVectors) {
-            this(sourceFile, rawVectors, position -> false);
+        public Source(DataFileMeta sourceFile, PkVectorReader vectors) {
+            this(sourceFile, vectors, position -> false);
         }
 
         public Source(
-                DataFileMeta sourceFile,
-                RawVectorSidecarReader rawVectors,
-                LongPredicate excludedPosition) {
-            this(sourceMetadata(sourceFile), rawVectors, excludedPosition);
+                DataFileMeta sourceFile, PkVectorReader vectors, LongPredicate excludedPosition) {
+            this(sourceMetadata(sourceFile), vectors, excludedPosition);
         }
 
         Source(
                 PkVectorSourceFile sourceFile,
-                RawVectorSidecarReader rawVectors,
+                PkVectorReader vectors,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
-            this.rawVectors = rawVectors;
+            this.vectors = vectors;
             this.readerFactory = null;
             this.excludedPosition = excludedPosition;
         }
@@ -246,7 +243,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                 ReaderFactory readerFactory,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
-            this.rawVectors = null;
+            this.vectors = null;
             this.readerFactory = readerFactory;
             this.excludedPosition = excludedPosition;
         }
@@ -255,19 +252,19 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             return new Source(sourceFile, readerFactory, position -> false);
         }
 
-        private RawVectorSidecarReader openReader() throws IOException {
-            return rawVectors != null ? rawVectors : readerFactory.open();
+        private PkVectorReader openReader() throws IOException {
+            return vectors != null ? vectors : readerFactory.open();
         }
 
-        private void closeReader(RawVectorSidecarReader reader) throws IOException {
-            if (rawVectors == null) {
+        private void closeReader(PkVectorReader reader) throws IOException {
+            if (vectors == null) {
                 reader.close();
             }
         }
 
         @FunctionalInterface
         interface ReaderFactory {
-            RawVectorSidecarReader open() throws IOException;
+            PkVectorReader open() throws IOException;
         }
     }
 }

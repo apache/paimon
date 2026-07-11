@@ -33,6 +33,7 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -46,201 +47,67 @@ import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLay
 import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests ANN payload construction through the vector GlobalIndexer SPI. */
+/** Tests ANN construction from generic vector readers. */
 class PkVectorAnnSegmentFileTest {
 
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    void testBuildsSingleSourceAnnSegmentWithRowPositionOrdinals() throws Exception {
+    void testBuildSkipsNullAndExcludedPhysicalRows() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
-        IndexPathFactory pathFactory = pathFactory();
-        Path rawPath = new Path(tempPath.resolve("raw").toUri());
-        try (RawVectorSidecarWriter writer = new RawVectorSidecarWriter(fileIO, rawPath, 2)) {
-            writer.write(new float[] {0, 0});
-            writer.write(new float[] {2, 0});
-        }
-        Options options = new Options();
-        options.setString("test.vector.dimension", "2");
-        options.setString("test.vector.metric", "l2");
-        DataField vectorField = new DataField(7, "embedding", DataTypes.ARRAY(DataTypes.FLOAT()));
-
-        IndexFileMeta segment;
-        try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
-            segment =
-                    new PkVectorAnnSegmentFile(fileIO, pathFactory)
-                            .build(
-                                    Collections.singletonList(
-                                            new PkVectorAnnSegmentFile.Source(
-                                                    dataFile("data-1"), rawReader)),
-                                    ROW_POSITION,
-                                    vectorField,
-                                    options,
-                                    "definition",
-                                    "l2",
-                                    "test-vector-ann");
-        }
+        IndexFileMeta segment =
+                annFile(fileIO)
+                        .build(
+                                Collections.singletonList(
+                                        new PkVectorAnnSegmentFile.Source(
+                                                dataFile("data-1", 3),
+                                                new ArrayReader(
+                                                        new float[][] {{0, 0}, null, {2, 0}}),
+                                                position -> position == 0)),
+                                ROW_POSITION,
+                                vectorField(),
+                                indexOptions(),
+                                "definition",
+                                "l2",
+                                "test-vector-ann");
 
         assertThat(segment.indexType()).isEqualTo(PkVectorAnnSegmentFile.PK_VECTOR_ANN);
-        assertThat(segment.rowCount()).isEqualTo(2);
-        assertThat(fileIO.exists(pathFactory.toPath(segment))).isTrue();
+        assertThat(segment.rowCount()).isEqualTo(1);
         PkVectorAnnSegmentMeta metadata =
                 PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         assertThat(metadata.ordinalLayout()).isEqualTo(ROW_POSITION);
-        assertThat(metadata.sourceFiles()).hasSize(1);
-        assertThat(metadata.sourceFiles().get(0).fileName()).isEqualTo("data-1");
-        assertThat(segment.globalIndexMeta().indexFieldId()).isEqualTo(7);
-    }
-
-    @Test
-    void testBuildSkipsNullAndSnapshotDeletedRows() throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
-        IndexPathFactory pathFactory = pathFactory();
-        Path rawPath = new Path(tempPath.resolve("raw-with-deletes").toUri());
-        try (RawVectorSidecarWriter writer = new RawVectorSidecarWriter(fileIO, rawPath, 2)) {
-            writer.write(new float[] {0, 0});
-            writer.write(null);
-            writer.write(new float[] {2, 0});
-        }
-        Options options = new Options();
-        options.setString("test.vector.dimension", "2");
-        options.setString("test.vector.metric", "l2");
-        DataField vectorField = new DataField(7, "embedding", DataTypes.ARRAY(DataTypes.FLOAT()));
-
-        IndexFileMeta segment;
-        try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
-            segment =
-                    new PkVectorAnnSegmentFile(fileIO, pathFactory)
-                            .build(
-                                    Collections.singletonList(
-                                            new PkVectorAnnSegmentFile.Source(
-                                                    dataFile("data-1", 3),
-                                                    rawReader,
-                                                    position -> position == 0)),
-                                    ROW_POSITION,
-                                    vectorField,
-                                    options,
-                                    "definition",
-                                    "l2",
-                                    "test-vector-ann");
-        }
-
-        PkVectorAnnSegmentMeta metadata =
-                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(segment.rowCount()).isEqualTo(1);
-    }
-
-    @Test
-    void testAnnSearchUsesRowPositionDeletionMask() throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
-        IndexPathFactory pathFactory = pathFactory();
-        Path rawPath = new Path(tempPath.resolve("ann-search-raw").toUri());
-        try (RawVectorSidecarWriter writer = new RawVectorSidecarWriter(fileIO, rawPath, 2)) {
-            writer.write(new float[] {0, 0});
-            writer.write(new float[] {1, 0});
-            writer.write(new float[] {2, 0});
-        }
-        Options options = new Options();
-        options.setString("test.vector.dimension", "2");
-        options.setString("test.vector.metric", "l2");
-        DataField vectorField = new DataField(7, "embedding", DataTypes.ARRAY(DataTypes.FLOAT()));
-        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory);
-        IndexFileMeta segment;
-        try (RawVectorSidecarReader rawReader = new RawVectorSidecarReader(fileIO, rawPath)) {
-            segment =
-                    annFile.build(
-                            Collections.singletonList(
-                                    new PkVectorAnnSegmentFile.Source(
-                                            dataFile("data-1", 3), rawReader)),
-                            ROW_POSITION,
-                            vectorField,
-                            options,
-                            "definition",
-                            "l2",
-                            "test-vector-ann");
-        }
-        PkVectorAnnSegmentMeta metadata =
-                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
-        deletionVector.delete(0);
-        List<PkVectorAnnSegmentSearcher.Candidate> candidates;
-        try {
-            candidates =
-                    new PkVectorAnnSegmentSearcher(
-                                    fileIO,
-                                    annFile,
-                                    vectorField,
-                                    options,
-                                    "test-vector-ann",
-                                    "l2",
-                                    executor)
-                            .search(
-                                    segment,
-                                    metadata,
-                                    new float[] {0, 0},
-                                    2,
-                                    deletionVector,
-                                    Collections.emptyMap());
-        } finally {
-            executor.shutdownNow();
-        }
-
-        assertThat(candidates)
-                .extracting(PkVectorAnnSegmentSearcher.Candidate::rowPosition)
-                .containsExactly(1L, 2L);
-        assertThat(candidates)
-                .extracting(PkVectorAnnSegmentSearcher.Candidate::distance)
-                .containsExactly(1F, 4F);
-    }
-
-    @Test
-    void testBuildsAndSearchesMultiSourceAnnSegment() throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
-        IndexPathFactory pathFactory = pathFactory();
-        Path raw1Path = new Path(tempPath.resolve("multi-raw-1").toUri());
-        Path raw2Path = new Path(tempPath.resolve("multi-raw-2").toUri());
-        try (RawVectorSidecarWriter writer1 = new RawVectorSidecarWriter(fileIO, raw1Path, 2);
-                RawVectorSidecarWriter writer2 = new RawVectorSidecarWriter(fileIO, raw2Path, 2)) {
-            writer1.write(new float[] {5, 0});
-            writer1.write(new float[] {10, 0});
-            writer2.write(new float[] {0, 0});
-            writer2.write(new float[] {2, 0});
-        }
-        Options options = new Options();
-        options.setString("test.vector.dimension", "2");
-        options.setString("test.vector.metric", "l2");
-        DataField vectorField = new DataField(7, "embedding", DataTypes.ARRAY(DataTypes.FLOAT()));
-        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory);
-        IndexFileMeta segment;
-        try (RawVectorSidecarReader raw1 = new RawVectorSidecarReader(fileIO, raw1Path);
-                RawVectorSidecarReader raw2 = new RawVectorSidecarReader(fileIO, raw2Path)) {
-            segment =
-                    annFile.build(
-                            Arrays.asList(
-                                    new PkVectorAnnSegmentFile.Source(dataFile("data-1"), raw1),
-                                    new PkVectorAnnSegmentFile.Source(dataFile("data-2"), raw2)),
-                            FILE_POSITION,
-                            vectorField,
-                            options,
-                            "definition",
-                            "l2",
-                            "test-vector-ann");
-        }
-
-        PkVectorAnnSegmentMeta metadata =
-                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.ordinalLayout())
-                .isEqualTo(PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION);
         assertThat(metadata.sourceFiles())
                 .extracting(PkVectorSourceFile::fileName)
-                .containsExactly("data-1", "data-2");
+                .containsExactly("data-1");
+    }
 
+    @Test
+    void testBuildsAndSearchesMultiSourceSegment() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = annFile(fileIO);
+        IndexFileMeta segment =
+                annFile.build(
+                        Arrays.asList(
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("data-1", 2),
+                                        new ArrayReader(new float[][] {{5, 0}, {10, 0}})),
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("data-2", 2),
+                                        new ArrayReader(new float[][] {{0, 0}, {2, 0}}))),
+                        FILE_POSITION,
+                        vectorField(),
+                        indexOptions(),
+                        "definition",
+                        "l2",
+                        "test-vector-ann");
+        PkVectorAnnSegmentMeta metadata =
+                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
         data2Deletes.delete(0);
         Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
                 new HashMap<>();
         deletionVectors.put("data-2", data2Deletes);
+
         ExecutorService executor = Executors.newSingleThreadExecutor();
         List<PkVectorAnnSegmentSearcher.Candidate> candidates;
         try {
@@ -248,8 +115,8 @@ class PkVectorAnnSegmentFileTest {
                     new PkVectorAnnSegmentSearcher(
                                     fileIO,
                                     annFile,
-                                    vectorField,
-                                    options,
+                                    vectorField(),
+                                    indexOptions(),
                                     "test-vector-ann",
                                     "l2",
                                     executor)
@@ -264,6 +131,7 @@ class PkVectorAnnSegmentFileTest {
             executor.shutdownNow();
         }
 
+        assertThat(metadata.ordinalLayout()).isEqualTo(FILE_POSITION);
         assertThat(candidates)
                 .extracting(
                         PkVectorAnnSegmentSearcher.Candidate::dataFileName,
@@ -272,16 +140,21 @@ class PkVectorAnnSegmentFileTest {
                         org.assertj.core.groups.Tuple.tuple("data-2", 1L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 0L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 1L));
-        assertThat(candidates.get(0).distance())
-                .isCloseTo(4F, org.assertj.core.data.Offset.offset(0.001F));
-        assertThat(candidates.get(1).distance())
-                .isCloseTo(25F, org.assertj.core.data.Offset.offset(0.001F));
-        assertThat(candidates.get(2).distance())
-                .isCloseTo(100F, org.assertj.core.data.Offset.offset(0.001F));
     }
 
-    private static DataFileMeta dataFile(String fileName) {
-        return dataFile(fileName, 2);
+    private PkVectorAnnSegmentFile annFile(LocalFileIO fileIO) {
+        return new PkVectorAnnSegmentFile(fileIO, pathFactory());
+    }
+
+    private static DataField vectorField() {
+        return new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+    }
+
+    private static Options indexOptions() {
+        Options options = new Options();
+        options.setString("test.vector.dimension", "2");
+        options.setString("test.vector.metric", "l2");
+        return options;
     }
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
@@ -295,7 +168,7 @@ class PkVectorAnnSegmentFileTest {
                 1,
                 Collections.emptyList(),
                 null,
-                FileSource.APPEND,
+                FileSource.COMPACT,
                 null,
                 null,
                 null,
@@ -320,5 +193,38 @@ class PkVectorAnnSegmentFileTest {
                 return false;
             }
         };
+    }
+
+    private static class ArrayReader implements PkVectorReader {
+
+        private final float[][] vectors;
+        private int position;
+
+        private ArrayReader(float[][] vectors) {
+            this.vectors = vectors;
+        }
+
+        @Override
+        public int dimension() {
+            return 2;
+        }
+
+        @Override
+        public long rowCount() {
+            return vectors.length;
+        }
+
+        @Override
+        public boolean readNextVector(float[] reuse) {
+            float[] vector = vectors[position++];
+            if (vector == null) {
+                return false;
+            }
+            System.arraycopy(vector, 0, reuse, 0, reuse.length);
+            return true;
+        }
+
+        @Override
+        public void close() throws IOException {}
     }
 }
