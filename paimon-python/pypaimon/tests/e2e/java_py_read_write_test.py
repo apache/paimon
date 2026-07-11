@@ -1392,12 +1392,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         self.assertTrue(pa.types.is_list(result.schema.field('payloads').type))
         self.assertEqual(
-            result.select(['id', 'payloads']).to_pylist(),
+            result.column('id').to_pylist(),
+            [1, 2, 3, 4],
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
             [
-                {'id': 1, 'payloads': [b'java-alpha', None, b'']},
-                {'id': 2, 'payloads': []},
-                {'id': 3, 'payloads': None},
-                {'id': 4, 'payloads': [b'java-omega']},
+                [b'java-alpha', None, b''],
+                [],
+                None,
+                [b'java-omega'],
             ],
         )
 
@@ -1445,8 +1449,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
             read_builder.new_scan().plan().splits())
         result = table_sort_by(result, 'id')
         self.assertEqual(
-            result.select(['id', 'payloads']).to_pylist(),
-            data.select(['id', 'payloads']).to_pylist(),
+            result.column('id').to_pylist(),
+            data.column('id').to_pylist(),
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
+            data.column('payloads').to_pylist(),
         )
 
     def test_compact_conflict_shard_update(self):
