@@ -27,7 +27,9 @@ on real PK tables lives in ``test_aggregation_e2e.py``.
 import datetime
 import unittest
 from decimal import Decimal
+from functools import reduce
 
+from pypaimon.common.options import CoreOptions, Options
 from pypaimon.read.reader.aggregate import create_field_aggregator
 from pypaimon.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
@@ -40,16 +42,20 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldMinAgg,
     FieldPrimaryKeyAgg,
     FieldSumAgg,
+    FieldListaggAgg,
 )
 from pypaimon.schema.data_types import AtomicType
 
 
-def _make(identifier, sql_type):
+def _make(identifier, sql_type, options: CoreOptions = None):
     """Build an aggregator through the public registry path so we also
     exercise the registered factory (including its type validation).
     """
+    if options is None:
+        options = CoreOptions(Options.from_none())
+
     return create_field_aggregator(
-        AtomicType(sql_type), "field0", identifier, options=None
+        AtomicType(sql_type), "field0", identifier, options=options
     )
 
 
@@ -245,6 +251,276 @@ class FieldBoolAndAggTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             _make("bool_and", "VARCHAR")
         self.assertIn("BOOLEAN", str(ctx.exception))
+
+
+class FieldListaggAggTest(unittest.TestCase):
+
+    def test_default_delimiter(self):
+        agg = _make("listagg", "STRING")
+        self.assertIsInstance(agg, FieldListaggAgg)
+
+        self.assertEqual(
+            agg.agg("user1", "user2"),
+            "user1,user2",
+        )
+
+    def test_default_delimiter_distinct(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True}))
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "user1",
+                "user2",
+                "user1",
+                "user3",
+            ],
+        )
+
+        self.assertEqual(result, "user1,user2,user3")
+
+    def test_custom_delimiter_empty_strings(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({
+                'fields.field0.list-agg-delimiter': ';',
+                'fields.field0.distinct': True
+            })),
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "",
+                "",
+            ],
+        )
+
+        self.assertEqual(result, "")
+
+    def test_default_delimiter_distinct_multi_user(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True})),
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "user1",
+                "user2",
+                "user1,user3",
+            ],
+        )
+
+        self.assertEqual(result, "user1,user2,user3")
+
+    def test_default_delimiter_distinct_empty_left(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True})),
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "",
+                "user2",
+                "user1,user3",
+            ],
+        )
+
+        self.assertEqual(result, "user2,user1,user3")
+
+    def test_custom_delimiter_distinct_multi_kv(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({
+                'fields.field0.list-agg-delimiter': ';',
+                'fields.field0.distinct': True
+            }))
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "k1=v1;k2=v2",
+                "k1=v1;k3=v3",
+                "",
+            ],
+        )
+
+        self.assertEqual(result, "k1=v1;k2=v2;k3=v3")
+
+    def test_custom_delimiter_whitespace(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({
+                'fields.field0.list-agg-delimiter': ' ',
+                'fields.field0.distinct': True
+            })),
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "k1=v1 k2=v2",
+                " k1=v1  k3=v3",
+                " ",
+            ],
+        )
+
+        self.assertEqual(result, "k1=v1 k2=v2 k3=v3")
+
+    def test_default_delimiter_distinct_multi_duplicate_kv(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True}))
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "k1=v1,k2=v2",
+                "k1=v1,k2=v3",
+                "",
+            ],
+        )
+
+        self.assertEqual(result, "k1=v1,k2=v2,k2=v3")
+
+    def test_custom_delimiter(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.list-agg-delimiter': '-'})),
+        )
+
+        self.assertEqual(
+            agg.agg("user1", "user2"),
+            "user1-user2",
+        )
+
+    def test_distinct_should_not_match_substring(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True})),
+        )
+
+        result = agg.agg(
+            "abc,def,asd",
+            "ab,xy",
+        )
+
+        self.assertEqual(
+            result,
+            "abc,def,asd,ab,xy",
+        )
+
+    def test_distinct_substring_custom_delimiter(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({
+                'fields.field0.list-agg-delimiter': ';',
+                'fields.field0.distinct': True
+            })),
+        )
+
+        result = agg.agg(
+            "abc;def;asd",
+            "ab;xy;def",
+        )
+
+        self.assertEqual(
+            result,
+            "abc;def;asd;ab;xy",
+        )
+
+    def test_ignore_blank_values(self):
+        agg = _make("listagg", "STRING")
+
+        result = reduce(
+            agg.agg,
+            [
+                "user1",
+                "",
+                " ",
+                "   ",
+                "\t",
+                "\n",
+                "\r",
+                "\r\n",
+                " \t\n ",
+                " \t\n\r\n \u3000 ",
+                "user2",
+                "\u3000",
+                "\u2000",
+            ],
+        )
+
+        self.assertEqual(
+            result,
+            "user1,user2",
+        )
+
+    def test_distinct_ignore_blank_values(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({'fields.field0.distinct': True})),
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "user1",
+                "user2",
+                "user1",
+                "user3",
+                "",
+                " ",
+                "   ",
+                "\t",
+                "\n",
+                "\r",
+                "\r\n",
+                " \t\n ",
+                " \t\n\r\n \u3000 ",
+                "user2",
+                "user3",
+                "\u3000",
+                "\u2000",
+            ],
+        )
+
+        self.assertEqual(
+            result,
+            "user1,user2,user3",
+        )
+
+    def test_first_non_blank_value_without_leading_delimiter(self):
+        agg = _make("listagg", "STRING")
+
+        acc = None
+        acc = agg.agg(acc, " ")
+        acc = agg.agg(acc, "first line")
+
+        self.assertEqual(
+            acc,
+            "first line",
+        )
 
 
 class RegistrationTest(unittest.TestCase):
