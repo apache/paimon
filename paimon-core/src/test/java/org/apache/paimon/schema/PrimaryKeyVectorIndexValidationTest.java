@@ -207,16 +207,6 @@ class PrimaryKeyVectorIndexValidationTest {
                 .hasMessageContaining("l2, cosine, inner_product");
     }
 
-    @Test
-    void testRejectsInvalidAnnMinimumRows() {
-        Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_VECTOR_ANN_MIN_ROWS.key(), "0");
-
-        assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("pk-vector.ann.min-rows")
-                .hasMessageContaining("greater than 0");
-    }
-
     private static Map<String, String> enabledOptions() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");

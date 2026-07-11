@@ -953,9 +953,6 @@ public class SchemaValidation {
                 "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
                 indexColumn,
                 options.primaryKeyVectorDistanceMetric(indexColumn));
-        checkArgument(
-                options.primaryKeyVectorAnnMinRows(indexColumn) > 0,
-                "pk-vector.ann.min-rows must be greater than 0.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

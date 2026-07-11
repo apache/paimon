@@ -89,17 +89,6 @@ class PrimaryKeyVectorIndexOptionsTest {
     }
 
     @Test
-    void testFieldScopedAnnThresholdOverridesTableDefault() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
-        options.put(CoreOptions.PK_VECTOR_ANN_MIN_ROWS.key(), "10000");
-        options.put("fields.embedding.pk-vector.ann.min-rows", "20000");
-
-        CoreOptions coreOptions = new CoreOptions(options);
-        assertThat(coreOptions.primaryKeyVectorAnnMinRows("embedding")).isEqualTo(20_000L);
-    }
-
-    @Test
     void testFieldScopedJsonOptionsOverrideTableDefault() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");

@@ -2734,16 +2734,8 @@ public class CoreOptions implements Serializable {
                             "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
                                     + "Each column owns one index and must define "
                                     + "fields.<column>.pk-vector.index.type. Index options and distance "
-                                    + "metric are also field-scoped. The ANN minimum can be overridden "
-                                    + "through fields.<column>.pk-vector.ann.min-rows. The first release "
-                                    + "supports exactly one column.");
-
-    public static final ConfigOption<Long> PK_VECTOR_ANN_MIN_ROWS =
-            key("pk-vector.ann.min-rows")
-                    .longType()
-                    .defaultValue(10_000L)
-                    .withDescription(
-                            "Minimum live rows required before a bucket vector segment is built as ANN.");
+                                    + "metric are also field-scoped. The first release supports exactly "
+                                    + "one column.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -4315,10 +4307,6 @@ public class CoreOptions implements Serializable {
         Options fieldOptions = new Options();
         fieldOptions.setString(option.key(), fieldValue);
         return fieldOptions.get(option);
-    }
-
-    public long primaryKeyVectorAnnMinRows(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MIN_ROWS);
     }
 
     /** Specifies the merge engine for table with primary key. */
