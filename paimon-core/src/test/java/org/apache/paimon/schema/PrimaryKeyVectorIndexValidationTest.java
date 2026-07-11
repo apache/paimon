@@ -208,18 +208,12 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testRejectsInvalidAnnBuildBounds() {
-        Map<String, String> invalidRowOptions = enabledOptions();
-        invalidRowOptions.put(CoreOptions.PK_VECTOR_ANN_MIN_ROWS.key(), "100");
-        invalidRowOptions.put(CoreOptions.PK_VECTOR_ANN_MAX_ROWS.key(), "99");
-        assertThatThrownBy(() -> validateTableSchema(schema(invalidRowOptions)))
-                .hasMessageContaining("pk-vector.ann.max-rows")
-                .hasMessageContaining("greater than or equal");
+    void testRejectsInvalidAnnMinimumRows() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_ANN_MIN_ROWS.key(), "0");
 
-        Map<String, String> invalidSourceFileOptions = enabledOptions();
-        invalidSourceFileOptions.put(CoreOptions.PK_VECTOR_ANN_MAX_SOURCE_FILES.key(), "0");
-        assertThatThrownBy(() -> validateTableSchema(schema(invalidSourceFileOptions)))
-                .hasMessageContaining("pk-vector.ann.max-source-files")
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-vector.ann.min-rows")
                 .hasMessageContaining("greater than 0");
     }
 

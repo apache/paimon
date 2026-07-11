@@ -954,27 +954,8 @@ public class SchemaValidation {
                 indexColumn,
                 options.primaryKeyVectorDistanceMetric(indexColumn));
         checkArgument(
-                options.primaryKeyVectorL0MaxSegments(indexColumn) > 0,
-                "pk-vector.l0.max-segments must be greater than 0.");
-        checkArgument(
-                options.primaryKeyVectorL0MaxRows(indexColumn) > 0,
-                "pk-vector.l0.max-rows must be greater than 0.");
-        checkArgument(
                 options.primaryKeyVectorAnnMinRows(indexColumn) > 0,
                 "pk-vector.ann.min-rows must be greater than 0.");
-        checkArgument(
-                options.primaryKeyVectorAnnMaxRows(indexColumn) > 0,
-                "pk-vector.ann.max-rows must be greater than 0.");
-        checkArgument(
-                options.primaryKeyVectorAnnMaxRows(indexColumn)
-                        >= options.primaryKeyVectorAnnMinRows(indexColumn),
-                "pk-vector.ann.max-rows must be greater than or equal to pk-vector.ann.min-rows.");
-        checkArgument(
-                options.primaryKeyVectorAnnMaxSourceFiles(indexColumn) > 0,
-                "pk-vector.ann.max-source-files must be greater than 0.");
-        checkArgument(
-                options.primaryKeyVectorRefineFactor(indexColumn) > 0,
-                "pk-vector.refine-factor must be greater than 0.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

@@ -1206,18 +1206,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
-            <td><h5>pk-vector.ann.max-rows</h5></td>
-            <td style="word-wrap: break-word;">100000</td>
-            <td>Long</td>
-            <td>Target maximum rows in one primary-key ANN segment. A single oversized source file is not split.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.ann.max-source-files</h5></td>
-            <td style="word-wrap: break-word;">32</td>
-            <td>Integer</td>
-            <td>Maximum source data files represented by one primary-key ANN segment.</td>
-        </tr>
-        <tr>
             <td><h5>pk-vector.ann.min-rows</h5></td>
             <td style="word-wrap: break-word;">10000</td>
             <td>Long</td>
@@ -1227,25 +1215,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>pk-vector.index.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. Operational defaults can be overridden through fields.&lt;column&gt;.pk-vector.* options. The first release supports exactly one column.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.l0.max-rows</h5></td>
-            <td style="word-wrap: break-word;">50000</td>
-            <td>Long</td>
-            <td>Maximum raw vector rows in a bucket before vector minor compaction.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.l0.max-segments</h5></td>
-            <td style="word-wrap: break-word;">8</td>
-            <td>Integer</td>
-            <td>Maximum raw vector segments in a bucket before vector minor compaction.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.refine-factor</h5></td>
-            <td style="word-wrap: break-word;">4</td>
-            <td>Integer</td>
-            <td>Initial ANN candidate multiplier for primary-key vector search. It is not a visibility correctness boundary.</td>
+            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. The ANN minimum can be overridden through fields.&lt;column&gt;.pk-vector.ann.min-rows. The first release supports exactly one column.</td>
         </tr>
         <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>

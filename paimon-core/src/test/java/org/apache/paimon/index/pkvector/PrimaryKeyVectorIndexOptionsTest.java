@@ -94,19 +94,9 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
         options.put(CoreOptions.PK_VECTOR_ANN_MIN_ROWS.key(), "10000");
         options.put("fields.embedding.pk-vector.ann.min-rows", "20000");
-        options.put("fields.embedding.pk-vector.l0.max-segments", "4");
-        options.put("fields.embedding.pk-vector.l0.max-rows", "30000");
-        options.put("fields.embedding.pk-vector.ann.max-rows", "90000");
-        options.put("fields.embedding.pk-vector.ann.max-source-files", "16");
-        options.put("fields.embedding.pk-vector.refine-factor", "6");
 
         CoreOptions coreOptions = new CoreOptions(options);
         assertThat(coreOptions.primaryKeyVectorAnnMinRows("embedding")).isEqualTo(20_000L);
-        assertThat(coreOptions.primaryKeyVectorL0MaxSegments("embedding")).isEqualTo(4);
-        assertThat(coreOptions.primaryKeyVectorL0MaxRows("embedding")).isEqualTo(30_000L);
-        assertThat(coreOptions.primaryKeyVectorAnnMaxRows("embedding")).isEqualTo(90_000L);
-        assertThat(coreOptions.primaryKeyVectorAnnMaxSourceFiles("embedding")).isEqualTo(16);
-        assertThat(coreOptions.primaryKeyVectorRefineFactor("embedding")).isEqualTo(6);
     }
 
     @Test
@@ -231,14 +221,6 @@ class PrimaryKeyVectorIndexOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("pk-vector.index.options")
                 .hasMessageContaining("JSON object");
-    }
-
-    @Test
-    void testAnnBuildBoundsDefaults() {
-        CoreOptions options = coreOptions(null);
-
-        assertThat(options.primaryKeyVectorAnnMaxRows("embedding")).isEqualTo(100_000L);
-        assertThat(options.primaryKeyVectorAnnMaxSourceFiles("embedding")).isEqualTo(32);
     }
 
     private static CoreOptions coreOptions(String indexOptions) {

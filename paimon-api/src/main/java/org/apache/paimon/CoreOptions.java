@@ -2734,23 +2734,9 @@ public class CoreOptions implements Serializable {
                             "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
                                     + "Each column owns one index and must define "
                                     + "fields.<column>.pk-vector.index.type. Index options and distance "
-                                    + "metric are also field-scoped. Operational defaults can be "
-                                    + "overridden through fields.<column>.pk-vector.* options. The first "
-                                    + "release supports exactly one column.");
-
-    public static final ConfigOption<Integer> PK_VECTOR_L0_MAX_SEGMENTS =
-            key("pk-vector.l0.max-segments")
-                    .intType()
-                    .defaultValue(8)
-                    .withDescription(
-                            "Maximum raw vector segments in a bucket before vector minor compaction.");
-
-    public static final ConfigOption<Long> PK_VECTOR_L0_MAX_ROWS =
-            key("pk-vector.l0.max-rows")
-                    .longType()
-                    .defaultValue(50_000L)
-                    .withDescription(
-                            "Maximum raw vector rows in a bucket before vector minor compaction.");
+                                    + "metric are also field-scoped. The ANN minimum can be overridden "
+                                    + "through fields.<column>.pk-vector.ann.min-rows. The first release "
+                                    + "supports exactly one column.");
 
     public static final ConfigOption<Long> PK_VECTOR_ANN_MIN_ROWS =
             key("pk-vector.ann.min-rows")
@@ -2758,28 +2744,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(10_000L)
                     .withDescription(
                             "Minimum live rows required before a bucket vector segment is built as ANN.");
-
-    public static final ConfigOption<Long> PK_VECTOR_ANN_MAX_ROWS =
-            key("pk-vector.ann.max-rows")
-                    .longType()
-                    .defaultValue(100_000L)
-                    .withDescription(
-                            "Target maximum rows in one primary-key ANN segment. A single oversized source file is not split.");
-
-    public static final ConfigOption<Integer> PK_VECTOR_ANN_MAX_SOURCE_FILES =
-            key("pk-vector.ann.max-source-files")
-                    .intType()
-                    .defaultValue(32)
-                    .withDescription(
-                            "Maximum source data files represented by one primary-key ANN segment.");
-
-    public static final ConfigOption<Integer> PK_VECTOR_REFINE_FACTOR =
-            key("pk-vector.refine-factor")
-                    .intType()
-                    .defaultValue(4)
-                    .withDescription(
-                            "Initial ANN candidate multiplier for primary-key vector search. "
-                                    + "It is not a visibility correctness boundary.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -4353,28 +4317,8 @@ public class CoreOptions implements Serializable {
         return fieldOptions.get(option);
     }
 
-    public int primaryKeyVectorL0MaxSegments(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_L0_MAX_SEGMENTS);
-    }
-
-    public long primaryKeyVectorL0MaxRows(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_L0_MAX_ROWS);
-    }
-
     public long primaryKeyVectorAnnMinRows(String column) {
         return primaryKeyVectorOption(column, PK_VECTOR_ANN_MIN_ROWS);
-    }
-
-    public long primaryKeyVectorAnnMaxRows(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MAX_ROWS);
-    }
-
-    public int primaryKeyVectorAnnMaxSourceFiles(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_ANN_MAX_SOURCE_FILES);
-    }
-
-    public int primaryKeyVectorRefineFactor(String column) {
-        return primaryKeyVectorOption(column, PK_VECTOR_REFINE_FACTOR);
     }
 
     /** Specifies the merge engine for table with primary key. */
