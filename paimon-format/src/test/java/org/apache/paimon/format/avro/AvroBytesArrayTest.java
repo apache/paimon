@@ -21,7 +21,10 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.JoinedArray;
+import org.apache.paimon.data.SlicedArray;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -150,6 +153,57 @@ public class AvroBytesArrayTest {
                 true);
     }
 
+    @Test
+    public void testWriteMixedJoinedAndSlicedStringAvroBytesArrays() throws Exception {
+        DataType elementType = DataTypes.STRING().notNull();
+        Schema arraySchema =
+                AvroSchemaConverter.convertToSchema(
+                        DataTypes.ARRAY(elementType).notNull(), new HashMap<>());
+        Schema elementSchema = arraySchema.getElementType();
+
+        InternalArray rawArray =
+                createAvroBytesArray(
+                        elementType,
+                        elementSchema,
+                        objectArray(
+                                BinaryString.fromString("a"),
+                                BinaryString.fromString("b"),
+                                BinaryString.fromString("c")));
+        InternalArray appendedRawArray =
+                createAvroBytesArray(
+                        elementType,
+                        elementSchema,
+                        objectArray(
+                                BinaryString.fromString("d"),
+                                BinaryString.fromString("e"),
+                                BinaryString.fromString("f")));
+
+        InternalArray mixedArray =
+                new JoinedArray(
+                        new JoinedArray(
+                                new SlicedArray(rawArray, 1, 2),
+                                objectArray(BinaryString.fromString("x"))),
+                        new SlicedArray(appendedRawArray, 0, 2));
+        byte[] mixedBytes = writeArrayBytes(arraySchema, elementType, mixedArray);
+        byte[] expectedBytes =
+                writeRawArrayBytes(
+                        elementType,
+                        objectArray(
+                                BinaryString.fromString("b"),
+                                BinaryString.fromString("c"),
+                                BinaryString.fromString("x"),
+                                BinaryString.fromString("d"),
+                                BinaryString.fromString("e")));
+
+        assertThat(mixedBytes).isEqualTo(expectedBytes);
+        InternalArray resultArray = createAvroBytesArray(elementType, elementSchema, mixedBytes);
+        assertThat(resultArray.getString(0).toString()).isEqualTo("b");
+        assertThat(resultArray.getString(1).toString()).isEqualTo("c");
+        assertThat(resultArray.getString(2).toString()).isEqualTo("x");
+        assertThat(resultArray.getString(3).toString()).isEqualTo("d");
+        assertThat(resultArray.getString(4).toString()).isEqualTo("e");
+    }
+
     private void checkResult(DataType elementType, GenericArray values, boolean nullable)
             throws Exception {
         DataType arrayElementType = nullable ? elementType : elementType.notNull();
@@ -199,6 +253,29 @@ public class AvroBytesArrayTest {
         encoder.writeArrayEnd();
         encoder.flush();
         return baos.toByteArray();
+    }
+
+    private byte[] writeArrayBytes(Schema arraySchema, DataType elementType, InternalArray array)
+            throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(baos, null);
+        FieldWriter writer = new FieldWriterFactory().visitArray(arraySchema, elementType);
+        writer.write(GenericRow.of(array), 0, encoder);
+        encoder.flush();
+        return baos.toByteArray();
+    }
+
+    private InternalArray createAvroBytesArray(
+            DataType elementType, Schema elementSchema, GenericArray values) throws Exception {
+        return createAvroBytesArray(
+                elementType, elementSchema, writeRawArrayBytes(elementType, values));
+    }
+
+    private InternalArray createAvroBytesArray(
+            DataType elementType, Schema elementSchema, byte[] bytes) throws Exception {
+        BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(bytes, null);
+        FieldReader elementReader = new FieldReaderFactory().visit(elementSchema, elementType);
+        return AvroBytesArray.create(decoder, elementReader, elementSchema);
     }
 
     private void checkArrayValues(

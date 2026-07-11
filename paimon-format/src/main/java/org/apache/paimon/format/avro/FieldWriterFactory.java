@@ -27,6 +27,8 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.JoinedArray;
+import org.apache.paimon.data.SlicedArray;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -219,6 +221,42 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
             BinaryEncoder encoder)
             throws IOException {
         if (length == 0) {
+            return;
+        }
+
+        if (array instanceof SlicedArray) {
+            SlicedArray slicedArray = (SlicedArray) array;
+            writeArrayItems(
+                    slicedArray.array(),
+                    slicedArray.offset() + offset,
+                    length,
+                    elementWriter,
+                    encoder);
+            return;
+        }
+
+        if (array instanceof JoinedArray) {
+            JoinedArray joinedArray = (JoinedArray) array;
+            int arrayOff = offset;
+            int remainingLength = length;
+            for (InternalArray innerArray : joinedArray.arrays()) {
+                int size = innerArray.size();
+                // find the first array to write
+                if (arrayOff >= size) {
+                    arrayOff -= size;
+                    continue;
+                }
+
+                int writeLen = Math.min(size - arrayOff, remainingLength);
+                writeArrayItems(innerArray, arrayOff, writeLen, elementWriter, encoder);
+                remainingLength -= writeLen;
+                // the inner array offset is 0 except the first array
+                arrayOff = 0;
+
+                if (remainingLength <= 0) {
+                    break;
+                }
+            }
             return;
         }
 
