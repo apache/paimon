@@ -225,6 +225,25 @@ public class IndexManifestFileHandlerTest {
         assertThat(indexManifestFile.read(annManifest)).containsExactly(ann);
     }
 
+    @Test
+    public void testSourceMetaDoesNotDisableRangeValidationForOtherFields() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
+        IndexManifestEntry sourceBacked = pkVectorEntry("btree", "source-backed");
+        IndexManifestEntry previousRange = globalIndexEntry("previous-range", 0, 99, 2);
+        String manifest = handler.write(null, Arrays.asList(sourceBacked, previousRange));
+        IndexManifestEntry overlappingRange = globalIndexEntry("overlapping-range", 50, 149, 2);
+
+        assertThatThrownBy(() -> handler.write(manifest, Arrays.asList(overlappingRange)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("previous-range")
+                .hasMessageContaining("overlapping-range")
+                .hasMessageContaining("overlapping row range");
+    }
+
     private IndexManifestFile createIndexManifestFile(TestAppendFileStore fileStore) {
         return new IndexManifestFile.Factory(
                         fileStore.fileIO(),
