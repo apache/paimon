@@ -29,7 +29,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link PrimaryKeyVectorIndexOptions}. */
+/** Tests for primary-key vector index options in {@link CoreOptions}. */
 class PrimaryKeyVectorIndexOptionsTest {
 
     @Test
@@ -38,6 +38,14 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
 
         assertThat(new CoreOptions(options).primaryKeyVectorIndexEnabled()).isTrue();
+    }
+
+    @Test
+    void testResolvesSingleIndexColumn() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+
+        assertThat(new CoreOptions(options).primaryKeyVectorIndexColumn()).isEqualTo("embedding");
     }
 
     @Test
@@ -62,9 +70,14 @@ class PrimaryKeyVectorIndexOptionsTest {
     void testIndexOptionsMustBeFieldScoped() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         options.put("pk-vector.index.options", "{\"nlist\":64}");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexOptions("embedding")).isNull();
+        assertThat(
+                        new CoreOptions(options)
+                                .primaryKeyVectorIndexOptions("embedding")
+                                .get("ivf-pq.nlist"))
+                .isNull();
     }
 
     @Test
@@ -96,7 +109,7 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.options", "{\"nlist\":64}");
         options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":128}");
 
-        Options resolved = PrimaryKeyVectorIndexOptions.resolve(new CoreOptions(options));
+        Options resolved = new CoreOptions(options).primaryKeyVectorIndexOptions("embedding");
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("128");
     }
@@ -107,7 +120,7 @@ class PrimaryKeyVectorIndexOptionsTest {
                 coreOptions(
                         "{\"nlist\":64,\"ivf-pq.pq.m\":\"8\"," + "\"fields.embedding.hnsw.m\":16}");
 
-        Options resolved = PrimaryKeyVectorIndexOptions.resolve(coreOptions);
+        Options resolved = coreOptions.primaryKeyVectorIndexOptions("embedding");
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(resolved.get("ivf-pq.pq.m")).isEqualTo("8");
@@ -117,7 +130,7 @@ class PrimaryKeyVectorIndexOptionsTest {
 
     @Test
     void testRejectsNonObjectOptions() {
-        assertThatThrownBy(() -> PrimaryKeyVectorIndexOptions.resolve(coreOptions("[1,2]")))
+        assertThatThrownBy(() -> coreOptions("[1,2]").primaryKeyVectorIndexOptions("embedding"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("pk-vector.index.options")
                 .hasMessageContaining("JSON object");

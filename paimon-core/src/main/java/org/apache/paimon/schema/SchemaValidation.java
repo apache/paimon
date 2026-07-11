@@ -29,7 +29,6 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.index.pkvector.PrimaryKeyVectorIndexOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
@@ -931,7 +930,7 @@ public class SchemaValidation {
         checkArgument(
                 !options.pkClusteringOverride(),
                 "Primary-key vector index does not support pk-clustering-override.");
-        PrimaryKeyVectorIndexOptions.resolve(options, indexColumn);
+        options.primaryKeyVectorIndexOptions(indexColumn);
 
         DataField vectorField =
                 schema.fields().stream()
