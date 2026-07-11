@@ -52,9 +52,9 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
+
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
