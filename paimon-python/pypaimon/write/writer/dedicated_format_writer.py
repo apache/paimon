@@ -346,19 +346,39 @@ class DedicatedFormatWriter(DataWriter):
         self.committed_files.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
-            pa.RecordBatch, Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
+            Optional[pa.RecordBatch], Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
         """Split data into normal, blob, and vector parts based on column names."""
-        normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
+        normal_data = (
+            self._project_columns(data, self.normal_column_names)
+            if self.normal_column_names else None
+        )
         blob_data_map = {
-            blob_column: data.select([blob_column]) for blob_column in self.blob_file_column_names
+            blob_column: self._project_columns(data, [blob_column])
+            for blob_column in self.blob_file_column_names
         }
         vector_data = (
-            pa.RecordBatch.from_arrays(
-                [data.column(name) for name in self.vector_write_columns],
-                names=self.vector_write_columns,
-            ) if self.vector_write_columns else None
+            self._project_columns(data, self.vector_write_columns)
+            if self.vector_write_columns else None
         )
         return normal_data, blob_data_map, vector_data
+
+    @staticmethod
+    def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
+        indices = [data.schema.get_field_index(name) for name in column_names]
+        missing_columns = [
+            name for name, index in zip(column_names, indices) if index < 0
+        ]
+        if missing_columns:
+            raise KeyError(f"Columns not found in record batch: {missing_columns}")
+
+        projected_schema = pa.schema(
+            [data.schema.field(index) for index in indices],
+            metadata=data.schema.metadata,
+        )
+        return pa.RecordBatch.from_arrays(
+            [data.column(index) for index in indices],
+            schema=projected_schema,
+        )
 
     def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
         if not self.blob_inline_fields:

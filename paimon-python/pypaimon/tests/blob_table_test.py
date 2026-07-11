@@ -47,6 +47,15 @@ class _StreamingOnlyBlob(Blob):
         return io.BytesIO(self.data)
 
 
+class _RecordBatchWithoutSelect:
+    def __init__(self, batch):
+        self.schema = batch.schema
+        self._batch = batch
+
+    def column(self, index):
+        return self._batch.column(index)
+
+
 class DedicatedFormatWriterTest(unittest.TestCase):
     """Tests for DedicatedFormatWriter functionality with paimon table operations."""
 
@@ -125,6 +134,50 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 self.assertGreater(file_meta.row_count, 0)
 
         blob_writer.close()
+
+    def test_split_data_with_pyarrow_6_record_batch_api(self):
+        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+
+        payload_type = pa.list_(
+            pa.field('item', pa.large_binary(), nullable=False)
+        )
+        schema = pa.schema(
+            [
+                pa.field('id', pa.int32(), nullable=False),
+                pa.field('payloads', payload_type),
+                pa.field('embedding', pa.list_(pa.float32())),
+            ],
+            metadata={b'table': b'array-blob'},
+        )
+        batch = pa.RecordBatch.from_arrays(
+            [
+                pa.array([1, 2], type=pa.int32()),
+                pa.array([[b'a'], []], type=payload_type),
+                pa.array([[1.0], [2.0]], type=pa.list_(pa.float32())),
+            ],
+            schema=schema,
+        )
+
+        writer = object.__new__(DedicatedFormatWriter)
+        writer.normal_column_names = ['id']
+        writer.blob_file_column_names = ['payloads']
+        writer.vector_write_columns = ['embedding']
+
+        normal_data, blob_data_map, vector_data = writer._split_data(
+            _RecordBatchWithoutSelect(batch)
+        )
+
+        self.assertEqual(normal_data.column(0).to_pylist(), [1, 2])
+        self.assertFalse(normal_data.schema.field('id').nullable)
+        self.assertEqual(
+            blob_data_map['payloads'].column(0).to_pylist(),
+            [[b'a'], []],
+        )
+        self.assertFalse(
+            blob_data_map['payloads'].schema.field('payloads').type.value_field.nullable
+        )
+        self.assertEqual(vector_data.column(0).to_pylist(), [[1.0], [2.0]])
+        self.assertEqual(normal_data.schema.metadata, {b'table': b'array-blob'})
 
     def test_dedicated_format_writer_schema_detection(self):
         """Test that DedicatedFormatWriter correctly detects blob columns from schema."""
