@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -77,6 +78,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     public DataTableStreamScan(
             TableSchema schema,
+            SchemaManager schemaManager,
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
@@ -84,7 +86,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             boolean supportStreamingReadOverwrite,
             TableQueryAuth queryAuth,
             boolean hasPk) {
-        super(schema, options, snapshotReader, queryAuth);
+        super(schema, schemaManager, options, snapshotReader, queryAuth);
 
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
