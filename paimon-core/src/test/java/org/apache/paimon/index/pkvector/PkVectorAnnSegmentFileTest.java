@@ -43,8 +43,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests ANN construction from generic vector readers. */
@@ -64,7 +62,6 @@ class PkVectorAnnSegmentFileTest {
                                                 new ArrayReader(
                                                         new float[][] {{0, 0}, null, {2, 0}}),
                                                 position -> position == 0)),
-                                ROW_POSITION,
                                 vectorField(),
                                 indexOptions(),
                                 "definition",
@@ -75,7 +72,6 @@ class PkVectorAnnSegmentFileTest {
         assertThat(segment.rowCount()).isEqualTo(1);
         PkVectorAnnSegmentMeta metadata =
                 PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.ordinalLayout()).isEqualTo(ROW_POSITION);
         assertThat(metadata.sourceFiles())
                 .extracting(PkVectorSourceFile::fileName)
                 .containsExactly("data-1");
@@ -94,7 +90,6 @@ class PkVectorAnnSegmentFileTest {
                                 new PkVectorAnnSegmentFile.Source(
                                         dataFile("data-2", 2),
                                         new ArrayReader(new float[][] {{0, 0}, {2, 0}}))),
-                        FILE_POSITION,
                         vectorField(),
                         indexOptions(),
                         "definition",
@@ -131,7 +126,6 @@ class PkVectorAnnSegmentFileTest {
             executor.shutdownNow();
         }
 
-        assertThat(metadata.ordinalLayout()).isEqualTo(FILE_POSITION);
         assertThat(candidates)
                 .extracting(
                         PkVectorAnnSegmentSearcher.Candidate::dataFileName,

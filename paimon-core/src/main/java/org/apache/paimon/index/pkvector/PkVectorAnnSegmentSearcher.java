@@ -45,8 +45,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
-import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorAnnSegmentMeta.OrdinalLayout.ROW_POSITION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Searches one ANN payload and maps its segment-local ids back to source row positions. */
@@ -110,16 +108,6 @@ public class PkVectorAnnSegmentSearcher {
         checkArgument(
                 PkVectorAnnSegmentFile.PK_VECTOR_ANN.equals(segment.indexType()),
                 "Vector segment %s is not an ANN payload.",
-                segment.fileName());
-        checkArgument(
-                metadata.ordinalLayout() == ROW_POSITION
-                        || metadata.ordinalLayout() == FILE_POSITION,
-                "ANN segment %s has unsupported ordinal layout %s.",
-                segment.fileName(),
-                metadata.ordinalLayout());
-        checkArgument(
-                metadata.ordinalLayout() != ROW_POSITION || metadata.sourceFiles().size() == 1,
-                "Row-position ANN segment %s must reference exactly one source file.",
                 segment.fileName());
         GlobalIndexer indexer = GlobalIndexer.create(algorithm, vectorField, indexOptions);
         checkArgument(

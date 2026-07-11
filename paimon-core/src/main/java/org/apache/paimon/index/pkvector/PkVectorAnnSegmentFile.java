@@ -60,7 +60,6 @@ public class PkVectorAnnSegmentFile extends IndexFile {
 
     public IndexFileMeta build(
             List<Source> sources,
-            PkVectorAnnSegmentMeta.OrdinalLayout ordinalLayout,
             DataField vectorField,
             Options indexOptions,
             String indexDefinitionId,
@@ -151,8 +150,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             Path payloadPath = fileWriter.path(result.fileName());
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
             PkVectorAnnSegmentMeta metadata =
-                    new PkVectorAnnSegmentMeta(
-                            indexDefinitionId, sourceFiles, ordinalLayout, payloadMetadata);
+                    new PkVectorAnnSegmentMeta(indexDefinitionId, sourceFiles, payloadMetadata);
             IndexFileMeta segment =
                     new IndexFileMeta(
                             PK_VECTOR_ANN,

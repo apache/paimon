@@ -37,17 +37,14 @@ public final class PkVectorAnnSegmentMeta {
 
     private final String indexDefinitionId;
     private final List<PkVectorSourceFile> sourceFiles;
-    private final OrdinalLayout ordinalLayout;
     private final byte[] payloadMetadata;
 
     public PkVectorAnnSegmentMeta(
             String indexDefinitionId,
             List<PkVectorSourceFile> sourceFiles,
-            OrdinalLayout ordinalLayout,
             byte[] payloadMetadata) {
         this.indexDefinitionId = Objects.requireNonNull(indexDefinitionId);
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
-        this.ordinalLayout = Objects.requireNonNull(ordinalLayout);
         this.payloadMetadata = Arrays.copyOf(payloadMetadata, payloadMetadata.length);
         checkArgument(!this.sourceFiles.isEmpty(), "An ANN segment must reference source files.");
     }
@@ -58,10 +55,6 @@ public final class PkVectorAnnSegmentMeta {
 
     public List<PkVectorSourceFile> sourceFiles() {
         return sourceFiles;
-    }
-
-    public OrdinalLayout ordinalLayout() {
-        return ordinalLayout;
     }
 
     public byte[] payloadMetadata() {
@@ -78,7 +71,6 @@ public final class PkVectorAnnSegmentMeta {
                 output.writeUTF(sourceFile.fileName());
                 output.writeLong(sourceFile.rowCount());
             }
-            output.writeByte(ordinalLayout.ordinal());
             output.writeInt(payloadMetadata.length);
             output.write(payloadMetadata);
             return output.getCopyOfBuffer();
@@ -100,8 +92,6 @@ public final class PkVectorAnnSegmentMeta {
             for (int i = 0; i < sourceFileCount; i++) {
                 sourceFiles.add(new PkVectorSourceFile(input.readUTF(), input.readLong()));
             }
-            OrdinalLayout ordinalLayout =
-                    enumValue(OrdinalLayout.values(), input.readByte(), "ordinal layout");
             int payloadMetadataLength = input.readInt();
             checkArgument(
                     payloadMetadataLength >= 0, "Payload metadata length must not be negative.");
@@ -110,27 +100,10 @@ public final class PkVectorAnnSegmentMeta {
             checkArgument(
                     input.available() == 0,
                     "Unexpected trailing bytes in ANN vector segment metadata.");
-            return new PkVectorAnnSegmentMeta(
-                    indexDefinitionId, sourceFiles, ordinalLayout, payloadMetadata);
+            return new PkVectorAnnSegmentMeta(indexDefinitionId, sourceFiles, payloadMetadata);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to deserialize ANN vector segment metadata.", e);
         }
-    }
-
-    private static <T> T enumValue(T[] values, byte ordinal, String field) {
-        int index = ordinal;
-        checkArgument(
-                index >= 0 && index < values.length,
-                "Unknown ANN vector segment %s: %s.",
-                field,
-                ordinal);
-        return values[index];
-    }
-
-    /** Mapping from an ANN-local ordinal to a physical data-file position. */
-    public enum OrdinalLayout {
-        ROW_POSITION,
-        FILE_POSITION
     }
 }

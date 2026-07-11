@@ -38,15 +38,12 @@ class PkVectorAnnSegmentMetaTest {
                         Arrays.asList(
                                 new PkVectorSourceFile("data-1", 100),
                                 new PkVectorSourceFile("data-2", 50)),
-                        PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION,
                         new byte[] {1, 2, 3});
 
         PkVectorAnnSegmentMeta restored = PkVectorAnnSegmentMeta.deserialize(metadata.serialize());
 
         assertThat(restored.indexDefinitionId()).isEqualTo("index-definition");
         assertThat(restored.sourceFiles()).isEqualTo(metadata.sourceFiles());
-        assertThat(restored.ordinalLayout())
-                .isEqualTo(PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION);
         assertThat(restored.payloadMetadata()).containsExactly(1, 2, 3);
     }
 
@@ -58,7 +55,6 @@ class PkVectorAnnSegmentMetaTest {
         output.writeInt(1);
         output.writeUTF("data-1");
         output.writeLong(10);
-        output.writeByte(PkVectorAnnSegmentMeta.OrdinalLayout.FILE_POSITION.ordinal());
         output.writeInt(1);
 
         assertThatThrownBy(() -> PkVectorAnnSegmentMeta.deserialize(output.getCopyOfBuffer()))
