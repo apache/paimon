@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -27,6 +28,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -34,6 +36,9 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 
@@ -44,6 +49,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /** Sort Compact Action tests for dynamic bucket table. */
 public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
@@ -75,6 +82,10 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         .files();
         Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
                 .isLessThan(filesFilter.size() / (double) files.size());
+
+        // sort compact of a hash-dynamic bucket table must produce a COMPACT snapshot
+        Assertions.assertThat(getTable().snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
     }
 
     @Test
@@ -234,6 +245,82 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         BatchTableCommit commit = getTable().newBatchWriteBuilder().newCommit();
         commit.commit(messages);
         commit.close();
+    }
+
+    @Test
+    public void testDynamicBucketSortWithSnapshotSequenceOrdering() throws Exception {
+        createSequenceOrderingTable();
+
+        commit(writeControlledRow(1L, 100L));
+        commit(writeControlledRow(1L, 200L));
+        commit(writeControlledRow(2L, 300L));
+
+        FileStoreTable table = getTable();
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        Assertions.assertThat(splits).anyMatch(DataSplit::rawConvertible);
+
+        zorder(Arrays.asList("f1", "f2"));
+
+        Assertions.assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        TableRead read = table.newReadBuilder().newRead();
+        List<Split> readSplits =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .map(split -> (Split) split)
+                        .collect(Collectors.toList());
+        AtomicBoolean foundPk1 = new AtomicBoolean(false);
+        for (Split split : readSplits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(
+                        row -> {
+                            if (row.getLong(0) == 1L) {
+                                Assertions.assertThat(row.getLong(1)).isEqualTo(200L);
+                                foundPk1.set(true);
+                            }
+                        });
+            }
+        }
+        Assertions.assertThat(foundPk1.get()).isTrue();
+    }
+
+    private List<CommitMessage> writeControlledRow(long pk, long f1) throws Exception {
+        Table table = getTable();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            GenericRow row =
+                    GenericRow.of(
+                            pk,
+                            f1,
+                            f1,
+                            f1,
+                            BinaryString.fromString("000000000test"));
+            batchTableWrite.write(row, 0);
+            return batchTableWrite.prepareCommit();
+        }
+    }
+
+    private void createSequenceOrderingTable() throws Exception {
+        catalog.createDatabase(database, true);
+        catalog.createTable(identifier(), sequenceOrderingSchema(), true);
+    }
+
+    private static Schema sequenceOrderingSchema() {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.BIGINT());
+        schemaBuilder.column("f1", DataTypes.BIGINT());
+        schemaBuilder.column("f2", DataTypes.BIGINT());
+        schemaBuilder.column("f3", DataTypes.BIGINT());
+        schemaBuilder.column("f4", DataTypes.STRING());
+        schemaBuilder.option("bucket", "-1");
+        schemaBuilder.option("scan.parallelism", "1");
+        schemaBuilder.option("sink.parallelism", "1");
+        schemaBuilder.option("dynamic-bucket.target-row-num", "10000");
+        schemaBuilder.option(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        schemaBuilder.option(CoreOptions.WRITE_ONLY.key(), "true");
+        schemaBuilder.option(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "1");
+        schemaBuilder.primaryKey("f0");
+        return schemaBuilder.build();
     }
 
     private void createTable() throws Exception {

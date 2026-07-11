@@ -45,9 +45,11 @@ import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -85,6 +87,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private RowType readKeyType;
     @Nullable private RowType outerReadType;
+    @Nullable private RowType pushedReadType;
 
     @Nullable private List<Predicate> filtersForKeys;
     @Nullable private List<Predicate> filtersForAll;
@@ -131,12 +134,13 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
+        pushedReadType = readType;
         RowType tableRowType = tableSchema.logicalRowType();
-        RowType adjustedReadType = readType;
+        RowType adjustedReadType = stripKeyValueSequenceField(readType);
 
         if (!sequenceFields.isEmpty()) {
             // make sure actual readType contains sequence fields
-            List<String> readFieldNames = readType.getFieldNames();
+            List<String> readFieldNames = adjustedReadType.getFieldNames();
             List<DataField> extraFields = new ArrayList<>();
             for (String seqField : sequenceFields) {
                 if (!readFieldNames.contains(seqField)) {
@@ -144,7 +148,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 }
             }
             if (!extraFields.isEmpty()) {
-                List<DataField> allFields = new ArrayList<>(readType.getFields());
+                List<DataField> allFields = new ArrayList<>(adjustedReadType.getFields());
                 allFields.addAll(extraFields);
                 adjustedReadType = new RowType(allFields);
             }
@@ -154,12 +158,30 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         readerFactoryBuilder.withReadValueType(adjustedReadType);
         mergeSorter.setProjectedValueType(adjustedReadType);
 
-        // When finalReadType != readType, need to project the outer read type
-        if (adjustedReadType != readType) {
-            outerReadType = readType;
+        // KV _SEQUENCE_NUMBER is materialized at unwrap time, not from data files.
+        if (adjustedReadType != readType
+                && !isKeyValueSequenceOnlyDifference(readType, adjustedReadType)) {
+            outerReadType = stripKeyValueSequenceField(readType);
         }
 
         return this;
+    }
+
+    private static RowType stripKeyValueSequenceField(RowType readType) {
+        List<String> fieldNames = readType.getFieldNames();
+        if (!fieldNames.contains(SpecialFields.SEQUENCE_NUMBER.name())) {
+            return readType;
+        }
+        return readType.project(
+                fieldNames.stream()
+                        .filter(name -> !SpecialFields.SEQUENCE_NUMBER.name().equals(name))
+                        .collect(Collectors.toList()));
+    }
+
+    private static boolean isKeyValueSequenceOnlyDifference(
+            RowType readType, RowType strippedReadType) {
+        return readType.getFieldCount() == strippedReadType.getFieldCount() + 1
+                && readType.getFieldNames().contains(SpecialFields.SEQUENCE_NUMBER.name());
     }
 
     @Override
@@ -335,6 +357,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         }
 
         return projectOuter(ConcatRecordReader.create(suppliers));
+    }
+
+    @Nullable
+    public RowType outerReadType() {
+        return outerReadType;
+    }
+
+    public boolean keyValueSequenceNumberEnabled() {
+        return KeyValueTableRead.keyValueSequenceNumberEnabled(
+                tableSchema.options(), pushedReadType);
     }
 
     /**

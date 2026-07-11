@@ -87,6 +87,11 @@ public abstract class FlinkSink<T> implements Serializable {
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
+    @Nullable
+    protected StoreSinkWrite.Provider writeProviderOverride() {
+        return null;
+    }
+
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
@@ -130,18 +135,21 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean isStreaming = isStreaming(input);
 
         boolean writeOnly = table.coreOptions().writeOnly();
+        StoreSinkWrite.Provider writeProvider = writeProviderOverride();
+        if (writeProvider == null) {
+            writeProvider =
+                    StoreSinkWrite.createWriteProvider(
+                            table,
+                            env.getCheckpointConfig(),
+                            isStreaming,
+                            ignorePreviousFiles,
+                            hasSinkMaterializer(input));
+        }
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
                         new CommittableTypeInfo(),
-                        createWriteOperatorFactory(
-                                StoreSinkWrite.createWriteProvider(
-                                        table,
-                                        env.getCheckpointConfig(),
-                                        isStreaming,
-                                        ignorePreviousFiles,
-                                        hasSinkMaterializer(input)),
-                                commitUser));
+                        createWriteOperatorFactory(writeProvider, commitUser));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {

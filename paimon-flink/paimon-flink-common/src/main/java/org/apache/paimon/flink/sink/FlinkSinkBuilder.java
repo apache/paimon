@@ -88,12 +88,17 @@ public class FlinkSinkBuilder {
 
     private DataStream<RowData> input;
     @Nullable protected Map<String, String> overwritePartition;
-    @Nullable private Integer parallelism;
+    @Nullable protected Integer parallelism;
     @Nullable private TableSortInfo tableSortInfo;
 
     // ============== for extension ==============
 
     protected boolean compactSink = false;
+
+    /** Row type used to convert sink input {@link RowData} to {@link InternalRow}. */
+    protected org.apache.paimon.types.RowType sinkInputRowType() {
+        return table.rowType();
+    }
 
     public FlinkSinkBuilder(Table table) {
         if (!(table instanceof FileStoreTable)) {
@@ -221,11 +226,34 @@ public class FlinkSinkBuilder {
         DataStream<InternalRow> input =
                 mapToInternalRow(
                         this.input,
-                        table.rowType(),
+                        sinkInputRowType(),
                         contextForDescriptor,
                         table.coreOptions().blobWriteNullOnMissingFile(),
                         table.coreOptions().blobWriteNullOnFetchFailure());
-        if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
+        boolean localMergeSupported =
+                sinkInputRowType().equals(table.schema().logicalRowType());
+        // LocalMergeOperator is built from table.schema(), whose logical row type does not include
+        // the prepended _SEQUENCE_NUMBER column used by the sort compact sequence-ordering path
+        // (see SortCompactSinkBuilder.sinkInputRowType). Its key projection uses unshifted field
+        // positions and would treat the sequence column as a user column, corrupting the local
+        // merge. Local merge is therefore unsupported for that path; warn loudly and skip it
+        // rather than silently dropping the user-configured local-merge-buffer-size.
+        if (table.coreOptions().localMergeEnabled()
+                && table.schema().primaryKeys().size() > 0
+                && !localMergeSupported) {
+            LOG.warn(
+                    "Local merge ("
+                            + CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key()
+                            + ") is enabled but is not supported for sort compact with snapshot "
+                            + "sequence ordering, because the local merge operator is not aware "
+                            + "of the prepended _SEQUENCE_NUMBER column. Skipping local merge for "
+                            + "this job. To avoid this warning, unset "
+                            + CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key()
+                            + " for this table before running sort compact.");
+        }
+        if (table.coreOptions().localMergeEnabled()
+                && table.schema().primaryKeys().size() > 0
+                && localMergeSupported) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
                             .transform(
@@ -352,7 +380,7 @@ public class FlinkSinkBuilder {
         }
     }
 
-    private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
+    protected DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
@@ -370,7 +398,12 @@ public class FlinkSinkBuilder {
             }
         }
 
-        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
+        return createAppendTableSink().sinkFrom(input);
+    }
+
+    /** Create the {@link RowAppendTableSink} for the unaware bucket mode. */
+    protected RowAppendTableSink createAppendTableSink() {
+        return new RowAppendTableSink(table, overwritePartition, parallelism);
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {

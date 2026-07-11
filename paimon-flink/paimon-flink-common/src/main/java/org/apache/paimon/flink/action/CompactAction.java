@@ -132,7 +132,12 @@ public class CompactAction extends TableActionBase {
 
     @Override
     public void build() throws Exception {
-        buildImpl();
+        if (!buildImpl()) {
+            // empty input: no-op topology so procedure execution succeeds without commit
+            env.fromSequence(0, 0)
+                    .name("Nothing to Sort Compact")
+                    .sinkTo(new DiscardingSink<>());
+        }
     }
 
     protected boolean buildImpl() throws Exception {

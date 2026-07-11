@@ -29,6 +29,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
@@ -106,11 +107,26 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         mergeRead.mergeSorter(),
                         forceKeepDelete);
         if (readType != null) {
+            RowType projectedReadType = stripKeyValueSequenceField(readType);
             ProjectedRow projectedRow =
-                    ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
+                    ProjectedRow.from(projectedReadType, mergeRead.tableSchema().logicalRowType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
-        return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
+        return KeyValueTableRead.unwrap(
+                reader,
+                KeyValueTableRead.keyValueSequenceNumberEnabled(
+                        mergeRead.tableSchema().options(), readType));
+    }
+
+    private static RowType stripKeyValueSequenceField(RowType readType) {
+        List<String> fieldNames = readType.getFieldNames();
+        if (!fieldNames.contains(SpecialFields.SEQUENCE_NUMBER.name())) {
+            return readType;
+        }
+        return readType.project(
+                fieldNames.stream()
+                        .filter(name -> !SpecialFields.SEQUENCE_NUMBER.name().equals(name))
+                        .collect(java.util.stream.Collectors.toList()));
     }
 
     private static RecordReader<KeyValue> readDiff(

@@ -354,8 +354,21 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       sql(
         "CALL sys.compact(table => 't', order_strategy => 'order', where => 'pt = 1', order_by => 'a')")
       val table = loadTable("t")
-      assert(table.latestSnapshot().get().commitKind.equals(CommitKind.OVERWRITE))
+      assert(table.latestSnapshot().get().commitKind.equals(CommitKind.COMPACT))
       checkAnswer(sql("SELECT * FROM t ORDER BY a"), Seq(Row(1, 1), Row(2, 1)))
+    }
+  }
+
+  test("Paimon Procedure: sort compact rejects row tracking table") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('bucket' = '-1', 'row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 'a')")
+      assert(
+        intercept[UnsupportedOperationException](
+          spark.sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+            .collect()).getMessage
+          .contains("Sort compact is unsupported for row tracking tables"))
     }
   }
 

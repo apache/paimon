@@ -34,13 +34,23 @@ public interface SplitReadProvider {
     class Context {
 
         private final boolean forceKeepDelete;
+        private final boolean keyValueSequenceNumberEnabled;
 
         public Context(boolean forceKeepDelete) {
+            this(forceKeepDelete, false);
+        }
+
+        public Context(boolean forceKeepDelete, boolean keyValueSequenceNumberEnabled) {
             this.forceKeepDelete = forceKeepDelete;
+            this.keyValueSequenceNumberEnabled = keyValueSequenceNumberEnabled;
         }
 
         public boolean forceKeepDelete() {
             return forceKeepDelete;
+        }
+
+        public boolean keyValueSequenceNumberEnabled() {
+            return keyValueSequenceNumberEnabled;
         }
     }
 }

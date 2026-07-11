@@ -59,6 +59,15 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     }
 
     /**
+     * Enable sort-compact write mode for primary-key tables with snapshot sequence ordering. Output
+     * files are written as {@code COMPACT} and preserve per-record sequence numbers from input
+     * rows.
+     */
+    default FileStoreWrite<T> withSortCompactWrite(boolean sortCompactWrite) {
+        return this;
+    }
+
+    /**
      * With memory pool factory for the current file store write.
      *
      * @param memoryPoolFactory the given memory pool factory.

@@ -85,6 +85,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
 
+    private boolean preserveInputSequence;
+    private FileSource dataFileSource = FileSource.APPEND;
+
     public MergeTreeWriter(
             boolean writeBufferSpillable,
             MemorySize maxDiskSize,
@@ -145,6 +148,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         return compactManager;
     }
 
+    public void withPreserveInputSequence(boolean preserveInputSequence) {
+        this.preserveInputSequence = preserveInputSequence;
+    }
+
+    public void withDataFileSource(FileSource dataFileSource) {
+        this.dataFileSource = dataFileSource;
+    }
+
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
         this.writeBuffer =
@@ -162,7 +173,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long sequenceNumber = newSequenceNumber();
+        long sequenceNumber =
+                preserveInputSequence && kv.sequenceNumber() != KeyValue.UNKNOWN_SEQUENCE
+                        ? kv.sequenceNumber()
+                        : newSequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushWriteBuffer(false, false);
@@ -218,7 +232,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                             ? writerFactory.createRollingChangelogFileWriter(0)
                             : null;
             final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
-                    writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+                    writerFactory.createRollingMergeTreeFileWriter(0, dataFileSource);
 
             try {
                 writeBuffer.forEach(

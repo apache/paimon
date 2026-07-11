@@ -50,12 +50,12 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected final String commitUser;
     protected final StoreSinkWriteState state;
-    private final IOManagerImpl paimonIOManager;
-    private final boolean ignorePreviousFiles;
-    private final boolean waitCompaction;
+    protected final IOManagerImpl paimonIOManager;
+    protected final boolean ignorePreviousFiles;
+    protected final boolean waitCompaction;
     private final boolean isStreamingMode;
-    private final MemoryPoolFactory memoryPoolFactory;
-    @Nullable private final MetricGroup metricGroup;
+    protected final MemoryPoolFactory memoryPoolFactory;
+    @Nullable protected final MetricGroup metricGroup;
 
     protected TableWriteImpl<?> write;
 
@@ -80,7 +80,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.write = newTableWrite(table);
     }
 
-    private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
+    protected TableWriteImpl<?> newTableWrite(FileStoreTable table) {
         TableWriteImpl<?> tableWrite =
                 table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
