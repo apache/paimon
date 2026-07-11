@@ -61,7 +61,11 @@ class BlobFormatWriter:
             if blob_value is Blob.ARRAY_PLACE_HOLDER:
                 self.lengths.append(self.PLACE_HOLDER_LENGTH)
                 return
-            self.add_blob_array(blob_field_name, blob_value)
+            self.add_blob_array(
+                blob_field_name,
+                blob_value,
+                element_nullable=blob_field_type.element.nullable,
+            )
             return
 
         if blob_value is Blob.PLACE_HOLDER:
@@ -103,11 +107,27 @@ class BlobFormatWriter:
             if flush:
                 self.output_stream.flush()
 
-    def add_blob_array(self, blob_field_name: str, blob_values) -> None:
+    def add_blob_array(
+            self,
+            blob_field_name: str,
+            blob_values,
+            element_nullable: bool = True) -> None:
         if isinstance(blob_values, (bytes, bytearray, str)) or not hasattr(blob_values, '__iter__'):
             raise ValueError("ARRAY<BLOB> field value must be a list or tuple of Blob values")
 
         blob_values = list(blob_values)
+        for blob_value in blob_values:
+            if blob_value is None:
+                if not element_nullable:
+                    raise ValueError(
+                        f"ARRAY<BLOB> field '{blob_field_name}' does not allow null elements"
+                    )
+                continue
+            if not isinstance(blob_value, Blob):
+                raise ValueError("ARRAY<BLOB> elements must be Blob/BlobData instances or None")
+            if blob_value is Blob.PLACE_HOLDER or blob_value is Blob.ARRAY_PLACE_HOLDER:
+                raise ValueError("ARRAY<BLOB> elements do not support placeholders")
+
         previous_pos = self.position
         crc32 = 0
 
@@ -122,10 +142,6 @@ class BlobFormatWriter:
             if blob_value is None:
                 element_lengths.append(self.ARRAY_NULL_ELEMENT_LENGTH)
                 continue
-            if not isinstance(blob_value, Blob):
-                raise ValueError("ARRAY<BLOB> elements must be Blob/BlobData instances or None")
-            if blob_value is Blob.PLACE_HOLDER or blob_value is Blob.ARRAY_PLACE_HOLDER:
-                raise ValueError("ARRAY<BLOB> elements do not support placeholders")
 
             blob_pos, blob_length, crc32 = self._write_blob_data(blob_value, crc32)
             element_lengths.append(blob_length)

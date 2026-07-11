@@ -704,7 +704,14 @@ class PyarrowFieldParser:
             if type_name.startswith('TIME'):
                 return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
-            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
+            element_type = PyarrowFieldParser.from_paimon_type(data_type.element)
+            return pyarrow.list_(
+                pyarrow.field(
+                    "item",
+                    element_type,
+                    nullable=data_type.element.nullable,
+                )
+            )
         elif isinstance(data_type, VectorType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):

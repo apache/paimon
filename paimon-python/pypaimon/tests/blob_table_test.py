@@ -1376,6 +1376,79 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             },
         )
 
+    def test_array_blob_element_not_null(self):
+        array_blob_type = pa.list_(
+            pa.field('item', pa.large_binary(), nullable=False)
+        )
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        table_name = 'test_db.array_blob_element_not_null'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        valid_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payloads': pa.array(
+                [[b'alpha', b''], [], None],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(valid_data)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertFalse(
+            result.schema.field('payloads').type.value_field.nullable
+        )
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'alpha', b''],
+                2: [],
+                3: None,
+            },
+        )
+
+        nullable_array_type = pa.list_(pa.large_binary())
+        incompatible_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', nullable_array_type),
+        ])
+        incompatible_data = pa.Table.from_pydict({
+            'id': [4],
+            'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
+        }, schema=incompatible_schema)
+        incompatible_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+            incompatible_writer.write_arrow(incompatible_data)
+        incompatible_writer.abort()
+
+        invalid_data = pa.Table.from_pydict({
+            'id': [5],
+            'payloads': pa.array([[b'bad', None]], type=array_blob_type),
+        }, schema=pa_schema)
+        invalid_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "does not allow null elements"):
+            invalid_writer.write_arrow(invalid_data)
+        invalid_writer.abort()
+
     def test_blob_update_single_row_at_first_position(self):
         from pypaimon import Schema
 

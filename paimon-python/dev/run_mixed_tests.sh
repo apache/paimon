@@ -108,6 +108,7 @@ run_batched_java_write_tests() {
     core_tests="${core_tests}+testCompactConflictWriteBase"
     core_tests="${core_tests}+testBlobCompactConflictWriteBase"
     core_tests="${core_tests}+testBlobWriteAlterCompact"
+    core_tests="${core_tests}+testJavaWriteArrayBlobTable"
     core_tests="${core_tests}+testDataEvolutionWrite"
     core_tests="${core_tests}+testJavaWriteRowAppendTable"
     if [[ "$PYTHON_MINOR" -ge 7 ]]; then
@@ -916,6 +917,43 @@ run_blob_alter_compact_test() {
     fi
 }
 
+run_array_blob_interop_test() {
+    echo -e "${YELLOW}=== Running ARRAY<BLOB> Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
+
+    if ! skip_batched_java_write; then
+        cd "$PROJECT_ROOT"
+        echo "Running Maven test for JavaPyE2ETest.testJavaWriteArrayBlobTable..."
+        if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteArrayBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+            echo -e "${RED}✗ Java ARRAY<BLOB> write test failed${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ Java ARRAY<BLOB> write test completed successfully${NC}"
+    fi
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python ARRAY<BLOB> read test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_array_blob_written_by_java -v; then
+        echo -e "${RED}✗ Python ARRAY<BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ARRAY<BLOB> read test completed successfully${NC}"
+
+    echo "Running Python ARRAY<BLOB> write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_array_blob_for_java -v; then
+        echo -e "${RED}✗ Python ARRAY<BLOB> write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ARRAY<BLOB> write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadArrayBlobTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadArrayBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java ARRAY<BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java ARRAY<BLOB> read test completed successfully${NC}"
+}
+
 # Function to run VARIANT test (Java write, Python read)
 run_java_variant_write_py_read_test() {
     echo -e "${YELLOW}=== Running VARIANT Test (Java Write, Python Read) ===${NC}"
@@ -1032,6 +1070,7 @@ main() {
     local compact_conflict_result=0
     local blob_compact_conflict_result=0
     local blob_alter_compact_result=0
+    local array_blob_interop_result=0
     local data_evolution_result=0
     local data_evolution_deletion_vector_result=0
     local data_evolution_py_write_result=0
@@ -1248,6 +1287,12 @@ main() {
 
     echo ""
 
+    if ! run_array_blob_interop_test; then
+        array_blob_interop_result=1
+    fi
+
+    echo ""
+
     # Run data evolution test (Java write, Python read)
     if ! run_data_evolution_test; then
         data_evolution_result=1
@@ -1435,6 +1480,12 @@ main() {
         echo -e "${RED}✗ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): FAILED${NC}"
     fi
 
+    if [[ $array_blob_interop_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ ARRAY<BLOB> Interoperability Test (Java ↔ Python): PASSED${NC}"
+    else
+        echo -e "${RED}✗ ARRAY<BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
+    fi
+
     if [[ $data_evolution_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Data Evolution Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -1476,7 +1527,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
