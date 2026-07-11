@@ -18,7 +18,7 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.InternalArray;
 
 import javax.annotation.Nullable;
 
@@ -29,7 +29,7 @@ import java.util.Optional;
 /** Synchronous vector sidecar owned by one key-value data-file writer. */
 public interface KeyValueVectorSidecarWriter extends Closeable {
 
-    void write(@Nullable InternalVector vector) throws IOException;
+    void write(@Nullable InternalArray vector) throws IOException;
 
     void complete(DataFileMeta sourceFile) throws IOException;
 

@@ -896,24 +896,19 @@ public class SchemaValidation {
         String indexType = options.primaryKeyVectorIndexType();
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexName),
-                "pk-vector.index.name must be configured when pk-vector.index.state = %s.",
-                options.primaryKeyVectorIndexState());
+                "pk-vector.index.name must be configured when a primary-key vector index is defined.");
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexColumn),
-                "pk-vector.index.column must be configured when pk-vector.index.state = %s.",
-                options.primaryKeyVectorIndexState());
+                "pk-vector.index.column must be configured when a primary-key vector index is defined.");
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(indexType),
-                "pk-vector.index.type must be configured when pk-vector.index.state = %s.",
-                options.primaryKeyVectorIndexState());
+                "pk-vector.index.type must be configured when a primary-key vector index is defined.");
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
-                "pk-vector.index.state = %s requires a primary-key table.",
-                options.primaryKeyVectorIndexState());
+                "Primary-key vector index requires a primary-key table.");
         checkArgument(
                 options.deletionVectorsEnabled(),
-                "pk-vector.index.state = %s requires deletion-vectors.enabled = true.",
-                options.primaryKeyVectorIndexState());
+                "Primary-key vector index requires deletion-vectors.enabled = true.");
         checkArgument(
                 options.mergeEngine() == MergeEngine.DEDUPLICATE
                         || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,

@@ -1206,6 +1206,72 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-vector.ann.max-rows</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Long</td>
+            <td>Target maximum rows in one primary-key ANN segment. A single oversized source file is not split.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.ann.max-source-files</h5></td>
+            <td style="word-wrap: break-word;">32</td>
+            <td>Integer</td>
+            <td>Maximum source data files represented by one primary-key ANN segment.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.ann.min-rows</h5></td>
+            <td style="word-wrap: break-word;">10000</td>
+            <td>Long</td>
+            <td>Minimum live rows required before a bucket vector segment is built as ANN.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.distance.metric</h5></td>
+            <td style="word-wrap: break-word;">"inner_product"</td>
+            <td>String</td>
+            <td>Distance metric persisted by the primary-key vector index. Supported values are l2, cosine, and inner_product.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.column</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>VECTOR column indexed by the primary-key vector index.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.name</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Name of the bucket-local primary-key vector index.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.options</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Algorithm-specific options as a JSON object. Unqualified keys are scoped to pk-vector.index.type; fully qualified index or fields.&lt;column&gt; keys are preserved.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.type</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Vector index algorithm identifier, for example 'ivf-pq'. The implementation validates it through the vector-index SPI.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.l0.max-rows</h5></td>
+            <td style="word-wrap: break-word;">50000</td>
+            <td>Long</td>
+            <td>Maximum raw vector rows in a bucket before vector minor compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.l0.max-segments</h5></td>
+            <td style="word-wrap: break-word;">8</td>
+            <td>Integer</td>
+            <td>Maximum raw vector segments in a bucket before vector minor compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.refine-factor</h5></td>
+            <td style="word-wrap: break-word;">4</td>
+            <td>Integer</td>
+            <td>Initial ANN candidate multiplier for primary-key vector search. It is not a visibility correctness boundary.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

@@ -2726,18 +2726,6 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
-    /**
-     * State of the bucket-local vector index for a primary-key table. The definition is persisted
-     * in table options so every writer uses the same indexed column and algorithm.
-     */
-    public static final ConfigOption<PrimaryKeyVectorIndexState> PK_VECTOR_INDEX_STATE =
-            key("pk-vector.index.state")
-                    .enumType(PrimaryKeyVectorIndexState.class)
-                    .defaultValue(PrimaryKeyVectorIndexState.DISABLED)
-                    .withDescription(
-                            "Lifecycle state of the bucket-local primary-key vector index. "
-                                    + "Only BUILDING and ACTIVE cause writers to create vector sidecars.");
-
     public static final ConfigOption<String> PK_VECTOR_INDEX_NAME =
             key("pk-vector.index.name")
                     .stringType()
@@ -4346,18 +4334,10 @@ public class CoreOptions implements Serializable {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
     }
 
-    public PrimaryKeyVectorIndexState primaryKeyVectorIndexState() {
-        return options.get(PK_VECTOR_INDEX_STATE);
-    }
-
     public boolean primaryKeyVectorIndexEnabled() {
-        return primaryKeyVectorIndexState() != PrimaryKeyVectorIndexState.DISABLED;
-    }
-
-    public boolean primaryKeyVectorIndexWriteEnabled() {
-        PrimaryKeyVectorIndexState state = primaryKeyVectorIndexState();
-        return state == PrimaryKeyVectorIndexState.BUILDING
-                || state == PrimaryKeyVectorIndexState.ACTIVE;
+        return options.getOptional(PK_VECTOR_INDEX_NAME).isPresent()
+                || options.getOptional(PK_VECTOR_INDEX_COLUMN).isPresent()
+                || options.getOptional(PK_VECTOR_INDEX_TYPE).isPresent();
     }
 
     @Nullable
@@ -5221,36 +5201,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         GlobalIndexSearchMode(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Lifecycle state of a bucket-local primary-key vector index. */
-    public enum PrimaryKeyVectorIndexState implements DescribedEnum {
-        DISABLED("disabled", "No primary-key vector index is configured."),
-        BUILDING("building", "Existing files are being backfilled; new files create raw sidecars."),
-        ACTIVE(
-                "active",
-                "The index is available for vector search and new files create raw sidecars."),
-        DROPPING(
-                "dropping",
-                "New sidecars are disabled while existing vector index files are removed.");
-
-        private final String value;
-        private final String description;
-
-        PrimaryKeyVectorIndexState(String value, String description) {
             this.value = value;
             this.description = description;
         }

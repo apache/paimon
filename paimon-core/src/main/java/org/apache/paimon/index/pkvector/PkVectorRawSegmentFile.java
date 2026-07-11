@@ -18,7 +18,7 @@
 
 package org.apache.paimon.index.pkvector;
 
-import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -124,7 +124,7 @@ public class PkVectorRawSegmentFile extends IndexFile {
         }
 
         @Override
-        public void write(@Nullable InternalVector vector) throws IOException {
+        public void write(@Nullable InternalArray vector) throws IOException {
             rawWriter.write(vector);
         }
 
