@@ -67,12 +67,10 @@ class PkVectorAnnSegmentFileTest {
                                 "l2",
                                 "test-vector-ann");
 
-        assertThat(segment.indexType()).isEqualTo(PkVectorAnnSegmentFile.PK_VECTOR_ANN);
+        assertThat(segment.indexType()).isEqualTo("test-vector-ann");
         assertThat(segment.rowCount()).isEqualTo(1);
-        PkVectorAnnSegmentMeta metadata =
-                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.indexType()).isEqualTo("test-vector-ann");
-        assertThat(metadata.sourceFiles())
+        PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(segment);
+        assertThat(sourceMeta.sourceFiles())
                 .extracting(PkVectorSourceFile::fileName)
                 .containsExactly("data-1");
     }
@@ -94,9 +92,7 @@ class PkVectorAnnSegmentFileTest {
                         indexOptions(),
                         "l2",
                         "test-vector-ann");
-        PkVectorAnnSegmentMeta metadata =
-                PkVectorAnnSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.indexType()).isEqualTo("test-vector-ann");
+        PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(segment);
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
         data2Deletes.delete(0);
         Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
@@ -111,7 +107,7 @@ class PkVectorAnnSegmentFileTest {
                                     fileIO, annFile, vectorField(), indexOptions(), "l2", executor)
                             .search(
                                     segment,
-                                    metadata,
+                                    sourceMeta,
                                     new float[] {0, 0},
                                     3,
                                     deletionVectors,

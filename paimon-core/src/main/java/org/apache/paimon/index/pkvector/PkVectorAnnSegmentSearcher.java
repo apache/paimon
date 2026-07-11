@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
@@ -79,7 +80,7 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<Candidate> search(
             IndexFileMeta segment,
-            PkVectorAnnSegmentMeta metadata,
+            PkVectorSourceMeta sourceMeta,
             float[] query,
             int limit,
             @Nullable DeletionVector deletionVector,
@@ -87,31 +88,32 @@ public class PkVectorAnnSegmentSearcher {
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
         if (deletionVector != null) {
             checkArgument(
-                    metadata.sourceFiles().size() == 1,
+                    sourceMeta.sourceFiles().size() == 1,
                     "A single deletion vector can only search a single-source ANN segment.");
-            deletionVectors.put(metadata.sourceFiles().get(0).fileName(), deletionVector);
+            deletionVectors.put(sourceMeta.sourceFiles().get(0).fileName(), deletionVector);
         }
-        return search(segment, metadata, query, limit, deletionVectors, searchOptions);
+        return search(segment, sourceMeta, query, limit, deletionVectors, searchOptions);
     }
 
     public List<Candidate> search(
             IndexFileMeta segment,
-            PkVectorAnnSegmentMeta metadata,
+            PkVectorSourceMeta sourceMeta,
             float[] query,
             int limit,
             Map<String, DeletionVector> deletionVectors,
             Map<String, String> searchOptions) {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
+        GlobalIndexMeta globalIndexMeta = segment.globalIndexMeta();
         checkArgument(
-                PkVectorAnnSegmentFile.PK_VECTOR_ANN.equals(segment.indexType()),
-                "Vector segment %s is not an ANN payload.",
+                globalIndexMeta != null && globalIndexMeta.sourceMeta() != null,
+                "Vector segment %s has no source metadata.",
                 segment.fileName());
         GlobalIndexer indexer =
-                GlobalIndexer.create(metadata.indexType(), vectorField, indexOptions);
+                GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
-                metadata.indexType());
+                segment.indexType());
         String readerMetric = normalizeMetric(((VectorGlobalIndexer) indexer).metric());
         checkArgument(
                 metric.equals(readerMetric),
@@ -123,7 +125,7 @@ public class PkVectorAnnSegmentSearcher {
                 new GlobalIndexIOMeta(
                         annSegmentFile.path(segment),
                         segment.fileSize(),
-                        metadata.payloadMetadata());
+                        globalIndexMeta.indexMeta());
         GlobalIndexReader reader =
                 indexer.createReader(
                         meta -> fileIO.newInputStream(meta.filePath()),
@@ -132,7 +134,7 @@ public class PkVectorAnnSegmentSearcher {
         try {
             VectorSearch search = new VectorSearch(query, limit, vectorField.name(), searchOptions);
             RoaringNavigableMap64 liveRows =
-                    liveRowPositions(metadata.sourceFiles(), deletionVectors);
+                    liveRowPositions(sourceMeta.sourceFiles(), deletionVectors);
             if (liveRows != null) {
                 search.withIncludeRowIds(liveRows);
             }
@@ -141,7 +143,7 @@ public class PkVectorAnnSegmentSearcher {
                 return Collections.emptyList();
             }
 
-            long sourceRowCount = totalRowCount(metadata.sourceFiles());
+            long sourceRowCount = totalRowCount(sourceMeta.sourceFiles());
             List<Candidate> candidates = new ArrayList<>();
             ScoredGlobalIndexResult scored = result.get();
             for (long ordinal : scored.results()) {
@@ -151,7 +153,7 @@ public class PkVectorAnnSegmentSearcher {
                         segment.fileName(),
                         ordinal,
                         sourceRowCount);
-                FilePosition filePosition = filePosition(metadata.sourceFiles(), ordinal);
+                FilePosition filePosition = filePosition(sourceMeta.sourceFiles(), ordinal);
                 DeletionVector deletionVector = deletionVectors.get(filePosition.dataFileName);
                 checkArgument(
                         deletionVector == null

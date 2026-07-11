@@ -52,8 +52,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Builds immutable ANN payloads whose index ids are source data-file row positions. */
 public class PkVectorAnnSegmentFile extends IndexFile {
 
-    public static final String PK_VECTOR_ANN = "pk-vector-ann";
-
     public PkVectorAnnSegmentFile(FileIO fileIO, IndexPathFactory pathFactory) {
         super(fileIO, pathFactory);
     }
@@ -148,16 +146,19 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             ResultEntry result = results.get(0);
             Path payloadPath = fileWriter.path(result.fileName());
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
-            PkVectorAnnSegmentMeta metadata =
-                    new PkVectorAnnSegmentMeta(indexType, sourceFiles, payloadMetadata);
             IndexFileMeta segment =
                     new IndexFileMeta(
-                            PK_VECTOR_ANN,
+                            indexType,
                             result.fileName(),
                             fileIO.getFileSize(payloadPath),
                             liveRowCount,
                             new GlobalIndexMeta(
-                                    0, totalRowCount, vectorField.id(), null, metadata.serialize()),
+                                    0,
+                                    totalRowCount,
+                                    vectorField.id(),
+                                    null,
+                                    payloadMetadata,
+                                    new PkVectorSourceMeta(sourceFiles).serialize()),
                             pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
             return segment;

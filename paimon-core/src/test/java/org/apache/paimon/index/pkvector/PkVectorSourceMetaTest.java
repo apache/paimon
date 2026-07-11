@@ -27,37 +27,30 @@ import java.util.Arrays;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link PkVectorAnnSegmentMeta}. */
-class PkVectorAnnSegmentMetaTest {
+/** Tests for {@link PkVectorSourceMeta}. */
+class PkVectorSourceMetaTest {
 
     @Test
     void testRoundTrip() {
-        PkVectorAnnSegmentMeta metadata =
-                new PkVectorAnnSegmentMeta(
-                        "test-vector-ann",
+        PkVectorSourceMeta metadata =
+                new PkVectorSourceMeta(
                         Arrays.asList(
-                                new PkVectorSourceFile("data-1", 100),
-                                new PkVectorSourceFile("data-2", 50)),
-                        new byte[] {1, 2, 3});
+                                new PkVectorSourceFile("data-1", 10),
+                                new PkVectorSourceFile("data-2", 20)));
 
-        PkVectorAnnSegmentMeta restored = PkVectorAnnSegmentMeta.deserialize(metadata.serialize());
+        PkVectorSourceMeta restored = PkVectorSourceMeta.deserialize(metadata.serialize());
 
-        assertThat(restored.indexType()).isEqualTo("test-vector-ann");
         assertThat(restored.sourceFiles()).isEqualTo(metadata.sourceFiles());
-        assertThat(restored.payloadMetadata()).containsExactly(1, 2, 3);
     }
 
     @Test
-    void testRejectsTruncatedPayloadMetadata() throws Exception {
+    void testRejectsTruncatedSourceMetadata() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(128);
         output.writeInt(1);
-        output.writeUTF("index");
         output.writeInt(1);
         output.writeUTF("data-1");
-        output.writeLong(10);
-        output.writeInt(1);
 
-        assertThatThrownBy(() -> PkVectorAnnSegmentMeta.deserialize(output.getCopyOfBuffer()))
-                .hasMessageContaining("Failed to deserialize ANN vector segment metadata");
+        assertThatThrownBy(() -> PkVectorSourceMeta.deserialize(output.getCopyOfBuffer()))
+                .hasMessageContaining("Failed to deserialize vector source metadata");
     }
 }
