@@ -154,10 +154,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         readerFactoryBuilder.withReadValueType(adjustedReadType);
         mergeSorter.setProjectedValueType(adjustedReadType);
 
-        // When finalReadType != readType, need to project the outer read type
-        if (adjustedReadType != readType) {
-            outerReadType = readType;
-        }
+        // project the outer type when adjusted; reset any previous projection, as this
+        // method may be called again
+        outerReadType = adjustedReadType != readType ? readType : null;
 
         return this;
     }
@@ -339,9 +338,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     /**
      * Returns the pushed read type if {@link #withReadType(RowType)} was called, else the default
-     * read type.
+     * read type. This is the value layout the merge, comparator and serializer run on internally;
+     * when a sequence field was appended for merging, {@link #createMergeReader} projects its
+     * output back to {@code outerReadType}, so the emitted rows can be narrower than this type.
      */
-    private RowType actualReadType() {
+    public RowType actualReadType() {
         return readerFactoryBuilder.readValueType();
     }
 

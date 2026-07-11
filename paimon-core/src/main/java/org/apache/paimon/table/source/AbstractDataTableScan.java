@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
@@ -67,6 +68,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -84,6 +86,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
     protected final TableSchema schema;
+    protected final SchemaManager schemaManager;
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
     private final TableQueryAuth queryAuth;
@@ -97,20 +100,26 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     protected AbstractDataTableScan(
             TableSchema schema,
+            SchemaManager schemaManager,
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         this.schema = schema;
+        this.schemaManager = schemaManager;
         this.options = options;
         this.snapshotReader = snapshotReader;
         this.queryAuth = queryAuth;
     }
+
+    // the read type last pushed to the snapshot reader; widened for auth when needed
+    @Nullable private RowType appliedScanReadType;
 
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
         // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
         applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
+        applyAuthReadType(queryAuthResult);
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
             plan = queryAuthResult.convertPlan(plan);
@@ -208,6 +217,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withReadType(@Nullable RowType readType) {
         this.readType = readType;
+        this.appliedScanReadType = readType;
         snapshotReader.withReadType(readType);
         return this;
     }
@@ -258,7 +268,21 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (!options.queryAuthEnabled()) {
             return null;
         }
-        return queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        List<String> select = readType == null ? null : readType.getFieldNames();
+        TableQueryAuthResult result = queryAuth.auth(select);
+        if (result != null && result.hasRules()) {
+            // validated on every plan (this path already pays an auth-service call per plan), so
+            // schema changes under a live scan fail closed: references stale in the latest schema,
+            // or renamed relative to the schema being read (e.g. time travel), are rejected
+            RowType latestSchema =
+                    schemaManager
+                            .latest()
+                            .map(TableSchema::logicalRowType)
+                            .orElseGet(schema::logicalRowType);
+            result.validateAgainstSchema(latestSchema, select);
+            result.validateReadableWithoutRename(latestSchema, schema.logicalRowType());
+        }
+        return result;
     }
 
     @Override
@@ -277,6 +301,38 @@ abstract class AbstractDataTableScan implements DataTableScan {
     public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         snapshotReader.withRowRangeIndex(rowRangeIndex);
         return this;
+    }
+
+    /**
+     * Push the auth-widened read type to the snapshot reader before planning, so file-level column
+     * pruning keeps the files of the columns the rules read.
+     */
+    private void applyAuthReadType(@Nullable TableQueryAuthResult queryAuthResult) {
+        if (readType == null) {
+            return;
+        }
+        RowType desired = readType;
+        if (queryAuthResult != null && queryAuthResult.hasRules()) {
+            RowType widened = queryAuthResult.widenReadType(schema.logicalRowType(), readType);
+            if (widened != null) {
+                desired = widened;
+            }
+        }
+        // never narrow within this scan's lifetime: readers fix their schema on first use
+        if (appliedScanReadType != null) {
+            RowType widened =
+                    TableQueryAuthResult.appendMissingFields(
+                            appliedScanReadType,
+                            desired,
+                            new HashSet<>(appliedScanReadType.getFieldNames()));
+            if (widened != null) {
+                desired = widened;
+            }
+        }
+        if (!desired.equals(appliedScanReadType)) {
+            snapshotReader.withReadType(desired);
+            appliedScanReadType = desired;
+        }
     }
 
     public SnapshotReader snapshotReader() {

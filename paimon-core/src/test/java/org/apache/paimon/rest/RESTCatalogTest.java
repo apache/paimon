@@ -31,6 +31,8 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -87,10 +89,13 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
@@ -3580,6 +3585,897 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isEqualTo("prefix-example"); // col4 masked with ConcatWsTransform
         assertThat(row2.getString(4).toString())
                 .isEqualTo("value"); // col5 NOT masked - original value
+    }
+
+    private Table createMaskingAuthTable(
+            Identifier identifier, List<DataField> fields, Map<String, String> extraOptions)
+            throws Exception {
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        Map<String, String> options = new HashMap<>(extraOptions);
+        options.put(QUERY_AUTH_ENABLED.key(), "true");
+        catalog.createTable(
+                identifier,
+                new Schema(fields, Collections.emptyList(), Collections.emptyList(), options, ""),
+                true);
+        return catalog.getTable(identifier);
+    }
+
+    private static List<DataField> stringFields(String... names) {
+        List<DataField> fields = new ArrayList<>();
+        for (int i = 0; i < names.length; i++) {
+            fields.add(new DataField(i, names[i], DataTypes.STRING()));
+        }
+        return fields;
+    }
+
+    private static void writeStringRows(Table table, String[]... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (String[] values : rows) {
+            Object[] converted = new Object[values.length];
+            for (int i = 0; i < values.length; i++) {
+                converted[i] = BinaryString.fromString(values[i]);
+            }
+            write.write(GenericRow.of(converted));
+        }
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+    }
+
+    private static void writeStringRow(Table table, String... values) throws Exception {
+        writeStringRows(table, values);
+    }
+
+    /** Cross-column mask: display := concat_ws('-', first, last). */
+    private void maskDisplayWithFullName(Identifier identifier) {
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "first", DataTypes.STRING()),
+                                new FieldRef(1, "last", DataTypes.STRING()))));
+        setColumnMasking(identifier, columnMasking);
+    }
+
+    /** Rows must be copied: the auth back-projection reuses one ProjectedRow per split. */
+    private static List<InternalRow> collectRows(RecordReader<InternalRow> reader, RowType rowType)
+            throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(row -> rows.add(InternalRowUtils.copyInternalRow(row, rowType)));
+        return rows;
+    }
+
+    @Test
+    void testColumnMaskingCrossColumnWithProjection() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_cross_column");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display", "other"),
+                        Collections.emptyMap());
+        // two rows in one commit -> one split with multiple rows
+        writeStringRows(
+                table,
+                new String[] {"john", "doe", "ignored", "o1"},
+                new String[] {"jane", "roe", "ignored", "o2"});
+        maskDisplayWithFullName(identifier);
+
+        // project only the masked target; its input columns are not selected
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(splits),
+                        table.rowType().project("display"));
+
+        assertThat(rows).hasSize(2);
+        for (InternalRow row : rows) {
+            assertThat(row.getFieldCount()).isEqualTo(1);
+        }
+        assertThat(
+                        rows.stream()
+                                .map(row -> row.getString(0).toString())
+                                .collect(java.util.stream.Collectors.toList()))
+                .containsExactlyInAnyOrder("john-doe", "jane-roe");
+    }
+
+    @Test
+    void testColumnMaskingProjectionAcrossMultipleSplits() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_multi_split");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display"),
+                        // one file per split, so the scan below yields multiple splits
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
+        // two commits -> two splits; the widening must not leak state across splits
+        writeStringRow(table, "john", "doe", "ignored");
+        writeStringRow(table, "jane", "roe", "ignored");
+        maskDisplayWithFullName(identifier);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isGreaterThan(1);
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(splits),
+                        table.rowType().project("display"));
+
+        List<String> values = new ArrayList<>();
+        for (InternalRow row : rows) {
+            // every split must be projected back to the query's arity
+            assertThat(row.getFieldCount()).isEqualTo(1);
+            values.add(row.getString(0).toString());
+        }
+        assertThat(values).containsExactlyInAnyOrder("john-doe", "jane-roe");
+    }
+
+    @Test
+    void testColumnMaskingOnRowFilterColumnWithProjection() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_filter_target");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display", "other"),
+                        Collections.emptyMap());
+        writeStringRow(table, "john", "doe", "secret", "o1");
+
+        // the filter pulls unprojected "display" into the read type, activating its mask
+        LeafPredicate displayFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "display", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("secret")));
+        setRowFilter(identifier, Collections.singletonList(displayFilter));
+        maskDisplayWithFullName(identifier);
+
+        // project only "other": the mask target and inputs are all unprojected
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {3});
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(splits),
+                        table.rowType().project("other"));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getFieldCount()).isEqualTo(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo("o1");
+    }
+
+    @Test
+    void testColumnMaskingRevokedOnSameTableRead() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_revoked");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display"),
+                        Collections.emptyMap());
+        writeStringRow(table, "john", "doe", "plain");
+        maskDisplayWithFullName(identifier);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> masked =
+                collectRows(
+                        read.createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(masked).hasSize(1);
+        assertThat(masked.get(0).getString(0).toString()).isEqualTo("john-doe");
+
+        // revoke the rules: the same TableRead must drop the widened read type
+        setColumnMasking(identifier, new HashMap<>());
+        List<InternalRow> plain =
+                collectRows(
+                        read.createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(plain).hasSize(1);
+        assertThat(plain.get(0).getFieldCount()).isEqualTo(1);
+        assertThat(plain.get(0).getString(0).toString()).isEqualTo("plain");
+    }
+
+    @Test
+    void testColumnMaskingGrantedAfterReadSchemaFixed() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_granted");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display"),
+                        Collections.emptyMap());
+        writeStringRow(table, "john", "doe", "plain");
+
+        // first read without rules fixes the read schema to the projection
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> plain =
+                collectRows(
+                        read.createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(plain.get(0).getString(0).toString()).isEqualTo("plain");
+
+        // a mask granted afterwards needs columns outside the fixed schema: fail closed
+        maskDisplayWithFullName(identifier);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThatThrownBy(
+                        () ->
+                                collectRows(
+                                        read.createReader(splits),
+                                        table.rowType().project("display")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Recreate the reader");
+    }
+
+    @Test
+    void testColumnMaskingPreservesNestedProjection() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_nested");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "display", DataTypes.STRING()));
+        fields.add(
+                new DataField(
+                        1,
+                        "s",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.STRING()),
+                                new DataField(3, "b", DataTypes.STRING()))));
+        fields.add(new DataField(4, "extra", DataTypes.STRING()));
+        Table table = createMaskingAuthTable(identifier, fields, Collections.emptyMap());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("ignored"),
+                        GenericRow.of(BinaryString.fromString("AV"), BinaryString.fromString("BV")),
+                        BinaryString.fromString("EX")));
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+
+        // a nested-pruned read type, as engines push down
+        RowType tableRowType = table.rowType();
+        DataField sField = tableRowType.getField("s");
+        RowType prunedS = ((RowType) sField.type()).project("b");
+        RowType prunedReadType =
+                new RowType(
+                        Arrays.asList(
+                                tableRowType.getField("display"),
+                                new DataField(sField.id(), "s", prunedS)));
+
+        // sanity: the nested-pruned read works without masking
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(prunedReadType);
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        prunedReadType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getRow(1, 1).getString(0).toString()).isEqualTo("BV");
+
+        // mask "display" from unprojected "extra": widening must keep "s" pruned
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(4, "extra", DataTypes.STRING()))));
+        setColumnMasking(identifier, columnMasking);
+
+        readBuilder = table.newReadBuilder().withReadType(prunedReadType);
+        rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        prunedReadType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getFieldCount()).isEqualTo(2);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo("EX");
+        assertThat(rows.get(0).getRow(1, 1).getString(0).toString()).isEqualTo("BV");
+    }
+
+    @Test
+    void testColumnMaskingStaleRuleFailsClosed() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_stale");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("first", "last", "display"),
+                        Collections.emptyMap());
+        writeStringRow(table, "john", "doe", "secret");
+
+        // mask target absent from the schema (e.g. renamed since the rule was written)
+        Map<String, Transform> staleTarget = new HashMap<>();
+        staleTarget.put(
+                "renamed_away",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, staleTarget);
+        assertThatThrownBy(() -> readFully(table))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not exist in table schema");
+
+        // mask input absent from the schema
+        Map<String, Transform> staleInput = new HashMap<>();
+        staleInput.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "ghost", DataTypes.STRING()))));
+        setColumnMasking(identifier, staleInput);
+        assertThatThrownBy(() -> readFully(table))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not exist in table schema");
+    }
+
+    @Test
+    void testColumnMaskingRuleChangeOnRetainedColumn() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_retained");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("display", "hidden_a", "hidden_b"),
+                        Collections.emptyMap());
+        writeStringRow(table, "d1", "a1", "b1");
+
+        // first rules widen and fix the read schema to [display, hidden_a]
+        Map<String, Transform> rules = new HashMap<>();
+        rules.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(1, "hidden_a", DataTypes.STRING()))));
+        setColumnMasking(identifier, rules);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> masked =
+                collectRows(
+                        read.createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(masked.get(0).getString(0).toString()).isEqualTo("a1");
+
+        // the new rules mask only hidden_a, retained but unread: must not activate
+        rules.clear();
+        rules.put(
+                "hidden_a",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(2, "hidden_b", DataTypes.STRING()))));
+        setColumnMasking(identifier, rules);
+        List<InternalRow> plain =
+                collectRows(
+                        read.createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(plain).hasSize(1);
+        assertThat(plain.get(0).getFieldCount()).isEqualTo(1);
+        assertThat(plain.get(0).getString(0).toString()).isEqualTo("d1");
+    }
+
+    @Test
+    void testColumnMaskingRejectsNestedPrunedMaskTarget() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_pruned_target");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "display", DataTypes.STRING()));
+        fields.add(
+                new DataField(
+                        1,
+                        "s",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.STRING()),
+                                new DataField(3, "b", DataTypes.STRING()))));
+        Table table = createMaskingAuthTable(identifier, fields, Collections.emptyMap());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("d1"),
+                        GenericRow.of(
+                                BinaryString.fromString("AV"), BinaryString.fromString("BV"))));
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+
+        // the mask TARGETS the struct column "s" (reading another column)
+        RowType tableRowType = table.rowType();
+        DataField sField = tableRowType.getField("s");
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "s",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+
+        // projecting "s" nested-pruned would write the mask into a partial slot: fail closed
+        RowType prunedS = ((RowType) sField.type()).project("b");
+        RowType prunedReadType =
+                new RowType(
+                        Arrays.asList(
+                                tableRowType.getField("display"),
+                                new DataField(sField.id(), "s", prunedS)));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(prunedReadType);
+        assertThatThrownBy(
+                        () ->
+                                collectRows(
+                                        readBuilder
+                                                .newRead()
+                                                .createReader(
+                                                        readBuilder.newScan().plan().splits()),
+                                        prunedReadType))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pruned");
+    }
+
+    @Test
+    void testColumnMaskingOnColumnAddedAfterSnapshot() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_time_travel");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("first", "display"), Collections.emptyMap());
+        writeStringRow(table, "john", "d1"); // snapshot 1
+
+        // add a column, then mask it: the rule is valid only in the latest schema
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.addColumn("extra", DataTypes.STRING())),
+                false);
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "extra",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+
+        // the latest read masks the new column
+        Table latest = catalog.getTable(identifier);
+        ReadBuilder latestRead = latest.newReadBuilder();
+        List<InternalRow> latestRows =
+                collectRows(
+                        latestRead.newRead().createReader(latestRead.newScan().plan().splits()),
+                        latest.rowType());
+        assertThat(latestRows).hasSize(1);
+        assertThat(latestRows.get(0).getString(2).toString()).isEqualTo("****");
+
+        // a time-travel read of the old snapshot must not fail on the newer rule
+        Table old =
+                catalog.getTable(identifier)
+                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        ReadBuilder oldRead = old.newReadBuilder();
+        List<InternalRow> oldRows =
+                collectRows(
+                        oldRead.newRead().createReader(oldRead.newScan().plan().splits()),
+                        old.rowType());
+        assertThat(oldRows).hasSize(1);
+        assertThat(oldRows.get(0).getString(0).toString()).isEqualTo("john");
+    }
+
+    @Test
+    void testColumnMaskingRenamedColumnTimeTravelFailsClosed() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_rename_travel");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("first", "secret"), Collections.emptyMap());
+        writeStringRow(table, "john", "s1"); // snapshot 1, column named "secret"
+
+        // rename the column, then mask it under the new name
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.renameColumn("secret", "masked_secret")),
+                false);
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "masked_secret",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+
+        // the latest read masks the renamed column
+        Table latest = catalog.getTable(identifier);
+        ReadBuilder latestRead = latest.newReadBuilder();
+        List<InternalRow> latestRows =
+                collectRows(
+                        latestRead.newRead().createReader(latestRead.newScan().plan().splits()),
+                        latest.rowType());
+        assertThat(latestRows.get(0).getString(1).toString()).isEqualTo("****");
+
+        // a time-travel read of the pre-rename snapshot exposes the same physical column
+        // as "secret"; the rule keyed on "masked_secret" would be silently skipped by name
+        // and leak the raw value -- it must fail closed instead
+        Table old =
+                catalog.getTable(identifier)
+                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        ReadBuilder oldRead = old.newReadBuilder();
+        assertThatThrownBy(() -> oldRead.newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("renamed");
+    }
+
+    @Test
+    void testColumnMaskingSystemTargetInertWhenUnprojected() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_system_target");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("display", "other"),
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeStringRow(table, "d1", "o1");
+
+        // a mask on a system column the query does not project must be inert, not reject
+        // the whole query at plan time
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "_ROW_ID",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType().project("display"));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo("d1");
+    }
+
+    @Test
+    void testColumnMaskingInertTargetWithRenamedInputTimeTravel() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_inert_input");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("first", "old_input"), Collections.emptyMap());
+        writeStringRow(table, "john", "in1"); // snapshot 1
+
+        // rename the input, then add a target column masked from the renamed input
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.renameColumn("old_input", "renamed_input")),
+                false);
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.addColumn("display", DataTypes.STRING())),
+                false);
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "display",
+                new FieldTransform(new FieldRef(1, "renamed_input", DataTypes.STRING())));
+        setColumnMasking(identifier, masking);
+
+        // the pre-rename snapshot predates "display": the mask cannot output there, so the
+        // rename of its input must not fail the read
+        Table old =
+                catalog.getTable(identifier)
+                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        ReadBuilder oldRead = old.newReadBuilder();
+        List<InternalRow> rows =
+                collectRows(
+                        oldRead.newRead().createReader(oldRead.newScan().plan().splits()),
+                        old.rowType());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo("john");
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("in1");
+    }
+
+    @Test
+    void testColumnMaskingRevalidatedAfterRulesDisappear() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_revalidate");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("first", "secret"), Collections.emptyMap());
+        writeStringRow(table, "john", "s1");
+
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+
+        // plan 1: a valid mask on "secret" is validated and cached
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "secret",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+        scan.plan();
+
+        // plan 2: rules disappear -- the cached validation must be forgotten
+        setColumnMasking(identifier, Collections.emptyMap());
+        scan.plan();
+
+        // the masked column is renamed away, then the identical rule is restored; a stale-rule
+        // cache short-circuit would skip re-validation and silently stop masking
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.renameColumn("secret", "hidden")),
+                false);
+        setColumnMasking(identifier, masking);
+        assertThatThrownBy(scan::plan)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not exist in table schema");
+    }
+
+    @Test
+    void testColumnMaskingRenamedUnderLiveScanFailsClosed() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_live_rename");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("first", "secret"), Collections.emptyMap());
+        writeStringRow(table, "john", "s1");
+
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "secret",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        scan.plan();
+
+        // the masked column is renamed while the rules stay identical: the live scan must
+        // notice on its next plan and fail closed, not keep planning on the stale rule
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.renameColumn("secret", "hidden")),
+                false);
+        assertThatThrownBy(scan::plan)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not exist in table schema");
+    }
+
+    @Test
+    void testColumnMaskingRejectsNestedPrunedRuleInput() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_pruned_input");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "display", DataTypes.STRING()));
+        fields.add(
+                new DataField(
+                        1,
+                        "s",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.STRING()),
+                                new DataField(3, "b", DataTypes.STRING()))));
+        Table table = createMaskingAuthTable(identifier, fields, Collections.emptyMap());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("d1"),
+                        GenericRow.of(
+                                BinaryString.fromString("AV"), BinaryString.fromString("BV"))));
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+
+        // the mask on "display" reads the whole struct column "s"
+        RowType tableRowType = table.rowType();
+        DataField sField = tableRowType.getField("s");
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "display",
+                new CastTransform(new FieldRef(1, "s", sField.type()), DataTypes.STRING()));
+        setColumnMasking(identifier, masking);
+
+        // projecting "s" nested-pruned would hand the mask a partial struct: fail closed
+        RowType prunedS = ((RowType) sField.type()).project("b");
+        RowType prunedReadType =
+                new RowType(
+                        Arrays.asList(
+                                tableRowType.getField("display"),
+                                new DataField(sField.id(), "s", prunedS)));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(prunedReadType);
+        assertThatThrownBy(
+                        () ->
+                                collectRows(
+                                        readBuilder
+                                                .newRead()
+                                                .createReader(
+                                                        readBuilder.newScan().plan().splits()),
+                                        prunedReadType))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pruned");
+    }
+
+    @Test
+    void testColumnMaskingWithDataEvolutionColumnFiles() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_data_evolution");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "f0", DataTypes.INT()));
+        fields.add(new DataField(1, "f1", DataTypes.STRING()));
+        fields.add(new DataField(2, "f2", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        Table table = createMaskingAuthTable(identifier, fields, options);
+
+        // one row group split across two columnar files: (f0, f1) and (f2)
+        RowType tableRowType = table.rowType();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write0 =
+                builder.newWrite().withWriteType(tableRowType.project("f0", "f1"))) {
+            write0.write(GenericRow.of(0, BinaryString.fromString("a0")));
+            write0.write(GenericRow.of(1, BinaryString.fromString("a1")));
+            builder.newCommit().commit(write0.prepareCommit());
+        }
+        long rowId = ((FileStoreTable) table).snapshotManager().latestSnapshot().nextRowId() - 2;
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write1 =
+                builder.newWrite().withWriteType(tableRowType.project("f2"))) {
+            write1.write(GenericRow.of(BinaryString.fromString("b0")));
+            write1.write(GenericRow.of(BinaryString.fromString("b1")));
+            List<CommitMessage> commitables = write1.prepareCommit();
+            for (CommitMessage c : commitables) {
+                CommitMessageImpl message = (CommitMessageImpl) c;
+                List<DataFileMeta> newFiles =
+                        new ArrayList<>(message.newFilesIncrement().newFiles());
+                message.newFilesIncrement().newFiles().clear();
+                for (DataFileMeta file : newFiles) {
+                    message.newFilesIncrement().newFiles().add(file.assignFirstRowId(rowId));
+                }
+            }
+            builder.newCommit().commit(commitables);
+        }
+
+        // mask f1 from f2 and project only f1: the scan must keep f2's file
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "f1",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(2, "f2", DataTypes.STRING()))));
+        setColumnMasking(identifier, masking);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {1});
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        tableRowType.project("f1"));
+        assertThat(rows).hasSize(2);
+        assertThat(
+                        rows.stream()
+                                .map(row -> row.isNullAt(0) ? null : row.getString(0).toString())
+                                .collect(java.util.stream.Collectors.toList()))
+                .containsExactlyInAnyOrder("b0", "b1");
+    }
+
+    @Test
+    void testColumnMaskingRejectsUnprojectedBlobViewInput() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_blob_view");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "display", DataTypes.STRING()));
+        fields.add(new DataField(1, "image", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.BLOB_FIELD.key(), "image");
+        options.put(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
+        options.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "true");
+        Table table = createMaskingAuthTable(identifier, fields, options);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("d1"),
+                        Blob.fromView(new BlobViewStruct(identifier, 1, 0L))));
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+
+        // the mask reads the unprojected blob-view column: resolution cannot apply
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(1, "image", DataTypes.STRING()))));
+        setColumnMasking(identifier, masking);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
+        assertThatThrownBy(
+                        () ->
+                                collectRows(
+                                        readBuilder
+                                                .newRead()
+                                                .createReader(
+                                                        readBuilder.newScan().plan().splits()),
+                                        table.rowType().project("display")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("blob-view");
+    }
+
+    @Test
+    void testColumnMaskingReadingSystemField() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_row_id");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "display", DataTypes.BIGINT()));
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        fields,
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(42L));
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+
+        // the mask reads the projected _ROW_ID metadata field: not a stale rule
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "display",
+                new FieldTransform(new FieldRef(0, "_ROW_ID", DataTypes.BIGINT().notNull())));
+        setColumnMasking(identifier, masking);
+
+        RowType readType =
+                new RowType(
+                        Arrays.asList(
+                                table.rowType().getField("display"),
+                                org.apache.paimon.table.SpecialFields.ROW_ID));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        readType);
+        assertThat(rows).hasSize(1);
+        // display masked to the row id
+        assertThat(rows.get(0).getLong(0)).isEqualTo(rows.get(0).getLong(1));
+    }
+
+    @Test
+    void testColumnMaskingSystemFieldValidation() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_table_masking_system_validation");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("display", "other"),
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeStringRow(table, "d1", "o1");
+
+        // a mask keyed by a key-reader-internal name is stale, not a system field
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                "_KEY_display",
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+        setColumnMasking(identifier, masking);
+        assertThatThrownBy(() -> readFully(table))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not exist in table schema");
+
+        // a rule reading an unprojected system field fails clearly at plan time
+        masking.clear();
+        masking.put(
+                "display",
+                new FieldTransform(new FieldRef(0, "_ROW_ID", DataTypes.BIGINT().notNull())));
+        setColumnMasking(identifier, masking);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
+        assertThatThrownBy(() -> readBuilder.newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not project");
+    }
+
+    private static void readFully(Table table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        collectRows(
+                readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                table.rowType());
     }
 
     @Test

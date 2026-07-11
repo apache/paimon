@@ -147,7 +147,9 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         CoreOptions options = wrapped.coreOptions();
         return new DataTableBatchScan(
                 wrapped.schema(),
-                schemaManager(),
+                // the per-branch manager: for a fallback read this scan may serve the
+                // fallback branch, whose rules must validate against that branch's schema
+                wrapped.schemaManager(),
                 options,
                 newSnapshotReader(wrapped),
                 wrapped.catalogEnvironment().tableQueryAuth(options));
@@ -161,6 +163,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         }
         return new DataTableStreamScan(
                 wrapped.schema(),
+                schemaManager(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
