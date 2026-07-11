@@ -40,7 +40,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.RAW_DELTA;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -61,10 +60,6 @@ public class PkVectorRawSegmentFile extends IndexFile {
             int dimension,
             String indexDefinitionId,
             int vectorFieldId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
-            byte[] optionsHash,
             BiConsumer<IndexFileMeta, FileSource> segmentConsumer,
             Consumer<IndexFileMeta> segmentAbortConsumer) {
         Path path = pathFactory.newPath();
@@ -73,10 +68,6 @@ public class PkVectorRawSegmentFile extends IndexFile {
                     new RawVectorSidecarWriter(fileIO, path, dimension),
                     indexDefinitionId,
                     vectorFieldId,
-                    vectorTypeFingerprint,
-                    metric,
-                    algorithm,
-                    optionsHash,
                     segmentConsumer,
                     segmentAbortConsumer);
         } catch (IOException e) {
@@ -91,10 +82,6 @@ public class PkVectorRawSegmentFile extends IndexFile {
         private final RawVectorSidecarWriter rawWriter;
         private final String indexDefinitionId;
         private final int vectorFieldId;
-        private final String vectorTypeFingerprint;
-        private final String metric;
-        private final String algorithm;
-        private final byte[] optionsHash;
         private final BiConsumer<IndexFileMeta, FileSource> segmentConsumer;
         private final Consumer<IndexFileMeta> segmentAbortConsumer;
 
@@ -106,19 +93,11 @@ public class PkVectorRawSegmentFile extends IndexFile {
                 RawVectorSidecarWriter rawWriter,
                 String indexDefinitionId,
                 int vectorFieldId,
-                String vectorTypeFingerprint,
-                String metric,
-                String algorithm,
-                byte[] optionsHash,
                 BiConsumer<IndexFileMeta, FileSource> segmentConsumer,
                 Consumer<IndexFileMeta> segmentAbortConsumer) {
             this.rawWriter = rawWriter;
             this.indexDefinitionId = indexDefinitionId;
             this.vectorFieldId = vectorFieldId;
-            this.vectorTypeFingerprint = vectorTypeFingerprint;
-            this.metric = metric;
-            this.algorithm = algorithm;
-            this.optionsHash = optionsHash.clone();
             this.segmentConsumer = segmentConsumer;
             this.segmentAbortConsumer = segmentAbortConsumer;
         }
@@ -149,23 +128,12 @@ public class PkVectorRawSegmentFile extends IndexFile {
 
             PkVectorSegmentMeta metadata =
                     new PkVectorSegmentMeta(
-                            RAW_DELTA,
                             indexDefinitionId,
-                            vectorFieldId,
-                            vectorTypeFingerprint,
-                            metric,
-                            algorithm,
                             Collections.singletonList(
                                     new PkVectorSegmentMeta.SourceFile(
-                                            sourceFile.fileName(),
-                                            sourceFile.schemaId(),
-                                            sourceFile.level(),
-                                            sourceFile.rowCount(),
-                                            sourceFile.fileSize())),
+                                            sourceFile.fileName(), sourceFile.rowCount())),
                             ROW_POSITION,
-                            rawWriter.liveVectorCount(),
-                            0,
-                            optionsHash);
+                            new byte[0]);
             Path path = rawWriter.path();
             IndexFileMeta segment =
                     new IndexFileMeta(

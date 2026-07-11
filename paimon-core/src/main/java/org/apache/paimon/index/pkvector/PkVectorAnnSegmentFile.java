@@ -47,7 +47,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.LongPredicate;
 
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.ANN;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Builds immutable ANN payloads whose index ids are source data-file row positions. */
@@ -65,11 +64,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             DataField vectorField,
             Options indexOptions,
             String indexDefinitionId,
-            String vectorTypeFingerprint,
             String metric,
-            String algorithm,
-            byte[] optionsHash,
-            long buildSnapshotId)
+            String algorithm)
             throws IOException {
         checkArgument(!sources.isEmpty(), "An ANN segment must reference source files.");
         long totalRowCount = 0;
@@ -157,18 +153,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
             PkVectorSegmentMeta metadata =
                     new PkVectorSegmentMeta(
-                            ANN,
-                            indexDefinitionId,
-                            vectorField.id(),
-                            vectorTypeFingerprint,
-                            normalizeMetric(metric),
-                            algorithm,
-                            sourceFiles,
-                            ordinalLayout,
-                            liveRowCount,
-                            buildSnapshotId,
-                            optionsHash,
-                            payloadMetadata);
+                            indexDefinitionId, sourceFiles, ordinalLayout, payloadMetadata);
             IndexFileMeta segment =
                     new IndexFileMeta(
                             PK_VECTOR_ANN,
@@ -191,12 +176,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
     }
 
     private static PkVectorSegmentMeta.SourceFile sourceMetadata(DataFileMeta sourceFile) {
-        return new PkVectorSegmentMeta.SourceFile(
-                sourceFile.fileName(),
-                sourceFile.schemaId(),
-                sourceFile.level(),
-                sourceFile.rowCount(),
-                sourceFile.fileSize());
+        return new PkVectorSegmentMeta.SourceFile(sourceFile.fileName(), sourceFile.rowCount());
     }
 
     private static String normalizeMetric(String metric) {

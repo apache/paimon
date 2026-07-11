@@ -44,7 +44,6 @@ import java.util.concurrent.Executors;
 
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.ANN;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests ANN payload construction through the vector GlobalIndexer SPI. */
@@ -78,11 +77,8 @@ class PkVectorAnnSegmentFileTest {
                                     vectorField,
                                     options,
                                     "definition",
-                                    "ARRAY<FLOAT>",
                                     "l2",
-                                    "test-vector-ann",
-                                    new byte[] {1, 2},
-                                    42);
+                                    "test-vector-ann");
         }
 
         assertThat(segment.indexType()).isEqualTo(PkVectorAnnSegmentFile.PK_VECTOR_ANN);
@@ -90,13 +86,10 @@ class PkVectorAnnSegmentFileTest {
         assertThat(fileIO.exists(pathFactory.toPath(segment))).isTrue();
         PkVectorSegmentMeta metadata =
                 PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.role()).isEqualTo(ANN);
         assertThat(metadata.ordinalLayout()).isEqualTo(ROW_POSITION);
         assertThat(metadata.sourceFiles()).hasSize(1);
         assertThat(metadata.sourceFiles().get(0).fileName()).isEqualTo("data-1");
-        assertThat(metadata.liveRowCountAtBuild()).isEqualTo(2);
-        assertThat(metadata.buildSnapshotId()).isEqualTo(42);
-        assertThat(metadata.optionsHash()).containsExactly(1, 2);
+        assertThat(segment.globalIndexMeta().indexFieldId()).isEqualTo(7);
     }
 
     @Test
@@ -128,16 +121,12 @@ class PkVectorAnnSegmentFileTest {
                                     vectorField,
                                     options,
                                     "definition",
-                                    "ARRAY<FLOAT>",
                                     "l2",
-                                    "test-vector-ann",
-                                    new byte[] {1, 2},
-                                    42);
+                                    "test-vector-ann");
         }
 
         PkVectorSegmentMeta metadata =
                 PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
-        assertThat(metadata.liveRowCountAtBuild()).isEqualTo(1);
         assertThat(segment.rowCount()).isEqualTo(1);
     }
 
@@ -167,11 +156,8 @@ class PkVectorAnnSegmentFileTest {
                             vectorField,
                             options,
                             "definition",
-                            "ARRAY<FLOAT>",
                             "l2",
-                            "test-vector-ann",
-                            new byte[] {1, 2},
-                            42);
+                            "test-vector-ann");
         }
         PkVectorSegmentMeta metadata =
                 PkVectorSegmentMeta.deserialize(segment.globalIndexMeta().indexMeta());
@@ -181,7 +167,14 @@ class PkVectorAnnSegmentFileTest {
         List<PkVectorAnnSegmentSearcher.Candidate> candidates;
         try {
             candidates =
-                    new PkVectorAnnSegmentSearcher(fileIO, annFile, vectorField, options, executor)
+                    new PkVectorAnnSegmentSearcher(
+                                    fileIO,
+                                    annFile,
+                                    vectorField,
+                                    options,
+                                    "test-vector-ann",
+                                    "l2",
+                                    executor)
                             .search(
                                     segment,
                                     metadata,
@@ -231,11 +224,8 @@ class PkVectorAnnSegmentFileTest {
                             vectorField,
                             options,
                             "definition",
-                            "ARRAY<FLOAT>",
                             "l2",
-                            "test-vector-ann",
-                            new byte[] {1, 2},
-                            42);
+                            "test-vector-ann");
         }
 
         PkVectorSegmentMeta metadata =
@@ -255,7 +245,14 @@ class PkVectorAnnSegmentFileTest {
         List<PkVectorAnnSegmentSearcher.Candidate> candidates;
         try {
             candidates =
-                    new PkVectorAnnSegmentSearcher(fileIO, annFile, vectorField, options, executor)
+                    new PkVectorAnnSegmentSearcher(
+                                    fileIO,
+                                    annFile,
+                                    vectorField,
+                                    options,
+                                    "test-vector-ann",
+                                    "l2",
+                                    executor)
                             .search(
                                     segment,
                                     metadata,

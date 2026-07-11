@@ -35,99 +35,26 @@ public class PkVectorSegmentMeta {
 
     private static final int VERSION = 1;
 
-    private final Role role;
     private final String indexDefinitionId;
-    private final int vectorFieldId;
-    private final String vectorTypeFingerprint;
-    private final String metric;
-    private final String algorithm;
     private final List<SourceFile> sourceFiles;
     private final OrdinalLayout ordinalLayout;
-    private final long liveRowCountAtBuild;
-    private final long buildSnapshotId;
-    private final byte[] optionsHash;
     private final byte[] payloadMetadata;
 
     public PkVectorSegmentMeta(
-            Role role,
             String indexDefinitionId,
-            int vectorFieldId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
             List<SourceFile> sourceFiles,
             OrdinalLayout ordinalLayout,
-            long liveRowCountAtBuild,
-            long buildSnapshotId,
-            byte[] optionsHash) {
-        this(
-                role,
-                indexDefinitionId,
-                vectorFieldId,
-                vectorTypeFingerprint,
-                metric,
-                algorithm,
-                sourceFiles,
-                ordinalLayout,
-                liveRowCountAtBuild,
-                buildSnapshotId,
-                optionsHash,
-                new byte[0]);
-    }
-
-    public PkVectorSegmentMeta(
-            Role role,
-            String indexDefinitionId,
-            int vectorFieldId,
-            String vectorTypeFingerprint,
-            String metric,
-            String algorithm,
-            List<SourceFile> sourceFiles,
-            OrdinalLayout ordinalLayout,
-            long liveRowCountAtBuild,
-            long buildSnapshotId,
-            byte[] optionsHash,
             byte[] payloadMetadata) {
-        this.role = Objects.requireNonNull(role);
         this.indexDefinitionId = Objects.requireNonNull(indexDefinitionId);
-        this.vectorFieldId = vectorFieldId;
-        this.vectorTypeFingerprint = Objects.requireNonNull(vectorTypeFingerprint);
-        this.metric = Objects.requireNonNull(metric);
-        this.algorithm = Objects.requireNonNull(algorithm);
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         this.ordinalLayout = Objects.requireNonNull(ordinalLayout);
-        this.liveRowCountAtBuild = liveRowCountAtBuild;
-        this.buildSnapshotId = buildSnapshotId;
-        this.optionsHash = Arrays.copyOf(optionsHash, optionsHash.length);
         this.payloadMetadata = Arrays.copyOf(payloadMetadata, payloadMetadata.length);
 
         checkArgument(!this.sourceFiles.isEmpty(), "A vector segment must reference source files.");
-        checkArgument(liveRowCountAtBuild >= 0, "Live row count must not be negative.");
-        checkArgument(buildSnapshotId >= 0, "Build snapshot id must not be negative.");
-    }
-
-    public Role role() {
-        return role;
     }
 
     public String indexDefinitionId() {
         return indexDefinitionId;
-    }
-
-    public int vectorFieldId() {
-        return vectorFieldId;
-    }
-
-    public String vectorTypeFingerprint() {
-        return vectorTypeFingerprint;
-    }
-
-    public String metric() {
-        return metric;
-    }
-
-    public String algorithm() {
-        return algorithm;
     }
 
     public List<SourceFile> sourceFiles() {
@@ -136,18 +63,6 @@ public class PkVectorSegmentMeta {
 
     public OrdinalLayout ordinalLayout() {
         return ordinalLayout;
-    }
-
-    public long liveRowCountAtBuild() {
-        return liveRowCountAtBuild;
-    }
-
-    public long buildSnapshotId() {
-        return buildSnapshotId;
-    }
-
-    public byte[] optionsHash() {
-        return Arrays.copyOf(optionsHash, optionsHash.length);
     }
 
     public byte[] payloadMetadata() {
@@ -159,25 +74,13 @@ public class PkVectorSegmentMeta {
         try {
             DataOutputSerializer output = new DataOutputSerializer(128);
             output.writeInt(VERSION);
-            output.writeByte(role.ordinal());
             output.writeUTF(indexDefinitionId);
-            output.writeInt(vectorFieldId);
-            output.writeUTF(vectorTypeFingerprint);
-            output.writeUTF(metric);
-            output.writeUTF(algorithm);
             output.writeInt(sourceFiles.size());
             for (SourceFile sourceFile : sourceFiles) {
                 output.writeUTF(sourceFile.fileName);
-                output.writeLong(sourceFile.schemaId);
-                output.writeInt(sourceFile.level);
                 output.writeLong(sourceFile.rowCount);
-                output.writeLong(sourceFile.fileSize);
             }
             output.writeByte(ordinalLayout.ordinal());
-            output.writeLong(liveRowCountAtBuild);
-            output.writeLong(buildSnapshotId);
-            output.writeInt(optionsHash.length);
-            output.write(optionsHash);
             output.writeInt(payloadMetadata.length);
             output.write(payloadMetadata);
             return output.getCopyOfBuffer();
@@ -196,32 +99,15 @@ public class PkVectorSegmentMeta {
                     version == VERSION,
                     "Unsupported primary-key vector segment version: %s.",
                     version);
-            Role role = enumValue(Role.values(), input.readByte(), "role");
             String indexDefinitionId = input.readUTF();
-            int vectorFieldId = input.readInt();
-            String vectorTypeFingerprint = input.readUTF();
-            String metric = input.readUTF();
-            String algorithm = input.readUTF();
             int sourceFileCount = input.readInt();
             checkArgument(sourceFileCount > 0, "A vector segment must reference source files.");
             List<SourceFile> sourceFiles = new ArrayList<>(sourceFileCount);
             for (int i = 0; i < sourceFileCount; i++) {
-                sourceFiles.add(
-                        new SourceFile(
-                                input.readUTF(),
-                                input.readLong(),
-                                input.readInt(),
-                                input.readLong(),
-                                input.readLong()));
+                sourceFiles.add(new SourceFile(input.readUTF(), input.readLong()));
             }
             OrdinalLayout ordinalLayout =
                     enumValue(OrdinalLayout.values(), input.readByte(), "ordinal layout");
-            long liveRowCountAtBuild = input.readLong();
-            long buildSnapshotId = input.readLong();
-            int optionsHashLength = input.readInt();
-            checkArgument(optionsHashLength >= 0, "Options hash length must not be negative.");
-            byte[] optionsHash = new byte[optionsHashLength];
-            input.readFully(optionsHash);
             int payloadMetadataLength = input.readInt();
             checkArgument(
                     payloadMetadataLength >= 0, "Payload metadata length must not be negative.");
@@ -231,18 +117,7 @@ public class PkVectorSegmentMeta {
                     input.available() == 0,
                     "Unexpected trailing bytes in vector segment metadata.");
             return new PkVectorSegmentMeta(
-                    role,
-                    indexDefinitionId,
-                    vectorFieldId,
-                    vectorTypeFingerprint,
-                    metric,
-                    algorithm,
-                    sourceFiles,
-                    ordinalLayout,
-                    liveRowCountAtBuild,
-                    buildSnapshotId,
-                    optionsHash,
-                    payloadMetadata);
+                    indexDefinitionId, sourceFiles, ordinalLayout, payloadMetadata);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to deserialize primary-key vector segment metadata.", e);
@@ -259,12 +134,6 @@ public class PkVectorSegmentMeta {
         return values[index];
     }
 
-    /** Role of an immutable vector payload. */
-    public enum Role {
-        RAW_DELTA,
-        ANN
-    }
-
     /** Mapping from a segment-local ordinal to a physical data-file position. */
     public enum OrdinalLayout {
         ROW_POSITION,
@@ -275,39 +144,20 @@ public class PkVectorSegmentMeta {
     public static class SourceFile {
 
         private final String fileName;
-        private final long schemaId;
-        private final int level;
         private final long rowCount;
-        private final long fileSize;
 
-        public SourceFile(String fileName, long schemaId, int level, long rowCount, long fileSize) {
+        public SourceFile(String fileName, long rowCount) {
             this.fileName = Objects.requireNonNull(fileName);
-            this.schemaId = schemaId;
-            this.level = level;
             this.rowCount = rowCount;
-            this.fileSize = fileSize;
             checkArgument(rowCount >= 0, "Source file row count must not be negative.");
-            checkArgument(fileSize >= 0, "Source file size must not be negative.");
         }
 
         public String fileName() {
             return fileName;
         }
 
-        public long schemaId() {
-            return schemaId;
-        }
-
-        public int level() {
-            return level;
-        }
-
         public long rowCount() {
             return rowCount;
-        }
-
-        public long fileSize() {
-            return fileSize;
         }
 
         @Override
@@ -319,16 +169,12 @@ public class PkVectorSegmentMeta {
                 return false;
             }
             SourceFile that = (SourceFile) o;
-            return schemaId == that.schemaId
-                    && level == that.level
-                    && rowCount == that.rowCount
-                    && fileSize == that.fileSize
-                    && Objects.equals(fileName, that.fileName);
+            return rowCount == that.rowCount && Objects.equals(fileName, that.fileName);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(fileName, schemaId, level, rowCount, fileSize);
+            return Objects.hash(fileName, rowCount);
         }
     }
 }

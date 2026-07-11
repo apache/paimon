@@ -47,7 +47,6 @@ import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.FILE_POSITION;
 import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.OrdinalLayout.ROW_POSITION;
-import static org.apache.paimon.index.pkvector.PkVectorSegmentMeta.Role.ANN;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Searches one ANN payload and maps its segment-local ids back to source row positions. */
@@ -62,6 +61,8 @@ public class PkVectorAnnSegmentSearcher {
     private final PkVectorAnnSegmentFile annSegmentFile;
     private final DataField vectorField;
     private final Options indexOptions;
+    private final String algorithm;
+    private final String metric;
     private final ExecutorService executor;
 
     public PkVectorAnnSegmentSearcher(
@@ -69,11 +70,15 @@ public class PkVectorAnnSegmentSearcher {
             PkVectorAnnSegmentFile annSegmentFile,
             DataField vectorField,
             Options indexOptions,
+            String algorithm,
+            String metric,
             ExecutorService executor) {
         this.fileIO = fileIO;
         this.annSegmentFile = annSegmentFile;
         this.vectorField = vectorField;
         this.indexOptions = indexOptions;
+        this.algorithm = algorithm;
+        this.metric = normalizeMetric(metric);
         this.executor = executor;
     }
 
@@ -106,7 +111,6 @@ public class PkVectorAnnSegmentSearcher {
                 PkVectorAnnSegmentFile.PK_VECTOR_ANN.equals(segment.indexType()),
                 "Vector segment %s is not an ANN payload.",
                 segment.fileName());
-        checkArgument(metadata.role() == ANN, "Vector segment %s is not ANN.", segment.fileName());
         checkArgument(
                 metadata.ordinalLayout() == ROW_POSITION
                         || metadata.ordinalLayout() == FILE_POSITION,
@@ -117,20 +121,11 @@ public class PkVectorAnnSegmentSearcher {
                 metadata.ordinalLayout() != ROW_POSITION || metadata.sourceFiles().size() == 1,
                 "Row-position ANN segment %s must reference exactly one source file.",
                 segment.fileName());
-        checkArgument(
-                metadata.vectorFieldId() == vectorField.id(),
-                "ANN segment %s has vector field %s, but reader expects %s.",
-                segment.fileName(),
-                metadata.vectorFieldId(),
-                vectorField.id());
-
-        GlobalIndexer indexer =
-                GlobalIndexer.create(metadata.algorithm(), vectorField, indexOptions);
+        GlobalIndexer indexer = GlobalIndexer.create(algorithm, vectorField, indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
-                metadata.algorithm());
-        String metric = normalizeMetric(metadata.metric());
+                algorithm);
         String readerMetric = normalizeMetric(((VectorGlobalIndexer) indexer).metric());
         checkArgument(
                 metric.equals(readerMetric),
