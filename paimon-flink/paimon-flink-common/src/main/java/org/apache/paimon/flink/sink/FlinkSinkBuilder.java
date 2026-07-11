@@ -88,7 +88,7 @@ public class FlinkSinkBuilder {
 
     private DataStream<RowData> input;
     @Nullable protected Map<String, String> overwritePartition;
-    @Nullable private Integer parallelism;
+    @Nullable protected Integer parallelism;
     @Nullable private TableSortInfo tableSortInfo;
 
     // ============== for extension ==============
@@ -352,7 +352,7 @@ public class FlinkSinkBuilder {
         }
     }
 
-    private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
+    protected DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
@@ -370,7 +370,12 @@ public class FlinkSinkBuilder {
             }
         }
 
-        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
+        return createAppendTableSink().sinkFrom(input);
+    }
+
+    /** Create the {@link RowAppendTableSink} for the unaware bucket mode. */
+    protected RowAppendTableSink createAppendTableSink() {
+        return new RowAppendTableSink(table, overwritePartition, parallelism);
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {

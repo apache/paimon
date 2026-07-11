@@ -315,7 +315,17 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'f2,f1')");
 
-        checkLatestSnapshot(table, 21, Snapshot.CommitKind.OVERWRITE);
+        checkLatestSnapshot(table, 21, Snapshot.CommitKind.COMPACT);
+    }
+
+    @Test
+    public void testEmptySortCompactProcedure() throws Exception {
+        sql("CREATE TABLE T (f0 INT, f1 INT) WITH ('bucket' = '-1')");
+        FileStoreTable table = paimonTable("T");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'f0')");
+        Assertions.assertThat(table.snapshotManager().latestSnapshot()).isNull();
     }
 
     // ----------------------- Minor Compact -----------------------
