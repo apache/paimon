@@ -327,6 +327,11 @@ public class SchemaManager implements Serializable {
                         Objects.equals(oldValue, newValue)
                                 || isUnchangedNormalizedKey(
                                         setOption.key(), oldValue, newValue, oldTableSchema);
+                // reject 'type' even without snapshots: format tables hold data but
+                // create no snapshots, so the snapshot check would not catch them
+                if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
+                    throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
                 if (hasSnapshots.get() && !unchanged) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
@@ -335,6 +340,9 @@ public class SchemaManager implements Serializable {
                 }
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
+                if (CoreOptions.TYPE.key().equals(removeOption.key())) {
+                    throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
                 if (hasSnapshots.get()) {
                     checkResetTableOption(oldOptions, removeOption.key());
                 }
@@ -1273,23 +1281,45 @@ public class SchemaManager implements Serializable {
     }
 
     /**
-     * Checks whether a key whose old value is null actually hasn't changed. This handles keys like
-     * 'primary-key' and 'partition' that are stripped from options during schema normalization and
-     * stored in dedicated schema fields instead.
+     * Whether an option change is a semantic no-op: 'primary-key'/'partition' are normalized into
+     * dedicated schema fields (old value null), and 'type' compares case-insensitively, defaulting
+     * when unset.
      */
     public static boolean isUnchangedNormalizedKey(
             String key,
             @Nullable String oldValue,
             @Nullable String newValue,
             TableSchema tableSchema) {
-        if (oldValue != null || newValue == null) {
+        return isUnchangedNormalizedKey(
+                key, oldValue, newValue, tableSchema.primaryKeys(), tableSchema.partitionKeys());
+    }
+
+    /**
+     * Overload for callers holding the primary/partition keys rather than a {@link TableSchema}.
+     */
+    public static boolean isUnchangedNormalizedKey(
+            String key,
+            @Nullable String oldValue,
+            @Nullable String newValue,
+            List<String> primaryKeys,
+            List<String> partitionKeys) {
+        if (newValue == null) {
+            return false;
+        }
+        if (CoreOptions.TYPE.key().equals(key)) {
+            // 'type' compares case-insensitively (like convertToEnum); an unset type is the default
+            String effectiveOld =
+                    oldValue == null ? CoreOptions.TYPE.defaultValue().toString() : oldValue;
+            return newValue.equalsIgnoreCase(effectiveOld);
+        }
+        if (oldValue != null) {
             return false;
         }
         if (CoreOptions.PRIMARY_KEY.key().equals(key)) {
-            return normalizeKeyList(newValue).equals(tableSchema.primaryKeys());
+            return normalizeKeyList(newValue).equals(primaryKeys);
         }
         if (CoreOptions.PARTITION.key().equals(key)) {
-            return normalizeKeyList(newValue).equals(tableSchema.partitionKeys());
+            return normalizeKeyList(newValue).equals(partitionKeys);
         }
         return false;
     }
