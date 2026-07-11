@@ -73,11 +73,13 @@ public class IndexManifestFileHandler {
         indexes.addAll(previous.keySet());
         indexes.addAll(current.keySet());
         for (String indexName : indexes) {
+            List<IndexManifestEntry> previousEntries =
+                    previous.getOrDefault(indexName, Collections.emptyList());
+            List<IndexManifestEntry> currentEntries =
+                    current.getOrDefault(indexName, Collections.emptyList());
             indexEntries.addAll(
-                    getIndexManifestFileCombine(indexName)
-                            .combine(
-                                    previous.getOrDefault(indexName, Collections.emptyList()),
-                                    current.getOrDefault(indexName, Collections.emptyList())));
+                    getIndexManifestFileCombine(indexName, previousEntries, currentEntries)
+                            .combine(previousEntries, currentEntries));
         }
 
         return indexManifestFile.writeWithoutRolling(indexEntries);
@@ -94,9 +96,15 @@ public class IndexManifestFileHandler {
         return result;
     }
 
-    private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
+    private IndexManifestFileCombiner getIndexManifestFileCombine(
+            String indexType,
+            List<IndexManifestEntry> previousEntries,
+            List<IndexManifestEntry> currentEntries) {
+        if (hasSourceMeta(previousEntries) || hasSourceMeta(currentEntries)) {
+            return new GlobalIndexCombiner(false);
+        }
         if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-            return new GlobalIndexCombiner();
+            return new GlobalIndexCombiner(true);
         }
 
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
@@ -104,6 +112,16 @@ public class IndexManifestFileHandler {
         } else {
             return new BucketedCombiner();
         }
+    }
+
+    private static boolean hasSourceMeta(List<IndexManifestEntry> entries) {
+        for (IndexManifestEntry entry : entries) {
+            GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();
+            if (globalIndexMeta != null && globalIndexMeta.sourceMeta() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     interface IndexManifestFileCombiner {
@@ -202,6 +220,12 @@ public class IndexManifestFileHandler {
     /** We combine the previous and new index files by file name. */
     static class GlobalIndexCombiner implements IndexManifestFileCombiner {
 
+        private final boolean validateRowRangeOverlap;
+
+        private GlobalIndexCombiner(boolean validateRowRangeOverlap) {
+            this.validateRowRangeOverlap = validateRowRangeOverlap;
+        }
+
         @Override
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
@@ -222,7 +246,9 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : removed) {
                 indexEntries.remove(entry.indexFile().fileName());
             }
-            validateRetainedIndexFiles(indexEntries.values(), added);
+            if (validateRowRangeOverlap) {
+                validateRetainedIndexFiles(indexEntries.values(), added);
+            }
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }

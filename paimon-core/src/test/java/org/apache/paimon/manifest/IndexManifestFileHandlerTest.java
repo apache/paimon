@@ -202,6 +202,29 @@ public class IndexManifestFileHandlerTest {
         assertThat(entries).containsExactlyInAnyOrder(previous, added);
     }
 
+    @Test
+    public void testPrimaryKeyVectorSegmentsAllowFileLocalOverlappingRanges() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
+        IndexManifestEntry first = pkVectorEntry("test-vector-ann", "ann-1");
+        String firstManifest = handler.write(null, Arrays.asList(first));
+        IndexManifestEntry second = pkVectorEntry("test-vector-ann", "ann-2");
+
+        String secondManifest = handler.write(firstManifest, Arrays.asList(second));
+
+        assertThat(indexManifestFile.read(secondManifest)).containsExactlyInAnyOrder(first, second);
+
+        IndexManifestEntry ann = pkVectorEntry("test-vector-ann", "ann-3");
+        String annManifest =
+                handler.write(
+                        secondManifest,
+                        Arrays.asList(first.toDeleteEntry(), second.toDeleteEntry(), ann));
+        assertThat(indexManifestFile.read(annManifest)).containsExactly(ann);
+    }
+
     private IndexManifestFile createIndexManifestFile(TestAppendFileStore fileStore) {
         return new IndexManifestFile.Factory(
                         fileStore.fileIO(),
@@ -224,6 +247,20 @@ public class IndexManifestFileHandlerTest {
                         1L,
                         rowRangeEnd - rowRangeStart + 1,
                         new GlobalIndexMeta(rowRangeStart, rowRangeEnd, indexFieldId, null, null),
+                        null));
+    }
+
+    private IndexManifestEntry pkVectorEntry(String indexType, String fileName) {
+        return new IndexManifestEntry(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                new IndexFileMeta(
+                        indexType,
+                        fileName,
+                        1L,
+                        1L,
+                        new GlobalIndexMeta(0, 1, 1, null, null, new byte[] {1}),
                         null));
     }
 }
