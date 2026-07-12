@@ -877,8 +877,9 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
-        // pk-clustering-override mode allows deletion vectors for first-row
-        if (!options.pkClusteringOverride()) {
+        // pk-clustering-override and primary-key vector index modes allow deletion vectors for
+        // first-row.
+        if (!options.pkClusteringOverride() && !options.primaryKeyVectorIndexEnabled()) {
             checkArgument(
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
@@ -912,13 +913,8 @@ public class SchemaValidation {
                 !schema.primaryKeys().isEmpty(),
                 "Primary-key vector index requires a primary-key table.");
         checkArgument(
-                options.deletionVectorsEnabled(),
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key vector index requires deletion-vectors.enabled = true.");
-        checkArgument(
-                options.mergeEngine() == MergeEngine.DEDUPLICATE
-                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
-                "Primary-key vector index only supports merge-engine = deduplicate or partial-update, but is %s.",
-                options.mergeEngine());
         checkArgument(
                 !options.deletionVectorsMergeOnRead(),
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",

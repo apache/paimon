@@ -40,8 +40,8 @@ is built separately from writes, see
 A table with a primary-key vector index must satisfy all of the following:
 
 - It is a primary-key table in fixed-bucket mode (`bucket > 0`).
-- `deletion-vectors.enabled` is `true`.
-- Its merge engine is `deduplicate` (the default) or `partial-update`.
+- `deletion-vectors.enabled` is `true`, except for `first-row`, where it is optional.
+- Its merge engine is `deduplicate`, `partial-update`, `aggregation`, or `first-row`.
 - The indexed column is a `VECTOR` whose element type is `FLOAT`.
 - `pk-clustering-override` is disabled.
 - The configured vector index implementation is available on every writer and reader classpath.
@@ -119,6 +119,9 @@ The maintenance behavior depends on the merge engine:
   physical row. A delete removes the old row from search results through the deletion vector.
 - `partial-update`: Paimon builds the vector index from the lookup-completed Level-1
   compact-output row.
+- `aggregation`: Paimon builds the vector index from the aggregated Level-1 compact-output row.
+- `first-row`: Paimon indexes the retained first row. Deletion vectors are optional because later
+  rows with the same primary key are ignored.
 
 When compaction replaces source data files, Paimon removes ANN segments that reference those files
 and creates replacement segments for the new compact-output files. Small outputs are indexed as
@@ -199,7 +202,6 @@ cached payloads and fetch only the selected data-file positions.
 - Exactly one vector index column is supported per table in the first release.
 - Only `FLOAT` vectors are supported.
 - Dynamic-bucket and `pk-clustering-override` tables are not supported.
-- `aggregation` and `first-row` merge engines are not supported.
 - Flink's procedure returns rows but does not expose the ANN score as a separate column.
 - Vector search is snapshot-scoped batch reading; streaming search and lateral vector search for
   primary-key tables are not supported.

@@ -46,12 +46,19 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
 
     @Override
     protected Schema schemaDefault() {
+        return vectorSchema("deduplicate", true);
+    }
+
+    private Schema vectorSchema(String mergeEngine, boolean deletionVectorsEnabled) {
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .column("embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
                 .primaryKey("id")
                 .option(CoreOptions.BUCKET.key(), "1")
-                .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine)
+                .option(
+                        CoreOptions.DELETION_VECTORS_ENABLED.key(),
+                        Boolean.toString(deletionVectorsEnabled))
                 .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
                 .option(
                         "fields.embedding.pk-vector.index.type",
@@ -93,5 +100,76 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         }
 
         assertThat(ids).containsExactly(2, 3);
+    }
+
+    @Test
+    void testFirstRowVectorSearchWithDeletionVectors() throws Exception {
+        assertFirstRowVectorSearch(true);
+    }
+
+    @Test
+    void testFirstRowVectorSearchWithoutDeletionVectors() throws Exception {
+        assertFirstRowVectorSearch(false);
+    }
+
+    private void assertFirstRowVectorSearch(boolean deletionVectorsEnabled) throws Exception {
+        catalog.createTable(identifier(), vectorSchema("first-row", deletionVectorsEnabled), false);
+        FileStoreTable table = getTableDefault();
+
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {3, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {1, 0})));
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {0.5f, 0})));
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .executeLocal();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+
+        assertThat(ids).containsExactly(2);
+    }
+
+    @Test
+    void testAggregationVectorSearch() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("aggregation", true), false);
+        FileStoreTable table = getTableDefault();
+
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {3, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {1, 0})));
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {0.5f, 0})));
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .executeLocal();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+
+        assertThat(ids).containsExactly(1);
     }
 }

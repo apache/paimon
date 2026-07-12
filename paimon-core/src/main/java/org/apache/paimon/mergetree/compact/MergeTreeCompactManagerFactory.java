@@ -288,7 +288,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
             FileReaderFactory<KeyValue> lookupReaderFactory = readerFactory;
             if (lookupStrategy.isFirstRow) {
-                if (options.deletionVectorsEnabled()) {
+                if (options.deletionVectorsEnabled() && !options.primaryKeyVectorIndexEnabled()) {
                     throw new UnsupportedOperationException(
                             "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
                 }
