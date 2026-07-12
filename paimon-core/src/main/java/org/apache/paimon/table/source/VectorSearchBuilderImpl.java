@@ -135,7 +135,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                     table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
                     partitionFilter);
         }
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
+        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
@@ -147,7 +147,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                     "Primary-key vector search does not support non-partition filters.");
             return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options);
         }
-        return new VectorReadImpl(
+        return new DataEvolutionVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 

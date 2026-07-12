@@ -594,7 +594,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         FileStoreTable table = getTableDefault();
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 1);
 
-        ExposingVectorRead read = new ExposingVectorRead(table, idFilter);
+        ExposingDataEvolutionVectorRead read = new ExposingDataEvolutionVectorRead(table, idFilter);
 
         assertThat(read.rawReadType(false).getFieldNames())
                 .containsExactly(VECTOR_FIELD_NAME, SpecialFields.ROW_ID.name());
@@ -611,7 +611,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
         candidates.add(1L);
 
-        ExposingVectorRead read = new ExposingVectorRead(table, null);
+        ExposingDataEvolutionVectorRead read = new ExposingDataEvolutionVectorRead(table, null);
         ScoredGlobalIndexResult result =
                 read.rawCandidateSearch(
                         Collections.singletonList(new Range(0, 2)),
@@ -937,7 +937,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // Build ONE btree index covering partial range [3,7]
         buildAndCommitBTreeIndex(table, new int[] {3, 4, 5, 6, 7}, new Range(3, 7));
 
-        // VectorScanImpl should attach scalar index because [3,7] intersects [0,9]
+        // DataEvolutionVectorScan should attach scalar index because [3,7] intersects [0,9]
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
         VectorScan.Plan plan =
                 table.newVectorSearchBuilder()
@@ -1409,9 +1409,9 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors);
     }
 
-    private static class ExposingVectorRead extends VectorReadImpl {
+    private static class ExposingDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
-        private ExposingVectorRead(FileStoreTable table, Predicate filter) {
+        private ExposingDataEvolutionVectorRead(FileStoreTable table, Predicate filter) {
             super(
                     table,
                     null,
@@ -1654,7 +1654,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitBTreeIndex(table, new int[] {0, 1, 2, 3, 4}, range1);
         buildAndCommitBTreeIndex(table, new int[] {5, 6, 7, 8, 9}, range2);
 
-        // --- Test VectorScanImpl: verify splits contain scalar index files ---
+        // --- Test DataEvolutionVectorScan: verify splits contain scalar index files ---
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
         VectorSearchBuilder searchBuilder =
                 table.newVectorSearchBuilder()
@@ -1676,7 +1676,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .count();
         assertThat(scalarCount).isGreaterThan(0);
 
-        // --- Test VectorReadImpl: pre-filter should narrow results ---
+        // --- Test DataEvolutionVectorRead: pre-filter should narrow results ---
         // Query vector near (0,1) with filter id >= 5
         // Without filter: rows 5,6,7,8,9 are closest
         // With filter id >= 5: btree pre-filter restricts to rows 5-9
