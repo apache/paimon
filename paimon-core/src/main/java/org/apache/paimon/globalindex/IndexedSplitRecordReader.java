@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -35,7 +36,7 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Return value with score. */
-public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
+public class IndexedSplitRecordReader implements ScoreRecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final Map<Long, Float> rowIdToScore;

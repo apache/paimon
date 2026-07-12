@@ -65,6 +65,15 @@ class VectorSearchOptionsTest extends PaimonSparkTestBase {
         .collect()
 
       assert(result.length == 1)
+
+      val scores = spark
+        .sql("""
+               |SELECT __paimon_search_score FROM vector_search(
+               |  'T', 'v', array(1.0f, 0.0f), 1, map('ivf.nprobe', '16'))
+               |""".stripMargin)
+        .collect()
+      assert(scores.length == 1)
+      assert(!scores.head.isNullAt(0))
     }
   }
 }
