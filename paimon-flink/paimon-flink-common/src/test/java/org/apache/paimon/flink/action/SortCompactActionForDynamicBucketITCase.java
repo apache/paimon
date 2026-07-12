@@ -289,8 +289,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     private void compactForRawConvertibleSplits(FileStoreTable table) throws Exception {
         DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
         FileStoreTable compactTable =
-                table.copy(
-                        Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BatchWriteBuilder writeBuilder = compactTable.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit batchCommit = writeBuilder.newCommit()) {
