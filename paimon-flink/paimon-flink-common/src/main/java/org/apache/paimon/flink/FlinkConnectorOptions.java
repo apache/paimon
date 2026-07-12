@@ -498,11 +498,14 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, a primary-key table sink advertises the FLIP-510 key-only "
-                                    + "(partial) deletes capability, allowing the Flink planner to drop the "
-                                    + "upstream ChangelogNormalize node when the source produces deletes by key. "
-                                    + "This changes the execution plan and requires Flink 2.1+; it has no "
-                                    + "effect on Flink 1.x. Disabled by default.");
+                            "If true, a primary-key table sink advertises the key-only (partial) "
+                                    + "deletes capability, allowing the Flink planner to drop the "
+                                    + "upstream ChangelogNormalize node when the source produces "
+                                    + "deletes by key. Requires Flink 2.1+; no effect on Flink 1.x. "
+                                    + "Does not apply when the table has no primary key, when "
+                                    + "'changelog-producer' is 'input', or when 'merge-engine' is "
+                                    + "'aggregation' or 'partial-update' with aggregation functions; "
+                                    + "in those cases a warning is logged. Disabled by default.");
 
     public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
             key("sink.writer-coordinator.cache-memory")

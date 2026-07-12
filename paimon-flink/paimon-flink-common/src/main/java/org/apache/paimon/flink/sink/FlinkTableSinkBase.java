@@ -36,6 +36,8 @@ import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -59,6 +61,8 @@ public abstract class FlinkTableSinkBase
 
     protected final Table table;
 
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkTableSinkBase.class);
+
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
 
@@ -74,19 +78,24 @@ public abstract class FlinkTableSinkBase
         if (table.primaryKeys().isEmpty()) {
             // Don't check this, for example, only inserts are available from the database, but the
             // plan phase contains all changelogs
+            warnKeyOnlyDeletesIgnored("the table has no primary key");
             return requestedMode;
         } else {
             Options options = Options.fromMap(table.options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
+                warnKeyOnlyDeletesIgnored("'changelog-producer' is 'input'");
                 return requestedMode;
             }
 
             if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
+                warnKeyOnlyDeletesIgnored("'merge-engine' is 'aggregation'");
                 return requestedMode;
             }
 
             if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE
                     && new CoreOptions(options).definedAggFunc()) {
+                warnKeyOnlyDeletesIgnored(
+                        "'merge-engine' is 'partial-update' with aggregation functions");
                 return requestedMode;
             }
 
@@ -97,15 +106,21 @@ public abstract class FlinkTableSinkBase
                     builder.addContainedKind(kind);
                 }
             }
-            // FLIP-510: a primary-key Paimon table applies changes (including deletes) by primary
-            // key, so it can accept key-only (partial) deletes. Advertising this as a sink
-            // capability lets the planner drop the upstream ChangelogNormalize when the source
-            // produces deletes by key. This changes the execution plan, so it is opt-in via
-            // 'sink.key-only-deletes.enabled' and is a no-op on Flink 1.x (API added in Flink 2.1).
             if (options.get(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED)) {
                 ChangelogModeUtils.enableKeyOnlyDeletes(builder);
             }
             return builder.build();
+        }
+    }
+
+    private void warnKeyOnlyDeletesIgnored(String reason) {
+        if (Options.fromMap(table.options())
+                .get(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED)) {
+            LOG.warn(
+                    "'{}' is set to true for table {}, but it has no effect because {}.",
+                    FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED.key(),
+                    tableIdentifier.asSummaryString(),
+                    reason);
         }
     }
 

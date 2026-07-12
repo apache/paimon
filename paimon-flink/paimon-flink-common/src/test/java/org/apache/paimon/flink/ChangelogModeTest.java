@@ -113,6 +113,15 @@ public class ChangelogModeTest {
     }
 
     @Test
+    public void testKeyOnlyDeletesIgnoredWithInputChangelogProducer() throws Exception {
+        Options options = new Options();
+        options.set(CHANGELOG_PRODUCER, INPUT);
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // The input changelog producer forces ChangelogMode.all(), so key-only deletes is ignored.
+        test(options, ChangelogMode.all(), ChangelogMode.all());
+    }
+
+    @Test
     public void testLookupChangelogProducer() throws Exception {
         Options options = new Options();
         options.set(CHANGELOG_PRODUCER, LOOKUP);

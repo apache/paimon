@@ -18,13 +18,39 @@
 
 package org.apache.paimon.flink.utils;
 
+import org.apache.flink.runtime.util.EnvironmentInformation;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Utility methods about Flink {@link ChangelogMode} to resolve compatibility issues. */
 public class ChangelogModeUtils {
 
-    /** FLIP-510 key-only deletes, available from Flink 2.1. */
+    private static final Logger LOG = LoggerFactory.getLogger(ChangelogModeUtils.class);
+
     public static ChangelogMode.Builder enableKeyOnlyDeletes(ChangelogMode.Builder builder) {
-        return builder.keyOnlyDeletes(true);
+        if (isFlink21OrAbove()) {
+            return builder.keyOnlyDeletes(true);
+        }
+        LOG.warn(
+                "'sink.key-only-deletes.enabled' requires Flink 2.1+ (current version: {}); "
+                        + "key-only deletes are not enabled.",
+                EnvironmentInformation.getVersion());
+        return builder;
+    }
+
+    private static boolean isFlink21OrAbove() {
+        String version = EnvironmentInformation.getVersion();
+        try {
+            String[] parts = version.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = Integer.parseInt(parts[1]);
+            return major > 2 || (major == 2 && minor >= 1);
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Could not parse Flink version '{}'; key-only deletes are not enabled.",
+                    version);
+            return false;
+        }
     }
 }
