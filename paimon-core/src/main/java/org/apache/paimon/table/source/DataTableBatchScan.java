@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -66,6 +67,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
+    @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
 
     public DataTableBatchScan(
             TableSchema schema,
@@ -110,6 +112,17 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     protected TableScan.Plan planWithoutAuth() {
+        if (globalIndexSplitResult != null) {
+            if (!hasNext) {
+                throw new EndOfScanException();
+            }
+            hasNext = false;
+            if (globalIndexSplitResult.snapshotId() > 0) {
+                maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
+            }
+            List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
+            return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
+        }
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -133,6 +146,14 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         } else {
             throw new EndOfScanException();
         }
+    }
+
+    @Override
+    public DataTableBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+        if (globalIndexResult instanceof GlobalIndexSplitResult) {
+            this.globalIndexSplitResult = (GlobalIndexSplitResult) globalIndexResult;
+        }
+        return this;
     }
 
     @Override

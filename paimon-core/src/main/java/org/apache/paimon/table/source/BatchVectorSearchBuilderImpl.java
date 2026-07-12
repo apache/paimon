@@ -125,7 +125,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
+        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
