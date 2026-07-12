@@ -28,7 +28,9 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -286,6 +288,10 @@ public class SortedGlobalIndexBuilder implements Serializable {
             commitMessages.add(flushIndex(rowRange, currentWriter.finish(), partition));
         }
         return commitMessages;
+    }
+
+    public Optional<KeySerializer> sortKeySerializer() {
+        return GlobalIndexer.create(indexType, indexField, options).sortKeySerializer();
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {

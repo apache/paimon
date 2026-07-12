@@ -84,6 +84,10 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
                                                         .BTREE_INDEX_HIGH_PRIORITY_POOL_RATIO)));
     }
 
+    protected KeySerializer keySerializer() {
+        return keySerializer;
+    }
+
     @Override
     public BTreeIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
         long blockSize = options.get(BTreeIndexOptions.BTREE_INDEX_BLOCK_SIZE).getBytes();

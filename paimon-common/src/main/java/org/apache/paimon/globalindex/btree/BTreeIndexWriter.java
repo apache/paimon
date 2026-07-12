@@ -106,11 +106,19 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             return;
         }
 
-        if (lastKey != null && comparator.compare(key, lastKey) != 0) {
-            try {
-                flush();
-            } catch (IOException e) {
-                throw new RuntimeException("Error in writing btree index files.", e);
+        if (lastKey != null) {
+            int cmp = comparator.compare(key, lastKey);
+            if (cmp < 0) {
+                throw new IllegalStateException(
+                        "BTreeIndexWriter requires keys in non-decreasing order of the index"
+                                + " comparator, cmp received key smaller than the previous one.");
+            }
+            if (cmp != 0) {
+                try {
+                    flush();
+                } catch (IOException e) {
+                    throw new RuntimeException("Error in writing btree index files.", e);
+                }
             }
         }
         lastKey = key;

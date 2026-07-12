@@ -27,6 +27,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 /** A btree global index over reversed keys. */
@@ -34,6 +35,11 @@ public class ReverseBTreeGlobalIndexer extends BTreeGlobalIndexer {
 
     public ReverseBTreeGlobalIndexer(DataField dataField, Options options) {
         super(new ReversedKeySerializer(KeySerializer.create(dataField.type())), options);
+    }
+
+    @Override
+    public Optional<KeySerializer> sortKeySerializer() {
+        return Optional.of(keySerializer());
     }
 
     @Override
