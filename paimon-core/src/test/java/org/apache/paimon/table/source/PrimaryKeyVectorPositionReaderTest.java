@@ -29,7 +29,6 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -43,8 +42,8 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /** Tests physical row-position filtering with vector scores. */
 class PrimaryKeyVectorPositionReaderTest {
@@ -91,17 +90,16 @@ class PrimaryKeyVectorPositionReaderTest {
     @Test
     void testKeyValueTableReadRoutesPhysicalSplitToRawReader() throws Exception {
         RawFileSplitRead rawRead = mock(RawFileSplitRead.class, RETURNS_SELF);
-        RecordReader<InternalRow> expectedReader = mock(RecordReader.class);
         IndexedSplit split = selectedSplit();
-        when(rawRead.createReader(split)).thenReturn(expectedReader);
         KeyValueTableRead tableRead =
                 new KeyValueTableRead(
                         () -> mock(MergeFileSplitRead.class),
                         () -> rawRead,
                         mock(TableSchema.class));
 
-        assertThat(tableRead.createReader(split)).isSameAs(expectedReader);
-        verify(rawRead).createReader(split);
+        assertThat(tableRead.createReader(split))
+                .isInstanceOf(PrimaryKeyVectorPositionReader.class);
+        verify(rawRead, never()).createReader(split);
     }
 
     private static IndexedSplit selectedSplit() {

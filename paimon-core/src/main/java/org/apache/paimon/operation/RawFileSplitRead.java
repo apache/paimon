@@ -31,7 +31,6 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataFileRecordReader;
@@ -49,14 +48,12 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
-import org.apache.paimon.table.source.PrimaryKeyVectorPositionReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -69,11 +66,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.IntFunction;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -155,9 +150,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        if (s instanceof IndexedSplit) {
-            return createReader((IndexedSplit) s);
-        } else if (s instanceof DataSplit) {
+        if (s instanceof DataSplit) {
             DataSplit split = (DataSplit) s;
             return createReader(
                     split.partition(),
@@ -217,45 +210,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return ConcatRecordReader.create(suppliers);
     }
 
-    private RecordReader<InternalRow> createReader(IndexedSplit split) throws IOException {
-        DataSplit dataSplit = split.dataSplit();
-        checkArgument(
-                dataSplit.dataFiles().size() == 1,
-                "Indexed split for a primary-key table must contain exactly one data file.");
+    FileRecordReader<InternalRow> createFileReader(
+            DataSplit dataSplit, RoaringBitmap32 selectedPositions) throws IOException {
         DataFileMeta dataFile = dataSplit.dataFiles().get(0);
-        RoaringBitmap32 rowPositions = new RoaringBitmap32();
-        float[] scores = split.scores();
-        Map<Integer, Float> scoreByPosition = scores == null ? null : new HashMap<>();
-        int scoreIndex = 0;
-        for (Range range : split.rowRanges()) {
-            checkArgument(
-                    range.from >= 0 && range.to < dataFile.rowCount(),
-                    "Indexed row range %s is outside data file %s row count %s.",
-                    range,
-                    dataFile.fileName(),
-                    dataFile.rowCount());
-            checkArgument(
-                    range.to <= Integer.MAX_VALUE,
-                    "Indexed row range %s exceeds supported physical positions.",
-                    range);
-            for (long position = range.from; position <= range.to; position++) {
-                rowPositions.add((int) position);
-                if (scoreByPosition != null) {
-                    checkArgument(
-                            scoreIndex < scores.length,
-                            "Scores length does not match row ranges in indexed split.");
-                    scoreByPosition.put((int) position, scores[scoreIndex++]);
-                }
-            }
-        }
-        checkArgument(!rowPositions.isEmpty(), "Indexed split must select at least one row.");
-        if (scores != null) {
-            checkArgument(
-                    scoreIndex == scores.length,
-                    "Scores length does not match row ranges in indexed split.");
-        }
-        IntFunction<Float> scoreGetter =
-                scoreByPosition == null ? position -> Float.NaN : scoreByPosition::get;
         DeletionVector.Factory dvFactory =
                 DeletionVector.factory(
                         fileIO, dataSplit.dataFiles(), dataSplit.deletionFiles().orElse(null));
@@ -264,19 +221,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 dataFile.fileName(), () -> dvFactory.create(dataFile.fileName()).orElse(null));
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(dataSplit.partition(), dataSplit.bucket());
-        FileRecordReader<InternalRow> reader =
-                (FileRecordReader<InternalRow>)
-                        createFileReader(
-                                        dataSplit.partition(),
-                                        dataFilePathFactory,
-                                        dataFile,
-                                        // ANN has already selected the rows. Applying a regular
-                                        // TopN or limit before position filtering can drop hits.
-                                        createFormatReaderMappingBuilder(null, null),
-                                        dvFactories,
-                                        rowPositions)
-                                .get();
-        return new PrimaryKeyVectorPositionReader(reader, rowPositions, scoreGetter);
+        return (FileRecordReader<InternalRow>)
+                createFileReader(
+                                dataSplit.partition(),
+                                dataFilePathFactory,
+                                dataFile,
+                                // The caller has already selected the rows. Applying a regular
+                                // TopN or limit before position filtering can drop hits.
+                                createFormatReaderMappingBuilder(null, null),
+                                dvFactories,
+                                selectedPositions)
+                        .get();
     }
 
     private Builder createFormatReaderMappingBuilder() {

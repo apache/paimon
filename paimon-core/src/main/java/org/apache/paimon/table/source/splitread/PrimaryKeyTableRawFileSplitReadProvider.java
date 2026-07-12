@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source.splitread;
 
-import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.table.source.DataSplit;
@@ -36,9 +35,6 @@ public class PrimaryKeyTableRawFileSplitReadProvider extends RawFileSplitReadPro
 
     @Override
     public boolean match(Split split, Context context) {
-        if (split instanceof IndexedSplit) {
-            return !context.forceKeepDelete();
-        }
         if (!(split instanceof DataSplit)) {
             return false;
         }
