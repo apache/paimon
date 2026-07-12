@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
@@ -36,13 +37,12 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,7 +52,7 @@ class PrimaryKeyVectorRawFileSplitReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void testRegularLimitDoesNotDropSelectedPhysicalPosition() throws Exception {
+    void testRegularLimitDoesNotDropSelectedPhysicalPositions() throws Exception {
         Path tablePath = new Path(tempDir.toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
@@ -80,16 +80,22 @@ class PrimaryKeyVectorRawFileSplitReadTest {
 
         DataSplit dataSplit = table.newSnapshotReader().read().dataSplits().get(0);
         assertThat(dataSplit.dataFiles()).hasSize(1);
-        Map<Integer, Float> scores = new HashMap<>();
-        scores.put(3, 0.25F);
-        PrimaryKeyVectorDataSplit vectorSplit =
-                new PrimaryKeyVectorDataSplit(dataSplit, RoaringBitmap32.bitmapOf(3), scores);
+        IndexedSplit vectorSplit =
+                new IndexedSplit(
+                        dataSplit,
+                        Arrays.asList(new Range(1, 1), new Range(3, 3)),
+                        new float[] {0.5F, 0.25F});
 
         try (RecordReader<InternalRow> reader =
-                table.newRead().withLimit(1).createReader(vectorSplit)) {
+                table.newRead().withLimit(2).createReader(vectorSplit)) {
             ScoreRecordIterator<InternalRow> batch =
                     (ScoreRecordIterator<InternalRow>) reader.readBatch();
             InternalRow row = batch.next();
+            assertThat(row.getInt(0)).isEqualTo(1);
+            assertThat(row.getInt(1)).isEqualTo(10);
+            assertThat(batch.returnedRowId()).isEqualTo(1);
+            assertThat(batch.returnedScore()).isEqualTo(0.5F);
+            row = batch.next();
             assertThat(row.getInt(0)).isEqualTo(3);
             assertThat(row.getInt(1)).isEqualTo(30);
             assertThat(batch.returnedRowId()).isEqualTo(3);

@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -32,12 +33,12 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Answers.RETURNS_SELF;
@@ -91,7 +92,7 @@ class PrimaryKeyVectorPositionReaderTest {
     void testKeyValueTableReadRoutesPhysicalSplitToRawReader() throws Exception {
         RawFileSplitRead rawRead = mock(RawFileSplitRead.class, RETURNS_SELF);
         RecordReader<InternalRow> expectedReader = mock(RecordReader.class);
-        PrimaryKeyVectorDataSplit split = selectedSplit();
+        IndexedSplit split = selectedSplit();
         when(rawRead.createReader(split)).thenReturn(expectedReader);
         KeyValueTableRead tableRead =
                 new KeyValueTableRead(
@@ -103,7 +104,7 @@ class PrimaryKeyVectorPositionReaderTest {
         verify(rawRead).createReader(split);
     }
 
-    private static PrimaryKeyVectorDataSplit selectedSplit() {
+    private static IndexedSplit selectedSplit() {
         DataFileMeta dataFile =
                 DataFileMeta.forAppend(
                         "data-file",
@@ -129,9 +130,8 @@ class PrimaryKeyVectorPositionReaderTest {
                         .withTotalBuckets(1)
                         .withDataFiles(Collections.singletonList(dataFile))
                         .build();
-        HashMap<Integer, Float> scores = new HashMap<>();
-        scores.put(1, 0.5F);
-        return new PrimaryKeyVectorDataSplit(dataSplit, RoaringBitmap32.bitmapOf(1), scores);
+        return new IndexedSplit(
+                dataSplit, Collections.singletonList(new Range(1, 1)), new float[] {0.5F});
     }
 
     private static class TestingFileReader implements FileRecordReader<InternalRow> {
