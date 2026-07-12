@@ -40,7 +40,7 @@ is built separately from writes, see
 A table with a primary-key vector index must satisfy all of the following:
 
 - It is a primary-key table in fixed-bucket mode (`bucket > 0`).
-- `deletion-vectors.enabled` is `true` and `deletion-vectors.merge-on-read` is `false`.
+- `deletion-vectors.enabled` is `true`.
 - Its merge engine is `deduplicate` (the default) or `partial-update`.
 - The indexed column is a `VECTOR` whose element type is `FLOAT`.
 - `pk-clustering-override` is disabled.
@@ -64,7 +64,6 @@ CREATE TABLE item_embeddings (
 ) WITH (
     'bucket' = '16',
     'deletion-vectors.enabled' = 'true',
-    'deletion-vectors.merge-on-read' = 'false',
     'pk-vector.index.columns' = 'embedding',
     'fields.embedding.pk-vector.index.type' = 'ivf-flat',
     'fields.embedding.pk-vector.distance.metric' = 'cosine',
@@ -84,7 +83,6 @@ TBLPROPERTIES (
     'primary-key' = 'id',
     'bucket' = '16',
     'deletion-vectors.enabled' = 'true',
-    'deletion-vectors.merge-on-read' = 'false',
     'pk-vector.index.columns' = 'embedding',
     'fields.embedding.pk-vector.index.type' = 'ivf-flat',
     'fields.embedding.pk-vector.distance.metric' = 'cosine',
