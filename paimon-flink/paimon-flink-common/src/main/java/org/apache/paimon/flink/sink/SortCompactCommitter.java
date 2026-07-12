@@ -80,7 +80,12 @@ public class SortCompactCommitter extends StoreCommitter {
                         .collect(Collectors.toList());
         List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
         if (retryCommittables.isEmpty()) {
-            if (sortedCommittables.isEmpty()
+            // Delete-only compact commits are only valid at job end (filterAndCommit with
+            // checkAppendFiles=false, e.g. CommitterOperator#endInput). Recovery paths call
+            // filterAndCommit with checkAppendFiles=true and an empty restored list; treating
+            // that as delete-only would remove all planned input files before writers run.
+            if (!checkAppendFiles
+                    && sortedCommittables.isEmpty()
                     && rewriter.hasInput()
                     && !rewriter.isPlannedInputAlreadyCommitted()) {
                 return filterAndCommitDeleteOnly(

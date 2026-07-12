@@ -79,6 +79,13 @@ public class SortCompactDynamicBucketSink extends DynamicBucketCompactSink {
     }
 
     @Override
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
+        // Batch sort compact is a one-shot job; use restore-only semantics like append sort
+        // compact instead of restore-and-fail, which intentionally fails after recovery commit.
+        return FlinkWriteSink.createRestoreOnlyCommittableStateManager(table);
+    }
+
+    @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         // If checkpoint is enabled for streaming job, we have to commit new files list even if
         // they're empty. Otherwise we can't tell if the commit is successful after a restart.

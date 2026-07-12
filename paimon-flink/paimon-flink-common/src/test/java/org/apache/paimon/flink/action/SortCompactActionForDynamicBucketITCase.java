@@ -256,6 +256,8 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         commit(writeControlledRow(2L, 300L));
 
         FileStoreTable table = getTable();
+        compactForRawConvertibleSplits(table);
+
         List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
         Assertions.assertThat(splits).anyMatch(DataSplit::rawConvertible);
 
@@ -282,6 +284,19 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
             }
         }
         Assertions.assertThat(foundPk1.get()).isTrue();
+    }
+
+    private void compactForRawConvertibleSplits(FileStoreTable table) throws Exception {
+        DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
+        FileStoreTable compactTable =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        BatchWriteBuilder writeBuilder = compactTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit batchCommit = writeBuilder.newCommit()) {
+            write.compact(split.partition(), split.bucket(), true);
+            batchCommit.commit(write.prepareCommit());
+        }
     }
 
     private List<CommitMessage> writeControlledRow(long pk, long f1) throws Exception {

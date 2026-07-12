@@ -314,6 +314,39 @@ public class SortCompactCommitterTest {
     }
 
     @Test
+    public void testFilterAndCommitRecoveryDoesNotDeletePlannedInput() throws Exception {
+        TestAppendFileStore store = createAppendStore(new HashMap<>());
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        long snapshotsBeforeRecover = table.snapshotManager().snapshotCount();
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            commit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            new SortCompactCommitMessageRewriter(
+                                    table,
+                                    plan.snapshotId() == null ? 0L : plan.snapshotId(),
+                                    plan.dataSplits()));
+            int committed = committer.filterAndCommit(Collections.emptyList(), true, true);
+            assertThat(committed).isZero();
+        }
+
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(snapshotsBeforeRecover);
+        assertThat(table.store().newScan().plan().files()).hasSize(2);
+    }
+
+    @Test
     public void testFilterAndCommitDeleteOnlyWhenWriterProducesNoCommittable() throws Exception {
         TestAppendFileStore store = createAppendStore(new HashMap<>());
         CommitMessageImpl initial =
