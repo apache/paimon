@@ -103,7 +103,7 @@ class PkVectorAnnSegmentFileTest {
         deletionVectors.put("data-2", data2Deletes);
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        List<PkVectorAnnSegmentSearcher.Candidate> candidates;
+        List<PkVectorSearchResult> candidates;
         try {
             candidates =
                     new PkVectorAnnSegmentSearcher(
@@ -120,9 +120,7 @@ class PkVectorAnnSegmentFileTest {
         }
 
         assertThat(candidates)
-                .extracting(
-                        PkVectorAnnSegmentSearcher.Candidate::dataFileName,
-                        PkVectorAnnSegmentSearcher.Candidate::rowPosition)
+                .extracting(PkVectorSearchResult::dataFileName, PkVectorSearchResult::rowPosition)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("data-2", 1L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 0L),

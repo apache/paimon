@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.Options;
@@ -41,7 +42,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -51,10 +51,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Searches one ANN payload and maps its segment-local ids back to source row positions. */
 public class PkVectorAnnSegmentSearcher {
 
-    private static final Comparator<Candidate> BEST_FIRST =
-            Comparator.comparingDouble((Candidate candidate) -> candidate.distance)
-                    .thenComparing(candidate -> candidate.dataFileName)
-                    .thenComparingLong(candidate -> candidate.rowPosition);
+    private static final Comparator<PkVectorSearchResult> BEST_FIRST =
+            Comparator.comparingDouble(PkVectorSearchResult::distance)
+                    .thenComparing(PkVectorSearchResult::dataFileName)
+                    .thenComparingLong(PkVectorSearchResult::rowPosition);
 
     private final FileIO fileIO;
     private final PkVectorAnnSegmentFile annSegmentFile;
@@ -74,11 +74,11 @@ public class PkVectorAnnSegmentSearcher {
         this.annSegmentFile = annSegmentFile;
         this.vectorField = vectorField;
         this.indexOptions = indexOptions;
-        this.metric = normalizeMetric(metric);
+        this.metric = VectorSearchMetric.normalize(metric);
         this.executor = executor;
     }
 
-    public List<Candidate> search(
+    public List<PkVectorSearchResult> search(
             IndexFileMeta segment,
             PkVectorSourceMeta sourceMeta,
             float[] query,
@@ -95,7 +95,7 @@ public class PkVectorAnnSegmentSearcher {
         return search(segment, sourceMeta, query, limit, deletionVectors, searchOptions);
     }
 
-    public List<Candidate> search(
+    public List<PkVectorSearchResult> search(
             IndexFileMeta segment,
             PkVectorSourceMeta sourceMeta,
             float[] query,
@@ -114,7 +114,8 @@ public class PkVectorAnnSegmentSearcher {
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
                 segment.indexType());
-        String readerMetric = normalizeMetric(((VectorGlobalIndexer) indexer).metric());
+        String readerMetric =
+                VectorSearchMetric.normalize(((VectorGlobalIndexer) indexer).metric());
         checkArgument(
                 metric.equals(readerMetric),
                 "ANN segment metric %s does not match index reader metric %s.",
@@ -144,7 +145,7 @@ public class PkVectorAnnSegmentSearcher {
             }
 
             long sourceRowCount = totalRowCount(sourceMeta.sourceFiles());
-            List<Candidate> candidates = new ArrayList<>();
+            List<PkVectorSearchResult> candidates = new ArrayList<>();
             ScoredGlobalIndexResult scored = result.get();
             for (long ordinal : scored.results()) {
                 checkArgument(
@@ -162,10 +163,11 @@ public class PkVectorAnnSegmentSearcher {
                         segment.fileName(),
                         filePosition.rowPosition);
                 candidates.add(
-                        new Candidate(
+                        new PkVectorSearchResult(
                                 filePosition.dataFileName,
                                 filePosition.rowPosition,
-                                scoreToDistance(scored.scoreGetter().score(ordinal), metric)));
+                                VectorSearchMetric.scoreToDistance(
+                                        scored.scoreGetter().score(ordinal), metric)));
             }
             Collections.sort(candidates, BEST_FIRST);
             return Collections.unmodifiableList(candidates);
@@ -216,47 +218,6 @@ public class PkVectorAnnSegmentSearcher {
             fileOffset = nextOffset;
         }
         throw new IllegalArgumentException("ANN ordinal is outside source files: " + ordinal);
-    }
-
-    private static float scoreToDistance(float score, String metric) {
-        if ("l2".equals(metric)) {
-            return 1F / score - 1F;
-        } else if ("cosine".equals(metric)) {
-            return 1F - score;
-        } else if ("inner_product".equals(metric)) {
-            return -score;
-        }
-        throw new IllegalArgumentException("Unsupported ANN vector metric: " + metric);
-    }
-
-    private static String normalizeMetric(String metric) {
-        return metric.toLowerCase(Locale.ROOT).replace('-', '_');
-    }
-
-    /** One ANN candidate addressed by source-file row position. */
-    public static class Candidate {
-
-        private final long rowPosition;
-        private final float distance;
-        private final String dataFileName;
-
-        private Candidate(String dataFileName, long rowPosition, float distance) {
-            this.dataFileName = dataFileName;
-            this.rowPosition = rowPosition;
-            this.distance = distance;
-        }
-
-        public String dataFileName() {
-            return dataFileName;
-        }
-
-        public long rowPosition() {
-            return rowPosition;
-        }
-
-        public float distance() {
-            return distance;
-        }
     }
 
     private static class FilePosition {

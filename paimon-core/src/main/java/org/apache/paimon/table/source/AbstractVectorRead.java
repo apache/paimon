@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -447,7 +448,10 @@ public abstract class AbstractVectorRead implements Serializable {
                         float[] stored = getVector(row, vectorIndex);
                         checkVectorDimension(queryVector, stored);
                         offerScore(
-                                topKHeap, limit, rowId, computeScore(queryVector, stored, metric));
+                                topKHeap,
+                                limit,
+                                rowId,
+                                VectorSearchMetric.computeScore(queryVector, stored, metric));
                     });
         } catch (IOException e) {
             throw new RuntimeException("Failed to read raw vectors for vector search.", e);
@@ -523,7 +527,11 @@ public abstract class AbstractVectorRead implements Serializable {
                 continue;
             }
             checkVectorDimension(queryVector, stored);
-            offerScore(topKHeap, topK, rowId, computeScore(queryVector, stored, metric));
+            offerScore(
+                    topKHeap,
+                    topK,
+                    rowId,
+                    VectorSearchMetric.computeScore(queryVector, stored, metric));
         }
         return scoredResult(topKHeap);
     }
@@ -655,7 +663,7 @@ public abstract class AbstractVectorRead implements Serializable {
         if (metric == null) {
             metric = configuredRawSearchMetric();
         }
-        return metric == null ? "l2" : normalizeMetric(metric);
+        return metric == null ? "l2" : VectorSearchMetric.normalize(metric);
     }
 
     @Nullable
@@ -690,7 +698,7 @@ public abstract class AbstractVectorRead implements Serializable {
         for (Map.Entry<String, String> entry : options.entrySet()) {
             String key = entry.getKey();
             if (key.endsWith(".distance.metric") || key.endsWith(".metric")) {
-                String value = normalizeMetric(entry.getValue());
+                String value = VectorSearchMetric.normalize(entry.getValue());
                 if (isRawSearchMetric(value)) {
                     if (metric != null && !metric.equals(value)) {
                         return null;
@@ -705,15 +713,11 @@ public abstract class AbstractVectorRead implements Serializable {
     @Nullable
     private static String option(Map<String, String> options, String key) {
         String value = options.get(key);
-        return value == null ? null : normalizeMetric(value);
+        return value == null ? null : VectorSearchMetric.normalize(value);
     }
 
     private static boolean isRawSearchMetric(String metric) {
-        return "l2".equals(metric) || "cosine".equals(metric) || "inner_product".equals(metric);
-    }
-
-    private static String normalizeMetric(String metric) {
-        return metric.toLowerCase().replace('-', '_');
+        return VectorSearchMetric.isSupported(metric);
     }
 
     protected int configuredRefineFactor(String indexType) {
@@ -793,35 +797,6 @@ public abstract class AbstractVectorRead implements Serializable {
             }
         }
         throw new IllegalArgumentException("No vector index files found.");
-    }
-
-    private static float computeScore(float[] query, float[] stored, String metric) {
-        if ("l2".equals(metric)) {
-            float sumSq = 0;
-            for (int i = 0; i < query.length; i++) {
-                float diff = query[i] - stored[i];
-                sumSq += diff * diff;
-            }
-            return 1.0f / (1.0f + sumSq);
-        } else if ("cosine".equals(metric)) {
-            float dot = 0;
-            float normA = 0;
-            float normB = 0;
-            for (int i = 0; i < query.length; i++) {
-                dot += query[i] * stored[i];
-                normA += query[i] * query[i];
-                normB += stored[i] * stored[i];
-            }
-            float denominator = (float) (Math.sqrt(normA) * Math.sqrt(normB));
-            return denominator == 0 ? 0 : dot / denominator;
-        } else if ("inner_product".equals(metric)) {
-            float dot = 0;
-            for (int i = 0; i < query.length; i++) {
-                dot += query[i] * stored[i];
-            }
-            return dot;
-        }
-        throw new IllegalArgumentException("Unknown vector search metric: " + metric);
     }
 
     private static List<Optional<ScoredGlobalIndexResult>> emptyOptionalResults(int n) {
