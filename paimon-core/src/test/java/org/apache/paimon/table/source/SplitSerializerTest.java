@@ -32,6 +32,7 @@ import org.apache.paimon.utils.CompatibilityUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +60,48 @@ public class SplitSerializerTest {
             Split actual = SplitSerializer.deserialize(SplitSerializer.serialize(goldenCase.split));
             assertSplitEquals(goldenCase.split, actual);
         }
+    }
+
+    @Test
+    public void testPrimaryKeyVectorDataSplitRoundTrip() throws IOException {
+        PrimaryKeyVectorDataSplit split = primaryKeyVectorDataSplit();
+
+        Split actual = SplitSerializer.deserialize(SplitSerializer.serialize(split));
+
+        assertThat(actual).isEqualTo(split);
+        PrimaryKeyVectorDataSplit vectorSplit = (PrimaryKeyVectorDataSplit) actual;
+        assertThat(vectorSplit.rowPositions()).isEqualTo(RoaringBitmap32.bitmapOf(1, 3));
+        assertThat(vectorSplit.score(1)).isEqualTo(0.9F);
+        assertThat(vectorSplit.score(3)).isEqualTo(0.7F);
+    }
+
+    @Test
+    public void testPrimaryKeyVectorDataSplitJavaSerialization() throws Exception {
+        PrimaryKeyVectorDataSplit split = primaryKeyVectorDataSplit();
+
+        PrimaryKeyVectorDataSplit actual =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(split), getClass().getClassLoader());
+
+        assertThat(actual).isEqualTo(split);
+    }
+
+    private static PrimaryKeyVectorDataSplit primaryKeyVectorDataSplit() {
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withSnapshot(45L)
+                        .withPartition(DataFileTestUtils.row(2026, 10))
+                        .withBucket(6)
+                        .withTotalBuckets(8)
+                        .withBucketPath("dt=20260708/bucket-6")
+                        .withDataFiles(
+                                Collections.singletonList(dataFile("vector-file", 1, 0, 4, 400L)))
+                        .rawConvertible(true)
+                        .build();
+        Map<Integer, Float> scores = new LinkedHashMap<>();
+        scores.put(1, 0.9F);
+        scores.put(3, 0.7F);
+        return new PrimaryKeyVectorDataSplit(dataSplit, RoaringBitmap32.bitmapOf(1, 3), scores);
     }
 
     @Test

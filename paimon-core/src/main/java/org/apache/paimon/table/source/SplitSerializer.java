@@ -63,6 +63,7 @@ public class SplitSerializer {
     private static final int QUERY_AUTH_SPLIT = 5;
     private static final int FALLBACK_DATA_SPLIT = 6;
     private static final int FALLBACK_SPLIT = 7;
+    private static final int PRIMARY_KEY_VECTOR_DATA_SPLIT = 8;
 
     private SplitSerializer() {}
 
@@ -76,7 +77,10 @@ public class SplitSerializer {
         out.writeLong(MAGIC);
         out.writeInt(VERSION);
 
-        if (split instanceof QueryAuthSplit) {
+        if (split instanceof PrimaryKeyVectorDataSplit) {
+            out.writeInt(PRIMARY_KEY_VECTOR_DATA_SPLIT);
+            ((PrimaryKeyVectorDataSplit) split).serialize(out);
+        } else if (split instanceof QueryAuthSplit) {
             out.writeInt(QUERY_AUTH_SPLIT);
             writeQueryAuthSplit((QueryAuthSplit) split, out);
         } else if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
@@ -133,6 +137,8 @@ public class SplitSerializer {
                 return FallbackReadFileStoreTable.FallbackDataSplit.deserialize(in);
             case FALLBACK_SPLIT:
                 return readFallbackSplit(in);
+            case PRIMARY_KEY_VECTOR_DATA_SPLIT:
+                return PrimaryKeyVectorDataSplit.deserialize(in);
             default:
                 throw new IOException("Unsupported split type: " + type);
         }
