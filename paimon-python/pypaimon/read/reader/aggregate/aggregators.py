@@ -546,7 +546,7 @@ class FieldNestedUpdateAgg(FieldAggregator):
             elif not limit_new_keys or len(row_map) < self.count_limit:
                 row_map[key] = row
 
-    def _apply_nested_key_null_strategy(self, key: Tuple[Any | None, ...]) -> bool:
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
         """Apply nested-key-null-strategy."""
 
         if all(v is not None for v in key):

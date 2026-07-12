@@ -85,7 +85,7 @@ class ProjectedRow(InternalRow):
         """
         return ProjectedRow(projection)
 
-    def to_tuple(self) -> Tuple[Any | None, ...]:
+    def to_tuple(self) -> Tuple[Any, ...]:
         return tuple(
             self.row.get_field(index)
             if index >= 0 else None
