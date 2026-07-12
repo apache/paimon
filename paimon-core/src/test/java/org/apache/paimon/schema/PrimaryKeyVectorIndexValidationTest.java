@@ -141,11 +141,13 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testSupportsFirstRowWithDeletionVectors() {
+    void testRejectsFirstRowWithDeletionVectors() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
 
-        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining(
+                        "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine");
     }
 
     @Test

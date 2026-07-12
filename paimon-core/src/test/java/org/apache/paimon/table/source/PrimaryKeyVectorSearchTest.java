@@ -103,17 +103,8 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
     }
 
     @Test
-    void testFirstRowVectorSearchWithDeletionVectors() throws Exception {
-        assertFirstRowVectorSearch(true);
-    }
-
-    @Test
-    void testFirstRowVectorSearchWithoutDeletionVectors() throws Exception {
-        assertFirstRowVectorSearch(false);
-    }
-
-    private void assertFirstRowVectorSearch(boolean deletionVectorsEnabled) throws Exception {
-        catalog.createTable(identifier(), vectorSchema("first-row", deletionVectorsEnabled), false);
+    void testFirstRowVectorSearch() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("first-row", false), false);
         FileStoreTable table = getTableDefault();
 
         write(

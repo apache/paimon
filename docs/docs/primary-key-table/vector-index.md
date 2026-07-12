@@ -40,7 +40,7 @@ is built separately from writes, see
 A table with a primary-key vector index must satisfy all of the following:
 
 - It is a primary-key table in fixed-bucket mode (`bucket > 0`).
-- `deletion-vectors.enabled` is `true`, except for `first-row`, where it is optional.
+- `deletion-vectors.enabled` is `true`, except for `first-row`, where it must be `false`.
 - Its merge engine is `deduplicate`, `partial-update`, `aggregation`, or `first-row`.
 - The indexed column is a `VECTOR` whose element type is `FLOAT`.
 - `pk-clustering-override` is disabled.
@@ -120,8 +120,8 @@ The maintenance behavior depends on the merge engine:
 - `partial-update`: Paimon builds the vector index from the lookup-completed Level-1
   compact-output row.
 - `aggregation`: Paimon builds the vector index from the aggregated Level-1 compact-output row.
-- `first-row`: Paimon indexes the retained first row. Deletion vectors are optional because later
-  rows with the same primary key are ignored.
+- `first-row`: Paimon indexes the retained first row. Deletion vectors must be disabled because
+  later rows with the same primary key are ignored rather than deleting the retained row.
 
 When compaction replaces source data files, Paimon removes ANN segments that reference those files
 and creates replacement segments for the new compact-output files. Small outputs are indexed as

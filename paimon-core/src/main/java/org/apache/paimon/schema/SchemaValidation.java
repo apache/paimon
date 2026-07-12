@@ -877,9 +877,8 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
-        // pk-clustering-override and primary-key vector index modes allow deletion vectors for
-        // first-row.
-        if (!options.pkClusteringOverride() && !options.primaryKeyVectorIndexEnabled()) {
+        // pk-clustering-override mode allows deletion vectors for first-row
+        if (!options.pkClusteringOverride()) {
             checkArgument(
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
