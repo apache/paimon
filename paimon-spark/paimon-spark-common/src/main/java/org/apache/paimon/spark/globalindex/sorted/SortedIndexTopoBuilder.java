@@ -98,7 +98,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
         Optional<KeySerializer> sortKeySerializer = indexBuilder.sortKeySerializer();
 
-        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits = indexBuilder.scan();
+        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
+                indexBuilder.incrementalScan();
         if (!indexRangeAndSplits.isPresent()) {
             return Collections.emptyList();
         }
