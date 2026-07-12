@@ -49,10 +49,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -98,7 +98,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.snapshotSequenceOrdering = coreOptions.snapshotSequenceOrdering();
         this.partition = partition;
-        this.formatReaderMappings = new HashMap<>();
+        this.formatReaderMappings = new ConcurrentHashMap<>();
         this.dvFactory = dvFactory;
     }
 
@@ -300,9 +300,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             return readValueType;
         }
 
+        public FileStorePathFactory pathFactory() {
+            return pathFactory;
+        }
+
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
             return build(partition, bucket, dvFactory, true, Collections.emptyList());
+        }
+
+        /** Builds a reader which preserves every physical row position. */
+        public KeyValueFileReaderFactory buildWithoutDeletionVector(
+                BinaryRow partition, int bucket) {
+            return build(partition, bucket, ignored -> Optional.empty());
         }
 
         public KeyValueFileReaderFactory build(

@@ -56,8 +56,14 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -77,6 +83,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -954,6 +961,147 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testRollbackToAsLatestFileLevelDeleteIsVisibleToStreaming() throws Exception {
+        // Contrast with the DV-only case: when a rollback removes whole data files, the delete is
+        // file-level (FileKind.DELETE) and IS visible to streaming readers, no DV needed.
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1 (target): f1
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2 (latest): add f2
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f2")));
+
+        // roll back to snapshot 1 — f2 must be removed
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+
+        // f2 is retracted (before side) — the file-level delete is visible to streaming
+        assertThat(splits).isNotEmpty();
+        IncrementalSplit split = (IncrementalSplit) splits.get(0);
+        boolean f2Retracted = split.beforeFiles().stream().anyMatch(f -> f.fileName().equals("f2"));
+        assertThat(f2Retracted).isTrue();
+    }
+
+    @Test
+    public void testNormalDeletionVectorDeleteIsInvisibleToStreamingDelta() throws Exception {
+        // Baseline (no rollback involved): without a changelog producer, a plain DV-only delete
+        // produces an empty data delta, so the streaming delta read sees no change at all. DV
+        // deletes are only streamable via a changelog producer, not via the delta/overwrite path.
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+
+        // snapshot 2: a DV-only delete on f1 (data file unchanged, only an index increment)
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        Snapshot dvDelete = store.snapshotManager().latestSnapshot();
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(dvDelete).readChanges().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testRollbackToAsLatestDeletionVectorChangeIsInvisibleToStreaming()
+            throws Exception {
+        // A DV-only rollback changes only the index manifest (the data files are identical), so it
+        // produces an empty data delta and is invisible to streaming readers — consistent with a
+        // plain DV delete, which is also invisible to streaming (DV deletes are only streamable via
+        // a changelog producer, not via the delta/overwrite path).
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors (the rollback target)
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2: DV-only change — add a deletion vector for f1, data file unchanged
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        // sanity check: f1 really has a deletion vector now
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        // snapshot 3: roll back to snapshot 1
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        // The rollback's data delta is empty, so the streaming change read produces no splits — the
+        // DV-only rollback is invisible to streaming (batch / time-travel reads remain correct
+        // since
+        // the snapshot points to the target's index manifest).
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testExpireSnapshotsKeepsFilesRestoredByRollbackToAsLatest() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        KeyValue original = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "original");
+        KeyValue replacement = gen.nextInsert("20201111", 11, 2L, new int[] {2, 2}, "replacement");
+        KeyValue retainedBeforeRollback =
+                gen.nextInsert("20201112", 12, 3L, new int[] {3, 3}, "retained");
+
+        Snapshot target =
+                store.commitData(Collections.singletonList(original), gen::getPartition, kv -> 0)
+                        .get(0);
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        table.tagManager()
+                .createTag(
+                        target, "expiring-target", Duration.ZERO, Collections.emptyList(), false);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        table.tagManager().createTag(target, protectionTag, null, Collections.emptyList(), false);
+        store.overwriteData(
+                Collections.singletonList(replacement),
+                gen::getPartition,
+                kv -> 0,
+                Collections.emptyMap());
+        store.commitData(
+                Collections.singletonList(retainedBeforeRollback), gen::getPartition, kv -> 0);
+
+        try (TableCommitImpl commit = table.newCommit("rollback-to-as-latest-test")) {
+            assertThat(commit.rollbackToAsLatest(table.tagManager().getOrThrow(protectionTag)))
+                    .isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+        assertThat(table.tagManager().tags().get(target))
+                .contains("expiring-target")
+                .contains(protectionTag);
+
+        ((ExpireSnapshotsImpl) store.newExpire(1, 1, Long.MAX_VALUE)).expireUntil(1, 3);
+
+        List<KeyValue> actual = store.readKvsFromSnapshot(rolledBack.id());
+        assertThat(store.toKvMap(actual))
+                .isEqualTo(store.toKvMap(Collections.singletonList(original)));
+    }
+
+    @Test
     public void testManifestCompact() throws Exception {
         TestFileStore store = createStore(false);
 
@@ -982,6 +1130,51 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testRtasAppendAfterTruncateResetsInheritedIndexAndStats() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        store.commitData(generateDataList(1), s -> partition, kv -> 0);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "stale-index", 0, 0), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 1L, 1L, 1L, 0L, 8L, 8L));
+        Statistics fakeStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 1L, 100L, fakeColStatsMap);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        }
+
+        try (FileStoreCommitImpl truncateCommit = store.newCommit()) {
+            truncateCommit.withOperation(Snapshot.Operation.TRUNCATE);
+            truncateCommit.truncateTable(1L);
+        }
+
+        List<KeyValue> replacement = generateDataList(1);
+        store.commitDataImpl(
+                replacement,
+                s -> partition,
+                kv -> 0,
+                false,
+                null,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> {
+                    commit.withOperation(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+                    commit.commit(committable, false);
+                });
+
+        Snapshot rtasSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(rtasSnapshot.operation()).isEqualTo(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+        assertThat(rtasSnapshot.indexManifest()).isNull();
+        assertThat(rtasSnapshot.statistics()).isNull();
     }
 
     @Test

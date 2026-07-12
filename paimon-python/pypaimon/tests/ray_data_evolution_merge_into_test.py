@@ -39,7 +39,7 @@ except ImportError:
     _HAS_DATAFUSION = False
 
 _SKIP_CONDITION = not _HAS_DATAFUSION
-_SKIP_REASON = "datafusion not installed"
+_SKIP_REASON = "pypaimon[sql] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
 
@@ -133,13 +133,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         ) as mock_read_paimon:
             m._prepare(
                 target, source, self.catalog_options,
-                [WhenMatched(update='*')], [], ['id'],
+                [WhenMatched.update('*')], [], ['id'],
             )
 
         mock_read_paimon.assert_called_once_with(
             source,
             self.catalog_options,
             snapshot_id=expected_snapshot_id,
+            projection=['id', 'name', 'age'],
         )
 
     def test_no_clause_raises(self):
@@ -162,8 +163,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 catalog_options=self.catalog_options,
                 on=['id'],
                 when_matched=[
-                    WhenMatched(update='*'),
-                    WhenMatched(update={'age': 's.age'}, condition='s.age > 10'),
+                    WhenMatched.update('*'),
+                    WhenMatched.update({'age': 's.age'}, condition='s.age > 10'),
                 ],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
@@ -195,7 +196,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched.update('*')],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('data-evolution.enabled', str(ctx.exception))
@@ -208,7 +209,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched.update('*')],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('row-tracking.enabled', str(ctx.exception))
@@ -225,7 +226,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=bad_source,
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched.update('*')],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn("'id'", str(ctx.exception))
@@ -257,7 +258,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 catalog_options=self.catalog_options,
                 on=['id'],
                 when_matched=[
-                    WhenMatched(update='*', condition='s.nonexistent > 0')
+                    WhenMatched.update('*', condition='s.nonexistent > 0')
                 ],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
@@ -274,7 +275,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 catalog_options=self.catalog_options,
                 on=['id'],
                 when_matched=[
-                    WhenMatched(update='*', condition='s.age > t.nonexistent')
+                    WhenMatched.update('*', condition='s.age > t.nonexistent')
                 ],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
@@ -308,7 +309,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -316,6 +317,46 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2, 3])
         self.assertEqual(out['name'], ['a', 'b2', 'c2'])
         self.assertEqual(out['age'], [10, 22, 33])
+
+    def test_matched_delete(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        metrics = merge_into(
+            target=target,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([2, 3], type=pa.int32()),
+                    'name': ['ignored', 'ignored'],
+                    'age': pa.array([99, 99], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.delete()],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(metrics, {
+            'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
+        })
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['a'])
+        self.assertEqual(out['age'], [10])
 
     def test_not_matched_insert_appends_unmatched(self):
         target = self._create_table()
@@ -382,7 +423,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
             when_not_matched=[WhenNotMatched(insert='*')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -428,7 +469,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on={'id': 'uid'},
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
             when_not_matched=[WhenNotMatched(insert='*')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -495,26 +536,108 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=source,
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched.update('*')],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn("multiple source rows", str(ctx.exception))
 
-    def test_blob_columns_excluded(self):
-        import types
-
-        from pypaimon.ray.data_evolution_merge_into import _blob_col_names
-        from pypaimon.schema.data_types import AtomicType, DataField
-
-        fake_table = types.SimpleNamespace(
-            table_schema=types.SimpleNamespace(
-                fields=[
-                    DataField(0, 'id', AtomicType('INT')),
-                    DataField(1, 'payload', AtomicType('BLOB')),
-                ]
-            )
+    def test_blob_table_merge_into_updates_and_inserts_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['Alice', 'Bob'],
+                    'payload': pa.array(
+                        [b'blob-1', b'blob-2'], type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
         )
-        self.assertEqual({'payload'}, _blob_col_names(fake_table))
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([2, 3], type=pa.int32()),
+                    'name': ['Bobby', 'Cindy'],
+                    'payload': pa.array(
+                        [b'blob-2-updated', b'blob-3'],
+                        type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['Alice', 'Bobby', 'Cindy'])
+        self.assertEqual(
+            out['payload'], [b'blob-1', b'blob-2-updated', b'blob-3'])
+        self.assertEqual(metrics, {
+            'num_matched': 1, 'num_inserted': 1, 'num_unchanged': 0,
+        })
+
+    def test_blob_table_merge_into_inserts_null_for_unspecified_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['Alice'],
+                },
+                schema=source_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert={
+                'id': source_col('id'),
+                'name': source_col('name'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['Alice'])
+        self.assertEqual(out['payload'], [None])
+        self.assertEqual(metrics, {
+            'num_matched': 0, 'num_inserted': 1, 'num_unchanged': 0,
+        })
 
     def test_blob_table_feature_update(self):
         blob_schema = pa.schema([
@@ -571,7 +694,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update={'feature': source_col('new_feature')})
+                WhenMatched.update({'feature': source_col('new_feature')})
             ],
             num_partitions=num_partitions,
         )
@@ -651,7 +774,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update={'feature': source_col('new_feature')})
+                WhenMatched.update({'feature': source_col('new_feature')})
             ],
             num_partitions=num_partitions,
         )
@@ -694,7 +817,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
             when_not_matched=[WhenNotMatched(insert='*')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -720,7 +843,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -767,7 +890,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={'name': source_col('name')})],
+            when_matched=[WhenMatched.update({'name': source_col('name')})],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -784,7 +907,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=source,
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={'pt': source_col('pt')})],
+                when_matched=[WhenMatched.update({'pt': source_col('pt')})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('partition', str(ctx.exception))
@@ -855,7 +978,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*', condition='s.age > t.age + 10')],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age + 10')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -893,7 +1016,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*', condition='s.id >= 2')],
+            when_matched=[WhenMatched.update('*', condition='s.id >= 2')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -971,7 +1094,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*', condition='s.age > t.age')],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
             when_not_matched=[
                 WhenNotMatched(insert='*', condition='s.age > 10')
             ],
@@ -1014,7 +1137,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update='*', condition='s.age > t.age')],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -1053,7 +1176,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > t.age')
+                WhenMatched.update('*', condition='s.age > t.age')
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1091,7 +1214,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={'age': 's.age'})],
+            when_matched=[WhenMatched.update({'age': 's.age'})],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -1156,7 +1279,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={'name': 'updated'})],
+            when_matched=[WhenMatched.update({'name': 'updated'})],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -1172,7 +1295,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={'nonexistent': 's.id'})],
+                when_matched=[WhenMatched.update({'nonexistent': 's.id'})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('nonexistent', str(ctx.exception))
@@ -1185,7 +1308,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={'name': 't.nme'})],
+                when_matched=[WhenMatched.update({'name': 't.nme'})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('nme', str(ctx.exception))
@@ -1198,7 +1321,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={})],
+                when_matched=[WhenMatched.update({})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
@@ -1245,7 +1368,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={'age': 's.age', 'name': 't.name'})],
+            when_matched=[WhenMatched.update({'age': 's.age', 'name': 't.name'})],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
@@ -1261,7 +1384,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=self._source(),
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={'name': lambda r: r})],
+                when_matched=[WhenMatched.update({'name': lambda r: r})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
@@ -1277,7 +1400,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=source,
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update={'name': 's.name'})],
+                when_matched=[WhenMatched.update({'name': 's.name'})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
         self.assertIn('name', str(ctx.exception))
@@ -1376,7 +1499,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on={'id': 'uid'},
-            when_matched=[WhenMatched(update={
+            when_matched=[WhenMatched.update({
                 'age': source_col('id'),
             })],
             num_partitions=_TEST_NUM_PARTITIONS,
@@ -1407,7 +1530,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=source,
                 catalog_options=self.catalog_options,
                 on={'id': 'uid'},
-                when_matched=[WhenMatched(update={
+                when_matched=[WhenMatched.update({
                     'id': source_col('id'),
                 })],
                 num_partitions=_TEST_NUM_PARTITIONS,
@@ -1442,7 +1565,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={
+            when_matched=[WhenMatched.update({
                 'name': lit('s.active'),
             })],
             num_partitions=_TEST_NUM_PARTITIONS,
@@ -1480,7 +1603,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={
+            when_matched=[WhenMatched.update({
                 'age': source_col('age'),
             })],
             num_partitions=_TEST_NUM_PARTITIONS,
@@ -1518,7 +1641,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=source,
             catalog_options=self.catalog_options,
             on=['id'],
-            when_matched=[WhenMatched(update={
+            when_matched=[WhenMatched.update({
                 'age': source_col('age'),
                 'name': target_col('name'),
             })],
@@ -1559,8 +1682,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > 80'),
-                WhenMatched(update='*'),
+                WhenMatched.update('*', condition='s.age > 80'),
+                WhenMatched.update('*'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1628,8 +1751,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > 40'),
-                WhenMatched(update='*'),
+                WhenMatched.update('*', condition='s.age > 40'),
+                WhenMatched.update('*'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1698,8 +1821,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > 50'),
-                WhenMatched(update='*', condition='s.age > 30'),
+                WhenMatched.update('*', condition='s.age > 50'),
+                WhenMatched.update('*', condition='s.age > 30'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1738,10 +1861,10 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update={'name': 's.name'},
-                            condition='s.age > 50'),
-                WhenMatched(update={'age': 's.age'},
-                            condition='s.age > 10'),
+                WhenMatched.update({'name': 's.name'},
+                                   condition='s.age > 50'),
+                WhenMatched.update({'age': 's.age'},
+                                   condition='s.age > 10'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1780,8 +1903,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > 50'),
-                WhenMatched(update='*', condition='s.age > 80'),
+                WhenMatched.update('*', condition='s.age > 50'),
+                WhenMatched.update('*', condition='s.age > 80'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
@@ -1821,8 +1944,48 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 catalog_options=self.catalog_options,
                 on=['id'],
                 when_matched=[
-                    WhenMatched(update='*', condition='s.age > 80'),
-                    WhenMatched(update='*', condition='s.age > 30'),
+                    WhenMatched.update('*', condition='s.age > 80'),
+                    WhenMatched.update('*', condition='s.age > 30'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('multiple source rows', str(ctx.exception))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_duplicate_update_delete_raises(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([99, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*', condition='s.age > 50'),
+                    WhenMatched.delete(condition='s.age < 10'),
                 ],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
@@ -1847,7 +2010,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(update={'age': lit(99)})],
+            when_matched=[WhenMatched.update({'age': lit(99)})],
         )
 
         self.assertEqual(result['num_matched'], 3)
@@ -1874,7 +2037,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(update='*')],
+            when_matched=[WhenMatched.update('*')],
         )
 
         self.assertEqual(result['num_matched'], 3)
@@ -1903,7 +2066,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(update={'age': lit(99)}, condition='t.age > 15')],
+            when_matched=[WhenMatched.update({'age': lit(99)}, condition='t.age > 15')],
         )
 
         self.assertEqual(result['num_matched'], 2)
@@ -1930,8 +2093,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(
-                update={'name': lit('updated')},
+            when_matched=[WhenMatched.update(
+                {'name': lit('updated')},
                 condition='s.age > 15',
             )],
         )
@@ -1951,7 +2114,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 source=target,
                 catalog_options=self.catalog_options,
                 on=['_ROW_ID'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched.update('*')],
                 when_not_matched=[WhenNotMatched(insert='*')],
             )
         self.assertIn('Self-merge', str(ctx.exception))
@@ -1975,7 +2138,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(update={'name': lit('updated')})],
+            when_matched=[WhenMatched.update({'name': lit('updated')})],
         )
 
         self.assertEqual(result['num_matched'], 2)
@@ -2002,7 +2165,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             source=target,
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
-            when_matched=[WhenMatched(update={'name': source_col('_ROW_ID')})],
+            when_matched=[WhenMatched.update({'name': source_col('_ROW_ID')})],
         )
 
         self.assertEqual(result['num_matched'], 2)
@@ -2031,8 +2194,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
             when_matched=[
-                WhenMatched(
-                    update={'age': lit(99)},
+                WhenMatched.update(
+                    {'age': lit(99)},
                     condition='s._ROW_ID >= 0',
                 ),
             ],
@@ -2063,8 +2226,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
             when_matched=[
-                WhenMatched(
-                    update={'age': lit(99)},
+                WhenMatched.update(
+                    {'age': lit(99)},
                     condition='t._ROW_ID >= 0',
                 ),
             ],
@@ -2095,9 +2258,9 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
             when_matched=[
-                WhenMatched(update={'name': lit('old')}, condition='s.age <= 10'),
-                WhenMatched(update={'name': lit('young')}, condition='s.age <= 20'),
-                WhenMatched(update={'name': lit('senior')}),
+                WhenMatched.update({'name': lit('old')}, condition='s.age <= 10'),
+                WhenMatched.update({'name': lit('young')}, condition='s.age <= 20'),
+                WhenMatched.update({'name': lit('senior')}),
             ],
         )
 
@@ -2135,8 +2298,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['_ROW_ID'],
             when_matched=[
-                WhenMatched(
-                    update={'name': lit('updated')},
+                WhenMatched.update(
+                    {'name': lit('updated')},
                     condition='s.picture IS NULL',
                 ),
             ],
@@ -2147,7 +2310,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['updated', 'updated'])
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
-    def test_self_merge_blob_target_condition_rejected(self):
+    def test_self_merge_blob_target_condition_allowed(self):
         blob_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -2169,20 +2332,22 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        with self.assertRaises(ValueError) as ctx:
-            merge_into(
-                target=tbl_name,
-                source=tbl_name,
-                catalog_options=self.catalog_options,
-                on=['_ROW_ID'],
-                when_matched=[
-                    WhenMatched(
-                        update={'name': lit('x')},
-                        condition='t.picture IS NOT NULL',
-                    ),
-                ],
-            )
-        self.assertIn('blob', str(ctx.exception).lower())
+        result = merge_into(
+            target=tbl_name,
+            source=tbl_name,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'name': lit('x')},
+                    condition='t.picture IS NOT NULL',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        out = self._read_sorted(tbl_name)
+        self.assertEqual(out['name'], ['a'])
 
 
 class TargetProjectionTest(unittest.TestCase):
@@ -2207,6 +2372,142 @@ class TargetProjectionTest(unittest.TestCase):
         )
         self.assertIn('age', cols)
         self.assertIn('id', cols)
+
+    def test_matched_source_projection_prunes_unneeded_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import (
+            LiteralValue,
+            SourceColumnRef,
+            TargetColumnRef,
+        )
+
+        cols = _resolve_source_projection(
+            [
+                self._clause(
+                    {
+                        'age': SourceColumnRef('id'),
+                        'name': TargetColumnRef('name'),
+                        'note': LiteralValue('literal'),
+                    },
+                    condition="s.status = 't.fake' AND s.score > t.score",
+                )
+            ],
+            ['uid'],
+            ['uid', 'id', 'name', 'status', 'score', 'payload'],
+        )
+        self.assertEqual(['uid', 'id', 'status', 'score'], cols)
+
+    def test_literal_update_source_projection_keeps_only_join_key(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import LiteralValue
+
+        cols = _resolve_source_projection(
+            [self._clause({'name': LiteralValue('updated')})],
+            ['id'],
+            ['id', 'name', 'age', 'payload'],
+        )
+        self.assertEqual(['id'], cols)
+
+    def test_matched_update_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import build_matched_update_ds
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        joined = Mock()
+        result = object()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+        joined.map_batches.return_value = result
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ):
+            out = build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=1,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
+
+    def test_not_matched_insert_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_not_matched_insert_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        result = object()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+        source_renamed.map_batches.return_value = result
+
+        out = build_not_matched_insert_ds(
+            target_identifier='default.target',
+            source_ds=source_ds,
+            target_on=['id'],
+            source_on=['id'],
+            clauses=[self._clause({'name': SourceColumnRef('name')})],
+            target_field_names=['id', 'name'],
+            target_pa_schema=pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+            ]),
+            catalog_options={'warehouse': '/tmp/warehouse'},
+            num_partitions=1,
+            target_empty=True,
+        )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
 
 
 class MergeConditionUnitTest(unittest.TestCase):

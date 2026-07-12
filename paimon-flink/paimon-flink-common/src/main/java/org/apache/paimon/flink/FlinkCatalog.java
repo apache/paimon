@@ -257,6 +257,10 @@ public class FlinkCatalog extends AbstractCatalog {
                     context == null
                             ? Thread.currentThread().getContextClassLoader()
                             : context.getClassLoader();
+            // the built-in functions are bundled in Paimon connector
+            if (BuiltInFunctions.FUNCTIONS.containsKey(functionName)) {
+                classLoader = FlinkCatalog.class.getClassLoader();
+            }
             UserDefinedFunction function =
                     UserDefinedFunctionHelper.instantiateFunction(
                             classLoader, new Configuration(), functionName, catalogFunction);

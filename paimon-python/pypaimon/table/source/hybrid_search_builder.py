@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
     DictBasedScoredIndexResult,
@@ -33,6 +32,7 @@ from pypaimon.globalindex.vector_search_result import (
 
 RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
+MRR_RANKER = "mrr"
 _RRF_K = 60.0
 
 
@@ -46,7 +46,7 @@ def _normalize_ranker(ranker: Optional[str]) -> str:
     if ranker is None or not ranker.strip():
         return RRF_RANKER
     normalized = ranker.strip().lower()
-    if normalized not in (RRF_RANKER, WEIGHTED_SCORE_RANKER):
+    if normalized not in (RRF_RANKER, WEIGHTED_SCORE_RANKER, MRR_RANKER):
         raise ValueError("Unsupported hybrid ranker: %s" % ranker)
     return normalized
 
@@ -60,7 +60,7 @@ class HybridSearchRoute:
     limit: int
     weight: float = 1.0
     vector: Optional[List[float]] = None
-    full_text_query: Optional[FullTextQuery] = None
+    full_text_query: Optional[str] = None
     options: Dict[str, str] = field(default_factory=dict)
 
     VECTOR = "vector"
@@ -105,15 +105,15 @@ class HybridSearchRoute:
     @classmethod
     def full_text_route(
             cls,
-            query_json: str,
+            field_name: str,
+            query: str,
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchRoute':
         _check_full_text_options(options or {})
-        query = FullTextQuery.from_json(query_json)
         return cls(
             route_type=cls.FULL_TEXT,
-            field_name=query.referenced_columns()[0],
+            field_name=field_name,
             full_text_query=query,
             limit=limit,
             weight=weight,
@@ -127,8 +127,6 @@ class HybridSearchRoute:
         return self.route_type == self.FULL_TEXT
 
     def columns(self) -> List[str]:
-        if self.is_full_text():
-            return self.full_text_query.referenced_columns()
         return [self.field_name]
 
 
@@ -199,14 +197,15 @@ class HybridSearchBuilder(ABC):
 
     def add_full_text_route(
             self,
-            query_json: str,
+            field_name: str,
+            query: str,
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchBuilder':
         """Add a full-text-search route."""
         return self.add_route(
             HybridSearchRoute.full_text_route(
-                query_json, limit, weight, options))
+                field_name, query, limit, weight, options))
 
     @abstractmethod
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
@@ -322,6 +321,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         ]
         if self._ranker == WEIGHTED_SCORE_RANKER:
             return self._weighted_score(non_empty)
+        if self._ranker == MRR_RANKER:
+            return self._mrr(non_empty)
         return self._rrf(non_empty)
 
     def _validate_search(self):
@@ -354,7 +355,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
     def _new_full_text_search_builder(self, route):
         builder = (
             self._table.new_full_text_search_builder()
-            .with_query(route.full_text_query)
+            .with_query(route.field_name, route.full_text_query)
             .with_limit(route.limit)
         )
         if self._partition_filter is not None:
@@ -364,14 +365,16 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
     def _rrf(self, route_results):
         scores = {}
         for route_result in route_results:
-            result = route_result.result
-            score_getter = result.score_getter()
-            row_ids = sorted(
-                result.results(),
-                key=lambda row_id: (
-                    -(score_getter(row_id) or 0.0), row_id))
-            for rank, row_id in enumerate(row_ids):
+            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
                 contribution = route_result.route.weight / (_RRF_K + rank + 1.0)
+                scores[row_id] = scores.get(row_id, 0.0) + contribution
+        return _top_k(scores, self._limit)
+
+    def _mrr(self, route_results):
+        scores = {}
+        for route_result in route_results:
+            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
+                contribution = route_result.route.weight / (rank + 1.0)
                 scores[row_id] = scores.get(row_id, 0.0) + contribution
         return _top_k(scores, self._limit)
 
@@ -454,6 +457,13 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
                 [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
                  for c in (predicate.literals or [])])
         return predicate.new_index(name_to_idx[predicate.field])
+
+
+def _ranked_row_ids(result):
+    score_getter = result.score_getter()
+    return sorted(
+        result.results(),
+        key=lambda row_id: (-(score_getter(row_id) or 0.0), row_id))
 
 
 def _top_k(scores, limit):

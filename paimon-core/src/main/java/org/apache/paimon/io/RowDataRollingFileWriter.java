@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -49,23 +50,32 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat) {
         super(
-                () ->
-                        new RowDataFileWriter(
-                                fileIO,
-                                RollingFileWriter.createFileWriterContext(
-                                        fileFormat, writeSchema, statsCollectors, fileCompression),
-                                pathFactory.newPath(),
-                                writeSchema,
-                                schemaId,
-                                seqNumCounterSupplier,
-                                fileIndexOptions,
-                                fileSource,
-                                asyncFileWrite,
-                                statsDenseStore,
-                                pathFactory.isExternalPath(),
-                                writeCols),
+                () -> {
+                    Path dataPath = pathFactory.newPath();
+                    Path rowSidecarPath =
+                            rowSidecarFormat == null
+                                    ? null
+                                    : new Path(dataPath.getParent(), dataPath.getName() + ".row");
+                    return new RowDataFileWriter(
+                            fileIO,
+                            RollingFileWriter.createFileWriterContext(
+                                    fileFormat, writeSchema, statsCollectors, fileCompression),
+                            dataPath,
+                            writeSchema,
+                            schemaId,
+                            seqNumCounterSupplier,
+                            fileIndexOptions,
+                            fileSource,
+                            asyncFileWrite,
+                            statsDenseStore,
+                            pathFactory.isExternalPath(),
+                            writeCols,
+                            rowSidecarFormat,
+                            rowSidecarPath);
+                },
                 targetFileSize);
     }
 }

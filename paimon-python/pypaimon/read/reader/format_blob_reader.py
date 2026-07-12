@@ -37,12 +37,14 @@ class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
-                 batch_size: int = 1024, row_indices: Optional[Any] = None):
+                 batch_size: int = 1024, row_indices: Optional[Any] = None,
+                 blob_parallelism: int = 1):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
         self._blob_as_descriptor = blob_as_descriptor
         self._batch_size = batch_size
+        self._blob_parallelism = blob_parallelism
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -57,7 +59,9 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)
-            if self._blob_as_descriptor:
+            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
+            # that each open their own stream (one stream isn't thread-safe).
+            if self._blob_as_descriptor or self._blob_parallelism > 1:
                 self._input_stream.close()
                 self._input_stream = None
 
@@ -96,6 +100,7 @@ class FormatBlobReader(RecordBatchReader):
         # Collect records for this batch
         pydict_data = {name: [] for name in self._fields}
         records_in_batch = 0
+        blobs_to_resolve = []
 
         try:
             while True:
@@ -112,6 +117,10 @@ class FormatBlobReader(RecordBatchReader):
                         )
                     elif self._blob_as_descriptor:
                         pydict_data[field_name].append(blob.to_descriptor().serialize())
+                    elif self._blob_parallelism > 1:
+                        idx = len(pydict_data[field_name])
+                        pydict_data[field_name].append(None)
+                        blobs_to_resolve.append((field_name, idx, blob))
                     else:
                         pydict_data[field_name].append(blob.to_data())
 
@@ -120,8 +129,10 @@ class FormatBlobReader(RecordBatchReader):
                     break
 
         except StopIteration:
-            # Stop immediately when StopIteration occurs
             pass
+
+        if blobs_to_resolve:
+            self._resolve_blobs_concurrent(pydict_data, blobs_to_resolve)
 
         if records_in_batch == 0:
             return None
@@ -144,6 +155,12 @@ class FormatBlobReader(RecordBatchReader):
                 return combine_chunks.to_batches()[0]
             else:
                 return None
+
+    def _resolve_blobs_concurrent(self, pydict_data, blobs_to_resolve):
+        blobs = [item[2] for item in blobs_to_resolve]
+        results = self._file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
+        for (field_name, idx, _), data in zip(blobs_to_resolve, results):
+            pydict_data[field_name][idx] = data
 
     def close(self):
         self._blob_iterator = None

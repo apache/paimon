@@ -24,9 +24,10 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
-import org.apache.paimon.format.variant.VariantInferenceConfig;
-import org.apache.paimon.format.variant.VariantInferenceWriterFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
+import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -34,18 +35,22 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.predicate.ParquetFilters;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 
 /** Parquet {@link FileFormat}. */
-public class ParquetFileFormat extends FileFormat {
+public class ParquetFileFormat extends FileFormat implements SupportsFieldMetadata {
 
     private final FormatContext formatContext;
     private final Options options;
@@ -74,12 +79,31 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
+    public Map<String, Map<String, String>> readFieldMetadata(FormatReaderFactory.Context context)
+            throws IOException {
+        ParquetReadOptions readOptions =
+                ParquetUtil.getParquetReadOptionsBuilder(options)
+                        .withRange(0, context.fileSize())
+                        .build();
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
+                        readOptions,
+                        context.selection());
+        try {
+            return ParquetReaderFactory.readFieldMetadata(reader);
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         ParquetWriterFactory baseFactory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
-        // Wrap with variant inference decorator
-        return new VariantInferenceWriterFactory(
-                baseFactory, new VariantInferenceConfig(type, formatContext.options()));
+        return new ShreddingWritePlanWriterFactory(
+                baseFactory, new VariantShreddingWritePlanFactory(type, formatContext.options()));
     }
 
     @Override

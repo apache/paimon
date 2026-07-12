@@ -87,10 +87,14 @@ public abstract class ScannerTestBase {
     }
 
     protected void createAppendOnlyTable() throws Exception {
+        createAppendOnlyTable(new Options());
+    }
+
+    protected void createAppendOnlyTable(Options conf) throws Exception {
         tempDir = Files.createTempDirectory("junit");
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         fileIO = FileIOFinder.find(tablePath);
-        table = createFileStoreTable(false);
+        table = createFileStoreTable(false, conf, tablePath);
         snapshotReader = table.newSnapshotReader();
     }
 

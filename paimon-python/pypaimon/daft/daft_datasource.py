@@ -180,6 +180,7 @@ class _PaimonPKSplitTask(DataSourceTask):
         predicate: Predicate | None = None,
         output_columns: list[str] | None = None,
         blob_column_names: set[str] | None = None,
+        explicit_io_config_bytes: bytes | None = None,
     ) -> None:
         self._table_catalog_options = table_catalog_options
         self._table_identifier = table_identifier
@@ -192,6 +193,7 @@ class _PaimonPKSplitTask(DataSourceTask):
         self._predicate = predicate
         self._output_columns = output_columns
         self._blob_column_names = blob_column_names or set()
+        self._explicit_io_config_bytes = explicit_io_config_bytes
 
     @property
     def schema(self) -> Schema:
@@ -212,19 +214,48 @@ class _PaimonPKSplitTask(DataSourceTask):
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
 
+        blob_io_config_bytes = self._blob_io_config_bytes(table) if self._blob_column_names else None
         reader = read_builder.new_read().to_arrow_batch_reader([self._split])
         for batch in iter(reader.read_next_batch, None):
             if self._output_columns is not None:
                 batch = batch.select(self._output_columns)
             if self._blob_column_names:
-                batch = _convert_blob_columns(batch, self._blob_column_names)
+                batch = _convert_blob_columns(batch, self._blob_column_names, blob_io_config_bytes)
             rb = RecordBatch.from_arrow_record_batches([batch], batch.schema)
             if self._blob_column_names:
                 rb = _cast_blob_columns_to_file(rb, self._blob_column_names)
             yield rb
 
+    def _blob_io_config_bytes(self, table: FileStoreTable) -> bytes | None:
+        """Serialized IOConfig embedded into blob File columns, in priority order: refreshed
+        REST-DLF token / catalog creds (refreshed at read time, so long reads don't freeze a
+        short STS token), then the explicit read_paimon io_config, then the OSS env alias."""
+        from pypaimon.daft.daft_io_config import (
+            _convert_paimon_catalog_options_to_file_io_config,
+            _with_oss_alias,
+            serialize_io_config,
+        )
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
 
-def _convert_blob_columns(batch: pa.RecordBatch, blob_column_names: set[str]) -> pa.RecordBatch:
+        enriched = _enrich_options_with_rest_token(self._table_catalog_options, table)
+        io_config = _convert_paimon_catalog_options_to_file_io_config(enriched)
+        if io_config is not None:
+            return serialize_io_config(io_config)
+        if self._explicit_io_config_bytes is not None:
+            # oss:// blobs need the s3 alias even from an explicit io_config (opendal File.open is broken).
+            if urlparse(str(getattr(table, "table_path", "") or "")).scheme == "oss":
+                from daft.io import IOConfig
+                return serialize_io_config(_with_oss_alias(IOConfig._from_serialized(self._explicit_io_config_bytes)))
+            return self._explicit_io_config_bytes
+        io_config = _convert_paimon_catalog_options_to_file_io_config(enriched, require_credentials=False)
+        return serialize_io_config(io_config) if io_config is not None else None
+
+
+def _convert_blob_columns(
+    batch: pa.RecordBatch,
+    blob_column_names: set[str],
+    io_config_bytes: bytes | None = None,
+) -> pa.RecordBatch:
     """Replace serialized BlobDescriptor columns with the File physical struct layout."""
     from pypaimon.daft.daft_blob import FILE_PHYSICAL_TYPE, blob_column_to_file_array
 
@@ -233,7 +264,7 @@ def _convert_blob_columns(batch: pa.RecordBatch, blob_column_names: set[str]) ->
     for i, field in enumerate(batch.schema):
         col = batch.column(i)
         if field.name in blob_column_names and (pa.types.is_large_binary(field.type) or pa.types.is_binary(field.type)):
-            arrays.append(blob_column_to_file_array(col))
+            arrays.append(blob_column_to_file_array(col, io_config_bytes))
             fields.append(pa.field(field.name, FILE_PHYSICAL_TYPE, nullable=field.nullable))
         else:
             arrays.append(col)
@@ -272,8 +303,10 @@ class PaimonDataSource(DataSource):
         table: FileStoreTable,
         storage_config: StorageConfig,
         catalog_options: dict[str, str],
+        explicit_io_config_bytes: bytes | None = None,
     ) -> None:
         self._storage_config = storage_config
+        self._explicit_io_config_bytes = explicit_io_config_bytes
         self._catalog_options = dict(catalog_options or {})
         self._table_catalog_options = {
             **_extract_catalog_options(table),
@@ -291,6 +324,7 @@ class PaimonDataSource(DataSource):
     def __getstate__(self) -> dict[str, Any]:
         return {
             "_multithreaded_io": self._storage_config.multithreaded_io,
+            "_explicit_io_config_bytes": self._explicit_io_config_bytes,
             "_catalog_options": self._catalog_options,
             "_table_catalog_options": self._table_catalog_options,
             "_table_identifier": self._table_identifier,
@@ -302,6 +336,7 @@ class PaimonDataSource(DataSource):
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
+        self._explicit_io_config_bytes = state.get("_explicit_io_config_bytes")
         self._catalog_options = state["_catalog_options"]
         self._table_catalog_options = state["_table_catalog_options"]
         self._table_identifier = state["_table_identifier"]
@@ -485,6 +520,7 @@ class PaimonDataSource(DataSource):
                     read_pushdowns.reader_predicate,
                     read_pushdowns.task_columns,
                     self._blob_column_names,
+                    self._explicit_io_config_bytes,
                 )
 
     def explain_scan(self, pushdowns: Pushdowns, verbose: bool = False) -> PaimonScanExplain:
@@ -764,6 +800,12 @@ class PaimonDataSource(DataSource):
     ) -> _ReadPushdownState:
         reader_predicate, filters_consumed = self._pushdown_filter_state(pushdowns)
         planning_predicate = self._planning_predicate(reader_predicate)
+        # Partition filters arrive on a separate Daft channel (pushdowns.
+        # partition_filters), not in pushdowns.filters. Convert and AND them in
+        # so plan() prunes partitions at the manifest level; otherwise plan()
+        # enumerates every split and we skip in Python -- a full-table plan.
+        planning_predicate = self._and_predicates(
+            planning_predicate, self._partition_planning_predicate(pushdowns))
         requested_columns = self._valid_output_columns(pushdowns.columns)
         task_columns = self._task_columns(table, requested_columns, pushdowns)
         read_columns = self._fallback_read_columns(table, task_columns, reader_predicate)
@@ -800,6 +842,32 @@ class PaimonDataSource(DataSource):
         if self._paimon_predicate is not None or self._requires_fallback_reader():
             return pushdown_predicate
         return None
+
+    def _partition_planning_predicate(self, pushdowns: Pushdowns) -> Predicate | None:
+        """partition_filters -> Paimon predicate for plan-time pruning. Excludes
+        isNull (_predicate_contains_is_null): pruning drops the whole null
+        partition, which the post-filter can't restore -- so exclude it even for
+        PK tables (stricter than the row path's _can_plan_predicate)."""
+        partition_filters = getattr(pushdowns, "partition_filters", None)
+        if partition_filters is None:
+            return None
+        py_expr = getattr(partition_filters, "_expr", partition_filters)
+        _, remaining, paimon_predicate = convert_filters_to_paimon(self._table, [py_expr])
+        if remaining:
+            # Unconverted parts still apply via _partition_filter_skips_split.
+            logger.debug("Partition filter not pushed to plan: %s", remaining)
+        if paimon_predicate is None or self._predicate_contains_is_null(paimon_predicate):
+            return None  # isNull -> post-filter only (see docstring)
+        return paimon_predicate
+
+    @staticmethod
+    def _and_predicates(left: Predicate | None, right: Predicate | None) -> Predicate | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        return PredicateBuilder.and_predicates([left, right])
 
     @staticmethod
     def _source_limit(

@@ -19,6 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.SparkProcedures
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonHiveDynamicPartitionQuery
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.atn.PredictionMode
@@ -30,7 +31,7 @@ import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{NonReservedContext, QuotedIdentifierContext}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, InsertIntoStatement, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.internal.VariableSubstitution
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -111,6 +112,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
 
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
     Seq(
+      MarkHiveDynamicPartitionWrite,
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
       SparkShimLoader.shim.rewritePaimonSQLFunctionCommands(sparkSession),
@@ -366,6 +368,36 @@ class UpperCaseCharStream(wrapped: CodePointCharStream) extends CharStream {
     else Character.toUpperCase(la)
   }
   // scalastyle:on
+}
+
+object MarkHiveDynamicPartitionWrite extends Rule[LogicalPlan] {
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        case insert: InsertIntoStatement
+            if insert.userSpecifiedCols.isEmpty && !isByName(insert) &&
+              insert.partitionSpec.exists(_._2.isEmpty) =>
+          val dynamicPartitionColumns =
+            insert.partitionSpec.collect { case (name, None) => name }.toSeq
+          withNewQuery(
+            insert,
+            PaimonHiveDynamicPartitionQuery(dynamicPartitionColumns, insert.query))
+      }
+    }
+  }
+
+  private def withNewQuery(insert: InsertIntoStatement, query: LogicalPlan): InsertIntoStatement = {
+    insert.withNewChildren(Seq(query)).asInstanceOf[InsertIntoStatement]
+  }
+
+  private def isByName(insert: InsertIntoStatement): Boolean = {
+    try {
+      insert.getClass.getMethod("byName").invoke(insert).asInstanceOf[Boolean]
+    } catch {
+      case _: NoSuchMethodException => false
+    }
+  }
 }
 
 /** The post-processor validates & cleans-up the parse tree during the parse process. */

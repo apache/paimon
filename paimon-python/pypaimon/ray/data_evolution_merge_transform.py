@@ -52,10 +52,33 @@ def lit(value: Any) -> LiteralValue:
     return LiteralValue(value)
 
 
-@dataclass
 class WhenMatched:
-    update: SetSpec
-    condition: Optional[str] = None
+    def __init__(
+            self,
+            action: str,
+            *,
+            update: Optional[SetSpec] = None,
+            condition: Optional[str] = None):
+        if action not in ("update", "delete"):
+            raise ValueError("WhenMatched action must be 'update' or 'delete'.")
+        if action == "update" and update is None:
+            raise ValueError("WhenMatched.update requires an update spec.")
+        if action == "delete" and update is not None:
+            raise ValueError("WhenMatched.delete must not specify update.")
+        self.update = update
+        self.condition = condition
+        self.delete = action == "delete"
+
+    @classmethod
+    def update(
+            cls,
+            update: SetSpec = "*",
+            condition: Optional[str] = None):
+        return cls("update", update=update, condition=condition)
+
+    @classmethod
+    def delete(cls, condition: Optional[str] = None):
+        return cls("delete", condition=condition)
 
 
 @dataclass
@@ -68,6 +91,7 @@ class WhenNotMatched:
 class _NormalizedClause:
     spec: Dict[str, Any]
     condition: Optional[str] = None
+    delete: bool = False
 
 
 def vectorized_matched_transform(
@@ -93,6 +117,16 @@ def vectorized_matched_transform(
     return pa.Table.from_arrays(arrays, schema=update_schema)
 
 
+def vectorized_delete_transform(
+    batch: pa.Table,
+    row_id_name: str,
+    delete_schema: pa.Schema,
+) -> pa.Table:
+    return pa.Table.from_arrays(
+        [batch.column(f"t.{row_id_name}")], schema=delete_schema
+    )
+
+
 def vectorized_insert_transform(
     batch: pa.Table,
     spec: Dict[str, Any],
@@ -114,6 +148,10 @@ def vectorized_insert_transform(
     return pa.Table.from_arrays(arrays, schema=target_pa_schema)
 
 
+def cast_to_schema(batch: pa.Table, schema: pa.Schema) -> pa.Table:
+    return batch if batch.schema == schema else batch.cast(schema)
+
+
 def build_update_schema(
     target_pa_schema: pa.Schema,
     update_cols: Sequence[str],
@@ -123,6 +161,10 @@ def build_update_schema(
         [pa.field(row_id_name, pa.int64(), nullable=False)]
         + [target_pa_schema.field(col) for col in update_cols]
     )
+
+
+def build_delete_schema(row_id_name: str) -> pa.Schema:
+    return pa.schema([pa.field(row_id_name, pa.int64(), nullable=False)])
 
 
 def _resolve_spec_array(

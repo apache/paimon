@@ -60,6 +60,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Override
+    protected Map<String, String> catalogOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("catalog-options-table.enabled", "true");
+        return options;
+    }
+
+    @Override
     protected boolean inferScanParallelism() {
         return true;
     }
@@ -183,7 +190,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testCatalogOptionsTable() {
         List<Row> result = sql("SELECT * FROM sys.catalog_options");
-        assertThat(result).containsExactly(Row.of("warehouse", path));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("catalog-options-table.enabled", "true"), Row.of("warehouse", path));
     }
 
     @Test

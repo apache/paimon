@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,15 +32,35 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Compaction Sink for data-evolution table. */
 public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompactTask> {
 
-    public DataEvolutionTableCompactSink(FileStoreTable table) {
+    private final Snapshot snapshot;
+
+    public DataEvolutionTableCompactSink(FileStoreTable table, Snapshot snapshot) {
         super(table, true);
+        this.snapshot = snapshot;
     }
 
     public static DataStreamSink<?> sink(
-            FileStoreTable table, DataStream<DataEvolutionCompactTask> input) {
+            FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
         boolean isStreaming = isStreaming(input);
         checkArgument(!isStreaming, "Data evolution compaction sink only supports batch mode yet.");
-        return new DataEvolutionTableCompactSink(table).sinkFrom(input);
+        return new DataEvolutionTableCompactSink(table, snapshot).sinkFrom(input);
+    }
+
+    @Override
+    public DataStreamSink<?> sinkFrom(
+            DataStream<DataEvolutionCompactTask> input, String initialCommitUser) {
+        DataStream<Committable> written = doWrite(input, initialCommitUser, null);
+        if (table.coreOptions().deletionVectorsEnabled()) {
+            written =
+                    written.transform(
+                                    "Data Evolution Compact Deletion Vector Rewriter : "
+                                            + table.name(),
+                                    new CommittableTypeInfo(),
+                                    new DataEvolutionCompactDeletionVectorOperator.Factory(
+                                            table, snapshot))
+                            .forceNonParallel();
+        }
+        return doCommit(written, initialCommitUser);
     }
 
     @Override

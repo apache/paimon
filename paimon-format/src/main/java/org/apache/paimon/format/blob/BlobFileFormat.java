@@ -50,6 +50,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
+    private boolean writeNullOnMissingFile;
+    private boolean writeNullOnFetchFailure;
 
     @Nullable public BlobConsumer writeConsumer;
 
@@ -64,6 +66,14 @@ public class BlobFileFormat extends FileFormat {
 
     public static boolean isBlobFile(String fileName) {
         return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER);
+    }
+
+    public void setWriteNullOnMissingFile(boolean writeNullOnMissingFile) {
+        this.writeNullOnMissingFile = writeNullOnMissingFile;
+    }
+
+    public void setWriteNullOnFetchFailure(boolean writeNullOnFetchFailure) {
+        this.writeNullOnFetchFailure = writeNullOnFetchFailure;
     }
 
     public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
@@ -108,7 +118,8 @@ public class BlobFileFormat extends FileFormat {
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(out, writeConsumer, type);
+            return new BlobFormatWriter(
+                    out, writeConsumer, type, writeNullOnMissingFile, writeNullOnFetchFailure);
         }
     }
 

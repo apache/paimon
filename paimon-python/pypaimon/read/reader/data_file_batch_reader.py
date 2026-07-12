@@ -344,7 +344,9 @@ class DataFileBatchReader(RecordBatchReader):
         # Handle _ROW_ID field
         if SpecialFields.ROW_ID.name in self.system_fields.keys():
             idx = self.system_fields[SpecialFields.ROW_ID.name]
-            if self.row_id_offsets is not None:
+            if self.first_row_id is None:
+                arrays[idx] = pa.nulls(record_batch.num_rows, type=pa.int64())
+            elif self.row_id_offsets is not None:
                 end = self._row_id_cursor + record_batch.num_rows
                 row_ids = [self.first_row_id + o for o in self.row_id_offsets[self._row_id_cursor:end]]
                 arrays[idx] = pa.array(row_ids, type=pa.int64())

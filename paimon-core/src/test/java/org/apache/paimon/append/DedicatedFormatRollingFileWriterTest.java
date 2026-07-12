@@ -148,6 +148,31 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testDoesNotWriteRowSidecar() throws IOException {
+        // Tests that: dedicated blob files do not create row-store sidecars.
+        // Kills mutation: adding row sidecar writing to DedicatedFormatRollingFileWriter.
+        writer.write(GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        writer.close();
+
+        List<DataFileMeta> metasResult = writer.result();
+        assertThat(metasResult).hasSize(2);
+        assertThat(metasResult).anyMatch(file -> "parquet".equals(file.fileFormat()));
+        assertThat(metasResult).anyMatch(file -> "blob".equals(file.fileFormat()));
+        assertThat(metasResult)
+                .allSatisfy(
+                        file ->
+                                assertThat(file.extraFiles())
+                                        .noneMatch(extraFile -> extraFile.endsWith(".row")));
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(
+                            files.filter(Files::isRegularFile)
+                                    .noneMatch(
+                                            file -> file.getFileName().toString().endsWith(".row")))
+                    .isTrue();
+        }
+    }
+
+    @Test
     public void testBundleWritingPreservesMainFileIndexSideEffects() throws IOException {
         Options options = new Options();
         options.set("file-index.bloom-filter.columns", "f0");
@@ -194,54 +219,6 @@ public class DedicatedFormatRollingFileWriterTest {
         assertThat(mainFile.embeddedIndex()).isNotNull();
         assertThat(mainFile.embeddedIndex()).isNotEmpty();
         assertThat(mainFile.extraFiles()).isEmpty();
-    }
-
-    @Test
-    public void testBundleWritingWithExternalStorageFallback() throws IOException {
-        Options options = new Options();
-        options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "f2");
-        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, "f2");
-        java.nio.file.Path externalStoragePath = tempDir.resolve("external-storage-blob-path");
-        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, externalStoragePath.toString());
-        writer =
-                new DedicatedFormatRollingFileWriter(
-                        LocalFileIO.create(),
-                        SCHEMA_ID,
-                        FileFormat.fromIdentifier("parquet", new Options()),
-                        null,
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        SCHEMA,
-                        pathFactory,
-                        () -> seqNumCounter,
-                        COMPRESSION,
-                        new StatsCollectorFactories(new CoreOptions(options)),
-                        new FileIndexOptions(),
-                        FileSource.APPEND,
-                        false,
-                        BlobFileContext.create(SCHEMA, new CoreOptions(options)));
-
-        List<InternalRow> rows =
-                Arrays.asList(
-                        GenericRow.of(
-                                1, BinaryString.fromString("test1"), new BlobData(testBlobData)),
-                        GenericRow.of(
-                                2, BinaryString.fromString("test2"), new BlobData(testBlobData)),
-                        GenericRow.of(
-                                3, BinaryString.fromString("test3"), new BlobData(testBlobData)));
-
-        writer.writeBundle(new SingleUseBundleRecords(rows));
-        writer.close();
-        List<DataFileMeta> metasResult = writer.result();
-
-        assertThat(writer.recordCount()).isEqualTo(3);
-        assertThat(metasResult).hasSize(1);
-        assertThat(metasResult.get(0).rowCount()).isEqualTo(3);
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            assertThat(stream.anyMatch(p -> p.getFileName().toString().endsWith(".blob"))).isTrue();
-        }
     }
 
     @Test

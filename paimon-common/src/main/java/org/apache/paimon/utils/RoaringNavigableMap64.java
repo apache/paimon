@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.roaringbitmap.longlong.LongIterator;
 import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
 import java.io.ByteArrayInputStream;
@@ -26,6 +27,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -34,6 +36,10 @@ import java.util.Objects;
 public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final long RANGE_LIST_SELECT_MIN_CARDINALITY = 4096;
+
+    private static final int RANGE_LIST_SELECT_SAMPLE_SIZE = 64;
 
     private final Roaring64NavigableMap roaring64NavigableMap;
 
@@ -141,8 +147,121 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
      * <p>This is useful for interoperability with APIs that expect List&lt;Range&gt;.
      */
     public List<Range> toRangeList() {
-        // TODO Optimize this to avoid iterator all ids
-        return Range.toRanges(roaring64NavigableMap::iterator);
+        long cardinality = roaring64NavigableMap.getLongCardinality();
+        if (!shouldUseSelectRanges(cardinality)) {
+            return toRangeListByIterator();
+        }
+
+        return toRangeListBySelect(cardinality);
+    }
+
+    private boolean shouldUseSelectRanges(long cardinality) {
+        if (cardinality < RANGE_LIST_SELECT_MIN_CARDINALITY) {
+            return false;
+        }
+
+        LongIterator iterator = roaring64NavigableMap.getLongIterator();
+        long previous = iterator.next();
+        int samples = 0;
+        int consecutive = 0;
+        while (samples < RANGE_LIST_SELECT_SAMPLE_SIZE && iterator.hasNext()) {
+            long current = iterator.next();
+            if (isNext(previous, current)) {
+                consecutive++;
+            }
+            previous = current;
+            samples++;
+        }
+        return consecutive * 4 >= samples * 3
+                && isNextAt(cardinality / 2)
+                && isNextAt(cardinality - 2);
+    }
+
+    private boolean isNextAt(long index) {
+        return isNext(roaring64NavigableMap.select(index), roaring64NavigableMap.select(index + 1));
+    }
+
+    private List<Range> toRangeListByIterator() {
+        List<Range> ranges = new ArrayList<>();
+        LongIterator iterator = roaring64NavigableMap.getLongIterator();
+        if (!iterator.hasNext()) {
+            return ranges;
+        }
+
+        long rangeStart = iterator.next();
+        long rangeEnd = rangeStart;
+        while (iterator.hasNext()) {
+            long current = iterator.next();
+            if (isNext(rangeEnd, current)) {
+                rangeEnd = current;
+            } else {
+                ranges.add(new Range(rangeStart, rangeEnd));
+                rangeStart = current;
+                rangeEnd = current;
+            }
+        }
+        ranges.add(new Range(rangeStart, rangeEnd));
+        return ranges;
+    }
+
+    private List<Range> toRangeListBySelect(long cardinality) {
+        List<Range> ranges = new ArrayList<>();
+        long rangeStartIndex = 0;
+        while (rangeStartIndex < cardinality) {
+            long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
+            long rangeEndIndex = findRangeEndIndex(rangeStartIndex, cardinality, rangeStart);
+            long rangeOffset = rangeEndIndex - rangeStartIndex;
+            ranges.add(new Range(rangeStart, rangeStart + rangeOffset));
+            rangeStartIndex = rangeEndIndex + 1;
+        }
+
+        return ranges;
+    }
+
+    private long findRangeEndIndex(long rangeStartIndex, long cardinality, long rangeStart) {
+        long lower = rangeStartIndex;
+        long upper;
+        long step = 1;
+
+        while (true) {
+            long candidateIndex = rangeStartIndex + step;
+            if (candidateIndex < 0 || candidateIndex >= cardinality) {
+                upper = cardinality - 1;
+                break;
+            }
+
+            if (!isContiguous(rangeStart, rangeStartIndex, candidateIndex)) {
+                upper = candidateIndex - 1;
+                break;
+            }
+
+            lower = candidateIndex;
+            if (step > Long.MAX_VALUE / 2) {
+                upper = cardinality - 1;
+                break;
+            }
+            step <<= 1;
+        }
+
+        while (lower < upper) {
+            long mid = lower + ((upper - lower + 1) >>> 1);
+            if (isContiguous(rangeStart, rangeStartIndex, mid)) {
+                lower = mid;
+            } else {
+                upper = mid - 1;
+            }
+        }
+        return lower;
+    }
+
+    private boolean isContiguous(long rangeStart, long rangeStartIndex, long candidateIndex) {
+        long offset = candidateIndex - rangeStartIndex;
+        return rangeStart <= Long.MAX_VALUE - offset
+                && roaring64NavigableMap.select(candidateIndex) == rangeStart + offset;
+    }
+
+    private static boolean isNext(long previous, long current) {
+        return previous != Long.MAX_VALUE && current == previous + 1;
     }
 
     public static RoaringNavigableMap64 bitmapOf(long... dat) {

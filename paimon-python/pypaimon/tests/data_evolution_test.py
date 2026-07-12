@@ -796,9 +796,10 @@ class DataEvolutionTest(unittest.TestCase):
         )
         self.assertEqual(
             len(result_non_projected),
-            3,
-            "Filter c > 150 with projection [id]: c not in read_type so filter is dropped, all 3 rows returned.",
+            1,
+            "Filter c > 150 with projection [id] should still evaluate c internally.",
         )
+        self.assertEqual(result_non_projected["id"].tolist(), [3])
         self.assertEqual(
             list(result_non_projected.columns),
             ["id"],
@@ -810,13 +811,13 @@ class DataEvolutionTest(unittest.TestCase):
         try:
             rows_from_iterator = list(table_read.to_iterator(splits))
         except ValueError as e:
-            if "Expected Arrow table or array" in str(e):
+            if "Expected Arrow" in str(e) and "RecordBatch" in str(e):
                 self.skipTest(
                     "RecordBatchReader path uses polars.from_arrow(RecordBatch) which fails; "
                     "skip to_iterator projection assertion on this path"
                 )
             raise
-        self.assertEqual(len(rows_from_iterator), 3, "to_iterator should return same row count as to_pandas")
+        self.assertEqual(len(rows_from_iterator), 1, "to_iterator should return same row count as to_pandas")
         for row in rows_from_iterator:
             self.assertIsInstance(row, OffsetRow)
             self.assertEqual(

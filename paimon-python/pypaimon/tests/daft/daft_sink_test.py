@@ -25,6 +25,8 @@ reader to ensure correctness.
 
 from __future__ import annotations
 
+import os
+
 import pyarrow as pa
 import pytest
 
@@ -35,6 +37,7 @@ from pypaimon.daft.daft_compat import file_range_position_field, has_file_range_
 from pypaimon.daft.daft_catalog import PaimonTable
 from pypaimon.daft.daft_datasink import PaimonDataSink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
+from daft.recordbatch.micropartition import MicroPartition
 
 requires_blob = pytest.mark.skipif(not has_file_range_reads(), reason="BLOB support requires daft >= 0.7.11")
 
@@ -57,6 +60,16 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
     finally:
         table_write.close()
         table_commit.close()
+
+
+def _table_data_files(table):
+    data_files = []
+    for dirpath, _, filenames in os.walk(table.table_path):
+        for filename in filenames:
+            if filename.endswith((".parquet", ".orc", ".avro")):
+                path = os.path.join(dirpath, filename)
+                data_files.append(os.path.relpath(path, table.table_path))
+    return sorted(data_files)
 
 
 def _create_id_dt_table(catalog, table_name: str):
@@ -335,6 +348,42 @@ def test_write_paimon_rejects_extra_columns(local_paimon_catalog):
 
     with pytest.raises(RuntimeError, match="Paimon write schema mismatch"):
         _write_table(df, table)
+
+
+def test_write_paimon_aborts_data_files_after_later_micropartition_fails(local_paimon_catalog):
+    """A failed write task must not leave files from earlier micropartitions."""
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={
+            "bucket": "1",
+            "file.format": "parquet",
+            "target-file-size": "1kb",
+        },
+    )
+    catalog.create_table("test_db.abort_failed_write", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.abort_failed_write")
+
+    valid = MicroPartition.from_arrow(
+        pa.table({
+            "id": pa.array(list(range(128)), type=pa.int64()),
+            "name": pa.array([f"name-{i:03d}" for i in range(128)], type=pa.string()),
+        })
+    )
+    invalid = MicroPartition.from_arrow(
+        pa.table({
+            "id": pa.array([999], type=pa.int64()),
+            "extra": pa.array(["bad"], type=pa.string()),
+        })
+    )
+
+    with pytest.raises(ValueError, match="Paimon write schema mismatch"):
+        list(PaimonDataSink(table).write(iter([valid, invalid])))
+
+    assert _table_data_files(table) == []
 
 
 def test_write_paimon_pk_table(pk_table):

@@ -51,10 +51,12 @@ org.apache.paimon.flink.action.RescaleActionFactory
 org.apache.paimon.flink.action.CloneActionFactory
 org.apache.paimon.flink.action.DataEvolutionMergeIntoActionFactory
 org.apache.paimon.flink.action.ReassignRowIdActionFactory
+org.apache.paimon.flink.action.CompactChainTableActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
 org.apache.paimon.flink.procedure.CompactProcedure
+org.apache.paimon.flink.procedure.CompactChainTableProcedure
 org.apache.paimon.flink.procedure.RewriteFileIndexProcedure
 org.apache.paimon.flink.procedure.CreateTagProcedure
 org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
@@ -69,6 +71,7 @@ org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
 org.apache.paimon.flink.procedure.RollbackToProcedure
+org.apache.paimon.flink.procedure.RollbackToAsLatestProcedure
 org.apache.paimon.flink.procedure.RollbackToTimestampProcedure
 org.apache.paimon.flink.procedure.RollbackToWatermarkProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure

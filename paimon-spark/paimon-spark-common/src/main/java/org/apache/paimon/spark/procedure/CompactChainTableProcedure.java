@@ -44,6 +44,7 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -132,21 +133,20 @@ public class CompactChainTableProcedure extends BaseProcedure {
             DataSourceV2Relation relation,
             String partitionStr,
             boolean overwrite) {
-        String partition = SparkProcedureUtils.toWhere(partitionStr);
         FileStoreTable snapshotTable = table.wrapped();
 
         ChainGroupReadTable.ChainTableBatchScan scan =
                 (ChainGroupReadTable.ChainTableBatchScan) table.newScan();
         PartitionPredicate partitionPredicate =
-                SparkProcedureUtils.convertToPartitionPredicate(
-                        partition, table.schema().logicalPartitionType(), spark(), relation);
+                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                        partitionStr, snapshotTable, spark());
 
         // Check if target partition already exists in snapshot branch
-        boolean partitionExists = checkPartitionExists(snapshotTable, partition, relation);
+        boolean partitionExists = checkPartitionExists(snapshotTable, partitionStr);
         if (partitionExists) {
             if (overwrite) {
                 scan.skipPreloadTargetSnapshot().withPartitionFilter(partitionPredicate);
-                LOG.info("Found existing partition {}, will overwrite it.", partition);
+                LOG.info("Found existing partition {}, will overwrite it.", partitionStr);
             } else {
                 LOG.info(
                         "Partition {} already exists in snapshot branch, skipping compaction.",
@@ -170,7 +170,14 @@ public class CompactChainTableProcedure extends BaseProcedure {
                         ScanPlanHelper$.MODULE$.createNewScanPlan(
                                 splits.toArray(new Split[0]), relation));
 
-        PaimonSparkWriter writer = PaimonSparkWriter.apply(snapshotTable);
+        // Always enable dynamic partition overwrite for compact_chain_table so that overwrite
+        // only affects the full partitions actually present in the compacted DataFrame,
+        // preserving other groups that have no delta data under the same partial partition.
+        PaimonSparkWriter writer =
+                PaimonSparkWriter.apply(
+                        snapshotTable.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "true")));
         Map<String, String> targetPartition =
                 ParameterUtils.parseCommaSeparatedKeyValues(partitionStr);
         for (Map.Entry<String, String> entry : targetPartition.entrySet()) {
@@ -187,20 +194,14 @@ public class CompactChainTableProcedure extends BaseProcedure {
         return true;
     }
 
-    private boolean checkPartitionExists(
-            FileStoreTable snapshotTable, String partition, DataSourceV2Relation relation) {
+    private boolean checkPartitionExists(FileStoreTable snapshotTable, String partition) {
         PartitionPredicate snapshotPartitionPredicate =
-                SparkProcedureUtils.convertToPartitionPredicate(
-                        partition,
-                        snapshotTable.schema().logicalPartitionType(),
-                        spark(),
-                        relation);
-
+                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                        partition, snapshotTable, spark());
         return !snapshotTable
                 .newScan()
                 .withPartitionFilter(snapshotPartitionPredicate)
-                .plan()
-                .splits()
+                .listPartitions()
                 .isEmpty();
     }
 

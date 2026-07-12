@@ -38,5 +38,11 @@ under the License.
             <td>Boolean</td>
             <td>If true, creating table in default database is not allowed. Default is false.</td>
         </tr>
+        <tr>
+            <td><h5>lineage-use-catalog-key-as-identifier</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to use the 'catalog-key' as the catalog identifier in the lineage dataset name (i.e., catalog_key.db_name.table_name) when using a JDBC metastore. If false, the internal Flink catalog name is used instead.</td>
+        </tr>
     </tbody>
 </table>

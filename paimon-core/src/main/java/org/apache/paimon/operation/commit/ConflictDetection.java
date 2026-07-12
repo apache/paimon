@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.errors.ErrorMessages;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -487,23 +488,92 @@ public class ConflictDetection {
 
         RangeHelper<SimpleFileEntry> rangeHelper =
                 new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
-        List<List<SimpleFileEntry>> merged = rangeHelper.mergeOverlappingRanges(entries);
-        for (List<SimpleFileEntry> group : merged) {
-            List<SimpleFileEntry> dataFiles = new ArrayList<>();
-            for (SimpleFileEntry f : group) {
-                if (!dedicatedStorageFile(f.fileName())) {
-                    dataFiles.add(f);
-                }
-            }
-            if (!rangeHelper.areAllRangesSame(dataFiles)) {
+        List<SimpleFileEntry> dataFiles =
+                entries.stream()
+                        .filter(file -> !dedicatedStorageFile(file.fileName()))
+                        .collect(Collectors.toList());
+
+        Optional<RuntimeException> exception =
+                checkDataFileRowIdRangeConflicts(rangeHelper, dataFiles);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        List<SimpleFileEntry> dedicatedFiles =
+                entries.stream()
+                        .filter(file -> dedicatedStorageFile(file.fileName()))
+                        .collect(Collectors.toList());
+        exception = checkDedicatedFileRowIdRangeConflicts(dataFiles, dedicatedFiles);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkDataFileRowIdRangeConflicts(
+            RangeHelper<SimpleFileEntry> rangeHelper, List<SimpleFileEntry> dataFiles) {
+        for (List<SimpleFileEntry> dataFileGroup : rangeHelper.mergeOverlappingRanges(dataFiles)) {
+            if (!rangeHelper.areAllRangesSame(dataFileGroup)) {
                 return Optional.of(
                         new RuntimeException(
-                                "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' operations "
+                                "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
+                                        + "operations "
                                         + "have encountered conflicts, data files: "
-                                        + dataFiles));
+                                        + dataFileGroup));
             }
         }
+
         return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkDedicatedFileRowIdRangeConflicts(
+            List<SimpleFileEntry> dataFiles, List<SimpleFileEntry> dedicatedFiles) {
+        if (dedicatedFiles.isEmpty()) {
+            return Optional.empty();
+        }
+
+        RowRangeIndex dataFileRowRangeIndex = rowRangeIndex(dataFiles, false);
+
+        for (SimpleFileEntry dedicatedFile : dedicatedFiles) {
+            Range dedicatedRange = dedicatedFile.nonNullRowIdRange();
+            if (dataFileRowRangeIndex.contains(dedicatedRange)) {
+                continue;
+            }
+
+            List<Range> intersectingRanges =
+                    dataFileRowRangeIndex.intersectedRanges(dedicatedRange.from, dedicatedRange.to);
+            List<SimpleFileEntry> intersectingDataFiles =
+                    dataFiles.stream()
+                            .filter(
+                                    dataFile ->
+                                            dataFile.nonNullRowIdRange()
+                                                    .hasIntersection(dedicatedRange))
+                            .collect(Collectors.toList());
+            String conflictReason =
+                    intersectingRanges.size() > 1
+                            ? "spans multiple data file ranges"
+                            : "is not covered by one data file range";
+            return Optional.of(
+                    new RuntimeException(
+                            String.format(
+                                    "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
+                                            + "operations have encountered conflicts, dedicated "
+                                            + "file %s %s %s: %s",
+                                    dedicatedFile,
+                                    dedicatedRange,
+                                    conflictReason,
+                                    intersectingDataFiles)));
+        }
+
+        return Optional.empty();
+    }
+
+    private static RowRangeIndex rowRangeIndex(
+            Collection<SimpleFileEntry> files, boolean mergeAdjacent) {
+        return RowRangeIndex.create(
+                files.stream().map(SimpleFileEntry::nonNullRowIdRange).collect(Collectors.toList()),
+                mergeAdjacent);
     }
 
     private Optional<RuntimeException> checkForRowIdFromSnapshot(
@@ -541,10 +611,16 @@ public class ConflictDetection {
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
                         && columnChecker.conflictsWith(file)) {
+                    LOG.debug(
+                            "Data evolution row id conflict detected for table {}, commit user {}, "
+                                    + "snapshot {}, file {}.",
+                            tableName,
+                            commitUser,
+                            snapshot.id(),
+                            file);
                     return Optional.of(
                             new RuntimeException(
-                                    "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
-                                            + " updating the same file, which can render some updates ineffective."));
+                                    ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE));
                 }
             }
         }
@@ -633,15 +709,14 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        List<Range> existingRanges =
+        List<SimpleFileEntry> existingDataFiles =
                 baseEntries.stream()
                         .filter(
                                 base ->
                                         base.firstRowId() != null
                                                 && !dedicatedStorageFile(base.fileName()))
-                        .map(SimpleFileEntry::nonNullRowIdRange)
                         .collect(Collectors.toList());
-        RowRangeIndex existingIndex = RowRangeIndex.create(existingRanges, false);
+        RowRangeIndex existingIndex = rowRangeIndex(existingDataFiles, false);
 
         for (SimpleFileEntry entry : filesToCheck) {
             Range rowRange = entry.nonNullRowIdRange();

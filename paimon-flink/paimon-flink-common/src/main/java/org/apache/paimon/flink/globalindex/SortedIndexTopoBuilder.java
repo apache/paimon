@@ -116,7 +116,7 @@ public class SortedIndexTopoBuilder {
             }
 
             Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
-                    indexBuilder.scan();
+                    indexBuilder.incrementalScan();
             if (!indexRangeAndSplits.isPresent()) {
                 continue;
             }

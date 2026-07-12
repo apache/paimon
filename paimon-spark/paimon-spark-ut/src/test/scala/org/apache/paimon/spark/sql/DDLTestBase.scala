@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
+import org.apache.spark.sql.types.TimestampType
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
@@ -405,6 +406,63 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(
+    "Paimon DDL: CREATE OR REPLACE TABLE AS SELECT reads latest rows after incompatible nested type replace") {
+    assume(gteqSpark3_4)
+    withTable("src", "t") {
+      sql("""
+            |CREATE TABLE src (
+            |  id BIGINT,
+            |  payload DOUBLE,
+            |  name_a STRING,
+            |  name_b STRING
+            |)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO src VALUES
+            |  (1, 1.1D, 'a', 'x'),
+            |  (2, 2.2D, 'b', 'y')
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS SELECT * FROM src
+            |""".stripMargin)
+
+      sql("""
+            |CREATE OR REPLACE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS
+            |SELECT
+            |  id,
+            |  named_struct(
+            |    'items_before', array(name_a),
+            |    'items_after', array(name_b)
+            |  ) AS payload,
+            |  name_a,
+            |  name_b
+            |FROM src
+            |""".stripMargin)
+
+      Assertions.assertEquals("struct", spark.table("t").schema("payload").dataType.typeName)
+
+      checkAnswer(
+        sql("""
+              |SELECT id, payload.items_before, payload.items_after, name_a, name_b
+              |FROM t
+              |WHERE name_a = 'a'
+              |LIMIT 1
+              |""".stripMargin),
+        Row(1L, Seq("a"), Seq("x"), "a", "x") :: Nil
+      )
+    }
+  }
+
   test("Paimon DDL: REPLACE TABLE supports incompatible schema and preserves old snapshots") {
     assume(gteqSpark3_4)
     withTable("t") {
@@ -647,6 +705,40 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                 }
               }
             }
+        }
+    }
+  }
+
+  test("Paimon DDL: legacy timestamp mapping") {
+    assume(gteqSpark3_4)
+
+    Seq("orc", "parquet").foreach {
+      format =>
+        withSparkSQLConf("spark.paimon.legacy-timestamp-mapping.enabled" -> "true") {
+          withTimeZone("Asia/Shanghai") {
+            withTable("paimon_tbl") {
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (reported_time timestamp)
+                     |USING paimon
+                     |TBLPROPERTIES ('file.format'='$format')
+                     |""".stripMargin)
+
+              sql("INSERT INTO paimon_tbl VALUES (timestamp'2026-06-30 23:47:51')")
+
+              Assertions.assertEquals(
+                TimestampType,
+                spark.table("paimon_tbl").schema("reported_time").dataType)
+              checkAnswer(
+                sql("""
+                      |SELECT from_unixtime(
+                      |  unix_timestamp(reported_time) + 24 * 3600,
+                      |  'yyyy-MM-dd HH:mm:ss'
+                      |) FROM paimon_tbl
+                      |""".stripMargin),
+                Row("2026-07-01 23:47:51") :: Nil
+              )
+            }
+          }
         }
     }
   }

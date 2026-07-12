@@ -20,7 +20,7 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
-import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.spark.{PaimonDeletedRecordsTaskMetric, SparkTypeUtils}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
@@ -30,6 +30,7 @@ import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 
 import org.apache.spark.sql.PaimonSparkSession
+import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
@@ -132,8 +133,33 @@ abstract class PaimonBatchWriteBase(
     } finally {
       batchTableCommit.close()
     }
-    postDriverMetrics()
+    postDriverMetrics(deletedRecordsTaskMetric(operation, addCommitMessage, deletedCommitMessage))
     postCommit(commitMessages)
+  }
+
+  /**
+   * For copy-on-write DELETE, the number of deleted records is exactly the row count of the removed
+   * files minus the row count of the rewritten files. This does not hold for UPDATE and MERGE,
+   * whose rewritten files mix copied rows with modified rows.
+   */
+  private def deletedRecordsTaskMetric(
+      operation: Snapshot.Operation,
+      addedMessages: Seq[CommitMessage],
+      deletedMessages: Seq[CommitMessage]): Array[CustomTaskMetric] = {
+    if (copyOnWriteScan.isEmpty || operation != Snapshot.Operation.DELETE) {
+      return Array.empty
+    }
+    val addedRecords = addedMessages
+      .collect { case m: CommitMessageImpl => m }
+      .flatMap(_.newFilesIncrement().newFiles().asScala)
+      .map(_.rowCount())
+      .sum
+    val deletedRecords = deletedMessages
+      .collect { case m: CommitMessageImpl => m }
+      .flatMap(_.newFilesIncrement().deletedFiles().asScala)
+      .map(_.rowCount())
+      .sum
+    Array(PaimonDeletedRecordsTaskMetric(deletedRecords - addedRecords))
   }
 
   protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
@@ -154,10 +180,10 @@ abstract class PaimonBatchWriteBase(
 
   // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
   // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
-  protected def postDriverMetrics(): Unit = {
+  protected def postDriverMetrics(extraMetrics: Array[CustomTaskMetric] = Array.empty): Unit = {
     val spark = PaimonSparkSession.active
     // todo: find a more suitable way to get metrics.
-    val commitMetrics = metricRegistry.buildSparkCommitMetrics()
+    val commitMetrics = metricRegistry.buildSparkCommitMetrics() ++ extraMetrics
     val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
     val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
     val metricUpdates = executionMetrics.flatMap {

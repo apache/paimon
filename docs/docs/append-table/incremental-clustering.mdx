@@ -45,7 +45,9 @@ Incremental Clustering supports:
 - Support changing clustering keys; newly ingested data is clustered according to the latest clustering keys.
 - Provide a full mode; when selected, the entire dataset will be reclustered.
 
-**Only append unaware-bucket table supports Incremental Clustering.**
+Incremental Clustering is supported for append tables in both unaware-bucket mode (`bucket = -1`) and
+bucketed mode (`bucket > 0`). For bucketed append tables, additional requirements apply because
+clustering gives up the ordered append guarantee within buckets.
 
 ## Enable Incremental Clustering
 
@@ -93,6 +95,43 @@ To enable Incremental Clustering, the following configuration needs to be set fo
 
 </table>
 
+For bucketed append tables (`bucket > 0`), you must also set the following option:
+
+<table className="table table-bordered">
+    <thead>
+    <tr>
+      <th className="text-left" style={{width: "20%"}}>Option</th>
+      <th className="text-left" style={{width: "10%"}}>Value</th>
+      <th className="text-left" style={{width: "5%"}}>Required</th>
+      <th className="text-left" style={{width: "10%"}}>Type</th>
+      <th className="text-left" style={{width: "55%"}}>Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>bucket-append-ordered</h5></td>
+      <td>false</td>
+      <td style={{wordWrap: "break-word"}}>Yes</td>
+      <td>Boolean</td>
+      <td>Must be set to false for bucketed append tables with incremental clustering.</td>
+    </tr>
+    </tbody>
+
+</table>
+
+Bucketed append tables with Incremental Clustering do not support `deletion-vectors.enabled = true`.
+
+Example:
+
+```sql
+ALTER TABLE T SET (
+    'bucket-append-ordered' = 'false',
+    'clustering.incremental' = 'true',
+    'clustering.columns' = 'event_time,user_id',
+    'clustering.strategy' = 'zorder'
+);
+```
+
 Once Incremental Clustering for a table is enabled, you can run Incremental Clustering in batch mode periodically 
 to continuously optimizes data layout of the table and deliver better query performance.
 
@@ -103,7 +142,7 @@ clustering and small-file merging must be performed exclusively via Incremental 
 ## Run Incremental Clustering
 :::info
 
-only support running Incremental Clustering in batch mode.
+The following examples submit batch compact jobs. They are the recommended way to run Incremental Clustering explicitly.
 
 :::
 
@@ -201,6 +240,13 @@ You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=bat
 </Tabs>
 
 ## Auto-Clustering For Historical Partition
+:::info
+
+Auto-clustering for historical partitions currently applies only to unaware-bucket append tables (`bucket = -1`).
+Bucketed append clustering does not use the `clustering.history-partition.*` table options.
+
+:::
+
 While performing incremental clustering on recently active partitions, Paimon can automatically detect historical and 
 inactive partitions and evaluate whether their data layout has reached an optimal state. 
 For those historical partitions that have not yet achieved optimal layout, Paimon will also perform full clustering on them 

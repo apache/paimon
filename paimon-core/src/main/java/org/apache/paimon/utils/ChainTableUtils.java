@@ -364,4 +364,21 @@ public class ChainTableUtils {
 
         return PredicateBuilder.and(conditions);
     }
+
+    /**
+     * Validates that the chain table configuration is compatible with incremental read paths
+     * (streaming read and lookup join). All validation rules for incremental reads should be
+     * centralized here.
+     */
+    public static void validateChainTableForIncrementalRead(ChainGroupReadTable table) {
+        CoreOptions.MergeEngine mergeEngine = table.other().coreOptions().mergeEngine();
+        if (mergeEngine != CoreOptions.MergeEngine.DEDUPLICATE) {
+            throw new IllegalArgumentException(
+                    "Chain table does not support "
+                            + mergeEngine
+                            + " merge engine on the delta branch "
+                            + "for streaming read or lookup join. "
+                            + "Please use the DEDUPLICATE merge engine on the delta branch.");
+        }
+    }
 }

@@ -75,18 +75,6 @@ under the License.
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
-            <td><h5>blob-external-storage-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') whose raw data will be written to external storage at write time. The external storage path is configured via 'blob-external-storage-path'. Orphan file cleanup is not applied to that path.</td>
-        </tr>
-        <tr>
-            <td><h5>blob-external-storage-path</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>The external storage path where raw BLOB data from fields configured by 'blob-external-storage-field' is written at write time. Orphan file cleanup is not applied to this path.</td>
-        </tr>
-        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -105,10 +93,16 @@ under the License.
             <td>Whether to resolve blob-view-field values from upstream tables at read time. Set to false to preserve BlobViewStruct references when forwarding blob view values to another blob-view table.</td>
         </tr>
         <tr>
+            <td><h5>blob-write-null-on-fetch-failure</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced resource cannot be fetched during Flink writes (e.g. invalid URI or HTTP errors other than 404). HTTP 404 is handled by 'blob-write-null-on-missing-file'. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
             <td><h5>blob-write-null-on-missing-file</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to write NULL for a descriptor BLOB value when the referenced file does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>
@@ -471,6 +465,12 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. Enable only when callers do not rely on stable _ROW_ID; this invalidates row-id based references and drops global indexes for affected partitions.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -487,6 +487,24 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to generate row-store sidecar files for normal data files on data evolution tables. The sidecar files are used to accelerate sparse row-id reads.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selected-rows</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Long</td>
+            <td>Maximum selected row count for reading a row-store sidecar file. The sidecar is used only when the selected rows are no more than this value and the selected row ratio is no more than data-evolution.row-sidecar.max-selection-ratio.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selection-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
@@ -844,6 +862,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>When need to lookup, commit will wait for compaction by lookup.</td>
         </tr>
         <tr>
+            <td><h5>lookup.blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, the lookup join stores only the BlobDescriptor (a lightweight reference containing file URI, offset, and length) for BLOB fields instead of the full blob bytes. This dramatically reduces local disk and memory usage for tables with large BLOB columns (e.g., images, videos). The downstream consumer receives the serialized BlobDescriptor bytes and can resolve the actual blob content on demand.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -1182,6 +1206,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-vector.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. The first release supports exactly one column.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -1198,6 +1228,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
             <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.target-row-num-per-bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Target row number per bucket for partitions compacted from postpone bucket files for the first time.</td>
         </tr>
         <tr>
             <td><h5>primary-key</h5></td>
@@ -1252,6 +1288,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
         </tr>
         <tr>
             <td><h5>scan.creation-time-millis</h5></td>

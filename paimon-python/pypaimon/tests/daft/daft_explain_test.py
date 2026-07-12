@@ -278,7 +278,9 @@ def test_explain_scan_applies_partition_filters_to_reader_counts(catalog_options
         verbose=True,
     )
 
-    assert result.paimon_scan.split_count == 2
+    # partition_filters are pushed into the plan, so it prunes to the matching
+    # partition (1 split) instead of planning both and skipping in Python.
+    assert result.paimon_scan.split_count == 1
     assert result.native_parquet_split_count == 1
     assert result.pypaimon_fallback_split_count == 0
     assert any("dt" in partition_filter for partition_filter in result.partition_filters)

@@ -143,7 +143,7 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
             FullTextSearch fullTextSearch) {
-        return wrapped.visitFullTextSearch(fullTextSearch)
+        return wrapped.visitFullTextSearch(fullTextSearch.offsetRange(this.offset, this.to))
                 .thenApply(opt -> opt.map(r -> r.offset(offset)));
     }
 

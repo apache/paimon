@@ -25,14 +25,15 @@ import pyarrow as pa
 _COL_REF_PATTERN = re.compile(r'\b([st])\.(\w+)\b')
 
 
-def _require_datafusion():
+def _load_datafusion():
     try:
         import datafusion
         return datafusion
     except ImportError:
         raise ImportError(
-            "merge_into condition expressions require the 'datafusion' "
-            "package. Install it with: pip install pypaimon[sql]"
+            "merge_into condition expressions require the PyPaimon SQL "
+            "extra, which provides DataFusion support. Install it with: "
+            "pip install pypaimon[sql]"
         )
 
 
@@ -73,7 +74,7 @@ def filter_batch(
 ) -> pa.Table:
     if batch.num_rows == 0:
         return batch
-    datafusion = _require_datafusion()
+    datafusion = _load_datafusion()
     rewritten = condition if _pre_rewritten else rewrite_condition(condition)
     ctx = datafusion.SessionContext()
     ctx.register_record_batches("_batch", [batch.to_batches()])

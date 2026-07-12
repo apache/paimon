@@ -173,6 +173,12 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         if (metricsReporter != null) {
             rewriter.setMetricsReporter(metricsReporter);
         }
+        String bucketInfo = "bucket=" + bucket;
+        if (partition.getFieldCount() > 0) {
+            String partitionString =
+                    readerFactoryBuilder.pathFactory().getPartitionString(partition);
+            bucketInfo = String.format("partition=%s, ", partitionString) + bucketInfo;
+        }
         return new MergeTreeCompactManager(
                 compactExecutor,
                 levels,
@@ -187,7 +193,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 options.needLookup(),
                 recordLevelExpire,
                 options.forceRewriteAllFiles(),
-                options.isChainTable());
+                options.isChainTable(),
+                bucketInfo);
     }
 
     private CompactStrategy createCompactStrategy(

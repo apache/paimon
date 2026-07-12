@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.5-SNAPSHOT</version>
+    <version>2.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -75,12 +75,12 @@ under the License.
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
         <module>paimon-mosaic</module>
-        <module>paimon-tantivy</module>
+        <module>paimon-full-text</module>
         <module>paimon-vector</module>
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2025-09-16T01:56:37Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-07-07T08:24:16Z</project.build.outputTimestamp>
         <paimon.shade.version>0.8.0</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
@@ -114,10 +114,11 @@ under the License.
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
         <parquet.version>1.16.0</parquet.version>
-        <orc.version>1.9.2</orc.version>
+        <orc.version>1.9.8</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
         <arrow.version>15.0.0</arrow.version>
+        <paimon.full-text-index.version>0.1.0-SNAPSHOT</paimon.full-text-index.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>

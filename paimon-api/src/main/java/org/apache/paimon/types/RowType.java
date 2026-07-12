@@ -21,6 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -158,7 +159,9 @@ public final class RowType extends DataType {
 
     @Override
     public int defaultSize() {
-        return fields.stream().mapToInt(f -> f.type().defaultSize()).sum();
+        return fields.stream()
+                .mapToInt(f -> f.type().defaultSize())
+                .reduce(0, MathUtils::addSafely);
     }
 
     @Override

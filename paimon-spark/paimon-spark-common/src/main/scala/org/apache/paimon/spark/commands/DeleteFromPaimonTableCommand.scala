@@ -79,7 +79,8 @@ case class DeleteFromPaimonTableCommand(
         dataFilePathToMeta,
         condition,
         relation,
-        sparkSession)
+        sparkSession,
+        coreOptions.dataEvolutionEnabled())
 
       // Step3: update the touched deletion vectors and index files
       writer.persistDeletionVectors(deletionVectors, readSnapshot)

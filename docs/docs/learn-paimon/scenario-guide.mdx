@@ -287,6 +287,10 @@ SELECT * FROM product_logs WHERE product_id IN (1, 2, 3);
 
 See [Bucketed Append — Data Skipping](../append-table/bucketed#data-skipping).
 
+If queries also frequently filter on columns other than the `bucket-key` and ordered streaming is not required, you can
+enable [Incremental Clustering](../append-table/incremental-clustering) on the bucketed append table by setting
+`bucket-append-ordered = false`.
+
 **Bucketed Join Bonus:** If two bucketed tables share the same `bucket-key` and bucket count, Spark can join them
 **without shuffle**, significantly accelerating batch join queries:
 
@@ -330,7 +334,7 @@ See [Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
 | Mode | Config | Data Skipping | Bucketed Join | Ordered Streaming | Incremental Clustering |
 |---|---|---|---|---|---|
 | Unaware-Bucket (default) | No bucket config | Via min-max / file index | No | No | Yes |
-| Bucketed | `bucket = N, bucket-key = col` | **Bucket-key filter pushdown** | Yes | Yes | No |
+| Bucketed | `bucket = N, bucket-key = col` | **Bucket-key filter pushdown** | Yes | Yes, unless `bucket-append-ordered = false` | Yes, requires `bucket-append-ordered = false` |
 
 ---
 
@@ -389,22 +393,6 @@ while metadata stays in standard columnar files (Parquet/ORC). This means:
 - `SELECT id, name, label FROM image_table` does **not** load any blob data — very fast.
 - Blob data supports streaming reads for large objects (videos, model weights) without loading entire files into memory.
 - Supports multiple input methods: local files, HTTP URLs, InputStreams, and byte arrays.
-
-**For external storage (e.g., blobs already in S3):**
-
-```sql
-CREATE TABLE video_table (
-    id INT,
-    title STRING,
-    video BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
-) WITH (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-external-storage-path' = 's3://my-bucket/paimon-blobs/'
-);
-```
-
-This stores only descriptor references inline, while the actual blob data resides in external storage.
 
 ### Scenario 9: Vector Search / RAG Applications
 

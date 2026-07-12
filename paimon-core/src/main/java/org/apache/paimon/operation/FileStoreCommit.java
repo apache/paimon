@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
@@ -33,6 +34,8 @@ import java.util.Map;
 
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
+
+    FileStoreCommit withIOManager(IOManager ioManager);
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
@@ -75,6 +78,9 @@ public interface FileStoreCommit extends AutoCloseable {
 
     /** Compact the manifest entries only. */
     void compactManifest();
+
+    /** Roll back to the target snapshot and materialize it as the latest snapshot. */
+    boolean rollbackToAsLatest(Snapshot targetSnapshot);
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

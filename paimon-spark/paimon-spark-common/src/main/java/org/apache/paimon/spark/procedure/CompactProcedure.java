@@ -20,12 +20,14 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -183,7 +185,6 @@ public class CompactProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
         return modifySparkTable(
                 tableIdent,
                 sparkTable -> {
@@ -197,12 +198,19 @@ public class CompactProcedure extends BaseProcedure {
                             sortColumns,
                             table.partitionKeys());
                     DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
-                    PartitionPredicate partitionPredicate =
-                            SparkProcedureUtils.convertToPartitionPredicate(
-                                    finalWhere,
-                                    table.schema().logicalPartitionType(),
-                                    spark(),
-                                    relation);
+                    PartitionPredicate partitionPredicate;
+                    if (partitions != null) {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
+                    } else {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertToPartitionPredicate(
+                                        where,
+                                        table.schema().logicalPartitionType(),
+                                        spark(),
+                                        relation);
+                    }
                     HashMap<String, String> dynamicOptions = new HashMap<>();
                     ProcedureUtils.putIfNotEmpty(
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
@@ -491,8 +499,13 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
         List<DataEvolutionCompactTask> compactionTasks;
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
         DataEvolutionCompactCoordinator compactCoordinator =
-                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, partitionPredicate, false, false, snapshot);
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         try {
@@ -573,6 +586,9 @@ public class CompactProcedure extends BaseProcedure {
                                 messageSerializerser.deserialize(
                                         messageSerializerser.getVersion(), serializedMessage));
                     }
+                    messages.addAll(
+                            new DataEvolutionCompactionCommitPreparation(table, snapshot)
+                                    .prepare(messages));
                     commit.commit(messages);
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);

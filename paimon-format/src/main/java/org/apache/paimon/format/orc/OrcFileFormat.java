@@ -25,6 +25,7 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
@@ -49,8 +50,10 @@ import org.apache.orc.TypeDescription;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
@@ -60,7 +63,7 @@ import static org.apache.paimon.format.OrcOptions.ORC_TIMESTAMP_LTZ_LEGACY_TYPE;
 
 /** Orc {@link FileFormat}. */
 @ThreadSafe
-public class OrcFileFormat extends FileFormat {
+public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
 
     public static final String IDENTIFIER = "orc";
 
@@ -130,6 +133,19 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
+    public Map<String, Map<String, String>> readFieldMetadata(FormatReaderFactory.Context context)
+            throws IOException {
+        org.apache.orc.Reader reader =
+                OrcReaderFactory.createReader(
+                        readerConf, context.fileIO(), context.filePath(), context.selection());
+        try {
+            return OrcReaderFactory.readFieldMetadata(reader);
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Override
     public void validateDataFields(RowType rowType) {
         DataType refinedType = refineDataType(rowType);
         OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
@@ -154,7 +170,12 @@ public class OrcFileFormat extends FileFormat {
                         typeDescription, refinedType.getFields(), legacyTimestampLtzType);
 
         return new OrcWriterFactory(
-                vectorizer, orcProperties, writerConf, writeBatchSize, writeBatchMemory);
+                vectorizer,
+                orcProperties,
+                writerConf,
+                writeBatchSize,
+                writeBatchMemory,
+                legacyTimestampLtzType);
     }
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {

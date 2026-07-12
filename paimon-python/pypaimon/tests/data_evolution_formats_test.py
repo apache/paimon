@@ -31,6 +31,10 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.read.split_read import SplitRead
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.range import Range
 
 
 class DataEvolutionFormatsTest(unittest.TestCase):
@@ -50,9 +54,189 @@ class DataEvolutionFormatsTest(unittest.TestCase):
     def _file_path(file_meta):
         return file_meta.external_path if file_meta.external_path else file_meta.file_path
 
+    @staticmethod
+    def _extra_file_path(file_meta, extra_file):
+        if "://" in extra_file or extra_file.startswith("/"):
+            return extra_file
+        file_path = DataEvolutionFormatsTest._file_path(file_meta)
+        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
+
+    @staticmethod
+    def _row_sidecar_files(file_meta):
+        return [extra_file for extra_file in file_meta.extra_files
+                if extra_file.endswith('.row')]
+
+    @staticmethod
+    def _data_file_meta(file_name, first_row_id, row_count, extra_files):
+        return DataFileMeta.create(
+            file_name=file_name,
+            file_size=1,
+            row_count=row_count,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=extra_files,
+            first_row_id=first_row_id,
+        )
+
     # ------------------------------------------------------------------
     # Parquet-format data evolution
     # ------------------------------------------------------------------
+
+    def test_row_sidecar_selection_requires_small_count_and_low_ratio(self):
+        small_file = self._data_file_meta('file1.parquet', 10, 100, ['file1.row'])
+        large_file = self._data_file_meta('file2.parquet', 10, 1000000, ['file2.row'])
+
+        self.assertTrue(SplitRead._should_read_row_sidecar(
+            large_file, [Range(10, 4105)], 'file2.row', 4096, 0.05))
+        self.assertFalse(SplitRead._should_read_row_sidecar(
+            small_file, [Range(10, 15)], 'file1.row', 4096, 0.05))
+        self.assertFalse(SplitRead._should_read_row_sidecar(
+            large_file, [Range(10, 4106)], 'file2.row', 4096, 0.05))
+        self.assertTrue(SplitRead._should_read_row_sidecar(
+            small_file, [Range(10, 15)], 'file1.row', 64, 0.25))
+
+    def test_row_sidecar_disabled_by_default(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_row_sidecar_default_off', schema, False)
+        table = self.catalog.get_table('default.fmt_row_sidecar_default_off')
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'id': [1, 2], 'val': ['a', 'b']}, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        data_files = [nf for m in cmts for nf in m.new_files
+                      if nf.file_name.endswith('.parquet')]
+        self.assertGreater(len(data_files), 0)
+        for file_meta in data_files:
+            self.assertEqual([], self._row_sidecar_files(file_meta))
+
+    def test_row_sidecar_enabled_writes_extra_file(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.row-sidecar.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_row_sidecar_enabled', schema, False)
+        table = self.catalog.get_table('default.fmt_row_sidecar_enabled')
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'id': [1, 2, 3], 'val': ['a', 'b', 'c']}, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        data_files = [nf for m in cmts for nf in m.new_files
+                      if nf.file_name.endswith('.parquet')]
+        self.assertGreater(len(data_files), 0)
+        for file_meta in data_files:
+            sidecars = self._row_sidecar_files(file_meta)
+            self.assertEqual(1, len(sidecars))
+            self.assertTrue(os.path.exists(self._extra_file_path(file_meta, sidecars[0])))
+
+    def test_row_sidecar_not_written_by_dedicated_format_writer(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.row-sidecar.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_row_sidecar_dedicated_writer', schema, False)
+        table = self.catalog.get_table('default.fmt_row_sidecar_dedicated_writer')
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'payload': pa.array([b'a', b'b'], type=pa.large_binary()),
+        }, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        all_files = [nf for m in cmts for nf in m.new_files]
+        self.assertGreater(len([f for f in all_files if f.file_name.endswith('.parquet')]), 0)
+        self.assertGreater(len([f for f in all_files if f.file_name.endswith('.blob')]), 0)
+        for file_meta in all_files:
+            self.assertEqual([], self._row_sidecar_files(file_meta))
+
+    def test_row_sidecar_serves_sparse_row_id_read(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.row-sidecar.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_row_sidecar_sparse_read', schema, False)
+        table = self.catalog.get_table('default.fmt_row_sidecar_sparse_read')
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict({
+            'id': list(range(100)),
+            'val': [f'v{i}' for i in range(100)],
+        }, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        data_files = [nf for m in cmts for nf in m.new_files
+                      if nf.file_name.endswith('.parquet')]
+        self.assertEqual(1, len(data_files))
+        sidecars = self._row_sidecar_files(data_files[0])
+        self.assertEqual(1, len(sidecars))
+        self.assertTrue(os.path.exists(self._extra_file_path(data_files[0], sidecars[0])))
+
+        os.remove(self._file_path(data_files[0]))
+
+        rb = table.new_read_builder().with_projection(['id', 'val', '_ROW_ID'])
+        pb = rb.new_predicate_builder()
+        rb.with_filter(pb.equal('_ROW_ID', 5))
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 1)
+        self.assertEqual(actual.column('id').to_pylist(), [5])
+        self.assertEqual(actual.column('val').to_pylist(), ['v5'])
+        self.assertEqual(actual.column('_ROW_ID').to_pylist(), [5])
 
     def test_parquet_column_subset_write_and_merge_read(self):
         """Write disjoint column subsets as parquet, merge-read via data evolution."""

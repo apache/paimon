@@ -45,6 +45,8 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -58,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -103,7 +106,12 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class SchemaValidation {
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
+            Arrays.asList(
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    MultisetType.class,
+                    VectorType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -206,7 +214,6 @@ public class SchemaValidation {
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
-        validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
 
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         Set<String> fieldsInDedicatedFile =
@@ -343,7 +350,11 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        validatePrimaryKeyVectorIndex(schema, options);
+
         validateMergeFunctionFactory(schema);
+
+        validateMapStorageLayout(schema, options);
 
         validateFileIndex(schema);
 
@@ -358,8 +369,6 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
-
-        validateMapStorageLayout(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -616,6 +625,7 @@ public class SchemaValidation {
             fieldMap.put(field.name(), field);
         }
 
+        boolean hasSharedShredding = false;
         for (String key : options.toMap().keySet()) {
             if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
                 continue;
@@ -645,6 +655,7 @@ public class SchemaValidation {
                 continue;
             }
 
+            hasSharedShredding = true;
             if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
                         String.format(
@@ -652,6 +663,119 @@ public class SchemaValidation {
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);
+        }
+
+        if (hasSharedShredding) {
+            validateMapSharedShreddingFileFormats(options);
+            validateMapSharedShreddingCompressions(options);
+            validateUnsupportedTypesWithMapSharedShredding(schema);
+            if (!schema.primaryKeys().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently only supports append-only tables.");
+            }
+            if (options.bucket() != -1 && !options.writeOnly()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+            }
+        }
+    }
+
+    private static void validateUnsupportedTypesWithMapSharedShredding(TableSchema schema) {
+        RowType rowType = new RowType(schema.fields());
+        if (containsType(rowType, type -> type instanceof VariantType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with Variant fields.");
+        }
+        if (containsType(rowType, type -> type.is(DataTypeRoot.BLOB))) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with BLOB fields.");
+        }
+        if (containsType(rowType, type -> type instanceof MultisetType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        }
+        if (containsType(rowType, type -> type instanceof VectorType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with VECTOR fields.");
+        }
+    }
+
+    private static boolean containsType(DataType dataType, Predicate<DataType> predicate) {
+        if (predicate.test(dataType)) {
+            return true;
+        }
+        if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                if (containsType(field.type(), predicate)) {
+                    return true;
+                }
+            }
+        } else if (dataType instanceof ArrayType) {
+            return containsType(((ArrayType) dataType).getElementType(), predicate);
+        } else if (dataType instanceof MultisetType) {
+            return containsType(((MultisetType) dataType).getElementType(), predicate);
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            return containsType(mapType.getKeyType(), predicate)
+                    || containsType(mapType.getValueType(), predicate);
+        } else if (dataType instanceof VectorType) {
+            return containsType(((VectorType) dataType).getElementType(), predicate);
+        }
+        return false;
+    }
+
+    private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.FILE_FORMAT.key(), options.fileFormatString());
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            validateMapSharedShreddingFileFormat(
+                    CoreOptions.FILE_FORMAT_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
+    }
+
+    private static void validateMapSharedShreddingCompressions(CoreOptions options) {
+        validateMapSharedShreddingCompression(
+                CoreOptions.FILE_COMPRESSION.key(), options.fileCompression());
+        for (Map.Entry<Integer, String> entry : options.fileCompressionPerLevel().entrySet()) {
+            validateMapSharedShreddingCompression(
+                    CoreOptions.FILE_COMPRESSION_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingCompression(
+                CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), options.changelogFileCompression());
+    }
+
+    private static void validateMapSharedShreddingCompression(
+            String optionKey, String compression) {
+        if (StringUtils.isEmpty(compression)) {
+            return;
+        }
+        try {
+            MapSharedShreddingUtils.normalizeFieldDictCompression(compression);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports none/lz4/zstd compression, but %s is %s.",
+                            optionKey, compression),
+                    e);
+        }
+    }
+
+    private static void validateMapSharedShreddingFileFormat(String optionKey, String format) {
+        if (StringUtils.isEmpty(format)) {
+            return;
+        }
+        if (!CoreOptions.FILE_FORMAT_PARQUET.equals(format)
+                && !CoreOptions.FILE_FORMAT_ORC.equals(format)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports parquet/orc file formats, but %s is %s.",
+                            optionKey, format));
         }
     }
 
@@ -695,6 +819,11 @@ public class SchemaValidation {
                                 + "Only CHAR/VARCHAR/STRING is supported.",
                         columnName,
                         keyType);
+                checkArgument(
+                        options.mapStorageLayout(columnName) != MapStorageLayout.SHARED_SHREDDING,
+                        "Column '%s' is configured with map.storage-layout=shared-shredding, "
+                                + "which does not support nested file index.",
+                        columnName);
             }
 
             for (String indexType : entry.getValue().keySet()) {
@@ -754,6 +883,75 @@ public class SchemaValidation {
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
         }
+    }
+
+    private static void validatePrimaryKeyVectorIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyVectorIndexEnabled()) {
+            return;
+        }
+
+        List<String> indexColumns = options.primaryKeyVectorIndexColumns();
+        checkArgument(
+                new HashSet<>(indexColumns).size() == indexColumns.size(),
+                "pk-vector.index.columns must not contain duplicate columns, but is %s.",
+                indexColumns);
+        checkArgument(
+                indexColumns.size() == 1,
+                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        String indexType = options.primaryKeyVectorIndexType(indexColumn);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "pk-vector.index.columns must contain a non-empty column.");
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexType),
+                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
+                indexColumn);
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key vector index requires a primary-key table.");
+        checkArgument(
+                options.deletionVectorsEnabled(),
+                "Primary-key vector index requires deletion-vectors.enabled = true.");
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                "Primary-key vector index only supports merge-engine = deduplicate or partial-update, but is %s.",
+                options.mergeEngine());
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
+                options.mergeEngine());
+        checkArgument(
+                options.bucket() > 0,
+                "Primary-key vector index requires fixed bucket mode (bucket > 0), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key vector index does not support pk-clustering-override.");
+        options.primaryKeyVectorIndexOptions(indexColumn);
+
+        DataField vectorField =
+                schema.fields().stream()
+                        .filter(field -> field.name().equals(indexColumn))
+                        .findFirst()
+                        .orElse(null);
+        checkArgument(
+                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
+                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
+                indexColumn);
+        checkArgument(
+                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
+                        == DataTypeRoot.FLOAT,
+                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
+                indexColumn);
+        checkArgument(
+                Arrays.asList("l2", "cosine", "inner_product")
+                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
+                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                indexColumn,
+                options.primaryKeyVectorDistanceMetric(indexColumn));
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
@@ -890,9 +1088,6 @@ public class SchemaValidation {
                     rowTrackingEnabled,
                     "Data evolution config must enabled with row-tracking.enabled");
             checkArgument(
-                    !options.deletionVectorsEnabled(),
-                    "Data evolution config must disabled with deletion-vectors.enabled");
-            checkArgument(
                     !options.clusteringIncrementalEnabled(),
                     "Data evolution config must disabled with clustering.incremental");
         }
@@ -990,37 +1185,6 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
-    }
-
-    private static void validateBlobExternalStorageFields(
-            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
-        Set<String> blobFieldNames =
-                rowType.getFields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
-                        .map(DataField::name)
-                        .collect(Collectors.toCollection(HashSet::new));
-        Set<String> configured = options.blobExternalStorageField();
-        for (String field : configured) {
-            checkArgument(
-                    blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-            checkArgument(
-                    blobDescriptorFields.contains(field),
-                    "Field '%s' in '%s' must also be in '%s'.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(),
-                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
-        }
-        if (!configured.isEmpty()) {
-            String externalStoragePath = options.blobExternalStoragePath();
-            checkArgument(
-                    externalStoragePath != null && !externalStoragePath.isEmpty(),
-                    "'%s' must be set when '%s' is configured.",
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-        }
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {

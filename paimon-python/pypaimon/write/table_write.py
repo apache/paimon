@@ -23,6 +23,7 @@ import pyarrow as pa
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.write.row_utils import require_columns, row_to_named_values
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -58,6 +59,20 @@ class TableWrite:
             indices_array = pa.array(row_indices, type=pa.int64())
             sub_table = pa.compute.take(data, indices_array)
             self.file_store_write.write(partition, bucket, sub_table)
+
+    def write_row(self, row):
+        values_by_name = row_to_named_values(row, self.table.table_schema.fields)
+        column_names = (
+            self.file_store_write.write_cols
+            if self.file_store_write.write_cols is not None
+            else list(self.table.field_names)
+        )
+        require_columns(values_by_name, column_names, "write_row")
+        require_columns(values_by_name, self.table.partition_keys, "write_row")
+        partition, bucket = (
+            self.row_key_extractor.extract_partition_bucket_row(values_by_name)
+        )
+        self.file_store_write.write_row(partition, bucket, row, values_by_name)
 
     def write_pandas(self, dataframe):
         pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
@@ -139,23 +154,39 @@ class TableWrite:
         self.file_store_write.abort()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if data_schema == self.table_pyarrow_schema:
+        if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
             return
-        if data_schema.names == self.file_store_write.write_cols:
-            return
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names == self.table_pyarrow_schema.names:
-            compatible = True
-            for i in range(len(data_schema)):
-                input_type = data_schema.field(i).type
-                table_type = self.table_pyarrow_schema.field(i).type
-                if input_type != table_type:
-                    if self._is_binary_family(input_type) and self._is_binary_family(table_type):
-                        continue
-                    compatible = False
-                    break
-            if compatible:
+
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            write_cols_schema = self._write_cols_pyarrow_schema(write_cols)
+            if self._is_compatible_pyarrow_schema(data_schema, write_cols_schema):
                 return
+
+        self._raise_inconsistent_schema(data_schema)
+
+    def _is_compatible_pyarrow_schema(
+            self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
+        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
+        if data_schema.names != expected_schema.names:
+            return False
+        for i in range(len(data_schema)):
+            input_type = data_schema.field(i).type
+            expected_type = expected_schema.field(i).type
+            if input_type == expected_type:
+                continue
+            if self._is_binary_family(input_type) and self._is_binary_family(expected_type):
+                continue
+            return False
+        return True
+
+    def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
+        table_fields = {
+            field.name: field for field in self.table_pyarrow_schema
+        }
+        return pa.schema([table_fields[col] for col in write_cols])
+
+    def _raise_inconsistent_schema(self, data_schema: pa.Schema):
         raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
                          f"Input schema is: {data_schema} "
                          f"Table schema is: {self.table_pyarrow_schema} "

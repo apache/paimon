@@ -18,17 +18,6 @@
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.vector_search import VectorSearch
-from pypaimon.globalindex.full_text_query import (
-    BooleanQuery,
-    BoostQuery,
-    FullTextOperator,
-    FullTextQuery,
-    FullTextQueryType,
-    MatchQuery,
-    MultiMatchQuery,
-    Occur,
-    PhraseQuery,
-)
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.vector_search_result import (
     ScoredGlobalIndexResult,
@@ -44,6 +33,14 @@ from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexRea
 from pypaimon.globalindex.sorted_file_global_index_reader import SortedFileGlobalIndexReader
 from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
+from pypaimon.globalindex.create_global_index import (
+    GlobalIndexBuilder,
+    create_global_index,
+)
+from pypaimon.globalindex.drop_global_index import (
+    GlobalIndexDropper,
+    drop_global_index,
+)
 from pypaimon.utils.range import Range
 
 __all__ = [
@@ -51,16 +48,7 @@ __all__ = [
     'GlobalIndexReader',
     'FieldRef',
     'VectorSearch',
-    'BooleanQuery',
-    'BoostQuery',
-    'FullTextOperator',
-    'FullTextQuery',
-    'FullTextQueryType',
     'FullTextSearch',
-    'MatchQuery',
-    'MultiMatchQuery',
-    'Occur',
-    'PhraseQuery',
     'ScoredGlobalIndexResult',
     'DictBasedScoredIndexResult',
     'ScoreGetter',
@@ -74,5 +62,9 @@ __all__ = [
     'SortedFileGlobalIndexReader',
     'SortedFileMetaSelector',
     'SortedIndexFileMeta',
+    'GlobalIndexBuilder',
+    'create_global_index',
+    'GlobalIndexDropper',
+    'drop_global_index',
     'Range',
 ]

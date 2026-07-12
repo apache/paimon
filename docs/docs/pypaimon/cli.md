@@ -423,7 +423,7 @@ Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
 
 ### Table Full-Text Search
 
-Perform full-text search on a Paimon table with a Tantivy full-text index and display matching rows.
+Perform full-text search on a Paimon table with a native full-text index and display matching rows.
 
 ```shell
 paimon table full-text-search mydb.articles --column content --query "paimon lake"
@@ -461,10 +461,10 @@ Output:
   4  Data lake platforms like Paimon handle large-...
 ```
 
-**Note:** The table must have a Tantivy full-text index built on the target column. PyPaimon uses
-the tokenizer settings stored in the index metadata; ngram full-text indexes require a `tantivy-py`
-package with custom tokenizer support, and jieba full-text indexes require the Python `jieba`
-package. See [Global Index](../multimodal-table/global-index) for how to create full-text indexes.
+**Note:** The table must have a full-text index built on the target column. PyPaimon uses
+the tokenizer settings stored in the index metadata and requires the `paimon-ftindex`
+package from `paimon-full-text` for full-text reads. See
+[Global Index](../multimodal-table/global-index) for how to create full-text indexes.
 
 ### Table Drop
 

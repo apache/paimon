@@ -98,6 +98,8 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
             List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         int n = vectors.length;
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
+        String indexType = vectorIndexType(splits);
+        int searchLimit = indexedSearchLimit(indexType);
 
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
@@ -116,6 +118,7 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vectors,
+                            searchLimit,
                             preFilters.isEmpty() ? null : preFilters.get(i),
                             executor));
         }
@@ -135,6 +138,35 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                 }
             }
         }
-        return merged;
+        return maybeRerankIndexedBatchResults(merged, indexType, globalIndexer);
+    }
+
+    protected ScoredGlobalIndexResult[] maybeRerankIndexedBatchResults(
+            ScoredGlobalIndexResult[] results, String indexType, GlobalIndexer globalIndexer) {
+        if (configuredRefineFactor(indexType) == 0) {
+            return results;
+        }
+
+        int n = results.length;
+        int searchLimit = indexedSearchLimit(indexType);
+        ScoredGlobalIndexResult[] candidates = new ScoredGlobalIndexResult[n];
+        RoaringNavigableMap64 unionCandidates = new RoaringNavigableMap64();
+        for (int i = 0; i < n; i++) {
+            candidates[i] = results[i].topK(searchLimit);
+            unionCandidates.or(candidates[i].results());
+        }
+
+        if (unionCandidates.isEmpty()) {
+            return candidates;
+        }
+
+        Map<Long, float[]> rawVectors = readRawVectors(unionCandidates, false);
+        String metric = rawSearchMetric(globalIndexer);
+        ScoredGlobalIndexResult[] reranked = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            reranked[i] =
+                    scoreRawVectors(candidates[i].results(), rawVectors, vectors[i], metric, limit);
+        }
+        return reranked;
     }
 }

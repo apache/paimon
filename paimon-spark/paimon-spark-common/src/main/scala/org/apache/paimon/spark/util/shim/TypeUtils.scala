@@ -18,7 +18,11 @@
 
 package org.apache.paimon.spark.util.shim
 
+import org.apache.paimon.spark.util.OptionUtils
+
 object TypeUtils {
 
-  def treatPaimonTimestampTypeAsSparkTimestampType(): Boolean = false
+  def treatPaimonTimestampTypeAsSparkTimestampType(): Boolean = {
+    OptionUtils.legacyTimestampMappingEnabled()
+  }
 }

@@ -84,6 +84,8 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
     protected ScoredGlobalIndexResult readIndexed(
             List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
+        String indexType = vectorIndexType(splits);
+        int searchLimit = indexedSearchLimit(indexType);
 
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
@@ -102,6 +104,7 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vector,
+                            searchLimit,
                             preFilters.isEmpty() ? null : preFilters.get(i),
                             executor));
         }
@@ -115,6 +118,6 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                 merged = merged.or(splitResult.get());
             }
         }
-        return merged;
+        return maybeRerankIndexedResult(merged, indexType, globalIndexer, vector);
     }
 }

@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.VectorType;
 
 import java.io.IOException;
 import java.util.List;
@@ -56,6 +57,9 @@ public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
     /** Option key for distance metric. */
     public static final String OPT_METRIC = "test.vector.metric";
 
+    /** Option key to reverse scores for testing refine/rerank behavior. */
+    public static final String OPT_REVERSE_SCORE = "test.vector.reverse-score";
+
     public static final String OPT_REQUIRED_OPTION_KEY = "test.vector.required-option.key";
 
     public static final String OPT_REQUIRED_OPTION_VALUE = "test.vector.required-option.value";
@@ -65,19 +69,31 @@ public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
     private final DataType fieldType;
     private final int dimension;
     private final String metric;
+    private final boolean reverseScore;
     private final String requiredOptionKey;
     private final String requiredOptionValue;
 
     public TestVectorGlobalIndexer(DataType fieldType, Options options) {
         checkArgument(
-                fieldType instanceof ArrayType
-                        && ((ArrayType) fieldType).getElementType() instanceof FloatType,
-                "TestVectorGlobalIndexer only supports ARRAY<FLOAT>, but got: " + fieldType);
+                isFloatVector(fieldType),
+                "TestVectorGlobalIndexer only supports VECTOR<FLOAT> or ARRAY<FLOAT>, but got: "
+                        + fieldType);
         this.fieldType = fieldType;
-        this.dimension = options.getInteger(OPT_DIMENSION, 0);
+        this.dimension =
+                fieldType instanceof VectorType
+                        ? ((VectorType) fieldType).getLength()
+                        : options.getInteger(OPT_DIMENSION, 0);
         this.metric = options.getString(OPT_METRIC, "l2");
+        this.reverseScore = options.getBoolean(OPT_REVERSE_SCORE, false);
         this.requiredOptionKey = options.getString(OPT_REQUIRED_OPTION_KEY, null);
         this.requiredOptionValue = options.getString(OPT_REQUIRED_OPTION_VALUE, null);
+    }
+
+    private static boolean isFloatVector(DataType fieldType) {
+        return (fieldType instanceof VectorType
+                        && ((VectorType) fieldType).getElementType() instanceof FloatType)
+                || (fieldType instanceof ArrayType
+                        && ((ArrayType) fieldType).getElementType() instanceof FloatType);
     }
 
     @Override
@@ -92,7 +108,12 @@ public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestVectorGlobalIndexReader(
-                fileReader, files.get(0), metric, requiredOptionKey, requiredOptionValue);
+                fileReader,
+                files.get(0),
+                metric,
+                reverseScore,
+                requiredOptionKey,
+                requiredOptionValue);
     }
 
     public int dimension() {

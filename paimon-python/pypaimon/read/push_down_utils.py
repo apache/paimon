@@ -21,6 +21,13 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.schema.data_types import DataField
 
+_UNSAFE_ARROW_FILTER_METHODS = frozenset([
+    'startsWith',
+    'endsWith',
+    'contains',
+    'like',
+])
+
 
 def extract_partition_spec_from_predicate(
     predicate: Predicate, partition_keys: List[str]
@@ -117,14 +124,37 @@ def _change_index(input_predicate: Predicate, mapping: Dict[int, int]):
     return input_predicate.new_index(mapping[input_predicate.index])
 
 
-def _get_all_fields(predicate: Predicate) -> Set[str]:
+def predicate_field_names(predicate: Predicate) -> Set[str]:
+    """Return all column names referenced by predicate leaves."""
     if predicate.field is not None:
         return {predicate.field}
     involved_fields = set()
     if predicate.literals:
         for sub_predicate in predicate.literals:
-            involved_fields.update(_get_all_fields(sub_predicate))
+            involved_fields.update(predicate_field_names(sub_predicate))
     return involved_fields
+
+
+def _get_all_fields(predicate: Predicate) -> Set[str]:
+    return predicate_field_names(predicate)
+
+
+def predicate_supports_arrow_filter(predicate: Optional[Predicate]) -> bool:
+    """Whether ``predicate.to_arrow()`` is safe for batch filtering.
+
+    PyArrow 6 accepts dataset expressions for comparisons, null checks, and
+    isin, but string match compute functions do not accept dataset expressions.
+    Predicate.to_arrow() currently falls back to a truthy expression or None for
+    those methods, which is safe for file pruning but not for final row filters.
+    """
+    if predicate is None:
+        return True
+    if predicate.method == 'and' or predicate.method == 'or':
+        return all(
+            predicate_supports_arrow_filter(p)
+            for p in (predicate.literals or [])
+        )
+    return predicate.method not in _UNSAFE_ARROW_FILTER_METHODS
 
 
 def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
@@ -150,6 +180,12 @@ def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
             filtered.append(r)
         return PredicateBuilder.and_predicates(filtered)
     if predicate.method == "or":
+        fields = _get_all_fields(predicate)
+        if (
+            SpecialFields.ROW_ID.name in fields
+            and fields != {SpecialFields.ROW_ID.name}
+        ):
+            return predicate
         new_children = []
         for c in predicate.literals or []:
             r = remove_row_id_filter(c)
@@ -160,4 +196,22 @@ def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
         if len(new_children) == 1:
             return new_children[0]
         return PredicateBuilder.or_predicates(new_children)
+    return predicate
+
+
+def exclude_predicate_with_fields(predicate: Optional[Predicate], fields: Set[str]) -> Optional[Predicate]:
+    """Drop predicate parts referencing any of ``fields`` (mirrors Java
+    PredicateBuilder.excludePredicateWithFields)."""
+    if not predicate or not fields:
+        return predicate
+    if predicate.method == "and":
+        kept = []
+        for p in _split_and(predicate):
+            r = exclude_predicate_with_fields(p, fields)
+            if r is not None:
+                kept.append(r)
+        return PredicateBuilder.and_predicates(kept) if kept else None
+    # leaf or OR: drop the whole thing if it touches any field (OR isn't split apart)
+    if _get_all_fields(predicate) & fields:
+        return None
     return predicate

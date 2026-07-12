@@ -21,7 +21,6 @@ package org.apache.paimon.data.columnar;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.LongIterator;
@@ -39,7 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * {@link ColumnarRow#setRowId}.
  */
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
-        implements FileRecordIterator<InternalRow> {
+        implements BatchColumnarRowIterator {
 
     protected final Path filePath;
     protected final ColumnarRow row;
@@ -99,7 +98,13 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return this.filePath;
     }
 
-    protected ColumnarRowIterator copy(ColumnVector[] vectors) {
+    @Override
+    public VectorizedColumnBatch batch() {
+        return row.batch();
+    }
+
+    @Override
+    public ColumnarRowIterator copy(ColumnVector[] vectors) {
         // We should call copy only when the iterator is at the beginning of the file.
         checkArgument(returnedPositionIndex == 0, "copy() should not be called after next()");
         ColumnarRowIterator newIterator =

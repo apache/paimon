@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -32,6 +33,8 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.lineage.LineageVertex;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.List;
@@ -55,7 +58,7 @@ public class FlinkFormatTableDataStreamSink {
         return dataStream.sinkTo(new FormatTableSink(table, overwrite, staticPartitions));
     }
 
-    private static class FormatTableSink implements Sink<RowData> {
+    private static class FormatTableSink implements Sink<RowData>, LineageVertexProvider {
 
         private final FormatTable table;
         private final boolean overwrite;
@@ -66,6 +69,11 @@ public class FlinkFormatTableDataStreamSink {
             this.table = table;
             this.overwrite = overwrite;
             this.staticPartitions = staticPartitions;
+        }
+
+        @Override
+        public LineageVertex getLineageVertex() {
+            return LineageUtils.sinkLineageVertex(table);
         }
 
         /**

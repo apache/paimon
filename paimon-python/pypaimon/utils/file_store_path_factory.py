@@ -58,6 +58,7 @@ class FileStorePathFactory:
         external_path_strategy: str = "round-robin",
         external_path_weights: Optional[List[int]] = None,
         index_file_in_data_file_dir: bool = False,
+        global_index_external_path: Optional[str] = None,
     ):
         self._root = root.rstrip('/')
         self.partition_keys = partition_keys
@@ -73,6 +74,9 @@ class FileStorePathFactory:
         self.external_path_weights = external_path_weights
         self.index_file_in_data_file_dir = index_file_in_data_file_dir
         self.legacy_partition_name = legacy_partition_name
+        self.global_index_external_path = (
+            global_index_external_path.rstrip('/')
+            if global_index_external_path else None)
 
     def root(self) -> str:
         return self._root
@@ -82,6 +86,9 @@ class FileStorePathFactory:
 
     def index_path(self) -> str:
         return f"{self._root}/{self.INDEX_PATH}"
+
+    def global_index_root_path(self) -> str:
+        return self.global_index_external_path or self.index_path()
 
     def statistics_path(self) -> str:
         return f"{self._root}/{self.STATISTICS_PATH}"
@@ -136,22 +143,37 @@ class FileStorePathFactory:
         )
 
     def global_index_path_factory(self) -> 'IndexPathFactory':
-        return IndexPathFactory(self.index_path())
+        return IndexPathFactory(
+            self.index_path(),
+            self.global_index_root_path(),
+            self.global_index_external_path is not None,
+        )
 
 
 class IndexPathFactory:
 
-    def __init__(self, index_path: str):
+    def __init__(
+        self,
+        index_path: str,
+        global_index_root_path: Optional[str] = None,
+        external_path: bool = False,
+    ):
         self._index_path = index_path
+        self._global_index_root_path = global_index_root_path or index_path
+        self._external_path = external_path
         self._file_count = 0
 
     def index_path(self) -> str:
-        """Return the base index path."""
+        """Return the table index path used as a read fallback."""
         return self._index_path
+
+    def global_index_root_path(self) -> str:
+        """Return the root path for newly written global index files."""
+        return self._global_index_root_path
 
     def to_path(self, file_name: str) -> str:
         """Convert a file name to a full path."""
-        return f"{self._index_path}/{file_name}"
+        return f"{self._global_index_root_path}/{file_name}"
 
     def new_path(self, prefix: str = "index-") -> str:
         """Create a new unique index file path."""
@@ -162,4 +184,4 @@ class IndexPathFactory:
 
     def is_external_path(self) -> bool:
         """Return whether this is an external path."""
-        return False
+        return self._external_path

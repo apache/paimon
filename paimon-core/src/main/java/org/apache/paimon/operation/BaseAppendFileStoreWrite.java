@@ -96,7 +96,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             CoreOptions options,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
             String tableName) {
-        super(snapshotManager, scan, options, partitionType, null, dvMaintainerFactory, tableName);
+        super(
+                snapshotManager,
+                scan,
+                options,
+                partitionType,
+                null,
+                dvMaintainerFactory,
+                null,
+                tableName);
         this.fileIO = fileIO;
         this.readForCompact = readForCompact;
         this.schemaId = schemaId;
@@ -155,6 +163,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 options.dataEvolutionEnabled(),
+                rowSidecarFileFormat(),
                 blobContext);
     }
 
@@ -278,7 +287,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                rowType.equals(writeType) ? null : writeType.getFieldNames());
+                rowType.equals(writeType) ? null : writeType.getFieldNames(),
+                rowSidecarFileFormat());
+    }
+
+    @Nullable
+    private FileFormat rowSidecarFileFormat() {
+        return options.dataEvolutionEnabled() && options.dataEvolutionRowSidecarEnabled()
+                ? FileFormat.fromIdentifier("row", options.toConfiguration())
+                : null;
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

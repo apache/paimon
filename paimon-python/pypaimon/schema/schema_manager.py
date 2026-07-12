@@ -391,48 +391,6 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
             raise ValueError("Blob type is not supported with primary key.")
 
 
-def _validate_blob_external_storage_fields(fields: List[DataField], options: dict):
-    """Validate blob-external-storage-field configuration.
-
-    Validation order aligned with Java's SchemaValidation.validateBlobExternalStorageFields():
-    1. Field must be a BLOB type in the schema
-    2. Field must be in blob-descriptor-field
-    3. blob-external-storage-path must be configured
-    """
-    core_options = CoreOptions(Options(options))
-    external_fields = core_options.blob_external_storage_fields()
-    if not external_fields:
-        return
-
-    # 1. Configured fields must be BLOB type
-    field_type_map = {f.name: f.type for f in fields}
-    for field_name in external_fields:
-        field_type = field_type_map.get(field_name)
-        if field_type is None or getattr(field_type, 'type', None) != 'BLOB':
-            raise ValueError(
-                f"Field '{field_name}' in "
-                f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' must be a BLOB type field."
-            )
-
-    # 2. Must be a subset of blob-descriptor-field
-    descriptor_fields = core_options.blob_descriptor_fields()
-    not_in_descriptor = external_fields - descriptor_fields
-    if not_in_descriptor:
-        raise ValueError(
-            f"Fields {sorted(not_in_descriptor)} in "
-            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' must also be configured in "
-            f"'{CoreOptions.BLOB_DESCRIPTOR_FIELD.key()}'."
-        )
-
-    # 3. Must configure external-storage-path
-    external_path = core_options.blob_external_storage_path()
-    if not external_path:
-        raise ValueError(
-            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' is configured but "
-            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key()}' is not set."
-        )
-
-
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
     new_name = change.new_name
 
@@ -597,7 +555,6 @@ class SchemaManager:
             )
 
             _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
-            _validate_blob_external_storage_fields(schema.fields, schema.options)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:

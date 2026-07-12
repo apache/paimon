@@ -24,11 +24,13 @@ on:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -88,16 +90,9 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build Tantivy native library
+      - name: Install paimon-full-text native dependency
         run: |
-          cd paimon-tantivy/paimon-tantivy-jni/rust
-          cargo build --release
-
-      - name: Copy Tantivy native library to resources
-        run: |
-          RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
-          mkdir -p ${RESOURCE_DIR}
-          cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
+          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Verify Python version
         run: python --version
@@ -142,15 +137,11 @@ jobs:
           fi
           df -h
 
-      - name: Build and install tantivy-py from source
+      - name: Install paimon-full-text Python dependency
         if: matrix.python-version != '3.6.15'
         shell: bash
         run: |
-          pip install maturin[patchelf]
-          git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
-          cd /tmp/tantivy-py
-          maturin build --release
-          pip install target/wheels/tantivy-*.whl
+          python -m pip install "${PAIMON_FULL_TEXT_DIR}/python"
 
 
       - name: Run lint-python.sh

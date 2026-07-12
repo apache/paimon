@@ -37,7 +37,7 @@ argument can be omitted. For the above example, the call statement is \
 ``CALL sys.compact(`table` => 'default.t', options => 'sink.parallelism=4')``.
 
 Specify partitions: we use string to represent partition filter. "," means "AND" and ";" means "OR". For example, if you want
-to specify two partitions date=01 and date=02, you need to write 'date=01;date=02'; If you want to specify one partition
+to specify two partitions date=01 or date=02, you need to write 'date=01;date=02'; If you want to specify one partition
 with date=01 and day=01, you need to write 'date=01,day=01'.
 
 Table options syntax: we use string to represent table options. The format is 'key1=value1,key2=value2...'.
@@ -120,8 +120,8 @@ All available procedures are listed below.
       <td>
          To compact databases. Arguments:
             <li>includingDatabases: to specify databases. You can use regular expression.</li>
-            <li>mode: compact mode. "divided": start a sink for each table, detecting the new table requires restarting the job;
-               "combined" (default): start a single combined sink for all tables, the new table will be automatically detected.
+            <li>mode: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job;
+               "combined": start a single combined sink for all tables, the new table will be automatically detected.
             </li>
             <li>includingTables: to specify tables. You can use regular expression.</li>
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
@@ -137,6 +137,29 @@ All available procedures are listed below.
             excluding_tables => 'ignore', 
             table_options => 'sink.parallelism=4',
             compat_strategy => 'full')
+      </td>
+   </tr>
+   <tr>
+      <td>compact_chain_table</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.compact_chain_table(
+            `table` => 'table',
+            partition => 'partition',
+            overwrite => overwrite) <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition') <br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition', overwrite) <br/><br/>
+      </td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: the target chain table identifier. Cannot be empty.</li>
+            <li>partition: partition specification format (e.g., 'dt=20250810,hour=22'). Cannot be empty.</li>
+            <li>overwrite: whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(`table` => 'default.T', partition => 'dt=20250810,hour=22')<br/><br/>
+         CALL sys.compact_chain_table('default.T', 'dt=20250810,hour=22', true)
       </td>
    </tr>
    <tr>
@@ -496,6 +519,36 @@ All available procedures are listed below.
          CALL sys.rollback_to('default.T', 10)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 10)
+      </td>
+   </tr>
+   <tr>
+      <td>rollback_to_as_latest</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- roll back to a snapshot as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest('identifier', cast(null as string), snapshotId)<br/><br/>
+         -- roll back to a tag as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest('identifier', 'tagName', cast(null as bigint))<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- roll back to a snapshot as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
+         -- roll back to a tag as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest(`table` => 'identifier', tag => 'tagName')
+      </td>
+      <td>
+         To roll a table back to a specific version and materialize it as the latest snapshot, without deleting later
+         snapshots or tags. Batch and time-travel reads are correct; for deletion-vector tables, a rollback whose only
+         difference is a deletion-vector change is not guaranteed to be observed by streaming overwrite readers.
+         Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>snapshotId (Long): id of the snapshot to roll back to.</li>
+            <li>tagName: name of the tag to roll back to.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_as_latest('default.T', cast(null as string), 10)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 10)
       </td>
    </tr>
    <tr>
@@ -871,15 +924,18 @@ All available procedures are listed below.
       <td>compact_manifest</td>
       <td>
          CALL [catalog.]sys.compact_manifest(`table` => 'identifier')<br/>
-         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', 'options' => 'key1=value1,key2=value2')
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', 'options' => 'key1=value1,key2=value2')<br/>
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', `dry_run` => true)
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
+            <li>dry_run (Boolean, optional): when true, returns manifest metadata statistics without actually compacting.</li>
       </td>
       <td>
-         CALL sys.compact_manifest(`table` => 'default.T')
+         CALL sys.compact_manifest(`table` => 'default.T')<br/>
+         CALL sys.compact_manifest(`table` => 'default.T', `dry_run` => true)
       </td>
    </tr>
    <tr>
@@ -1004,7 +1060,7 @@ All available procedures are listed below.
          To create a global index on a table for accelerating queries. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>index_column(required): the column name to build index on.</li>
-            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'tantivy-fulltext'.</li>
+            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'full-text'.</li>
             <li>partitions(optional): partition filter for selective index creation.</li>
             <li>options(optional): additional dynamic options for index creation.</li>
       </td>
@@ -1026,24 +1082,24 @@ All available procedures are listed below.
             `index_column` => 'name',<br/>
             `index_type` => 'btree',<br/>
             `partitions` => 'pt=p1;pt=p2')<br/><br/>
-         -- Create Tantivy full-text index with ngram tokenizer<br/>
+         -- Create native full-text index with ngram tokenizer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
-         -- Create Tantivy full-text index with jieba tokenizer<br/>
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=ngram,full-text.ngram.min-gram=2,full-text.ngram.max-gram=2')<br/><br/>
+         -- Create native full-text index with jieba tokenizer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=jieba')<br/><br/>
-         -- Create Tantivy full-text index with a custom analyzer<br/>
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=jieba')<br/><br/>
+         -- Create native full-text index with a custom analyzer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=simple,full-text.stem=true,full-text.remove-stop-words=true')
       </td>
    </tr>
    <tr>

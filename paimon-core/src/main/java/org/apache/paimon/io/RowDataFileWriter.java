@@ -20,6 +20,8 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -32,8 +34,10 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -48,7 +52,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final long schemaId;
     private final boolean isExternalPath;
     private final SimpleStatsConverter statsArraySerializer;
-    @Nullable private final DataFileIndexWriter dataFileIndexWriter;
+    private final List<DataFileAuxiliaryWriter> auxiliaryFileWriters;
     private final FileSource fileSource;
     @Nullable private final List<String> writeCols;
     private final RowDataFileSequenceNumberTracker sequenceNumberTracker;
@@ -66,13 +70,64 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean statsDenseStore,
             boolean isExternalPath,
             @Nullable List<String> writeCols) {
+        this(
+                fileIO,
+                context,
+                path,
+                writeSchema,
+                schemaId,
+                seqNumCounterSupplier,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                isExternalPath,
+                writeCols,
+                null,
+                null);
+    }
+
+    public RowDataFileWriter(
+            FileIO fileIO,
+            FileWriterContext context,
+            Path path,
+            RowType writeSchema,
+            long schemaId,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            boolean isExternalPath,
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat,
+            @Nullable Path rowSidecarPath) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
+        if ((rowSidecarFormat == null) != (rowSidecarPath == null)) {
+            throw new IllegalArgumentException(
+                    "Row sidecar format and path should be both null or both non-null.");
+        }
         this.schemaId = schemaId;
         this.isExternalPath = isExternalPath;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
-        this.dataFileIndexWriter =
-                DataFileIndexWriter.create(
-                        fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
+        List<DataFileAuxiliaryWriter> auxiliaryFileWriters = new ArrayList<>();
+        Path fileIndexPath = dataFileToFileIndexPath(path);
+        DataFileIndexWriter dataFileIndexWriter =
+                DataFileIndexWriter.create(fileIO, fileIndexPath, writeSchema, fileIndexOptions);
+        if (dataFileIndexWriter != null) {
+            auxiliaryFileWriters.add(
+                    new DataFileIndexAuxiliaryWriter(dataFileIndexWriter, fileIO, fileIndexPath));
+        }
+        if (rowSidecarFormat != null) {
+            auxiliaryFileWriters.add(
+                    new RowSidecarAuxiliaryWriter(
+                            fileIO,
+                            rowSidecarFormat.createWriterFactory(writeSchema),
+                            rowSidecarPath,
+                            context.compression(),
+                            asyncFileWrite));
+        }
+        this.auxiliaryFileWriters = Collections.unmodifiableList(auxiliaryFileWriters);
         this.fileSource = fileSource;
         this.writeCols = writeCols;
         this.sequenceNumberTracker =
@@ -83,19 +138,54 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     @Override
     public void write(InternalRow row) throws IOException {
         super.write(row);
-        // add row to index if needed
-        if (dataFileIndexWriter != null) {
-            dataFileIndexWriter.write(row);
+        for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+            auxiliaryFileWriter.write(row);
         }
         sequenceNumberTracker.update(row);
     }
 
     @Override
+    public void writeBundle(BundleRecords bundle) throws IOException {
+        for (InternalRow row : bundle) {
+            write(row);
+        }
+    }
+
+    @Override
     public void close() throws IOException {
-        if (dataFileIndexWriter != null) {
-            dataFileIndexWriter.close();
+        for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+            auxiliaryFileWriter.close();
         }
         super.close();
+    }
+
+    @Override
+    public void abort() {
+        for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+            auxiliaryFileWriter.abort();
+        }
+        super.abort();
+    }
+
+    @Override
+    public Optional<FileWriterAbortExecutor> abortExecutor() {
+        Optional<FileWriterAbortExecutor> mainAbortExecutor = super.abortExecutor();
+        if (auxiliaryFileWriters.isEmpty()) {
+            return mainAbortExecutor;
+        }
+
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>();
+        mainAbortExecutor.ifPresent(abortExecutors::add);
+        for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+            auxiliaryFileWriter.abortExecutor().ifPresent(abortExecutors::add);
+        }
+        if (abortExecutors.isEmpty()) {
+            return Optional.empty();
+        }
+        if (abortExecutors.size() == 1) {
+            return Optional.of(abortExecutors.get(0));
+        }
+        return Optional.of(new CompoundFileWriterAbortExecutor(fileIO, path, abortExecutors));
     }
 
     @Override
@@ -103,10 +193,18 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         long fileSize = outputBytes();
         Pair<List<String>, SimpleStats> statsPair =
                 statsArraySerializer.toBinary(fieldStats(fileSize));
-        DataFileIndexWriter.FileIndexResult indexResult =
-                dataFileIndexWriter == null
-                        ? DataFileIndexWriter.EMPTY_RESULT
-                        : dataFileIndexWriter.result();
+        List<String> extraFiles = new ArrayList<>();
+        byte[] embeddedIndex = null;
+        for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+            DataFileAuxiliaryResult auxiliaryResult = auxiliaryFileWriter.result();
+            extraFiles.addAll(auxiliaryResult.extraFiles());
+            if (auxiliaryResult.embeddedIndexBytes() != null) {
+                if (embeddedIndex != null) {
+                    throw new IOException("Found more than one embedded index for one data file.");
+                }
+                embeddedIndex = auxiliaryResult.embeddedIndexBytes();
+            }
+        }
         String externalPath = isExternalPath ? path.toString() : null;
         return DataFileMeta.forAppend(
                 path.getName(),
@@ -116,14 +214,140 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 sequenceNumberTracker.min(),
                 sequenceNumberTracker.max(),
                 schemaId,
-                indexResult.independentIndexFile() == null
-                        ? Collections.emptyList()
-                        : Collections.singletonList(indexResult.independentIndexFile()),
-                indexResult.embeddedIndexBytes(),
+                extraFiles.isEmpty() ? Collections.emptyList() : extraFiles,
+                embeddedIndex,
                 fileSource,
                 statsPair.getKey(),
                 externalPath,
                 null,
                 writeCols);
+    }
+
+    private interface DataFileAuxiliaryWriter {
+
+        void write(InternalRow row) throws IOException;
+
+        void close() throws IOException;
+
+        void abort();
+
+        Optional<FileWriterAbortExecutor> abortExecutor();
+
+        DataFileAuxiliaryResult result() throws IOException;
+    }
+
+    private static class DataFileAuxiliaryResult {
+
+        private static final DataFileAuxiliaryResult EMPTY =
+                new DataFileAuxiliaryResult(null, Collections.emptyList());
+
+        @Nullable private final byte[] embeddedIndexBytes;
+        private final List<String> extraFiles;
+
+        private DataFileAuxiliaryResult(
+                @Nullable byte[] embeddedIndexBytes, List<String> extraFiles) {
+            this.embeddedIndexBytes = embeddedIndexBytes;
+            this.extraFiles = extraFiles;
+        }
+
+        @Nullable
+        private byte[] embeddedIndexBytes() {
+            return embeddedIndexBytes;
+        }
+
+        private List<String> extraFiles() {
+            return extraFiles;
+        }
+
+        private static DataFileAuxiliaryResult embeddedIndex(byte[] embeddedIndexBytes) {
+            return new DataFileAuxiliaryResult(embeddedIndexBytes, Collections.emptyList());
+        }
+
+        private static DataFileAuxiliaryResult extraFile(String extraFile) {
+            return new DataFileAuxiliaryResult(null, Collections.singletonList(extraFile));
+        }
+    }
+
+    private static class DataFileIndexAuxiliaryWriter implements DataFileAuxiliaryWriter {
+
+        private final DataFileIndexWriter writer;
+        private final FileIO fileIO;
+        private final Path indexPath;
+
+        private DataFileIndexAuxiliaryWriter(
+                DataFileIndexWriter writer, FileIO fileIO, Path indexPath) {
+            this.writer = writer;
+            this.fileIO = fileIO;
+            this.indexPath = indexPath;
+        }
+
+        @Override
+        public void write(InternalRow row) {
+            writer.write(row);
+        }
+
+        @Override
+        public void close() throws IOException {
+            writer.close();
+        }
+
+        @Override
+        public void abort() {
+            fileIO.deleteQuietly(indexPath);
+        }
+
+        @Override
+        public Optional<FileWriterAbortExecutor> abortExecutor() {
+            return Optional.of(new FileWriterAbortExecutor(fileIO, indexPath));
+        }
+
+        @Override
+        public DataFileAuxiliaryResult result() {
+            DataFileIndexWriter.FileIndexResult result = writer.result();
+            if (result.independentIndexFile() != null) {
+                return DataFileAuxiliaryResult.extraFile(result.independentIndexFile());
+            }
+            if (result.embeddedIndexBytes() != null) {
+                return DataFileAuxiliaryResult.embeddedIndex(result.embeddedIndexBytes());
+            }
+            return DataFileAuxiliaryResult.EMPTY;
+        }
+    }
+
+    private static class RowSidecarAuxiliaryWriter
+            extends SingleFileWriter<InternalRow, DataFileAuxiliaryResult>
+            implements DataFileAuxiliaryWriter {
+
+        private RowSidecarAuxiliaryWriter(
+                FileIO fileIO,
+                FormatWriterFactory factory,
+                Path path,
+                String compression,
+                boolean asyncWrite) {
+            super(fileIO, factory, path, Function.identity(), compression, asyncWrite);
+        }
+
+        @Override
+        public DataFileAuxiliaryResult result() {
+            return DataFileAuxiliaryResult.extraFile(path.getName());
+        }
+    }
+
+    private static class CompoundFileWriterAbortExecutor extends FileWriterAbortExecutor {
+
+        private final List<FileWriterAbortExecutor> abortExecutors;
+
+        private CompoundFileWriterAbortExecutor(
+                FileIO fileIO, Path path, List<FileWriterAbortExecutor> abortExecutors) {
+            super(fileIO, path);
+            this.abortExecutors = abortExecutors;
+        }
+
+        @Override
+        public void abort() {
+            for (FileWriterAbortExecutor abortExecutor : abortExecutors) {
+                abortExecutor.abort();
+            }
+        }
     }
 }

@@ -834,64 +834,6 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         testBatchRead("SELECT id, name FROM DESC_BLOB_T ORDER BY id", expected);
     }
 
-    @Test
-    public void testUpdateExternalStorageBlobColumnSucceeds() throws Exception {
-        // Create a temp path for descriptor blobs backed by external storage.
-        String externalStoragePath = getTempDirPath("external-storage-path");
-
-        // Create a table with a descriptor BLOB column backed by external storage.
-        sEnv.executeSql(
-                buildDdl(
-                        "COPY_UPD_T",
-                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        new HashMap<String, String>() {
-                            {
-                                put(ROW_TRACKING_ENABLED.key(), "true");
-                                put(DATA_EVOLUTION_ENABLED.key(), "true");
-                                put("blob-field", "picture");
-                                put("blob-descriptor-field", "picture");
-                                put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "picture");
-                                put(
-                                        CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                                        externalStoragePath);
-                            }
-                        }));
-
-        // Insert initial row with raw bytes; write path stores data in external storage and keeps
-        // descriptor bytes.
-        insertInto("COPY_UPD_T", "(1, 'name1', X'48656C6C6F')");
-
-        // Create source table with new raw bytes for the BLOB column
-        sEnv.executeSql(
-                buildDdl(
-                        "COPY_UPD_S",
-                        Arrays.asList("id INT", "picture BYTES"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        new HashMap<String, String>() {
-                            {
-                                put(ROW_TRACKING_ENABLED.key(), "true");
-                                put(DATA_EVOLUTION_ENABLED.key(), "true");
-                            }
-                        }));
-        insertInto("COPY_UPD_S", "(1, X'574F524C44')");
-
-        // Update this descriptor BLOB column backed by external storage via MERGE INTO.
-        builder(warehouse, database, "COPY_UPD_T")
-                .withMergeCondition("COPY_UPD_T.id=COPY_UPD_S.id")
-                .withMatchedUpdateSet("COPY_UPD_T.picture=COPY_UPD_S.picture")
-                .withSourceTable("COPY_UPD_S")
-                .withSinkParallelism(1)
-                .build()
-                .run();
-
-        // Verify: name stays the same, BLOB column should have new data
-        List<Row> expected = Arrays.asList(changelogRow("+I", 1, "name1"));
-        testBatchRead("SELECT id, name FROM COPY_UPD_T ORDER BY id", expected);
-    }
-
     private void prepareTargetTable() throws Exception {
         sEnv.executeSql(
                 buildDdl(

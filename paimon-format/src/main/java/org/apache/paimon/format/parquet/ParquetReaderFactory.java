@@ -22,12 +22,14 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.variant.PaimonShreddingUtils;
-import org.apache.paimon.data.variant.VariantMetadataUtils;
-import org.apache.paimon.data.variant.VariantPathSegment;
+import org.apache.paimon.data.shredding.ShreddingReadPlan;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
+import org.apache.paimon.format.shredding.ShreddingFormatReader;
+import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
+import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
@@ -58,19 +60,17 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.paimon.data.variant.VariantMetadataUtils.path;
+import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
-import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWritableColumnVector;
 
 /**
  * Parquet {@link FormatReaderFactory} that reads data from the file to {@link
@@ -79,9 +79,8 @@ import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWr
 public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(ParquetReaderFactory.class);
-
     private final Options conf;
-    private final DataField[] readFields;
+    private final RowType readType;
     private final int batchSize;
     private final boolean caseSensitive;
     @Nullable private final FilterCompat.Filter filter;
@@ -102,7 +101,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
         this.conf = conf;
-        this.readFields = readType.getFields().toArray(new DataField[0]);
+        this.readType = readType;
         this.batchSize = batchSize;
         this.caseSensitive = conf.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
         this.filter = filter;
@@ -128,7 +127,17 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
-        RequestedSchema requestedSchema = getOrCreateRequestedSchema(fileSchema);
+        ShreddingReadPlan readPlan =
+                ShreddingReadPlanFactories.createReadPlan(
+                        readType,
+                        Collections.emptyMap(),
+                        fileSchema,
+                        shreddingReadPlanFactories(readType));
+        DataField[] physicalReadFields = readFields(readPlan.physicalRowType());
+        RequestedSchema requestedSchema =
+                readPlan.isIdentity()
+                        ? getOrCreateRequestedSchema(fileSchema)
+                        : createRequestedSchema(fileSchema, physicalReadFields);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -144,16 +153,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 "Parquet read batch size should be positive: %s",
                 actualBatchSize);
         reader.setRequestedSchema(requestedSchema.messageType);
-        WritableColumnVector[] writableVectors = createWritableVectors(actualBatchSize);
+        WritableColumnVector[] writableVectors =
+                createWritableVectors(actualBatchSize, physicalReadFields);
 
-        return new VectorizedParquetRecordReader(
-                context.filePath(),
-                reader,
-                fileSchema,
-                requestedSchema.fields,
-                writableVectors,
-                actualBatchSize,
-                context.fileIO());
+        VectorizedParquetRecordReader parquetReader =
+                new VectorizedParquetRecordReader(
+                        context.filePath(),
+                        reader,
+                        fileSchema,
+                        requestedSchema.fields,
+                        writableVectors,
+                        actualBatchSize,
+                        context.fileIO());
+        return readPlan.isIdentity()
+                ? parquetReader
+                : new ShreddingFormatReader(parquetReader, readPlan);
     }
 
     private RequestedSchema getOrCreateRequestedSchema(MessageType fileSchema) {
@@ -166,15 +180,28 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return requestedSchemaCache.computeIfAbsent(fileSchema, this::createRequestedSchema);
     }
 
+    private List<ShreddingReadPlanFactory> shreddingReadPlanFactories(RowType readType) {
+        return Collections.<ShreddingReadPlanFactory>singletonList(
+                new VariantShreddingReadPlanFactory(readType, caseSensitive));
+    }
+
     private RequestedSchema createRequestedSchema(MessageType fileSchema) {
-        MessageType rs = clipParquetSchema(fileSchema);
+        return createRequestedSchema(fileSchema, readFields(readType));
+    }
+
+    private static DataField[] readFields(RowType readType) {
+        return readType.getFields().toArray(new DataField[0]);
+    }
+
+    private RequestedSchema createRequestedSchema(MessageType fileSchema, DataField[] readFields) {
+        MessageType rs = clipParquetSchema(fileSchema, readFields);
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(rs);
         List<ParquetField> f = buildFieldsList(readFields, columnIO, rs);
         return new RequestedSchema(rs, f);
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */
-    private MessageType clipParquetSchema(GroupType parquetSchema) {
+    private MessageType clipParquetSchema(GroupType parquetSchema, DataField[] readFields) {
         Type[] types = new Type[readFields.length];
         for (int i = 0; i < readFields.length; ++i) {
             String fieldName = readFields[i].name();
@@ -221,12 +248,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     /** Clips `parquetType` by `readType`. */
     private Type clipParquetType(DataType readType, Type parquetType) {
+        Type variantType = VariantShreddingReadPlanFactory.clipParquetType(readType, parquetType);
+        if (variantType != null) {
+            return variantType;
+        }
+
         switch (readType.getTypeRoot()) {
             case ROW:
                 RowType rowType = (RowType) readType;
-                if (VariantMetadataUtils.isVariantRowType(rowType)) {
-                    return clipVariantType(rowType, parquetType.asGroupType());
-                }
                 GroupType rowGroup = (GroupType) parquetType;
                 List<Type> rowGroupFields = new ArrayList<>();
                 for (DataField field : rowType.getFields()) {
@@ -296,58 +325,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private Type clipVariantType(RowType variantRowType, GroupType parquetType) {
-        // If there is no typed_value field, return the original parquetType.
-        if (!parquetType.containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)) {
-            return parquetType;
-        }
-
-        boolean canClip = true;
-        Set<String> fieldsToRead = new HashSet<>();
-        for (DataField field : variantRowType.getFields()) {
-            String path = path(field.description());
-            VariantPathSegment[] pathSegments = VariantPathSegment.parse(path);
-            if (pathSegments.length < 1) {
-                canClip = false;
-                break;
-            }
-
-            // todo: support nested column pruning
-            VariantPathSegment pathSegment = pathSegments[0];
-            if (pathSegment instanceof VariantPathSegment.ObjectExtraction) {
-                fieldsToRead.add(((VariantPathSegment.ObjectExtraction) pathSegment).getKey());
-            } else {
-                canClip = false;
-                break;
-            }
-        }
-
-        if (!canClip) {
-            return parquetType;
-        }
-
-        List<Type> typedFieldsToRead = new ArrayList<>();
-        GroupType typedValue =
-                parquetType.getType(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME).asGroupType();
-        for (Type field : typedValue.getFields()) {
-            if (fieldsToRead.contains(field.getName())) {
-                typedFieldsToRead.add(field);
-                fieldsToRead.remove(field.getName());
-            }
-        }
-
-        List<Type> rowGroupFields = new ArrayList<>();
-        rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.METADATA_FIELD_NAME));
-        // If there are fields to read not in the `typed_value`, add the `value` field.
-        if (!fieldsToRead.isEmpty()) {
-            rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
-        }
-        if (!typedFieldsToRead.isEmpty()) {
-            rowGroupFields.add(typedValue.withNewFields(typedFieldsToRead));
-        }
-        return parquetType.withNewFields(rowGroupFields);
-    }
-
     /**
      * Compute the batch size to use for the given file. Subclasses can override this to implement
      * dynamic per-file batch sizing based on footer metadata. The default implementation returns
@@ -357,12 +334,29 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return batchSize;
     }
 
-    private WritableColumnVector[] createWritableVectors(int batchSize) {
+    private WritableColumnVector[] createWritableVectors(int batchSize, DataField[] readFields) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
-            columns[i] = createWritableColumnVector(batchSize, readFields[i].type());
+            columns[i] = createParquetWritableColumnVector(batchSize, readFields[i].type());
         }
         return columns;
+    }
+
+    public static Map<String, Map<String, String>> readFieldMetadata(ParquetFileReader reader) {
+        String encodedSchema =
+                reader.getFooter()
+                        .getFileMetaData()
+                        .getKeyValueMetaData()
+                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY);
+        byte[] schemaMetadata =
+                encodedSchema == null
+                        ? null
+                        : FormatMetadataUtils.decodeMetadata(
+                                        Collections.singletonMap(
+                                                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                                encodedSchema))
+                                .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY);
+        return FormatMetadataUtils.readFieldMetadata(schemaMetadata);
     }
 
     private static class RequestedSchema {

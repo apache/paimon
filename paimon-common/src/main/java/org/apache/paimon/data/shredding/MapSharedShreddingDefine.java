@@ -24,6 +24,8 @@ public class MapSharedShreddingDefine {
     public static final String VERSION = "paimon.map.shared-shredding.version";
     public static final int CURRENT_VERSION = 1;
     public static final String FIELD_DICT = "paimon.map.shared-shredding.field-dict";
+    public static final String FIELD_DICT_COMPRESSION =
+            "paimon.map.shared-shredding.field-dict-compression";
     public static final String FIELD_DICT_ORIGINAL_SIZE =
             "paimon.map.shared-shredding.field-dict-original-size";
     public static final String FIELD_COLUMNS = "paimon.map.shared-shredding.field-columns";

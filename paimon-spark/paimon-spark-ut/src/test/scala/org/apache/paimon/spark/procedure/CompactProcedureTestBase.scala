@@ -30,6 +30,7 @@ import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.scalatest.time.Span
 
 import java.util
@@ -537,7 +538,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
     assert(intercept[IllegalArgumentException] {
       spark.sql("CALL sys.compact(table => 'T', partitions => 'id = 1')")
-    }.getMessage.contains("Only partition predicate is supported"))
+    }.getMessage.contains("Partition keys [id] are invalid"))
 
     assert(intercept[IllegalArgumentException] {
       spark.sql("CALL sys.compact(table => 'T', where => 'id > 1 AND pt = \"p1\"')")
@@ -1532,5 +1533,43 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
   def lastSnapshotId(table: FileStoreTable): Long = {
     table.snapshotManager().latestSnapshotId()
+  }
+
+  test("Paimon Procedure: compact partitions accept unquoted string values") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', '2024-01-01', 0), (2, 'b', '2024-01-01', 0)")
+      spark.sql(s"INSERT INTO T VALUES (3, 'c', '2024-01-02', 0), (4, 'd', '2024-01-02', 0)")
+
+      val before = lastSnapshotId(table)
+      checkAnswer(
+        spark.sql(
+          "CALL sys.compact(table => 'T', partitions => 'dt=2024-01-01,hh=0', options => 'compaction.min.file-num=2')"),
+        Row(true) :: Nil)
+
+      Assertions.assertThat(lastSnapshotId(loadTable("T"))).isGreaterThan(before)
+    }
+  }
+
+  test("Paimon Procedure: compact with invalid partition key") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      val e = intercept[IllegalArgumentException] {
+        spark.sql("CALL sys.compact(table => 'T', partitions => 'pt=2024-01-01')")
+      }
+      Assertions.assertThat(e.getMessage.contains("Partition keys [pt] are invalid"))
+    }
   }
 }

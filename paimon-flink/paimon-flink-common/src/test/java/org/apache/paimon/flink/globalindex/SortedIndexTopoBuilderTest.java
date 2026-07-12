@@ -34,6 +34,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -44,7 +45,7 @@ public class SortedIndexTopoBuilderTest {
     public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
         SortedGlobalIndexBuilder indexBuilder = mock(SortedGlobalIndexBuilder.class);
         when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
-        when(indexBuilder.scan()).thenReturn(Optional.empty());
+        when(indexBuilder.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
         assertThat(
@@ -56,6 +57,7 @@ public class SortedIndexTopoBuilderTest {
                                 null,
                                 new Options()))
                 .isFalse();
+        verify(indexBuilder).incrementalScan();
         verifyNoInteractions(env);
     }
 

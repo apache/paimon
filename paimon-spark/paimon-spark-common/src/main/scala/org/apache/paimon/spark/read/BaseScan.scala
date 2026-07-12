@@ -54,6 +54,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedHybridSearch: Option[HybridSearch] = None
   def pushedFullTextSearch: Option[FullTextSearch] = None
   def pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty
+  def pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty
 
   // Runtime push down
   val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty
@@ -80,7 +81,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
   }
 
-  /** Pruned read RowType, with variant fields rewritten if variant pushdown was accepted. */
+  /**
+   * Pruned read RowType, with variant fields rewritten if variant pushdown was accepted, with
+   * accepted nested field pushdowns rewritten.
+   */
   private[paimon] val (readTableRowType, metadataFields) = {
     requiredSchema.fields.foreach(f => checkMetadataColumn(f.name))
     val (_requiredTableFields, _metadataFields) =
@@ -90,7 +94,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     val withVariants =
       if (pushedVariantExtractions.isEmpty) pruned
       else VariantPushDownUtils.rewriteRowType(pruned, pushedVariantExtractions)
-    (withVariants, _metadataFields)
+    val withMapSelectedKeys =
+      if (pushedMapSelectedKeys.isEmpty) withVariants
+      else MapSelectedKeysPushDownUtils.rewriteRowType(withVariants, pushedMapSelectedKeys)
+    (withMapSelectedKeys, _metadataFields)
   }
 
   private def checkMetadataColumn(fieldName: String): Unit = {
@@ -198,6 +205,13 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
           .describeRewrittenRowType(readTableRowType)
           .map(s => s", PushedVariants: [$s]")
           .getOrElse("")
+    val pushedMapSelectedKeysStr =
+      if (pushedMapSelectedKeys.isEmpty) ""
+      else
+        MapSelectedKeysPushDownUtils
+          .describeRewrittenRowType(readTableRowType)
+          .map(s => s", PushedMapSelectedKeys: [$s]")
+          .getOrElse("")
     s"${getClass.getSimpleName}: [${table.name}]" +
       pushedPartitionFiltersStr +
       pushedRuntimePartitionFiltersStr +
@@ -207,6 +221,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("") +
       pushedHybridSearch.map(hs => s", HybridSearch: [$hs]").getOrElse("") +
       pushedFullTextSearch.map(fts => s", FullTextSearch: [$fts]").getOrElse("") +
-      pushedVariantsStr
+      pushedVariantsStr +
+      pushedMapSelectedKeysStr
   }
 }

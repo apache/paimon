@@ -167,6 +167,25 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
         lateralVectorSearchesWithSubqueryFilter.head.searchFilters.nonEmpty,
         optimizedPlanWithSubqueryFilter.toString)
 
+      val optimizedPlanWithoutQueryVector = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      val lateralVectorSearchesWithoutQueryVector =
+        optimizedPlanWithoutQueryVector.collect { case lvs: LateralVectorSearch => lvs }
+      assert(
+        lateralVectorSearchesWithoutQueryVector.size == 1,
+        "Query vector column not in outer SELECT should not break lateral vector search: " +
+          optimizedPlanWithoutQueryVector.toString
+      )
+
       val constantVectorPlan = spark
         .sql("""
                |SELECT gid

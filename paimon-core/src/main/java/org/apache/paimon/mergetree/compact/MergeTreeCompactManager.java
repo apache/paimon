@@ -69,6 +69,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final boolean needLookup;
     private final boolean forceRewriteAllFiles;
     private final boolean forceKeepDelete;
+    private final String bucketInfo;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -86,7 +87,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire,
             boolean forceRewriteAllFiles,
-            boolean forceKeepDelete) {
+            boolean forceKeepDelete,
+            String bucketInfo) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -101,6 +103,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.needLookup = needLookup;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
         this.forceKeepDelete = forceKeepDelete;
+        this.bucketInfo = bucketInfo;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -216,7 +219,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
         CompactTask task;
         if (unit.fileRewrite()) {
-            task = new FileRewriteCompactTask(rewriter, unit, dropDelete, metricsReporter);
+            task =
+                    new FileRewriteCompactTask(
+                            rewriter, unit, dropDelete, metricsReporter, bucketInfo);
         } else {
             task =
                     new MergeTreeCompactTask(
@@ -229,7 +234,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             metricsReporter,
                             compactDfSupplier,
                             recordLevelExpire,
-                            forceRewriteAllFiles);
+                            forceRewriteAllFiles,
+                            bucketInfo);
         }
 
         if (LOG.isDebugEnabled()) {

@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactTask.TaskType.BLOB;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.DataEvolutionSplitRead.splitFieldBunches;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -102,9 +103,10 @@ public class MultipleBlobTableTest extends TableTestBase {
         assertThat(beforeBlobFileCount).isEqualTo(40);
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
@@ -116,9 +118,10 @@ public class MultipleBlobTableTest extends TableTestBase {
         long afterBlobFileCount =
                 after.stream().filter(file -> isBlobFile(file.fileName())).count();
         assertThat(afterBlobFileCount).isLessThan(beforeBlobFileCount);
-        coordinator = new DataEvolutionCompactCoordinator(table, true, false);
-        assertThat(coordinator.plan().stream().anyMatch(DataEvolutionCompactTask::isBlobTask))
-                .isFalse();
+        coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
+        assertThat(coordinator.plan().stream().anyMatch(task -> task.type() == BLOB)).isFalse();
 
         AtomicInteger integer = new AtomicInteger(0);
         readDefault(
@@ -145,9 +148,10 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isFalse();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isFalse();
 
         List<DataFileMeta> after = currentDataFiles(getTableDefault());
         assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count())
@@ -372,7 +376,8 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -502,7 +507,8 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         // Run compaction
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         if (!tasks.isEmpty()) {
             List<CommitMessage> compactMessages = new ArrayList<>();

@@ -60,6 +60,12 @@ class DataFileMeta:
             return None
         return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
 
+    def non_null_row_id_range(self) -> Range:
+        """Row-id range, failing fast if first_row_id is null (mirrors Java nonNullRowIdRange)."""
+        if self.first_row_id is None:
+            raise ValueError(f"First row id of '{self.file_name}' should not be null.")
+        return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
+
     def get_creation_time(self) -> Optional[Timestamp]:
         return self.creation_time
 

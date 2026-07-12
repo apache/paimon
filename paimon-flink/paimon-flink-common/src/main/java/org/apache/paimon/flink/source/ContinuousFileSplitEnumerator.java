@@ -25,6 +25,7 @@ import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.IncrementalSplit;
@@ -328,6 +329,8 @@ public class ContinuousFileSplitEnumerator
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
         if (split.split() instanceof DataSplit) {
             return assignSuggestedTask((DataSplit) split.split());
+        } else if (split.split() instanceof ChainSplit) {
+            return assignSuggestedTask((ChainSplit) split.split());
         } else {
             return assignSuggestedTask((IncrementalSplit) split.split());
         }
@@ -359,6 +362,35 @@ public class ContinuousFileSplitEnumerator
         int bucketId = split.bucket();
         if (shuffleBucketWithPartition) {
             return ChannelComputer.select(split.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
+    }
+
+    protected int assignSuggestedTask(ChainSplit split) {
+        int parallelism = context.currentParallelism();
+        // Extract bucket id from the bucket path stored in fileBucketPathMapping.
+        // The bucket path ends with "bucket-{id}".
+        int bucketId = 0;
+        if (!split.fileBucketPathMapping().isEmpty()) {
+            String bucketPath = split.fileBucketPathMapping().values().iterator().next();
+            int lastSlash = bucketPath.lastIndexOf('/');
+            if (lastSlash >= 0) {
+                String bucketDir = bucketPath.substring(lastSlash + 1);
+                if (bucketDir.startsWith("bucket-")) {
+                    try {
+                        bucketId = Integer.parseInt(bucketDir.substring("bucket-".length()));
+                    } catch (NumberFormatException e) {
+                        LOG.warn(
+                                "Failed to parse bucket id from path '{}', falling back to 0.",
+                                bucketPath,
+                                e);
+                    }
+                }
+            }
+        }
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.logicalPartition(), bucketId, parallelism);
         } else {
             return ChannelComputer.select(bucketId, parallelism);
         }
