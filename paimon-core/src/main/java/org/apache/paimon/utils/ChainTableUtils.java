@@ -34,6 +34,8 @@ import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -47,6 +49,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -462,15 +465,21 @@ public class ChainTableUtils {
         for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
             Map<String, String> fileBranchMapping = new HashMap<>();
             Map<String, String> fileBucketPathMapping = new HashMap<>();
+            Map<String, DeletionFile> deletionFileMapping = new HashMap<>();
             List<DataFileMeta> bucketFiles = new ArrayList<>();
-            for (DataSplit ds : entry.getValue()) {
-                for (DataFileMeta file : ds.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ds.bucketPath());
+            for (DataSplit dataSplit : entry.getValue()) {
+                Optional<List<DeletionFile>> deletionFilesOpt = dataSplit.deletionFiles();
+                for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+                    DataFileMeta file = dataSplit.dataFiles().get(i);
+                    DeletionFile deletionFile =
+                            deletionFilesOpt.isPresent() ? deletionFilesOpt.get().get(i) : null;
+                    fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
                     String branch =
                             snapshotFileNames.contains(file.fileName())
                                     ? snapshotBranch
                                     : deltaBranch;
                     fileBranchMapping.put(file.fileName(), branch);
+                    deletionFileMapping.put(file.fileName(), deletionFile);
                     bucketFiles.add(file);
                 }
             }
@@ -490,7 +499,8 @@ public class ChainTableUtils {
                                 logicalPartition,
                                 groupFiles,
                                 subMapping(fileBranchMapping, groupFiles),
-                                subMapping(fileBucketPathMapping, groupFiles)));
+                                subMapping(fileBucketPathMapping, groupFiles),
+                                subMapping(deletionFileMapping, groupFiles)));
             }
         }
         return result;
