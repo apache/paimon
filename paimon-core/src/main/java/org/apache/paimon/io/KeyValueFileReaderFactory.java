@@ -62,8 +62,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
-    private final RowType keyType;
-    private final RowType valueType;
+    protected final RowType keyType;
+    protected final RowType valueType;
 
     private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
@@ -73,7 +73,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final boolean snapshotSequenceOrdering;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
-    private final DeletionVector.Factory dvFactory;
+    protected final DeletionVector.Factory dvFactory;
 
     protected KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -127,6 +127,26 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return createRecordReader(file, true, null);
     }
 
+    protected FileRecordReader<KeyValue> createRecordReader(
+            DataFileMeta file,
+            FileRecordReader<InternalRow> fileRecordReader,
+            boolean overrideSequenceWithSnapshotId)
+            throws IOException {
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            fileRecordReader =
+                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
+        }
+
+        return new KeyValueDataFileRecordReader(
+                fileRecordReader,
+                keyType,
+                valueType,
+                file.level(),
+                overrideSequenceWithSnapshotId,
+                file.minSequenceNumber());
+    }
+
     private FileRecordReader<KeyValue> createRecordReader(
             DataFileMeta file, boolean reuseFormat, @Nullable Integer orcPoolSize)
             throws IOException {
@@ -166,12 +186,6 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         -1,
                         Collections.emptyMap());
 
-        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
-        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            fileRecordReader =
-                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
-        }
-
         // In snapshot-ordering mode, APPEND files carry the commit snapshot id in
         // minSequenceNumber (stamped at commit time); override per-record sequence with it so
         // later snapshots win during merge. COMPACT files already carry the snapshot id in their
@@ -185,13 +199,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                             + "Legacy files without fileSource cannot be ordered by commit snapshot id.");
             overrideSequenceWithSnapshotId = file.fileSource().get() == FileSource.APPEND;
         }
-        return new KeyValueDataFileRecordReader(
-                fileRecordReader,
-                keyType,
-                valueType,
-                file.level(),
-                overrideSequenceWithSnapshotId,
-                file.minSequenceNumber());
+
+        return createRecordReader(file, fileRecordReader, overrideSequenceWithSnapshotId);
     }
 
     public static Builder builder(

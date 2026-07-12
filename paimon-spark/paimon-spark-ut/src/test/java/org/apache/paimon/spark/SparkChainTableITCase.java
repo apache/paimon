@@ -2421,4 +2421,103 @@ public class SparkChainTableITCase {
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
         spark.close();
     }
+
+    @Test
+    public void testChainTableWithDeletionVectors(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS `chain_dv_t1` (\n"
+                        + "  `t1` BIGINT COMMENT 't1',\n"
+                        + "  `t2` BIGINT COMMENT 't2',\n"
+                        + "  `t3` STRING COMMENT 't3'\n"
+                        + ") PARTITIONED BY (`region` STRING COMMENT 'region', `date` STRING COMMENT 'date')\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'chain-table.enabled' = 'true',\n"
+                        + "  'deletion-vectors.enabled' = 'true',\n"
+                        + "  'primary-key' = 'region,date,t1',\n"
+                        + "  'sequence.field' = 't2',\n"
+                        + "  'bucket-key' = 't1',\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'partition.timestamp-pattern' = '$date',\n"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd',\n"
+                        + "  'chain-table.chain-partition-keys' = 'date',\n"
+                        + "  'compaction.min.file-num' = '100',\n"
+                        + "  'num-sorted-run.compaction-trigger' = '20'\n"
+                        + ")");
+
+        setupChainTableBranches(spark, "chain_dv_t1");
+
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'CN', date = '20260222') VALUES (1, 1, '1'), (6, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'CN', date = '20260223') VALUES (1, 2, '2'), (2, 2, '2'), (3, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'US', date = '20260223') VALUES (11, 1, '1')");
+
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_delta` PARTITION (region = 'CN', date = '20260224') VALUES (1, 3, '3'), (4, 1, '1'), (5, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_delta` PARTITION (region = 'US', date = '20260224') VALUES (12, 1, '1')");
+        // Delete rows from both branches to produce deletion vectors
+        spark.sql("DELETE FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE t1 = 3");
+        spark.sql("DELETE FROM `my_db1`.`chain_dv_t1$branch_delta` WHERE t1 = 4");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE date = '20260223'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,2,2,CN,20260223]", "[2,2,2,CN,20260223]", "[11,1,1,US,20260223]");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_delta` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]", "[5,1,1,CN,20260224]", "[12,1,1,US,20260224]");
+
+        assertThat(
+                        spark.sql("SELECT * FROM `my_db1`.`chain_dv_t1` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]",
+                        "[2,2,2,CN,20260224]",
+                        "[5,1,1,CN,20260224]",
+                        "[11,1,1,US,20260224]",
+                        "[12,1,1,US,20260224]");
+
+        spark.sql(
+                "CALL sys.compact_chain_table(table => 'my_db1.chain_dv_t1', partition => 'date=\"20260224\"')");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]",
+                        "[2,2,2,CN,20260224]",
+                        "[5,1,1,CN,20260224]",
+                        "[11,1,1,US,20260224]",
+                        "[12,1,1,US,20260224]");
+
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_dv_t1`;");
+        spark.close();
+    }
 }

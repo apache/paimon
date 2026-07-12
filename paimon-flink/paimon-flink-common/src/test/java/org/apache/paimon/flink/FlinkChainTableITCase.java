@@ -48,6 +48,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -695,6 +696,136 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                                 "SELECT * FROM `chain_test_group$branch_delta` WHERE region = 'CN' AND dt = '20250811'"))
                 .containsExactlyInAnyOrder(
                         "+I[2, 2, 1-1, CN, 20250811]", "+I[4, 1, 1, CN, 20250811]");
+    }
+
+    @Test
+    public void testChainTableWithDeletionVectors() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE chain_dv_t1 ("
+                        + "  t1 BIGINT,"
+                        + "  t2 BIGINT,"
+                        + "  t3 STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,t1',"
+                        + "  'bucket-key' = 't1',"
+                        + "  'bucket' = '1',"
+                        + "  'sequence.field' = 't2',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'deletion-vectors.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                        + "  'compaction.min.file-num' = '100',"
+                        + "  'num-sorted-run.compaction-trigger' = '20'"
+                        + ")");
+
+        setupChainTableBranches("chain_dv_t1");
+
+        sql(
+                "INSERT INTO `chain_dv_t1$branch_snapshot` PARTITION (dt = '20260222')"
+                        + " VALUES (1, 1, '1'), (6, 1, '1')");
+        sql(
+                "INSERT INTO `chain_dv_t1$branch_snapshot` PARTITION (dt = '20260223')"
+                        + " VALUES (1, 2, '2'), (2, 2, '2'), (3, 1, '1')");
+
+        sql(
+                "INSERT INTO `chain_dv_t1$branch_delta` PARTITION (dt = '20260224')"
+                        + " VALUES (4, 1, '1'), (5, 1, '1')");
+
+        // Delete rows from both branches to produce deletion vectors
+        sql("DELETE FROM `chain_dv_t1$branch_snapshot` WHERE t1 = 3");
+        sql("DELETE FROM `chain_dv_t1$branch_delta` WHERE t1 = 4");
+        sql("UPDATE `chain_dv_t1$branch_delta` SET t2=5,t3='5' WHERE t1 = 5");
+        assertThat(collectResult("SELECT * FROM chain_dv_t1 WHERE dt = '20260224'"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 2, 2, 20260224]", "+I[2, 2, 2, 20260224]", "+I[5, 5, 5, 20260224]");
+
+        sql("CALL sys.compact_chain_table('default.chain_dv_t1', 'dt=20260224')");
+
+        assertThat(
+                        collectResult(
+                                "SELECT * FROM `chain_dv_t1$branch_snapshot` WHERE dt = '20260224'"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 2, 2, 20260224]", "+I[2, 2, 2, 20260224]", "+I[5, 5, 5, 20260224]");
+        assertThat(
+                        collectResult(
+                                "SELECT * FROM `chain_dv_t1$branch_snapshot` WHERE dt = '20260223'"))
+                .containsExactlyInAnyOrder("+I[1, 2, 2, 20260223]", "+I[2, 2, 2, 20260223]");
+
+        assertThat(collectResult("SELECT * FROM `chain_dv_t1$branch_delta` WHERE dt = '20260224'"))
+                .containsExactlyInAnyOrder("+I[5, 5, 5, 20260224]");
+    }
+
+    @Test
+    @Timeout(120)
+    public void testStreamingReadWithDeletionVectors() throws Exception {
+        String tableName = "chain_dv_stream";
+        sql(
+                "CREATE TABLE "
+                        + tableName
+                        + " ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  region STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (region, dt) WITH ("
+                        + "  'primary-key' = 'region,dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '1',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'changelog-producer' = 'input',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'deletion-vectors.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                        + "  'chain-table.chain-partition-keys' = 'dt',"
+                        + "  'continuous.discovery-interval' = '1ms'"
+                        + ")");
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches(tableName);
+
+        // Write snapshot data and delete one row to produce a deletion vector in snapshot branch.
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot` PARTITION (region = 'CN', dt = '20260223')"
+                        + " VALUES (1, 1, '1'), (2, 1, '2'), (3, 1, '3')");
+        sql("DELETE FROM `" + tableName + "$branch_snapshot` WHERE region = 'CN' AND k = 3");
+
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM " + tableName).collect();
+
+        List<String> startingRows = collectRows(it, 2);
+        assertThat(startingRows)
+                .as("Starting phase should apply the snapshot deletion vector")
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1, 1, CN, 20260223]", "+I[2, 1, 2, CN, 20260223]");
+
+        // Write delta with cross-partition delete, update and insert.
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 1L, 2L, "1", "CN", "20260224"),
+                Row.ofKind(RowKind.UPDATE_BEFORE, 2L, 2L, "2", "CN", "20260224"),
+                Row.ofKind(RowKind.UPDATE_AFTER, 2L, 3L, "2-1", "CN", "20260224"),
+                Row.ofKind(RowKind.INSERT, 4L, 1L, "4", "CN", "20260224"));
+
+        // Incremental phase: explicit changelog should stream through.
+        List<String> deltaRows = collectRows(it, 4);
+        assertThat(deltaRows)
+                .as("Incremental delta changelog should stream through with deletion vectors")
+                .containsExactlyInAnyOrder(
+                        "-D[1, 2, 1, CN, 20260224]",
+                        "-U[2, 2, 2, CN, 20260224]",
+                        "+U[2, 3, 2-1, CN, 20260224]",
+                        "+I[4, 1, 4, CN, 20260224]");
+
+        it.close();
     }
 
     /** Write Row data (with RowKind) to a specific branch using DataStream API. */

@@ -31,6 +31,7 @@ import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.regex.Matcher;
@@ -408,9 +410,17 @@ public class ChainTableUtils {
         for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
             Map<String, String> fileBranchMapping = new HashMap<>();
             Map<String, String> fileBucketPathMapping = new HashMap<>();
-            for (DataSplit ds : entry.getValue()) {
-                for (DataFileMeta file : ds.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ds.bucketPath());
+            List<DataFileMeta> dataFiles = new ArrayList<>();
+            List<DeletionFile> deletionFiles = new ArrayList<>();
+            for (DataSplit dataSplit : entry.getValue()) {
+                Optional<List<DeletionFile>> deletionFilesOpt = dataSplit.deletionFiles();
+                for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+                    DataFileMeta file = dataSplit.dataFiles().get(i);
+                    DeletionFile deletionFile =
+                            deletionFilesOpt.isPresent() ? deletionFilesOpt.get().get(i) : null;
+                    dataFiles.add(file);
+                    deletionFiles.add(deletionFile);
+                    fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
                     String branch =
                             snapshotFileNames.contains(file.fileName())
                                     ? snapshotBranch
@@ -421,11 +431,10 @@ public class ChainTableUtils {
             result.add(
                     new ChainSplit(
                             logicalPartition,
-                            entry.getValue().stream()
-                                    .flatMap(ds -> ds.dataFiles().stream())
-                                    .collect(Collectors.toList()),
+                            dataFiles,
                             fileBranchMapping,
-                            fileBucketPathMapping));
+                            fileBucketPathMapping,
+                            deletionFiles));
         }
         return result;
     }

@@ -24,7 +24,6 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -495,18 +494,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
-                HashMap<String, String> fileBucketPathMapping = new HashMap<>();
-                HashMap<String, String> fileBranchMapping = new HashMap<>();
-                for (DataFileMeta file : dataSplit.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
-                    fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
-                }
-                splits.add(
-                        new ChainSplit(
-                                dataSplit.partition(),
-                                dataSplit.dataFiles(),
-                                fileBranchMapping,
-                                fileBucketPathMapping));
+                splits.add(ChainSplit.from(dataSplit, options.scanFallbackSnapshotBranch()));
             }
 
             snapshotPartitions.addAll(
