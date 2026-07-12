@@ -20,12 +20,58 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.read.{SparkPrimaryKeyVectorRead, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.table.source.DataSplit
 
 import scala.collection.JavaConverters._
 
 /** End-to-end tests for primary-key vector search through Spark SQL. */
 class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
+
+  test("distributed primary-key vector search selects Spark reader") {
+    withTable("T") {
+      createVectorTable()
+
+      val builder = new SparkVectorSearchBuilderImpl(loadTable("T"))
+      builder
+        .withVectorColumn("embedding")
+        .withVector(Array(0.0f, 0.0f))
+        .withLimit(1)
+
+      assert(builder.newVectorRead().isInstanceOf[SparkPrimaryKeyVectorRead])
+    }
+  }
+
+  test("distributed primary-key vector search evaluates buckets in Spark") {
+    withTable("T") {
+      createVectorTable(
+        bucket = 2,
+        extraOptions = Seq("global-index.thread-num" -> "1"))
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f)),
+                  |  (2, array(2.0f, 0.0f)),
+                  |  (3, array(3.0f, 0.0f)),
+                  |  (4, array(4.0f, 0.0f))
+                  |""".stripMargin)
+
+      val builder = new SparkVectorSearchBuilderImpl(loadTable("T"))
+      builder
+        .withVectorColumn("embedding")
+        .withVector(Array(0.0f, 0.0f))
+        .withLimit(2)
+
+      val jobGroup = s"primary-key-vector-${System.nanoTime()}"
+      spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+      try {
+        builder.newVectorRead().read(builder.newVectorScan().scan())
+      } finally {
+        spark.sparkContext.clearJobGroup()
+      }
+
+      assert(spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).nonEmpty)
+    }
+  }
 
   test("primary-key vector search uses bucket-local indexes") {
     withTable("T") {
@@ -63,7 +109,9 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
 
   test("primary-key vector search merges top k across buckets") {
     withTable("T") {
-      createVectorTable(bucket = 2)
+      createVectorTable(
+        bucket = 4,
+        extraOptions = Seq("global-index.thread-num" -> "2"))
       spark.sql("""
                   |INSERT INTO T VALUES
                   |  (1, array(1.0f, 0.0f)),
@@ -73,7 +121,15 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
                   |  (5, array(5.0f, 0.0f)),
                   |  (6, array(6.0f, 0.0f)),
                   |  (7, array(7.0f, 0.0f)),
-                  |  (8, array(8.0f, 0.0f))
+                  |  (8, array(8.0f, 0.0f)),
+                  |  (9, array(9.0f, 0.0f)),
+                  |  (10, array(10.0f, 0.0f)),
+                  |  (11, array(11.0f, 0.0f)),
+                  |  (12, array(12.0f, 0.0f)),
+                  |  (13, array(13.0f, 0.0f)),
+                  |  (14, array(14.0f, 0.0f)),
+                  |  (15, array(15.0f, 0.0f)),
+                  |  (16, array(16.0f, 0.0f))
                   |""".stripMargin)
 
       val buckets = loadTable("T")
@@ -84,7 +140,7 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
         .asScala
         .map(_.asInstanceOf[DataSplit].bucket())
         .toSet
-      assert(buckets == Set(0, 1))
+      assert(buckets == Set(0, 1, 2, 3))
 
       withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
         val ids = spark

@@ -152,6 +152,9 @@ FROM vector_search(
 
 The query vector dimension must match the indexed column dimension. For partitioned tables, Spark
 applies a partition predicate before running ANN and merging the global Top-K.
+When `spark.paimon.vector-search.distribute.enabled` is `true`, Spark distributes sufficiently
+large groups of bucket-local ANN searches across executors and merges their task-local Top-K
+results on the driver. Small plans stay local to avoid Spark job startup overhead.
 
 ### Flink SQL
 

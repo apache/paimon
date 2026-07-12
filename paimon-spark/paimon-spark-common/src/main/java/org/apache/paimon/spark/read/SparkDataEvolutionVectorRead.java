@@ -54,11 +54,11 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
  * Spark-aware {@link DataEvolutionVectorRead} that distributes grouped vector index evaluation
  * across the Spark cluster instead of evaluating them with the local thread pool.
  */
-public class SparkVectorReadImpl extends DataEvolutionVectorRead {
+public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
     private static final long serialVersionUID = 1L;
 
-    public SparkVectorReadImpl(
+    public SparkDataEvolutionVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,

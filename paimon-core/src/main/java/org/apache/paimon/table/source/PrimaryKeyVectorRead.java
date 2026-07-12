@@ -40,6 +40,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.VectorType;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -56,7 +57,9 @@ import static org.apache.paimon.globalindex.VectorSearchMetric.normalize;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Executes bucket-local primary-key vector search and merges physical candidates globally. */
-public class PrimaryKeyVectorRead implements VectorRead {
+public class PrimaryKeyVectorRead implements VectorRead, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final Comparator<Candidate> BEST_FIRST =
             (left, right) -> {
@@ -76,16 +79,13 @@ public class PrimaryKeyVectorRead implements VectorRead {
                 return fileName != 0 ? fileName : Long.compare(left.rowPosition, right.rowPosition);
             };
 
-    private final FileIO fileIO;
-    private final IndexFileHandler indexFileHandler;
-    private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
-    private final DataField vectorField;
+    protected final FileStoreTable table;
+    protected final DataField vectorField;
     private final String indexType;
     private final Options indexOptions;
-    private final ExecutorService executor;
     private final Map<String, String> searchOptions;
     private final float[] query;
-    private final int limit;
+    protected final int limit;
     private final String metric;
 
     public PrimaryKeyVectorRead(
@@ -102,15 +102,10 @@ public class PrimaryKeyVectorRead implements VectorRead {
                 query.length,
                 ((VectorType) vectorField.type()).getLength());
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
-        this.fileIO = table.fileIO();
-        this.indexFileHandler = table.store().newIndexFileHandler();
-        this.readerFactoryBuilder = keyValueStore(table).newReaderFactoryBuilder();
+        this.table = table;
         this.vectorField = vectorField;
         this.indexType = table.coreOptions().primaryKeyVectorIndexType(vectorField.name());
         this.indexOptions = table.coreOptions().primaryKeyVectorIndexOptions(vectorField.name());
-        this.executor =
-                GlobalIndexReadThreadPool.getExecutorService(
-                        table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM));
         this.searchOptions = Collections.unmodifiableMap(new HashMap<>(searchOptions));
         this.query = query.clone();
         this.limit = limit;
@@ -131,26 +126,52 @@ public class PrimaryKeyVectorRead implements VectorRead {
 
     @Override
     public GlobalIndexResult read(VectorScan.Plan plan) {
+        PrimaryKeyVectorScan.Plan primaryKeyPlan = primaryKeyPlan(plan);
+        return createResult(primaryKeyPlan, searchBuckets(bucketSplits(primaryKeyPlan)));
+    }
+
+    protected PrimaryKeyVectorScan.Plan primaryKeyPlan(VectorScan.Plan plan) {
         checkArgument(
                 plan instanceof PrimaryKeyVectorScan.Plan,
                 "Primary-key vector read requires a PrimaryKeyVectorScan plan.");
         PrimaryKeyVectorScan.Plan primaryKeyPlan = (PrimaryKeyVectorScan.Plan) plan;
+        for (VectorSearchSplit searchSplit : primaryKeyPlan.splits()) {
+            BucketVectorSearchSplit split = (BucketVectorSearchSplit) searchSplit;
+            checkArgument(
+                    split.dataSplit().snapshotId() == primaryKeyPlan.snapshotId(),
+                    "Vector bucket split snapshot does not match its plan.");
+        }
+        return primaryKeyPlan;
+    }
+
+    protected List<BucketVectorSearchSplit> bucketSplits(PrimaryKeyVectorScan.Plan plan) {
+        List<BucketVectorSearchSplit> splits = new ArrayList<>(plan.splits().size());
+        for (VectorSearchSplit split : plan.splits()) {
+            splits.add((BucketVectorSearchSplit) split);
+        }
+        return splits;
+    }
+
+    protected List<Candidate> searchBuckets(List<BucketVectorSearchSplit> splits) {
         try {
+            SearchContext context = new SearchContext(table);
             List<Candidate> candidates = new ArrayList<>();
-            for (VectorSearchSplit searchSplit : primaryKeyPlan.splits()) {
-                BucketVectorSearchSplit split = (BucketVectorSearchSplit) searchSplit;
-                checkArgument(
-                        split.dataSplit().snapshotId() == primaryKeyPlan.snapshotId(),
-                        "Vector bucket split snapshot does not match its plan.");
-                candidates.addAll(search(split));
+            for (BucketVectorSearchSplit split : splits) {
+                candidates.addAll(search(split, context));
             }
-            return new PrimaryKeyVectorResult(primaryKeyPlan, topK(candidates, limit), metric);
+            return topK(candidates, limit);
         } catch (IOException e) {
             throw new RuntimeException("Failed to search primary-key vector index.", e);
         }
     }
 
-    private List<Candidate> search(BucketVectorSearchSplit split) throws IOException {
+    protected GlobalIndexResult createResult(
+            PrimaryKeyVectorScan.Plan plan, List<Candidate> candidates) {
+        return new PrimaryKeyVectorResult(plan, topK(candidates, limit), metric);
+    }
+
+    private List<Candidate> search(BucketVectorSearchSplit split, SearchContext context)
+            throws IOException {
         DataSplit dataSplit = split.dataSplit();
         List<DataFileMeta> activeFiles =
                 dataSplit.dataFiles().stream()
@@ -159,23 +180,23 @@ public class PrimaryKeyVectorRead implements VectorRead {
         PkVectorBucketIndexState state =
                 PkVectorBucketIndexState.fromActivePayloads(
                         vectorField.id(), indexType, split.payloadFiles());
-        Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit);
+        Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit, context.fileIO);
         PkVectorDataFileReader.Factory readerFactory =
                 new PkVectorDataFileReader.Factory(
-                        readerFactoryBuilder,
+                        context.readerFactoryBuilder,
                         dataSplit.partition(),
                         dataSplit.bucket(),
                         vectorField,
                         ((VectorType) vectorField.type()).getLength());
         PkVectorAnnSegmentSearcher annSearcher =
                 new PkVectorAnnSegmentSearcher(
-                        fileIO,
-                        indexFileHandler.pkVectorAnnSegment(
+                        context.fileIO,
+                        context.indexFileHandler.pkVectorAnnSegment(
                                 dataSplit.partition(), dataSplit.bucket()),
                         vectorField,
                         indexOptions,
                         metric,
-                        executor);
+                        context.executor);
         PrimaryKeyVectorBucketSearch bucketSearch =
                 new PrimaryKeyVectorBucketSearch(readerFactory, annSearcher, searchOptions, metric);
         List<Candidate> candidates = new ArrayList<>();
@@ -192,7 +213,8 @@ public class PrimaryKeyVectorRead implements VectorRead {
         return candidates;
     }
 
-    private Map<String, DeletionVector> deletionVectors(DataSplit split) throws IOException {
+    private Map<String, DeletionVector> deletionVectors(DataSplit split, FileIO fileIO)
+            throws IOException {
         DeletionVector.Factory factory =
                 DeletionVector.factory(
                         fileIO, split.dataFiles(), split.deletionFiles().orElse(null));
@@ -206,7 +228,7 @@ public class PrimaryKeyVectorRead implements VectorRead {
         return result;
     }
 
-    static List<Candidate> topK(List<Candidate> candidates, int limit) {
+    protected static List<Candidate> topK(List<Candidate> candidates, int limit) {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         PriorityQueue<Candidate> nearest = new PriorityQueue<>(limit, BEST_FIRST.reversed());
         for (Candidate candidate : candidates) {
@@ -234,7 +256,9 @@ public class PrimaryKeyVectorRead implements VectorRead {
     }
 
     /** Snapshot-scoped physical row candidate. */
-    public static class Candidate {
+    public static class Candidate implements Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         private final BinaryRow partition;
         private final int bucket;
@@ -273,6 +297,23 @@ public class PrimaryKeyVectorRead implements VectorRead {
 
         public float distance() {
             return distance;
+        }
+    }
+
+    private static class SearchContext {
+
+        private final FileIO fileIO;
+        private final IndexFileHandler indexFileHandler;
+        private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
+        private final ExecutorService executor;
+
+        private SearchContext(FileStoreTable table) {
+            this.fileIO = table.fileIO();
+            this.indexFileHandler = table.store().newIndexFileHandler();
+            this.readerFactoryBuilder = keyValueStore(table).newReaderFactoryBuilder();
+            this.executor =
+                    GlobalIndexReadThreadPool.getExecutorService(
+                            table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM));
         }
     }
 }
