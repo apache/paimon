@@ -117,9 +117,8 @@ The maintenance behavior depends on the merge engine:
 
 - `deduplicate`: an update indexes the latest row and the deletion vector hides the replaced
   physical row. A delete removes the old row from search results through the deletion vector.
-- `partial-update`: Paimon first completes the row through lookup and compaction, then builds the
-  vector index from the complete compact-output row. The index therefore does not require
-  `lookup-wait = true` and never indexes an incomplete input row.
+- `partial-update`: Paimon builds the vector index from the lookup-completed Level-1
+  compact-output row.
 
 When compaction replaces source data files, Paimon removes ANN segments that reference those files
 and creates replacement segments for the new compact-output files. Small outputs are indexed as
