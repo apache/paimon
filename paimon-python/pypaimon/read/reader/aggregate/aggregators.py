@@ -40,6 +40,7 @@ from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.projected_row import ProjectedRow
 
@@ -57,6 +58,7 @@ NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
+NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -570,6 +572,102 @@ class FieldNestedUpdateAgg(FieldAggregator):
             )
         )
 
+
+class FieldNestedPartialUpdateAgg(FieldAggregator):
+    """
+    Used to partial update a field which representing a nested table.
+    The data type of nested table field is ARRAY<ROW>
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        field_type = _check_array_row(field_name, field_type)
+        super().__init__(name, field_type)
+
+        nested_type: RowType = field_type.element
+        self.nested_fields = len(nested_type.fields)
+
+        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
+        if not self.nested_key:
+            raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
+
+        self.key_projection = ProjectedRow.from_index_mapping(
+            [nested_type.get_field_index(name) for name in self.nested_key]
+        )
+
+        self.nested_key_null_strategy = (
+            options.field_nested_update_agg_nested_key_null_strategy(field_name)
+        )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None:
+            return accumulator
+
+        rows: List[InternalRow] = []
+        if accumulator is not None:
+            self._add_non_null_rows(accumulator, rows)
+        self._add_non_null_rows(input_field, rows)
+
+        row_map: Dict[Tuple[Any, ...], InternalRow] = {}
+        for row in rows:
+            key = self.key_projection.replace_row(row).to_tuple()
+            if not self._apply_nested_key_null_strategy(key):
+                continue
+
+            to_update = row_map.get(key)
+            if to_update is None:
+                to_update = GenericRow([None] * self.nested_fields, row.fields)
+            self._partial_update(to_update, row)
+            row_map[key] = to_update
+
+        return list(row_map.values())
+
+    def _partial_update(self, to_update: GenericRow, input_row: InternalRow) -> None:
+        for i in range(self.nested_fields):
+            value = input_row.get_field(i)
+            if value is not None:
+                to_update.values[i] = value
+
+    def _add_non_null_rows(
+            self,
+            array: List[InternalRow],
+            rows: List[InternalRow],
+    ) -> None:
+        """Append non-null rows from array."""
+
+        for row in array:
+            if row is None:
+                continue
+            rows.append(row)
+
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
+        """Apply nested-key-null-strategy."""
+
+        if all(v is not None for v in key):
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
+            return False
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
+            raise ValueError(
+                "Nested key contains null values. "
+                "Primary key fields must not be null."
+            )
+
+        raise ValueError(
+            "Unsupported nested-key-null-strategy '{}'".format(
+                self.nested_key_null_strategy
+            )
+        )
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -645,4 +743,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_NESTED_UPDATE, _build_field_options(FieldNestedUpdateAgg, NAME_NESTED_UPDATE)
+)
+register_aggregator(
+    NAME_NESTED_PARTIAL_UPDATE, _build_field_options(FieldNestedPartialUpdateAgg, NAME_NESTED_PARTIAL_UPDATE)
 )
