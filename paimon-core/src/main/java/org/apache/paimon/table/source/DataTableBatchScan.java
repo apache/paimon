@@ -67,7 +67,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
-    @Nullable private PrimaryKeyVectorResult primaryKeyVectorResult;
+    @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
 
     public DataTableBatchScan(
             TableSchema schema,
@@ -112,16 +112,16 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     protected TableScan.Plan planWithoutAuth() {
-        if (primaryKeyVectorResult != null) {
+        if (globalIndexSplitResult != null) {
             if (!hasNext) {
                 throw new EndOfScanException();
             }
             hasNext = false;
-            if (primaryKeyVectorResult.snapshotId() > 0) {
-                maybeCreateReadProtectionTag(primaryKeyVectorResult.snapshotId());
+            if (globalIndexSplitResult.snapshotId() > 0) {
+                maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
             }
-            List<Split> splits = new ArrayList<>(primaryKeyVectorResult.splits());
-            return new PlanImpl(null, primaryKeyVectorResult.snapshotId(), splits);
+            List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
+            return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
         }
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
@@ -150,8 +150,8 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public DataTableBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
-        if (globalIndexResult instanceof PrimaryKeyVectorResult) {
-            this.primaryKeyVectorResult = (PrimaryKeyVectorResult) globalIndexResult;
+        if (globalIndexResult instanceof GlobalIndexSplitResult) {
+            this.globalIndexSplitResult = (GlobalIndexSplitResult) globalIndexResult;
         }
         return this;
     }

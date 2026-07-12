@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Range;
@@ -38,7 +37,7 @@ import static org.apache.paimon.globalindex.VectorSearchMetric.normalize;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Snapshot-scoped vector result addressed by physical primary-key table row positions. */
-public class PrimaryKeyVectorResult implements GlobalIndexResult {
+public class PrimaryKeyVectorResult implements GlobalIndexSplitResult {
 
     private final PrimaryKeyVectorScan.Plan plan;
     private final List<PrimaryKeyVectorRead.Candidate> candidates;
@@ -53,10 +52,12 @@ public class PrimaryKeyVectorResult implements GlobalIndexResult {
         this.metric = normalize(metric);
     }
 
+    @Override
     public long snapshotId() {
         return plan.snapshotId();
     }
 
+    @Override
     public List<IndexedSplit> splits() {
         Map<FileKey, BucketVectorSearchSplit> sourceSplits = sourceSplits();
         Map<FileKey, TreeMap<Integer, Float>> selectedByFile = new LinkedHashMap<>();

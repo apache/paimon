@@ -82,7 +82,7 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .withVector(new float[] {0, 0})
                         .withLimit(2)
                         .executeLocal();
-        assertThat(result).isInstanceOf(PrimaryKeyVectorResult.class);
+        assertThat(result).isInstanceOf(GlobalIndexSplitResult.class);
 
         ReadBuilder readBuilder = table.newReadBuilder();
         TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
