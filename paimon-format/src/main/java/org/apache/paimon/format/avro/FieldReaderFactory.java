@@ -433,14 +433,14 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         private final FieldReader elementReader;
         private final List<Object> reusedList = new ArrayList<>();
 
-        private ArrayReader(Schema elementSchema, FieldReader elementReader) {
+        private ArrayReader(@Nullable Schema elementSchema, FieldReader elementReader) {
             this.elementSchema = elementSchema;
             this.elementReader = elementReader;
         }
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            if (decoder instanceof BinaryDecoder) {
+            if (elementSchema != null && decoder instanceof BinaryDecoder) {
                 AvroBytesArray avroBytesArray =
                         AvroBytesArray.create(
                                 (BinaryDecoder) decoder, elementReader, elementSchema);
