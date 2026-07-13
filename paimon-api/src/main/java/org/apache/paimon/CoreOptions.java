@@ -2741,6 +2741,20 @@ public class CoreOptions implements Serializable {
                                     + "metric are also field-scoped. The first release supports exactly "
                                     + "one column.");
 
+    public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
+            key("pk-btree.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated columns indexed by primary-key BTree indexes.");
+
+    public static final ConfigOption<String> PK_BITMAP_INDEX_COLUMNS =
+            key("pk-bitmap.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated columns indexed by primary-key Bitmap indexes.");
+
     public static final ConfigOption<Integer> PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT =
             key("pk-vector.index.compaction.level-fanout")
                     .intType()
@@ -4296,11 +4310,73 @@ public class CoreOptions implements Serializable {
     }
 
     public List<String> primaryKeyVectorIndexColumns() {
-        String columns = options.get(PK_VECTOR_INDEX_COLUMNS);
+        return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
+    }
+
+    public List<String> primaryKeyBTreeIndexColumns() {
+        return primaryKeyIndexColumns(PK_BTREE_INDEX_COLUMNS);
+    }
+
+    public List<String> primaryKeyBitmapIndexColumns() {
+        return primaryKeyIndexColumns(PK_BITMAP_INDEX_COLUMNS);
+    }
+
+    private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
+        String columns = options.get(option);
         if (columns == null) {
             return Collections.emptyList();
         }
         return Arrays.stream(columns.split(",", -1)).map(String::trim).collect(Collectors.toList());
+    }
+
+    public Options primaryKeyBTreeIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-btree", "btree-index.");
+    }
+
+    public Options primaryKeyBitmapIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-bitmap", "bitmap-index.");
+    }
+
+    private Options primaryKeySortedIndexOptions(
+            String column, String optionFamily, String algorithmPrefix) {
+        Options resolved = new Options(toConfiguration().toMap());
+        String optionKey = "fields." + column + "." + optionFamily + ".index.options";
+        String serialized = options.get(optionKey);
+        if (serialized == null || serialized.trim().isEmpty()) {
+            return resolved;
+        }
+
+        LinkedHashMap<String, String> parsed;
+        try {
+            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    optionKey + " must be a JSON object of option key-value pairs.", e);
+        }
+
+        for (Map.Entry<String, String> entry : parsed.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            checkArgument(
+                    key != null && !key.trim().isEmpty(),
+                    "%s contains an empty option key.",
+                    optionKey);
+            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
+            String qualifiedKey =
+                    key.startsWith(algorithmPrefix)
+                                    || key.startsWith("sorted-index.")
+                                    || key.startsWith("fields.")
+                            ? key
+                            : algorithmPrefix + key;
+            String previous = resolved.get(qualifiedKey);
+            checkArgument(
+                    previous == null || previous.equals(value),
+                    "%s defines conflicting values for %s.",
+                    optionKey,
+                    qualifiedKey);
+            resolved.setString(qualifiedKey, value);
+        }
+        return resolved;
     }
 
     public String primaryKeyVectorIndexColumn() {
