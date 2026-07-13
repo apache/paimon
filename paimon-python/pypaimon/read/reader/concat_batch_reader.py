@@ -415,9 +415,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             row_id - self._deletion_vector_range.from_
         )
 
-    @staticmethod
     def _state_overlaps_batch(
-        state: _BlobFileState, batch_first: int, batch_last: int
+        self, state: _BlobFileState, batch_first: int, batch_last: int
     ) -> bool:
         selected_ranges = state.selected_ranges
         while (
@@ -428,10 +427,12 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 selected_ranges[state.selected_range_index].count()
             )
             state.selected_range_index += 1
-        return (
-            state.selected_range_index < len(selected_ranges)
-            and selected_ranges[state.selected_range_index].from_ <= batch_last
-        )
+        if state.selected_range_index >= len(selected_ranges):
+            # Batch row ids only move forward. Once the last selected range is
+            # behind this batch, the reader can never be used again.
+            self._close_state_reader(state)
+            return False
+        return selected_ranges[state.selected_range_index].from_ <= batch_last
 
     def _read_blob_values(
         self, state: _BlobFileState, batch_row_ids: List[int]
