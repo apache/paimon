@@ -28,6 +28,8 @@ import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
@@ -82,7 +84,7 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<PkVectorSearchResult> search(
             IndexFileMeta segment,
-            PkVectorSourceMeta sourceMeta,
+            PrimaryKeyIndexSourceMeta sourceMeta,
             float[] query,
             int limit,
             @Nullable DeletionVector deletionVector,
@@ -99,13 +101,13 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<PkVectorSearchResult> search(
             IndexFileMeta segment,
-            PkVectorSourceMeta sourceMeta,
+            PrimaryKeyIndexSourceMeta sourceMeta,
             float[] query,
             int limit,
             Map<String, DeletionVector> deletionVectors,
             Map<String, String> searchOptions) {
         Set<String> activeSourceFiles = new HashSet<>();
-        for (PkVectorSourceFile sourceFile : sourceMeta.sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceMeta.sourceFiles()) {
             activeSourceFiles.add(sourceFile.fileName());
         }
         return search(
@@ -120,7 +122,7 @@ public class PkVectorAnnSegmentSearcher {
 
     public List<PkVectorSearchResult> search(
             IndexFileMeta segment,
-            PkVectorSourceMeta sourceMeta,
+            PrimaryKeyIndexSourceMeta sourceMeta,
             float[] query,
             int limit,
             Map<String, DeletionVector> deletionVectors,
@@ -207,11 +209,11 @@ public class PkVectorAnnSegmentSearcher {
 
     @Nullable
     private static RoaringNavigableMap64 liveRowPositions(
-            List<PkVectorSourceFile> sourceFiles,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
             Set<String> activeSourceFiles,
             Map<String, DeletionVector> deletionVectors) {
         boolean allSourcesActive = true;
-        for (PkVectorSourceFile sourceFile : sourceFiles) {
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             if (!activeSourceFiles.contains(sourceFile.fileName())) {
                 allSourcesActive = false;
                 break;
@@ -223,7 +225,7 @@ public class PkVectorAnnSegmentSearcher {
         RoaringNavigableMap64 live = new RoaringNavigableMap64();
         RoaringNavigableMap64 deleted = new RoaringNavigableMap64();
         long fileOffset = 0;
-        for (PkVectorSourceFile sourceFile : sourceFiles) {
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             boolean active = activeSourceFiles.contains(sourceFile.fileName());
             if (active && sourceFile.rowCount() > 0) {
                 live.addRange(new Range(fileOffset, fileOffset + sourceFile.rowCount() - 1));
@@ -240,17 +242,18 @@ public class PkVectorAnnSegmentSearcher {
         return live;
     }
 
-    private static long totalRowCount(List<PkVectorSourceFile> sourceFiles) {
+    private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
         long total = 0;
-        for (PkVectorSourceFile sourceFile : sourceFiles) {
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             total = Math.addExact(total, sourceFile.rowCount());
         }
         return total;
     }
 
-    private static FilePosition filePosition(List<PkVectorSourceFile> sourceFiles, long ordinal) {
+    private static FilePosition filePosition(
+            List<PrimaryKeyIndexSourceFile> sourceFiles, long ordinal) {
         long fileOffset = 0;
-        for (PkVectorSourceFile sourceFile : sourceFiles) {
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             long nextOffset = fileOffset + sourceFile.rowCount();
             if (ordinal < nextOffset) {
                 return new FilePosition(sourceFile.fileName(), ordinal - fileOffset);

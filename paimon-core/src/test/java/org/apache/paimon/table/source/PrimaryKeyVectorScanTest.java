@@ -25,8 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.pkvector.PkVectorSourceFile;
-import org.apache.paimon.index.pkvector.PkVectorSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -189,8 +189,9 @@ class PrimaryKeyVectorScanTest {
 
     private static IndexFileMeta payloadFile(String indexType, int fieldId, String fileName) {
         byte[] sourceMeta =
-                new PkVectorSourceMeta(
-                                Collections.singletonList(new PkVectorSourceFile("data-1", 2)))
+                new PrimaryKeyIndexSourceMeta(
+                                Collections.singletonList(
+                                        new PrimaryKeyIndexSourceFile("data-1", 2)))
                         .serialize();
         return new IndexFileMeta(
                 indexType,

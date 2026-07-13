@@ -23,6 +23,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
@@ -70,9 +72,9 @@ class PkVectorAnnSegmentFileTest {
 
         assertThat(segment.indexType()).isEqualTo("test-vector-ann");
         assertThat(segment.rowCount()).isEqualTo(1);
-        PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(segment);
+        PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
         assertThat(sourceMeta.sourceFiles())
-                .extracting(PkVectorSourceFile::fileName)
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-1");
     }
 
@@ -95,7 +97,7 @@ class PkVectorAnnSegmentFileTest {
                         "test-vector-ann");
         assertThat(segment.globalIndexMeta().rowRangeStart()).isZero();
         assertThat(segment.globalIndexMeta().rowRangeEnd()).isEqualTo(3);
-        PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(segment);
+        PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
         BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
         data2Deletes.delete(0);
         Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
@@ -153,7 +155,7 @@ class PkVectorAnnSegmentFileTest {
                                     fileIO, annFile, vectorField(), indexOptions(), "l2", executor)
                             .search(
                                     segment,
-                                    PkVectorSourceMeta.fromIndexFile(segment),
+                                    PrimaryKeyIndexSourceMeta.fromIndexFile(segment),
                                     new float[] {0, 0},
                                     3,
                                     Collections.emptyMap(),

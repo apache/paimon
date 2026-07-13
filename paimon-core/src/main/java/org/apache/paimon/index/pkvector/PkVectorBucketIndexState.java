@@ -19,6 +19,8 @@
 package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -52,8 +54,8 @@ public final class PkVectorBucketIndexState {
                     payloadsByName.put(payload.fileName(), payload) == null,
                     "Active vector payload %s appears more than once in the index manifest.",
                     payload.fileName());
-            PkVectorSourceMeta sourceMeta = validatedSourceMeta(payload);
-            for (PkVectorSourceFile sourceFile : sourceMeta.sourceFiles()) {
+            PrimaryKeyIndexSourceMeta sourceMeta = validatedSourceMeta(payload);
+            for (PrimaryKeyIndexSourceFile sourceFile : sourceMeta.sourceFiles()) {
                 IndexFileMeta previous = annBySource.put(sourceFile.fileName(), payload);
                 checkArgument(
                         previous == null,
@@ -84,9 +86,9 @@ public final class PkVectorBucketIndexState {
         return sourceFileToAnnSegment;
     }
 
-    private PkVectorSourceMeta validatedSourceMeta(IndexFileMeta payload) {
+    private PrimaryKeyIndexSourceMeta validatedSourceMeta(IndexFileMeta payload) {
         validateIdentity(payload);
-        return PkVectorSourceMeta.fromIndexFile(payload);
+        return PrimaryKeyIndexSourceMeta.fromIndexFile(payload);
     }
 
     private void validateIdentity(IndexFileMeta payload) {

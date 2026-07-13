@@ -28,11 +28,11 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentSearcher;
 import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
 import org.apache.paimon.index.pkvector.PkVectorDataFileReader;
 import org.apache.paimon.index.pkvector.PkVectorSearchResult;
-import org.apache.paimon.index.pkvector.PkVectorSourcePolicy;
 import org.apache.paimon.index.pkvector.PrimaryKeyVectorBucketSearch;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -212,7 +212,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         DataSplit dataSplit = split.dataSplit();
         List<DataFileMeta> activeFiles =
                 dataSplit.dataFiles().stream()
-                        .filter(PkVectorSourcePolicy::shouldRead)
+                        .filter(PrimaryKeyIndexSourcePolicy::shouldRead)
                         .collect(Collectors.toList());
         PkVectorBucketIndexState state =
                 PkVectorBucketIndexState.fromActivePayloads(

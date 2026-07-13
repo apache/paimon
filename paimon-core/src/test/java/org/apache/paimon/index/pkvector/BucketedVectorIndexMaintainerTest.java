@@ -22,6 +22,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -189,8 +191,8 @@ class BucketedVectorIndexMaintainerTest {
 
             assertThat(commit.appendIncrement()).isPresent();
             IndexFileMeta segment = commit.appendIncrement().get().newIndexFiles().get(0);
-            assertThat(PkVectorSourceMeta.fromIndexFile(segment).sourceFiles())
-                    .extracting(PkVectorSourceFile::fileName)
+            assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles())
+                    .extracting(PrimaryKeyIndexSourceFile::fileName)
                     .containsExactly("data-2");
             assertThat(annFile.exists(segment)).isTrue();
         } finally {
@@ -253,8 +255,8 @@ class BucketedVectorIndexMaintainerTest {
         assertThat(increment.newIndexFiles()).hasSize(1);
         IndexFileMeta delta = increment.newIndexFiles().get(0);
         assertThat(delta.indexType()).isEqualTo("test-vector-ann");
-        assertThat(PkVectorSourceMeta.fromIndexFile(delta).sourceFiles())
-                .extracting(PkVectorSourceFile::fileName)
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(delta).sourceFiles())
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-3");
         assertThat(maintainer.segments()).containsExactly(initialAnn, delta);
     }
@@ -361,8 +363,10 @@ class BucketedVectorIndexMaintainerTest {
                 commit.appendIncrement().get();
         assertThat(increment.deletedIndexFiles()).containsExactlyInAnyOrder(ann1, ann2, ann3);
         assertThat(increment.newIndexFiles()).hasSize(1);
-        assertThat(PkVectorSourceMeta.fromIndexFile(increment.newIndexFiles().get(0)).sourceFiles())
-                .extracting(PkVectorSourceFile::fileName)
+        assertThat(
+                        PrimaryKeyIndexSourceMeta.fromIndexFile(increment.newIndexFiles().get(0))
+                                .sourceFiles())
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-1", "data-2", "data-3");
     }
 

@@ -16,19 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.pkvector;
+package org.apache.paimon.index.pk;
 
 import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Immutable source data-file identity captured when a vector segment is built. */
-public final class PkVectorSourceFile {
+/** Immutable identity of a data file covered by a source-backed primary-key index. */
+public final class PrimaryKeyIndexSourceFile {
 
     private final String fileName;
     private final long rowCount;
 
-    public PkVectorSourceFile(String fileName, long rowCount) {
+    public PrimaryKeyIndexSourceFile(String fileName, long rowCount) {
         this.fileName = Objects.requireNonNull(fileName);
         this.rowCount = rowCount;
         checkArgument(rowCount >= 0, "Source file row count must not be negative.");
@@ -50,7 +50,7 @@ public final class PkVectorSourceFile {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        PkVectorSourceFile that = (PkVectorSourceFile) o;
+        PrimaryKeyIndexSourceFile that = (PrimaryKeyIndexSourceFile) o;
         return rowCount == that.rowCount && Objects.equals(fileName, that.fileName);
     }
 

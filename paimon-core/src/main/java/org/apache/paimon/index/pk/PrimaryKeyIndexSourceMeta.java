@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.pkvector;
+package org.apache.paimon.index.pk;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -30,27 +30,39 @@ import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Ordered source data files for a primary-key vector index payload. */
-public final class PkVectorSourceMeta {
+/** Ordered source data files covered by a source-backed primary-key index payload. */
+public final class PrimaryKeyIndexSourceMeta {
 
     private static final int VERSION = 1;
 
-    private final List<PkVectorSourceFile> sourceFiles;
+    private final List<PrimaryKeyIndexSourceFile> sourceFiles;
 
-    public PkVectorSourceMeta(List<PkVectorSourceFile> sourceFiles) {
+    public PrimaryKeyIndexSourceMeta(List<PrimaryKeyIndexSourceFile> sourceFiles) {
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
-        checkArgument(!this.sourceFiles.isEmpty(), "A vector index must reference source files.");
+        checkArgument(!this.sourceFiles.isEmpty(), "An index must reference source files.");
     }
 
-    public List<PkVectorSourceFile> sourceFiles() {
+    public PrimaryKeyIndexSourceMeta(PrimaryKeyIndexSourceFile sourceFile) {
+        this(Collections.singletonList(sourceFile));
+    }
+
+    public List<PrimaryKeyIndexSourceFile> sourceFiles() {
         return sourceFiles;
     }
 
-    public static PkVectorSourceMeta fromIndexFile(IndexFileMeta indexFile) {
+    public PrimaryKeyIndexSourceFile sourceFile() {
+        checkArgument(
+                sourceFiles.size() == 1,
+                "Expected exactly one source file, but found %s.",
+                sourceFiles.size());
+        return sourceFiles.get(0);
+    }
+
+    public static PrimaryKeyIndexSourceMeta fromIndexFile(IndexFileMeta indexFile) {
         GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
         checkArgument(
                 globalIndexMeta != null && globalIndexMeta.sourceMeta() != null,
-                "Vector index file %s has no source metadata.",
+                "Index file %s has no source metadata.",
                 indexFile.fileName());
         return deserialize(globalIndexMeta.sourceMeta());
     }
@@ -60,32 +72,32 @@ public final class PkVectorSourceMeta {
             DataOutputSerializer output = new DataOutputSerializer(128);
             output.writeInt(VERSION);
             output.writeInt(sourceFiles.size());
-            for (PkVectorSourceFile sourceFile : sourceFiles) {
+            for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
                 output.writeUTF(sourceFile.fileName());
                 output.writeLong(sourceFile.rowCount());
             }
             return output.getCopyOfBuffer();
         } catch (IOException e) {
-            throw new RuntimeException("Failed to serialize vector source metadata.", e);
+            throw new RuntimeException("Failed to serialize index source metadata.", e);
         }
     }
 
-    public static PkVectorSourceMeta deserialize(byte[] bytes) {
+    public static PrimaryKeyIndexSourceMeta deserialize(byte[] bytes) {
         try {
             DataInputDeserializer input = new DataInputDeserializer(bytes);
             int version = input.readInt();
-            checkArgument(version == VERSION, "Unsupported vector source version: %s.", version);
+            checkArgument(version == VERSION, "Unsupported index source version: %s.", version);
             int sourceFileCount = input.readInt();
-            checkArgument(sourceFileCount > 0, "A vector index must reference source files.");
-            List<PkVectorSourceFile> sourceFiles = new ArrayList<>(sourceFileCount);
+            checkArgument(sourceFileCount > 0, "An index must reference source files.");
+            List<PrimaryKeyIndexSourceFile> sourceFiles = new ArrayList<>(sourceFileCount);
             for (int i = 0; i < sourceFileCount; i++) {
-                sourceFiles.add(new PkVectorSourceFile(input.readUTF(), input.readLong()));
+                sourceFiles.add(new PrimaryKeyIndexSourceFile(input.readUTF(), input.readLong()));
             }
             checkArgument(
-                    input.available() == 0, "Unexpected trailing bytes in vector source metadata.");
-            return new PkVectorSourceMeta(sourceFiles);
+                    input.available() == 0, "Unexpected trailing bytes in index source metadata.");
+            return new PrimaryKeyIndexSourceMeta(sourceFiles);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to deserialize vector source metadata.", e);
+            throw new IllegalArgumentException("Failed to deserialize index source metadata.", e);
         }
     }
 }

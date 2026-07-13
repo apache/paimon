@@ -20,6 +20,8 @@ package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
@@ -101,11 +103,11 @@ class PkVectorAnnLevelsTest {
     private static IndexFileMeta segment(String fileName, DataFileMeta... sources) {
         long rowCount = Arrays.stream(sources).mapToLong(DataFileMeta::rowCount).sum();
         byte[] sourceMeta =
-                new PkVectorSourceMeta(
+                new PrimaryKeyIndexSourceMeta(
                                 Arrays.stream(sources)
                                         .map(
                                                 source ->
-                                                        new PkVectorSourceFile(
+                                                        new PrimaryKeyIndexSourceFile(
                                                                 source.fileName(),
                                                                 source.rowCount()))
                                         .collect(java.util.stream.Collectors.toList()))
