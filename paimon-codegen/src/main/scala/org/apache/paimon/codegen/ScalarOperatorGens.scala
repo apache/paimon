@@ -21,7 +21,8 @@ package org.apache.paimon.codegen
 import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.data.serializer.InternalMapSerializer
 import org.apache.paimon.types._
-import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, isCompositeType}
+import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, getNestedTypes, isCompositeType}
+import org.apache.paimon.types.DataTypeRoot.{DOUBLE, FLOAT}
 import org.apache.paimon.utils.InternalRowUtils
 import org.apache.paimon.utils.TypeCheckUtils._
 import org.apache.paimon.utils.TypeUtils.isInteroperable
@@ -50,7 +51,13 @@ object ScalarOperatorGens {
           s" is not supported now")
     }
     val canEqual = isInteroperable(left.resultType, right.resultType)
-    if (isCharacterString(left.resultType) && isCharacterString(right.resultType)) {
+    if (left.resultType.getTypeRoot == FLOAT && right.resultType.getTypeRoot == FLOAT) {
+      generateOperatorIfNotNull(ctx, resultType, left, right)(
+        (leftTerm, rightTerm) => s"java.lang.Float.compare($leftTerm, $rightTerm) == 0")
+    } else if (left.resultType.getTypeRoot == DOUBLE && right.resultType.getTypeRoot == DOUBLE) {
+      generateOperatorIfNotNull(ctx, resultType, left, right)(
+        (leftTerm, rightTerm) => s"java.lang.Double.compare($leftTerm, $rightTerm) == 0")
+    } else if (isCharacterString(left.resultType) && isCharacterString(right.resultType)) {
       generateOperatorIfNotNull(ctx, resultType, left, right)(
         (leftTerm, rightTerm) => s"$leftTerm.equals($rightTerm)")
     }
@@ -232,10 +239,11 @@ object ScalarOperatorGens {
           new BooleanType(elementType.isNullable))
 
         // TODO: With BinaryVector available, we can use it here.
+        val supportsBinaryArrayEquals = !containsFloatingPoint(elementType)
         val stmt =
           s"""
              |boolean $resultTerm;
-             |if ($leftTerm instanceof $BINARY_ARRAY && $rightTerm instanceof $BINARY_ARRAY) {
+             |if ($leftTerm instanceof $BINARY_ARRAY && $rightTerm instanceof $BINARY_ARRAY && $supportsBinaryArrayEquals) {
              |  $resultTerm = $leftTerm.equals($rightTerm);
              |} else {
              |  if ($leftTerm.size() == $rightTerm.size()) {
@@ -290,12 +298,19 @@ object ScalarOperatorGens {
 
         val leftMapTerm = newName("leftMap")
         val leftKeyTerm = newName("leftKey")
+        val leftKeyNullTerm = newName("leftKeyIsNull")
+        val leftKeyExpr =
+          GeneratedExpression(leftKeyTerm, leftKeyNullTerm, "", keyType)
         val leftValueTerm = newName("leftValue")
         val leftValueNullTerm = newName("leftValueIsNull")
         val leftValueExpr =
           GeneratedExpression(leftValueTerm, leftValueNullTerm, "", valueType)
 
         val rightMapTerm = newName("rightMap")
+        val rightKeyTerm = newName("rightKey")
+        val rightKeyNullTerm = newName("rightKeyIsNull")
+        val rightKeyExpr =
+          GeneratedExpression(rightKeyTerm, rightKeyNullTerm, "", keyType)
         val rightValueTerm = newName("rightValue")
         val rightValueNullTerm = newName("rightValueIsNull")
         val rightValueExpr =
@@ -305,6 +320,8 @@ object ScalarOperatorGens {
         val entryCls = classOf[java.util.Map.Entry[AnyRef, AnyRef]].getCanonicalName
         val valueEqualsExpr =
           generateEquals(ctx, leftValueExpr, rightValueExpr, new BooleanType(valueType.isNullable))
+        val keyEqualsExpr =
+          generateEquals(ctx, leftKeyExpr, rightKeyExpr, new BooleanType(keyType.isNullable))
 
         val internalTypeCls = classOf[DataType].getCanonicalName
         val keyTypeTerm = ctx.addReusableObject(keyType, "keyType", internalTypeCls)
@@ -312,37 +329,115 @@ object ScalarOperatorGens {
         val mapDataUtil = className[InternalMapSerializer]
 
         val stmt =
-          s"""
-             |boolean $resultTerm;
-             |if ($leftTerm.size() == $rightTerm.size()) {
-             |  $resultTerm = true;
-             |  $mapCls $leftMapTerm = $mapDataUtil
-             |      .convertToJavaMap($leftTerm, $keyTypeTerm, $valueTypeTerm);
-             |  $mapCls $rightMapTerm = $mapDataUtil
-             |      .convertToJavaMap($rightTerm, $keyTypeTerm, $valueTypeTerm);
-             |
-             |  for ($entryCls $entryTerm : $leftMapTerm.entrySet()) {
-             |    $keyCls $leftKeyTerm = ($keyCls) $entryTerm.getKey();
-             |    if ($rightMapTerm.containsKey($leftKeyTerm)) {
-             |      $valueCls $leftValueTerm = ($valueCls) $entryTerm.getValue();
-             |      $valueCls $rightValueTerm = ($valueCls) $rightMapTerm.get($leftKeyTerm);
-             |      boolean $leftValueNullTerm = ($leftValueTerm == null);
-             |      boolean $rightValueNullTerm = ($rightValueTerm == null);
-             |
-             |      ${valueEqualsExpr.code}
-             |      if (!${valueEqualsExpr.resultTerm}) {
-             |        $resultTerm = false;
-             |        break;
-             |      }
-             |    } else {
-             |      $resultTerm = false;
-             |      break;
-             |    }
-             |  }
-             |} else {
-             |  $resultTerm = false;
-             |}
-             """.stripMargin
+          if (containsFloatingPoint(keyType)) {
+            val leftKeyArrayTerm = newName("leftKeyArray")
+            val rightKeyArrayTerm = newName("rightKeyArray")
+            val leftValueArrayTerm = newName("leftValueArray")
+            val rightValueArrayTerm = newName("rightValueArray")
+            val matchedTerm = newName("matched")
+            val leftIndexTerm = newName("leftIndex")
+            val rightIndexTerm = newName("rightIndex")
+            val foundTerm = newName("found")
+
+            s"""
+               |boolean $resultTerm;
+               |if ($leftTerm.size() == $rightTerm.size()) {
+               |  $resultTerm = true;
+               |  $ARRAY_DATA $leftKeyArrayTerm = $leftTerm.keyArray();
+               |  $ARRAY_DATA $rightKeyArrayTerm = $rightTerm.keyArray();
+               |  $ARRAY_DATA $leftValueArrayTerm = $leftTerm.valueArray();
+               |  $ARRAY_DATA $rightValueArrayTerm = $rightTerm.valueArray();
+               |  boolean[] $matchedTerm = new boolean[$rightTerm.size()];
+               |
+               |  for (int $leftIndexTerm = 0; $leftIndexTerm < $leftTerm.size(); $leftIndexTerm++) {
+               |    $keyCls $leftKeyTerm = null;
+               |    boolean $leftKeyNullTerm = $leftKeyArrayTerm.isNullAt($leftIndexTerm);
+               |    if (!$leftKeyNullTerm) {
+               |      $leftKeyTerm =
+               |        ${rowFieldReadAccess(leftIndexTerm, leftKeyArrayTerm, keyType)};
+               |    }
+               |    boolean $foundTerm = false;
+               |
+               |    for (int $rightIndexTerm = 0; $rightIndexTerm < $rightTerm.size(); $rightIndexTerm++) {
+               |      if ($matchedTerm[$rightIndexTerm]) {
+               |        continue;
+               |      }
+               |
+               |      $keyCls $rightKeyTerm = null;
+               |      boolean $rightKeyNullTerm = $rightKeyArrayTerm.isNullAt($rightIndexTerm);
+               |      if (!$rightKeyNullTerm) {
+               |        $rightKeyTerm =
+               |          ${rowFieldReadAccess(rightIndexTerm, rightKeyArrayTerm, keyType)};
+               |      }
+               |
+               |      ${keyEqualsExpr.code}
+               |      if (($leftKeyNullTerm && $rightKeyNullTerm) ||
+               |          (!$leftKeyNullTerm && !$rightKeyNullTerm && ${keyEqualsExpr.resultTerm})) {
+               |        $valueCls $leftValueTerm = null;
+               |        boolean $leftValueNullTerm = $leftValueArrayTerm.isNullAt($leftIndexTerm);
+               |        if (!$leftValueNullTerm) {
+               |          $leftValueTerm =
+               |            ${rowFieldReadAccess(leftIndexTerm, leftValueArrayTerm, valueType)};
+               |        }
+               |
+               |        $valueCls $rightValueTerm = null;
+               |        boolean $rightValueNullTerm = $rightValueArrayTerm.isNullAt($rightIndexTerm);
+               |        if (!$rightValueNullTerm) {
+               |          $rightValueTerm =
+               |            ${rowFieldReadAccess(rightIndexTerm, rightValueArrayTerm, valueType)};
+               |        }
+               |
+               |        ${valueEqualsExpr.code}
+               |        if (${valueEqualsExpr.resultTerm}) {
+               |          $matchedTerm[$rightIndexTerm] = true;
+               |          $foundTerm = true;
+               |        }
+               |        break;
+               |      }
+               |    }
+               |
+               |    if (!$foundTerm) {
+               |      $resultTerm = false;
+               |      break;
+               |    }
+               |  }
+               |} else {
+               |  $resultTerm = false;
+               |}
+               """.stripMargin
+          } else {
+            s"""
+               |boolean $resultTerm;
+               |if ($leftTerm.size() == $rightTerm.size()) {
+               |  $resultTerm = true;
+               |  $mapCls $leftMapTerm = $mapDataUtil
+               |      .convertToJavaMap($leftTerm, $keyTypeTerm, $valueTypeTerm);
+               |  $mapCls $rightMapTerm = $mapDataUtil
+               |      .convertToJavaMap($rightTerm, $keyTypeTerm, $valueTypeTerm);
+               |
+               |  for ($entryCls $entryTerm : $leftMapTerm.entrySet()) {
+               |    $keyCls $leftKeyTerm = ($keyCls) $entryTerm.getKey();
+               |    if ($rightMapTerm.containsKey($leftKeyTerm)) {
+               |      $valueCls $leftValueTerm = ($valueCls) $entryTerm.getValue();
+               |      $valueCls $rightValueTerm = ($valueCls) $rightMapTerm.get($leftKeyTerm);
+               |      boolean $leftValueNullTerm = ($leftValueTerm == null);
+               |      boolean $rightValueNullTerm = ($rightValueTerm == null);
+               |
+               |      ${valueEqualsExpr.code}
+               |      if (!${valueEqualsExpr.resultTerm}) {
+               |        $resultTerm = false;
+               |        break;
+               |      }
+               |    } else {
+               |      $resultTerm = false;
+               |      break;
+               |    }
+               |  }
+               |} else {
+               |  $resultTerm = false;
+               |}
+               """.stripMargin
+          }
         (stmt, resultTerm)
     }
 
@@ -359,6 +454,14 @@ object ScalarOperatorGens {
     generateCallIfArgsNotNull(ctx, returnType, Seq(left, right), resultNullable) {
       args => expr(args.head, args(1))
     }
+  }
+
+  private def containsFloatingPoint(t: DataType): Boolean = t.getTypeRoot match {
+    case FLOAT | DOUBLE => true
+    case DataTypeRoot.ARRAY | DataTypeRoot.MAP | DataTypeRoot.MULTISET | DataTypeRoot.ROW |
+        DataTypeRoot.VECTOR =>
+      getNestedTypes(t).asScala.exists(containsFloatingPoint)
+    case _ => false
   }
 
   // ----------------------------------------------------------------------------------------------
