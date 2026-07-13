@@ -481,6 +481,15 @@ public class SchemaManagerTest {
         SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
+        // 'type' is rejected even without snapshots (format tables hold data but create none)
+        assertThatThrownBy(
+                        () -> manager.commitChanges(SchemaChange.setOption("type", "format-table")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption("type")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
+
         // set immutable options and set primary keys
         manager.commitChanges(
                 SchemaChange.setOption("primary-key", "f0, f1"),
@@ -542,6 +551,18 @@ public class SchemaManagerTest {
                                         SchemaChange.setOption("merge-engine", "deduplicate")))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
+
+        // flipping the type in place would build a different table kind over the same data
+        assertThatThrownBy(
+                        () -> manager.commitChanges(SchemaChange.setOption("type", "format-table")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
+
+        // setting the default type explicitly is not a change
+        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption("type", "table")))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> table.copy(Collections.singletonMap("type", "table")))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -570,6 +591,59 @@ public class SchemaManagerTest {
         assertThat(
                         SchemaManager.isUnchangedNormalizedKey(
                                 "primary-key", null, null, copied.schema()))
+                .isFalse();
+    }
+
+    @Test
+    public void testIsUnchangedNormalizedKeyWithKeyLists() {
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        List<String> partitionKeys = Collections.singletonList("f0");
+        // an explicit type equal to the default is not a change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type",
+                                null,
+                                CoreOptions.TYPE.defaultValue().toString(),
+                                primaryKeys,
+                                partitionKeys))
+                .isTrue();
+        // default type matched case-insensitively
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", null, "TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        // a different type is a real change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", null, "format-table", primaryKeys, partitionKeys))
+                .isFalse();
+        // primary-key / partition restated with the same normalized value are no-ops
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", null, "f0, f1", primaryKeys, partitionKeys))
+                .isTrue();
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "partition", null, "f0", primaryKeys, partitionKeys))
+                .isTrue();
+        // an explicitly stored type restated with different case is still a no-op
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "table", "TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "format-table", "FORMAT-TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        // a genuinely different explicit type is a real change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "table", "format-table", primaryKeys, partitionKeys))
+                .isFalse();
+        // non-type keys with a non-null old value are treated as changes
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", "f0", "f0,f1", primaryKeys, partitionKeys))
                 .isFalse();
     }
 
