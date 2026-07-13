@@ -35,10 +35,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.Objects;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -208,13 +208,16 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         } else {
             List<GroupedSplit> groupedSplits = groupSplits(splits, weightFunc, groupFunc);
             List<List<GroupedSplit>> groupedAssignment =
-                    BinPacking.packForFixedBinNumber(groupedSplits, GroupedSplit::weight, numReaders);
+                    BinPacking.packForFixedBinNumber(
+                            groupedSplits, GroupedSplit::weight, numReaders);
             assignmentList =
                     groupedAssignment.stream()
                             .map(
                                     group ->
                                             group.stream()
-                                                    .flatMap(groupedSplit -> groupedSplit.splits().stream())
+                                                    .flatMap(
+                                                            groupedSplit ->
+                                                                    groupedSplit.splits().stream())
                                                     .collect(Collectors.toList()))
                             .collect(Collectors.toList());
         }
@@ -231,15 +234,16 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
         Map<Object, List<FileStoreSourceSplit>> grouped = new HashMap<>();
         for (FileStoreSourceSplit split : splits) {
-            grouped.computeIfAbsent(Objects.requireNonNull(groupFunc.apply(split)), ignored -> new ArrayList<>())
+            grouped.computeIfAbsent(
+                            Objects.requireNonNull(groupFunc.apply(split)),
+                            ignored -> new ArrayList<>())
                     .add(split);
         }
         return grouped.values().stream()
                 .map(
                         group ->
                                 new GroupedSplit(
-                                        group,
-                                        group.stream().mapToLong(weightFunc::apply).sum()))
+                                        group, group.stream().mapToLong(weightFunc::apply).sum()))
                 .collect(Collectors.toList());
     }
 

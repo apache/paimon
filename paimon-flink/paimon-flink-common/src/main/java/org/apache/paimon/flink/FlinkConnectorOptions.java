@@ -640,6 +640,34 @@ public class FlinkConnectorOptions {
         }
     }
 
+    /** Bucket distribution strategy for dedicated compaction jobs. */
+    public enum CompactionBucketDistributionStrategy implements DescribedEnum {
+        LINEAR(
+                "linear",
+                "Distribute compact buckets by the existing stable partition-plus-bucket channel mapping."),
+        SIZE_AWARE_BATCH(
+                "size-aware-batch",
+                "For bounded full compaction, assign compact bucket splits by total data file size and forward them to writers to reduce long-tail compaction tasks.");
+
+        private final String value;
+        private final String description;
+
+        CompactionBucketDistributionStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
     /**
      * Split assign mode for {@link org.apache.paimon.flink.source.StaticFileStoreSplitEnumerator}.
      */

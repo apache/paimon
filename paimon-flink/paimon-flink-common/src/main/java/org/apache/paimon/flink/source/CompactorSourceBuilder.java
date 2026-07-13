@@ -111,10 +111,12 @@ public class CompactorSourceBuilder {
                     null,
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                    bucketDistributionStrategy == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
+                    bucketDistributionStrategy
+                                    == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
                             ? split -> bucketFileSize((DataSplit) split.split())
                             : null,
-                    bucketDistributionStrategy == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
+                    bucketDistributionStrategy
+                                    == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
                             ? split -> bucketKey((DataSplit) split.split())
                             : null,
                     options.get(CoreOptions.BLOB_AS_DESCRIPTOR));
@@ -173,7 +175,8 @@ public class CompactorSourceBuilder {
                             });
             dataStream = new DataStreamSource<>(filterStream);
         }
-        Integer parallelism = sourceParallelism(Options.fromMap(table.options()), bucketDistributionStrategy);
+        Integer parallelism =
+                sourceParallelism(Options.fromMap(table.options()), bucketDistributionStrategy);
         if (parallelism != null) {
             dataStream.setParallelism(parallelism);
         }
