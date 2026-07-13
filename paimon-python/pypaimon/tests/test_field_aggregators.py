@@ -1562,9 +1562,9 @@ class FieldNestedPartialUpdateAggTest(unittest.TestCase):
     IDENTIFIER = "nested_partial_update"
 
     DEFAULT_FIELDS = [
-        DataField(0, "k", AtomicType("INT")),
-        DataField(1, "v1", AtomicType("INT")),
-        DataField(2, "v2", AtomicType("STRING")),
+        DataField(10, "k", AtomicType("INT")),
+        DataField(20, "v1", AtomicType("INT")),
+        DataField(30, "v2", AtomicType("STRING")),
     ]
 
     def _make_data_type(self, fields: List[DataField] = None):
