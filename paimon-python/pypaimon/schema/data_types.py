@@ -379,9 +379,9 @@ class RowType(DataType):
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
 
     def get_field_index(self, field_name: str) -> int:
-        for field in self.fields:
+        for index, field in enumerate(self.fields):
             if field.name == field_name:
-                return field.id
+                return index
         raise ValueError("Field {} not found in {}".format(field_name, self))
 
 
