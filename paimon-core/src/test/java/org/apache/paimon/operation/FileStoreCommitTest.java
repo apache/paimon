@@ -34,6 +34,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -958,6 +959,58 @@ public class FileStoreCommitTest {
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+    }
+
+    @Test
+    public void testAbortIndexFiles() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.INDEX_FILE_IN_DATA_FILE_DIR.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+        IndexPathFactory indexPathFactory = store.pathFactory().indexFileFactory(partition, 0);
+
+        Path dataNewPath = indexPathFactory.newPath();
+        IndexFileMeta dataNew = createIndexFile(store, dataNewPath, false);
+        Path compactNewPath = new Path(tempDir.resolve("external-new-index").toUri());
+        IndexFileMeta compactNew = createIndexFile(store, compactNewPath, true);
+        Path dataDeletedPath = indexPathFactory.newPath();
+        IndexFileMeta dataDeleted = createIndexFile(store, dataDeletedPath, false);
+        Path compactDeletedPath = indexPathFactory.newPath();
+        IndexFileMeta compactDeleted = createIndexFile(store, compactDeletedPath, false);
+
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(dataNew),
+                                Collections.singletonList(dataDeleted)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(compactNew),
+                                Collections.singletonList(compactDeleted)));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(Collections.singletonList(commitMessage));
+        }
+
+        assertThat(store.fileIO().exists(dataNewPath)).isFalse();
+        assertThat(store.fileIO().exists(compactNewPath)).isFalse();
+        assertThat(store.fileIO().exists(dataDeletedPath)).isTrue();
+        assertThat(store.fileIO().exists(compactDeletedPath)).isTrue();
+    }
+
+    private static IndexFileMeta createIndexFile(
+            TestAppendFileStore store, Path path, boolean external) throws Exception {
+        store.fileIO().newOutputStream(path, false).close();
+        return new IndexFileMeta(
+                HASH_INDEX, path.getName(), 0, 0, null, external ? path.toString() : null, null);
     }
 
     @Test
