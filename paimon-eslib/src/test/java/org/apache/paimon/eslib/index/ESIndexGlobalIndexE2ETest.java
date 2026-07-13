@@ -1827,8 +1827,8 @@ class ESIndexGlobalIndexE2ETest {
         int dim = 32;
         int numVectors = 1000;
 
-        // Match the standalone DiskBBQ test: random normalized vectors + DOT_PRODUCT.
-        // (Sparse vectors with EUCLIDEAN produce NaN quantization scores — separate bug.)
+        // Match the standalone DiskBBQ test: random normalized vectors + DOT_PRODUCT. Sparse
+        // one-hot vectors with EUCLIDEAN are covered separately in eslib-core.
         java.util.Random rng = new java.util.Random(42);
         float[][] vectors = new float[numVectors][];
         for (int i = 0; i < numVectors; i++) {
