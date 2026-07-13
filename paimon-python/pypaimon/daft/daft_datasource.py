@@ -39,6 +39,7 @@ from pypaimon.daft.daft_explain import (
     READER_MODE_PYPAIMON_FALLBACK,
 )
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type
 
 if TYPE_CHECKING:
@@ -594,7 +595,7 @@ class PaimonDataSource(DataSource):
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
                 has_deletion_vectors=split.has_deletion_vectors,
-                has_auth=self._split_has_auth(split),
+                has_auth=paimon_scan.has_auth,
             )
             if routing.use_native_reader:
                 native_split_count += 1
@@ -677,7 +678,6 @@ class PaimonDataSource(DataSource):
 
     @staticmethod
     def _split_has_auth(split) -> bool:
-        from pypaimon.read.query_auth_split import QueryAuthSplit
         return isinstance(split, QueryAuthSplit)
 
     def _partition_filter_skips_split(

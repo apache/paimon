@@ -16,6 +16,7 @@
 #  limitations under the License.
 ################################################################################
 
+import datetime
 import json
 import unittest
 
@@ -369,6 +370,34 @@ class TestConvertLiteral(unittest.TestCase):
     def test_decimal_literal(self):
         result = _convert_literal(123.45, pa.decimal128(10, 2))
         self.assertIsInstance(result, pa.Scalar)
+
+    def test_timestamp_ltz_literal_uses_epoch_seconds(self):
+        # Jackson serializes java.time.Instant as epoch seconds (with an
+        # optional fractional part for nanos), not epoch milliseconds.
+        target_type = pa.timestamp("us", tz="UTC")
+        result = _convert_literal(1720612345.123456, target_type)
+        self.assertIsInstance(result, pa.Scalar)
+        expected = pa.scalar(
+            datetime.datetime.fromtimestamp(1720612345.123456, tz=datetime.timezone.utc),
+            type=target_type,
+        )
+        self.assertEqual(result.value, expected.value)
+
+    def test_time_literal_with_nanos(self):
+        # Jackson serializes java.time.LocalTime as [hour, minute, second,
+        # nanoOfSecond]; the nanosecond component must survive as
+        # sub-second precision on the resulting time scalar.
+        result = _convert_literal([12, 30, 45, 123456000], pa.time64("us"))
+        self.assertIsInstance(result, pa.Scalar)
+        expected = pa.scalar(
+            datetime.time(12, 30, 45, microsecond=123456), type=pa.time64("us"))
+        self.assertEqual(result.value, expected.value)
+
+    def test_time_literal_without_nanos(self):
+        result = _convert_literal([12, 30, 45], pa.time64("us"))
+        self.assertIsInstance(result, pa.Scalar)
+        expected = pa.scalar(datetime.time(12, 30, 45), type=pa.time64("us"))
+        self.assertEqual(result.value, expected.value)
 
 
 class TestExtractReferencedFields(unittest.TestCase):

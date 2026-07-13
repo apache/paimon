@@ -31,12 +31,7 @@ from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.offset_row import OffsetRow
 
 
-# ---------------------------------------------------------------------------
-#  Adapters: row ↔ batch conversion
-# ---------------------------------------------------------------------------
-
 class RecordReaderToBatchAdapter(RecordBatchReader):
-    """Convert a row-level RecordReader to a batch-level RecordBatchReader."""
 
     def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536, include_row_kind: bool = False):
         self._inner = inner
@@ -139,10 +134,6 @@ class _ArrowBatchIterator(RecordIterator):
         self._idx += 1
         return row
 
-
-# ---------------------------------------------------------------------------
-#  Batch-level auth readers
-# ---------------------------------------------------------------------------
 
 class AuthFilterReader(RecordBatchReader):
 

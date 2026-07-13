@@ -244,7 +244,7 @@ def _convert_literal(literal, target_type: pa.DataType):
                 dt = dt.replace(microsecond=literal[6] // 1000)
             return pa.scalar(dt, type=target_type)
         elif isinstance(literal, (int, float)):
-            dt = datetime.datetime.fromtimestamp(literal / 1000.0, tz=datetime.timezone.utc)
+            dt = datetime.datetime.fromtimestamp(literal, tz=datetime.timezone.utc)
             return pa.scalar(dt, type=target_type)
     elif pa.types.is_date(target_type):
         import datetime
@@ -259,6 +259,8 @@ def _convert_literal(literal, target_type: pa.DataType):
             return pa.scalar(t, type=target_type)
         elif isinstance(literal, list):
             t = datetime.time(*literal[:3])
+            if len(literal) > 3:
+                t = t.replace(microsecond=literal[3] // 1000)
             return pa.scalar(t, type=target_type)
     elif pa.types.is_decimal(target_type):
         import decimal

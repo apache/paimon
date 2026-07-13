@@ -24,6 +24,10 @@ import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.push_down_utils import predicate_field_names
+from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.read.reader.auth_masking_reader import (
+    AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
+    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
@@ -119,7 +123,7 @@ class TableRead:
             for split in splits:
                 if limit is not None and count >= limit:
                     return
-                reader = self._create_reader_for_split(split)
+                reader = self.__create_reader_for_split(split)
                 try:
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
@@ -223,7 +227,7 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self._create_reader_for_split(split, blob_parallelism)
+            reader = self.__create_reader_for_split(split, blob_parallelism)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -233,7 +237,8 @@ class TableRead:
                             batch = batch.slice(0, remaining)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
-                            batch = self._add_row_kind_column_to_batch(batch, "+I")
+                            if "_row_kind" not in batch.schema.names:
+                                batch = self._add_row_kind_column_to_batch(batch, "+I")
                         yield batch
                         if remaining is not None:
                             remaining -= batch.num_rows
@@ -389,7 +394,7 @@ class TableRead:
         """
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = self._create_reader_for_split(split, blob_parallelism)
+        reader = self.__create_reader_for_split(split, blob_parallelism)
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
@@ -796,24 +801,18 @@ class TableRead:
             widened.append(field)
         return widened
 
-    def _create_reader_for_split(self, split, blob_parallelism=1):
-        from pypaimon.read.query_auth_split import QueryAuthSplit
-
+    def __create_reader_for_split(self, split, blob_parallelism=1):
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
             split = split.split
 
         if auth_result is not None:
-            return self._authed_reader(split, auth_result, blob_parallelism)
+            return self.__authed_reader(split, auth_result, blob_parallelism)
         else:
             return self._create_split_read(split, blob_parallelism=blob_parallelism).create_reader()
 
-    def _authed_reader(self, split, auth_result, blob_parallelism=1):
-        from pypaimon.read.reader.auth_masking_reader import (
-            AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
-            RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
-
+    def __authed_reader(self, split, auth_result, blob_parallelism=1):
         table_fields = self.table.fields
         read_fields = self.read_type
 

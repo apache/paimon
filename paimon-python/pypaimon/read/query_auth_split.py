@@ -62,3 +62,16 @@ class QueryAuthSplit(Split):
         if name.startswith('_'):
             raise AttributeError(name)
         return getattr(self._split, name)
+
+
+def resolve_auth_result(query_auth_fn, read_type):
+    if query_auth_fn is None:
+        return None
+    select = [f.name for f in read_type] if read_type else None
+    return query_auth_fn(select)
+
+
+def wrap_plan_with_auth(auth_result, plan):
+    if auth_result is not None:
+        return auth_result.convert_plan(plan)
+    return plan

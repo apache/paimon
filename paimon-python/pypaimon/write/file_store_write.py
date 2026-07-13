@@ -294,8 +294,7 @@ class FileStoreWrite:
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
         scan = read_builder.with_filter(partition_filter).new_scan()
-        scan._query_auth_fn = None
-        splits = scan.plan().splits()
+        splits = scan.plan_for_write().splits()
 
         max_seq_numbers = {}
         for split in splits:

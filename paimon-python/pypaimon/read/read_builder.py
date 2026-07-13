@@ -21,6 +21,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
 from pypaimon.read.explain_render import render_predicate
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
@@ -238,6 +239,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     splits_all_above_l0 = 0
     split_infos: List[ExplainSplitInfo] = []
 
+    plan_has_auth = any(isinstance(s, QueryAuthSplit) for s in splits)
+
     for split in splits:
         files = getattr(split, 'files', []) or []
         per_split_levels: dict = {}
@@ -309,6 +312,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
         split_size_avg=sz_avg,
         split_size_p50=sz_p50,
         split_size_p95=sz_p95,
+        has_auth=plan_has_auth,
         splits=split_infos if verbose else None,
     )
 

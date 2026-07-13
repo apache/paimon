@@ -245,7 +245,29 @@ class ReadBuilderExplainTest(unittest.TestCase):
         self.assertEqual(dv_result.split_count, 0)
         self.assertEqual(dv_result.splits_all_above_l0, 0)
 
-    # ---- 7. pretty-print smoke -----------------------------------------
+    # ---- 8. query auth wraps splits and is surfaced in explain ---------
+
+    def test_explain_reports_query_auth_split(self):
+        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+
+        table, pa_schema = self._append_table('explain_query_auth')
+        _write(table, [{'id': i, 'val': i} for i in range(20)], pa_schema)
+
+        auth_result = TableQueryAuthResult(filter=None, column_masking={'val': 'CAST(NULL AS BIGINT)'})
+        table.catalog_environment.table_query_auth = lambda options, identifier: (lambda select: auth_result)
+
+        rb = table.new_read_builder()
+        result = rb.explain(verbose=True)
+
+        self.assertIsNotNone(result.splits)
+        self.assertGreater(len(result.splits), 0)
+        self.assertTrue(result.has_auth)
+
+        plan_splits = rb.new_scan().plan().splits()
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+        self.assertTrue(all(isinstance(s, QueryAuthSplit) for s in plan_splits))
+
+    # ---- 9. pretty-print smoke -----------------------------------------
 
     def test_pretty_print_smoke(self):
         table, pa_schema = self._append_table('explain_print_smoke')

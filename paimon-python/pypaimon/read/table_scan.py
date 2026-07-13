@@ -15,15 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json as _json
 from typing import Optional, Tuple
 
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
-from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
 
 class TableScan:
@@ -48,78 +51,20 @@ class TableScan:
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
-        auth_result = self._auth_query()
+        auth_result = self.__auth_query()
         if auth_result is not None:
-            self._apply_auth_to_scanner(auth_result)
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
-        if auth_result is not None:
-            plan = auth_result.convert_plan(plan)
+        return wrap_plan_with_auth(auth_result, plan)
+
+    def plan_for_write(self) -> Plan:
+        plan = self.plan()
+        if any(isinstance(s, QueryAuthSplit) for s in plan.splits()):
+            raise TableNoPermissionException(self.table.identifier)
         return plan
 
-    def _apply_auth_to_scanner(self, auth_result):
-        if not auth_result.filter:
-            return
-        partition_preds, has_non_partition = self._split_auth_filter(auth_result)
-        if partition_preds:
-            from pypaimon.common.predicate_builder import PredicateBuilder
-            combined = PredicateBuilder.and_predicates(partition_preds)
-            self.file_scanner.auth_partition_predicate = combined
-        if has_non_partition:
-            self.file_scanner.auth_has_non_partition_filter = True
-
-    def _split_auth_filter(self, auth_result):
-        partition_keys = set(self.table.partition_keys or [])
-        if not partition_keys:
-            return [], bool(auth_result.filter)
-
-        partition_preds = []
-        has_non_partition = False
-        field_index_map = {f.name: i for i, f in enumerate(self.table.fields)}
-
-        for json_str in (auth_result.filter or []):
-            pred = self._try_parse_partition_predicate(json_str, partition_keys, field_index_map)
-            if pred is not None:
-                partition_preds.append(pred)
-            else:
-                has_non_partition = True
-        return partition_preds, has_non_partition
-
-    def _try_parse_partition_predicate(self, json_str, partition_keys, field_index_map):
-        import json as _json
-        data = _json.loads(json_str)
-        if data is None or data.get("kind") != "LEAF":
-            return None
-        transform = data.get("transform", {})
-        if transform.get("name") != "FIELD_REF":
-            return None
-        field_name = transform.get("fieldRef", {}).get("name")
-        if field_name is None or field_name not in partition_keys:
-            return None
-        field_index = field_index_map.get(field_name)
-        if field_index is None:
-            return None
-
-        from pypaimon.common.predicate import Predicate
-        function = data.get("function", "")
-        literals = data.get("literals", [])
-        method_map = {
-            "EQUAL": "equal", "NOT_EQUAL": "not_equal",
-            "LESS_THAN": "less_than", "LESS_OR_EQUAL": "less_or_equal",
-            "GREATER_THAN": "greater_than", "GREATER_OR_EQUAL": "greater_or_equal",
-            "IS_NULL": "is_null", "IS_NOT_NULL": "is_not_null",
-            "IN": "in", "NOT_IN": "not_in",
-        }
-        method = method_map.get(function)
-        if method is None:
-            return None
-        return Predicate(method=method, index=field_index, field=field_name, literals=literals)
-
-    def _auth_query(self):
-        fn = self._query_auth_fn
-        if fn is None:
-            return None
-        select = [f.name for f in self._read_type] if self._read_type else None
-        return fn(select)
+    def __auth_query(self):
+        return resolve_auth_result(self._query_auth_fn, self._read_type)
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
         """Run :meth:`plan` while recording manifest / pruning counters.
@@ -127,10 +72,11 @@ class TableScan:
         Only used by :meth:`ReadBuilder.explain`; the regular read path
         keeps going through :meth:`plan`.
         """
-        auth_result = self._auth_query()
+        auth_result = self.__auth_query()
         if auth_result is not None:
-            self._apply_auth_to_scanner(auth_result)
-        return self.file_scanner.scan_with_stats()
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
+        plan, stats = self.file_scanner.scan_with_stats()
+        return wrap_plan_with_auth(auth_result, plan), stats
 
     def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options
@@ -360,3 +306,72 @@ class TableScan:
                 f"Only {sorted(allowed) if allowed else 'no scan keys'} "
                 f"are allowed for this mode."
             )
+
+
+def prune_scanner_by_auth(table, scanner, auth_result):
+    if not auth_result.filter:
+        return
+    partition_preds, has_non_partition = __split_auth_filter(table, auth_result)
+    if partition_preds:
+        combined = PredicateBuilder.and_predicates(partition_preds)
+        scanner.auth_partition_predicate = combined
+    if has_non_partition:
+        scanner.auth_has_non_partition_filter = True
+
+
+def __split_auth_filter(table, auth_result):
+    partition_keys = list(table.partition_keys or [])
+    if not partition_keys:
+        return [], bool(auth_result.filter)
+
+    partition_preds = []
+    has_non_partition = False
+    partition_key_set = set(partition_keys)
+    partition_index_map = {name: i for i, name in enumerate(partition_keys)}
+
+    for json_str in (auth_result.filter or []):
+        pred = __try_parse_partition_predicate(table, json_str, partition_key_set, partition_index_map)
+        if pred is not None:
+            partition_preds.append(pred)
+        else:
+            has_non_partition = True
+    return partition_preds, has_non_partition
+
+
+def __try_parse_partition_predicate(table, json_str, partition_keys, partition_index_map):
+    data = _json.loads(json_str)
+    if data is None or data.get("kind") != "LEAF":
+        return None
+    transform = data.get("transform", {})
+    if transform.get("name") != "FIELD_REF":
+        return None
+    field_name = transform.get("fieldRef", {}).get("name")
+    if field_name is None or field_name not in partition_keys:
+        return None
+    field_index = partition_index_map.get(field_name)
+    if field_index is None:
+        return None
+
+    partition_field_type = None
+    for f in table.fields:
+        if f.name == field_name:
+            partition_field_type = getattr(f.type, 'type', '')
+            break
+    base_type = partition_field_type.split('(')[0] if partition_field_type else ''
+    safe_types = {'INT', 'BIGINT', 'SMALLINT', 'TINYINT', 'STRING', 'VARCHAR', 'CHAR'}
+    if base_type not in safe_types:
+        return None
+
+    function = data.get("function", "")
+    literals = data.get("literals", [])
+    method_map = {
+        "EQUAL": "equal", "NOT_EQUAL": "notEqual",
+        "LESS_THAN": "lessThan", "LESS_OR_EQUAL": "lessOrEqual",
+        "GREATER_THAN": "greaterThan", "GREATER_OR_EQUAL": "greaterOrEqual",
+        "IS_NULL": "isNull", "IS_NOT_NULL": "isNotNull",
+        "IN": "in", "NOT_IN": "notIn",
+    }
+    method = method_map.get(function)
+    if method is None:
+        return None
+    return Predicate(method=method, index=field_index, field=field_name, literals=literals)

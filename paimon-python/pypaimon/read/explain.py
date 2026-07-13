@@ -121,6 +121,8 @@ class ExplainResult:
     split_size_p50: int = 0
     split_size_p95: int = 0
 
+    has_auth: bool = False
+
     # Verbose-only
     splits: Optional[List[ExplainSplitInfo]] = None
 

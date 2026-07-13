@@ -113,8 +113,7 @@ class TableUpdateByRowId:
         split a logical row range).
         """
         scan = self.table.new_read_builder().new_scan()
-        scan._query_auth_fn = None
-        plan = scan.plan()
+        plan = scan.plan_for_write()
         splits = plan.splits()
 
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}

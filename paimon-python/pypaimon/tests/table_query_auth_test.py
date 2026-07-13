@@ -69,6 +69,20 @@ class _FakePlan:
         return self._splits
 
 
+class _FakeTable:
+    def __init__(self, identifier=None):
+        self.identifier = identifier or Identifier("db", "table")
+
+
+class _FakeScan:
+    def __init__(self, plan, identifier=None):
+        self._plan = plan
+        self.table = _FakeTable(identifier)
+
+    def plan(self):
+        return self._plan
+
+
 def _simple_filter_json(field_name="dept", value="eng"):
     return json.dumps({
         "kind": "LEAF",
@@ -312,6 +326,45 @@ class TestQueryAuthSplitAttributeDelegation(unittest.TestCase):
         restored = pickle.loads(pickle.dumps(auth_split))
         self.assertEqual(restored.file_size, 999)
         self.assertEqual(restored.row_count, 100)
+
+
+class TestPlanForWrite(unittest.TestCase):
+
+    def test_no_restriction_returns_plan_unchanged(self):
+        from pypaimon.read.table_scan import TableScan
+
+        plain_plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        scan = _FakeScan(plain_plan)
+        result = TableScan.plan_for_write(scan)
+        self.assertIs(result, plain_plan)
+
+    def test_row_filter_restriction_raises(self):
+        from pypaimon.read.table_scan import TableScan
+
+        auth = TableQueryAuthResult([_simple_filter_json()], None)
+        wrapped_plan = _FakePlan([QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
+        scan = _FakeScan(wrapped_plan)
+        with self.assertRaises(TableNoPermissionException):
+            TableScan.plan_for_write(scan)
+
+    def test_column_masking_restriction_raises(self):
+        from pypaimon.read.table_scan import TableScan
+
+        auth = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
+        wrapped_plan = _FakePlan([QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
+        scan = _FakeScan(wrapped_plan)
+        with self.assertRaises(TableNoPermissionException):
+            TableScan.plan_for_write(scan)
+
+    def test_mixed_splits_any_restricted_raises(self):
+        from pypaimon.read.table_scan import TableScan
+
+        auth = TableQueryAuthResult([_simple_filter_json()], None)
+        wrapped_plan = _FakePlan(
+            [_FakeSplit(), QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
+        scan = _FakeScan(wrapped_plan)
+        with self.assertRaises(TableNoPermissionException):
+            TableScan.plan_for_write(scan)
 
 
 class TestCoreOptionsQueryAuth(unittest.TestCase):
