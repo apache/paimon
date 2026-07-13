@@ -399,8 +399,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
             TableSchema latestSchema = optionalLatestSchema.get();
-            Map<String, String> mergedOptions = new HashMap<>(tableSchema.options());
-            mergedOptions.putAll(latestSchema.options());
+            // The current copy's options mix committed options with dynamic overrides applied via
+            // copy(dynamicOptions). Rebase onto the latest committed options so altered option
+            // values are picked up, then re-apply only the dynamic overrides (entries that differ
+            // from the committed schema this copy is based on) so runtime overrides survive.
+            Map<String, String> committedOptions =
+                    schemaManager().schema(tableSchema.id()).options();
+            Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
+            tableSchema
+                    .options()
+                    .forEach(
+                            (key, value) -> {
+                                if (!value.equals(committedOptions.get(key))) {
+                                    mergedOptions.put(key, value);
+                                }
+                            });
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
             SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);

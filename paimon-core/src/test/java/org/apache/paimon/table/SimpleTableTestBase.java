@@ -639,6 +639,23 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCopyWithLatestSchemaKeepsDynamicOptions() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(SNAPSHOT_NUM_RETAINED_MAX, 100));
+        // apply a runtime dynamic override on top of the committed value
+        FileStoreTable withDynamic =
+                table.copy(Collections.singletonMap(SNAPSHOT_NUM_RETAINED_MAX.key(), "200"));
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.setOption(SNAPSHOT_NUM_RETAINED_MAX.key(), "10"));
+
+        // the dynamic override must survive the refresh rather than falling back to the
+        // committed value
+        FileStoreTable updated = withDynamic.copyWithLatestSchema();
+        assertThat(updated.coreOptions().snapshotNumRetainMax()).isEqualTo(200);
+    }
+
+    @Test
     public void testConsumerIdNotBlank() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
