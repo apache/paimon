@@ -439,7 +439,8 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
-                assertNotRenamingPrimaryKeyVectorIndexColumn(oldTableSchema, rename.fieldNames());
+                assertNotUpdatingPrimaryKeyIndexColumn(
+                        oldTableSchema, rename.fieldNames(), "rename");
                 assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
@@ -496,6 +497,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotUpdatingPrimaryKeyIndexColumn(
+                        oldTableSchema, update.fieldNames(), "update type of");
                 assertNotChangingBlobColumnType(
                         newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
@@ -943,6 +946,7 @@ public class SchemaManager implements Serializable {
             throw new UnsupportedOperationException(
                     String.format("Cannot drop partition key or primary key: [%s]", columnToDrop));
         }
+        assertNotUpdatingPrimaryKeyIndexColumn(schema, change.fieldNames(), "drop");
     }
 
     private static void assertNotUpdatingPartitionKeys(
@@ -984,16 +988,19 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static void assertNotRenamingPrimaryKeyVectorIndexColumn(
-            TableSchema schema, String[] fieldNames) {
+    private static void assertNotUpdatingPrimaryKeyIndexColumn(
+            TableSchema schema, String[] fieldNames, String operation) {
         if (fieldNames.length > 1) {
             return;
         }
         String fieldName = fieldNames[0];
-        if (new CoreOptions(schema.options()).primaryKeyVectorIndexColumns().contains(fieldName)) {
+        CoreOptions options = new CoreOptions(schema.options());
+        if (options.primaryKeyVectorIndexColumns().contains(fieldName)
+                || options.primaryKeyBTreeIndexColumns().contains(fieldName)
+                || options.primaryKeyBitmapIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Cannot rename primary-key vector index column: [%s]", fieldName));
+                            "Cannot %s primary-key index column: [%s]", operation, fieldName));
         }
     }
 
