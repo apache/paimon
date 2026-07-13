@@ -35,11 +35,13 @@ rewriting entire data files.
 Key capabilities:
 
 - **[Data Evolution](./data-evolution)**: Update partial columns without rewriting entire files, enabling efficient schema evolution.
+- **[Variant Storage](./variant)**: Store and query schema-flexible semi-structured data with optional typed sub-column shredding.
 - **[Blob Storage](./blob)**: Store large binary objects (images, videos, audio) in dedicated `.blob` files with efficient column projection.
 - **[Vector Storage](./vector)**: Store and manage vector embeddings in dedicated Vortex-format files optimized for vector workloads.
 - **[Global Index](./global-index)**: Build BTree, Bitmap, vector, and full-text indexes for efficient lookups and similarity search.
 
-All multimodal features require the following table properties:
+Data Evolution, Blob Storage, Vector Storage, and Global Index require the following table properties.
+Variant Storage can also be used in a regular Paimon table without these properties:
 
 ```sql
 'row-tracking.enabled' = 'true',
