@@ -1142,7 +1142,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
             FieldRef fieldRef, Object literal) {
-        if (literal == null) {
+        if (literal == null || isEmptyExclusiveScalarRange(fieldRef, literal, true)) {
             return emptyFilterFuture();
         }
         return async(
@@ -1172,7 +1172,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
             FieldRef fieldRef, Object literal) {
-        if (literal == null) {
+        if (literal == null || isEmptyExclusiveScalarRange(fieldRef, literal, false)) {
             return emptyFilterFuture();
         }
         return async(
@@ -1233,6 +1233,45 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                             indexedScalarLiteral(fieldRef, from),
                                             indexedScalarLiteral(fieldRef, to))));
                 });
+    }
+
+    /**
+     * Guards exclusive scalar bounds that have no representable value on the requested side. ESLib
+     * 1.0.3 implements integral exclusivity with {@code value - 1}/{@code value + 1}; at the type
+     * extrema those operations wrap and turn an empty predicate into a full-range query. {@code
+     * nextDown(-Infinity)} and {@code nextUp(+Infinity)} similarly remain at infinity.
+     */
+    private boolean isEmptyExclusiveScalarRange(
+            FieldRef fieldRef, Object literal, boolean valuesBelowLiteral) {
+        FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
+        if (config == null || config.scalarType() == null) {
+            return false;
+        }
+        Object indexedLiteral = indexedScalarLiteral(fieldRef, literal);
+        if (!(indexedLiteral instanceof Number)) {
+            return false;
+        }
+        Number number = (Number) indexedLiteral;
+        switch (config.scalarType()) {
+            case INT:
+                return valuesBelowLiteral
+                        ? number.intValue() == Integer.MIN_VALUE
+                        : number.intValue() == Integer.MAX_VALUE;
+            case LONG:
+                return valuesBelowLiteral
+                        ? number.longValue() == Long.MIN_VALUE
+                        : number.longValue() == Long.MAX_VALUE;
+            case FLOAT:
+                return valuesBelowLiteral
+                        ? number.floatValue() == Float.NEGATIVE_INFINITY
+                        : number.floatValue() == Float.POSITIVE_INFINITY;
+            case DOUBLE:
+                return valuesBelowLiteral
+                        ? number.doubleValue() == Double.NEGATIVE_INFINITY
+                        : number.doubleValue() == Double.POSITIVE_INFINITY;
+            default:
+                return false;
+        }
     }
 
     @Override

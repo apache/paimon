@@ -22,6 +22,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.lucene.codecs.KnnVectorsFormat;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
+import org.elasticsearch.eslib.adapter.PaimonHnswVectorsFormat;
+import org.elasticsearch.eslib.adapter.lucene9.PaimonLucene9Codec;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.ScalarFieldType;
 import org.elasticsearch.eslib.api.model.VectorAlgorithm;
@@ -88,13 +92,53 @@ class ESIndexOptionsTest {
     }
 
     @Test
+    void hnswConstructionParametersReachLuceneCodec() {
+        Map<String, String> m = new HashMap<>();
+        m.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        m.put("global-index.es-index.fields.embedding.dimension", "128");
+        m.put("global-index.es-index.fields.embedding.m", "30");
+        m.put("global-index.es-index.fields.embedding.ef_construction", "360");
+
+        ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
+        PaimonLucene9Codec codec = new PaimonLucene9Codec(options.getFieldConfigs());
+        PerFieldKnnVectorsFormat perField = (PerFieldKnnVectorsFormat) codec.knnVectorsFormat();
+        KnnVectorsFormat format = perField.getKnnVectorsFormatForField("embedding");
+
+        assertThat(format).isInstanceOf(PaimonHnswVectorsFormat.class);
+        assertThat(format.toString()).contains("maxConn=30").contains("beamWidth=360");
+    }
+
+    @Test
     void invalidHnswConstructionParametersAreRejected() {
         Map<String, String> nonPositive = new HashMap<>();
         nonPositive.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
         nonPositive.put("global-index.es-index.fields.embedding.m", "0");
         assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(nonPositive)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be a positive integer");
+                .hasMessageContaining("between 1 and 512");
+
+        Map<String, String> excessiveM = new HashMap<>();
+        excessiveM.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        excessiveM.put("global-index.es-index.fields.embedding.m", "513");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(excessiveM)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("between 1 and 512");
+
+        Map<String, String> excessiveEfConstruction = new HashMap<>();
+        excessiveEfConstruction.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        excessiveEfConstruction.put(
+                "global-index.es-index.fields.embedding.ef_construction", "3201");
+        assertThatThrownBy(
+                        () -> new ESIndexOptions(FIELDS, Options.fromMap(excessiveEfConstruction)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("between 1 and 3200");
+
+        Map<String, String> nonInteger = new HashMap<>();
+        nonInteger.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        nonInteger.put("global-index.es-index.fields.embedding.ef_construction", "wide");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(nonInteger)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("between 1 and 3200");
 
         Map<String, String> wrongAlgorithm = new HashMap<>();
         wrongAlgorithm.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");

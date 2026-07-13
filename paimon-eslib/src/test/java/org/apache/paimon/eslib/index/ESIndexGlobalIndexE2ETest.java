@@ -909,6 +909,91 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
+    void exclusiveNumericExtremaDoNotOverflow(@TempDir java.nio.file.Path tmp) throws IOException {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "i", DataTypes.INT()),
+                        new DataField(1, "l", DataTypes.BIGINT()),
+                        new DataField(2, "f", DataTypes.FLOAT()),
+                        new DataField(3, "d", DataTypes.DOUBLE()));
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-numeric-extrema");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(
+                0,
+                GenericRow.of(
+                        Integer.MIN_VALUE,
+                        Long.MIN_VALUE,
+                        Float.NEGATIVE_INFINITY,
+                        Double.NEGATIVE_INFINITY));
+        writer.write(1, GenericRow.of(0, 0L, 0.0F, 0.0D));
+        writer.write(
+                2,
+                GenericRow.of(
+                        Integer.MAX_VALUE,
+                        Long.MAX_VALUE,
+                        Float.POSITIVE_INFINITY,
+                        Double.POSITIVE_INFINITY));
+        ResultEntry entry = writer.finish().get(0);
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), Arrays.asList(ioMeta), fields, options);
+
+        FieldRef intRef = new FieldRef(0, "i", DataTypes.INT());
+        FieldRef longRef = new FieldRef(1, "l", DataTypes.BIGINT());
+        FieldRef floatRef = new FieldRef(2, "f", DataTypes.FLOAT());
+        FieldRef doubleRef = new FieldRef(3, "d", DataTypes.DOUBLE());
+        try {
+            assertEmptyIndexResult(
+                    reader.visitLessThan(intRef, Integer.MIN_VALUE).join(), "INT < MIN_VALUE");
+            assertEmptyIndexResult(
+                    reader.visitGreaterThan(intRef, Integer.MAX_VALUE).join(), "INT > MAX_VALUE");
+            assertEmptyIndexResult(
+                    reader.visitLessThan(longRef, Long.MIN_VALUE).join(), "LONG < MIN_VALUE");
+            assertEmptyIndexResult(
+                    reader.visitGreaterThan(longRef, Long.MAX_VALUE).join(), "LONG > MAX_VALUE");
+            assertEmptyIndexResult(
+                    reader.visitLessThan(floatRef, Float.NEGATIVE_INFINITY).join(),
+                    "FLOAT < -Infinity");
+            assertEmptyIndexResult(
+                    reader.visitGreaterThan(floatRef, Float.POSITIVE_INFINITY).join(),
+                    "FLOAT > +Infinity");
+            assertEmptyIndexResult(
+                    reader.visitLessThan(doubleRef, Double.NEGATIVE_INFINITY).join(),
+                    "DOUBLE < -Infinity");
+            assertEmptyIndexResult(
+                    reader.visitGreaterThan(doubleRef, Double.POSITIVE_INFINITY).join(),
+                    "DOUBLE > +Infinity");
+
+            assertEquals(
+                    1,
+                    reader.visitLessOrEqual(intRef, Integer.MIN_VALUE)
+                            .join()
+                            .get()
+                            .results()
+                            .getIntCardinality());
+            assertEquals(
+                    1,
+                    reader.visitGreaterOrEqual(doubleRef, Double.POSITIVE_INFINITY)
+                            .join()
+                            .get()
+                            .results()
+                            .getIntCardinality());
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
     void temporalPredicatesUseLongScalarPath(@TempDir java.nio.file.Path tmp) throws IOException {
         List<DataField> fields =
                 Arrays.asList(
@@ -1353,6 +1438,12 @@ class ESIndexGlobalIndexE2ETest {
 
     private static String phraseQuery(String terms) {
         return "{\"match_phrase\":{\"query\":\"" + terms + "\"}}";
+    }
+
+    private static void assertEmptyIndexResult(
+            Optional<GlobalIndexResult> result, String predicate) {
+        assertTrue(result.isPresent(), predicate + " is index-evaluable");
+        assertTrue(result.get().results().isEmpty(), predicate + " must match no row");
     }
 
     private static boolean contains(RoaringNavigableMap64 bitmap, long id) {

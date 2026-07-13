@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.VectorType;
 
+import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
 import org.elasticsearch.eslib.api.model.BuiltinAnalyzer;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.ScalarFieldType;
@@ -225,8 +226,14 @@ public class ESIndexOptions {
         String mStr = resolve(options, fieldName, "m", null);
         String efStr = resolve(options, fieldName, "ef_construction", null);
         if (vectorAlgorithm == VectorAlgorithm.HNSW) {
-            putPositiveIntegerParameter(params, fieldName, "m", mStr);
-            putPositiveIntegerParameter(params, fieldName, "ef_construction", efStr);
+            putBoundedPositiveIntegerParameter(
+                    params, fieldName, "m", mStr, Lucene99HnswVectorsFormat.MAXIMUM_MAX_CONN);
+            putBoundedPositiveIntegerParameter(
+                    params,
+                    fieldName,
+                    "ef_construction",
+                    efStr,
+                    Lucene99HnswVectorsFormat.MAXIMUM_BEAM_WIDTH);
         } else if (mStr != null || efStr != null) {
             throw new IllegalArgumentException(
                     "Vector field '"
@@ -248,8 +255,12 @@ public class ESIndexOptions {
                 .build();
     }
 
-    private static void putPositiveIntegerParameter(
-            Map<String, String> params, String fieldName, String key, String rawValue) {
+    private static void putBoundedPositiveIntegerParameter(
+            Map<String, String> params,
+            String fieldName,
+            String key,
+            String rawValue,
+            int maximum) {
         if (rawValue == null) {
             return;
         }
@@ -262,16 +273,20 @@ public class ESIndexOptions {
                             + key
                             + "' for vector field '"
                             + fieldName
-                            + "': must be a positive integer.",
+                            + "': must be an integer between 1 and "
+                            + maximum
+                            + ".",
                     e);
         }
-        if (value <= 0) {
+        if (value <= 0 || value > maximum) {
             throw new IllegalArgumentException(
                     "Invalid HNSW parameter '"
                             + key
                             + "' for vector field '"
                             + fieldName
-                            + "': must be a positive integer.");
+                            + "': must be an integer between 1 and "
+                            + maximum
+                            + ".");
         }
         params.put(key, String.valueOf(value));
     }

@@ -135,8 +135,8 @@ column.
 | `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw` or `diskbbq`. `native` is not supported by paimon-eslib. |
 | `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension. Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
 | `metric` | vector | `cosine` | Distance metric (for example `cosine`, `l2`, `dot_product`). Use the same metric at build and query time. |
-| `m` | vector (`hnsw`) | engine default | HNSW graph out-degree. |
-| `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width. |
+| `m` | vector (`hnsw`) | engine default | HNSW graph out-degree; valid range: 1–512. |
+| `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width; valid range: 1–3200. |
 | `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ. |
 | `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field. |
 | `read-search-threads` | index-type only | `-1` | DiskBBQ cluster-search pool size. `-1` uses CPU/2; `0` makes DiskBBQ search serial. Outer reader futures use Paimon's caller-owned executor. Key: `global-index.es-index.read-search-threads`. |
