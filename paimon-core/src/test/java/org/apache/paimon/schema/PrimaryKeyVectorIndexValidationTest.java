@@ -171,12 +171,20 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testRequiresFixedBucket() {
+    void testSupportsPostponeBucket() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.BUCKET.key(), "-2");
+
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testRejectsDynamicBucket() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.BUCKET.key(), "-1");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("requires fixed bucket mode");
+                .hasMessageContaining("requires fixed or postpone bucket mode");
     }
 
     @Test

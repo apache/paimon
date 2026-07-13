@@ -105,6 +105,75 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("postpone bucket builds primary-key vector index during compact") {
+    withTable("T") {
+      createVectorTable(
+        bucket = -2,
+        extraOptions = Seq(
+          "write-only" -> "true",
+          "postpone.batch-write-fixed-bucket" -> "true",
+          "deletion-vectors.merge-on-read" -> "false"))
+
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(3.0f, 0.0f)),
+                  |  (2, array(1.0f, 0.0f)),
+                  |  (3, array(2.0f, 0.0f))
+                  |""".stripMargin)
+
+      assert(spark.sql("SELECT id FROM T").collect().isEmpty)
+      assert(spark.sql("SELECT file_path FROM `T$files` WHERE level = 0").collect().nonEmpty)
+      assert(!spark.sql("SELECT bucket FROM `T$buckets`").collect().exists(_.getInt(0) == -2))
+
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      assert(spark.sql("SELECT id FROM T").collect().map(_.getInt(0)).toSet == Set(1, 2, 3))
+      val ids = spark
+        .sql("""
+               |SELECT id
+               |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+               |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(ids == Set(2, 3))
+
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (4, array(0.5f, 0.0f)),
+                  |  (6, array(6.0f, 0.0f))
+                  |""".stripMargin)
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        spark.sql("""
+                    |INSERT INTO T VALUES
+                    |  (5, array(1.5f, 0.0f)),
+                    |  (7, array(7.0f, 0.0f))
+                    |""".stripMargin)
+      }
+
+      assert(spark.sql("SELECT id FROM T").collect().map(_.getInt(0)).toSet == Set(1, 2, 3))
+      assert(spark.sql("SELECT bucket FROM `T$buckets`").collect().exists(_.getInt(0) == -2))
+      assert(spark.sql("SELECT file_path FROM `T$files` WHERE level = 0").collect().nonEmpty)
+
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      assert(
+        spark.sql("SELECT id FROM T").collect().map(_.getInt(0)).toSet ==
+          Set(1, 2, 3, 4, 5, 6, 7))
+      assert(!spark.sql("SELECT bucket FROM `T$buckets`").collect().exists(_.getInt(0) == -2))
+      assert(spark.sql("SELECT file_path FROM `T$files` WHERE level = 0").collect().isEmpty)
+      val mixedIds = spark
+        .sql("""
+               |SELECT id
+               |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+               |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(mixedIds == Set(4, 2))
+    }
+  }
+
   test("primary-key vector search merges top k across buckets") {
     withTable("T") {
       createVectorTable(bucket = 4, extraOptions = Seq("global-index.thread-num" -> "2"))

@@ -89,7 +89,9 @@ public class BucketFiles {
         changelogFiles.addAll(message.newFilesIncrement().changelogFiles());
         changelogFiles.addAll(message.compactIncrement().changelogFiles());
 
+        newIndexFiles.addAll(message.newFilesIncrement().newIndexFiles());
         newIndexFiles.addAll(message.compactIncrement().newIndexFiles());
+        deletedIndexFiles.addAll(message.newFilesIncrement().deletedIndexFiles());
         deletedIndexFiles.addAll(message.compactIncrement().deletedIndexFiles());
 
         toDelete.forEach((fileName, path) -> fileIO.deleteQuietly(path));

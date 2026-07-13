@@ -24,14 +24,20 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 
 /** Utils for postpone table. */
@@ -88,9 +94,23 @@ public class PostponeUtils {
     }
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(FileStoreTable table) {
+        return getKnownNumBuckets(
+                table.store().newScan().onlyReadRealBuckets().readSimpleEntries());
+    }
+
+    public static Map<BinaryRow, Integer> getKnownNumBuckets(
+            FileStoreTable table, long snapshotId) {
+        return getKnownNumBuckets(
+                table.store()
+                        .newScan()
+                        .withSnapshot(snapshotId)
+                        .onlyReadRealBuckets()
+                        .readSimpleEntries());
+    }
+
+    private static Map<BinaryRow, Integer> getKnownNumBuckets(
+            List<SimpleFileEntry> simpleFileEntries) {
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
-        List<SimpleFileEntry> simpleFileEntries =
-                table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
         for (SimpleFileEntry entry : simpleFileEntries) {
             if (entry.totalBuckets() >= 0) {
                 Integer oldTotalBuckets =
@@ -109,11 +129,43 @@ public class PostponeUtils {
         return knownNumBuckets;
     }
 
+    /** Returns real buckets containing active Level-0 files in the specified snapshot. */
+    public static List<CompactBucket> getLevel0Buckets(FileStoreTable table, long snapshotId) {
+        List<SimpleFileEntry> entries =
+                table.store()
+                        .newScan()
+                        .withSnapshot(snapshotId)
+                        .onlyReadRealBuckets()
+                        .readSimpleEntries();
+        Set<CompactBucket> buckets = new LinkedHashSet<>();
+        for (SimpleFileEntry entry : entries) {
+            if (entry.bucket() >= 0 && entry.totalBuckets() > 0 && entry.level() == 0) {
+                buckets.add(
+                        new CompactBucket(entry.partition(), entry.bucket(), entry.totalBuckets()));
+            }
+        }
+        return new ArrayList<>(buckets);
+    }
+
     /** Returns row counts of current active files in the postpone bucket. */
     public static Map<BinaryRow, Long> getPostponeRowCounts(FileStoreTable table) {
+        return getPostponeRowCounts(
+                table.newSnapshotReader()
+                        .withBucket(BucketMode.POSTPONE_BUCKET)
+                        .readFileIterator());
+    }
+
+    /** Returns row counts of active postpone files in the specified snapshot. */
+    public static Map<BinaryRow, Long> getPostponeRowCounts(FileStoreTable table, long snapshotId) {
+        return getPostponeRowCounts(
+                table.newSnapshotReader()
+                        .withSnapshot(snapshotId)
+                        .withBucket(BucketMode.POSTPONE_BUCKET)
+                        .readFileIterator());
+    }
+
+    private static Map<BinaryRow, Long> getPostponeRowCounts(Iterator<ManifestEntry> iterator) {
         Map<BinaryRow, Long> rowCounts = new HashMap<>();
-        Iterator<ManifestEntry> iterator =
-                table.newSnapshotReader().withBucket(BucketMode.POSTPONE_BUCKET).readFileIterator();
         while (iterator.hasNext()) {
             ManifestEntry entry = iterator.next();
             rowCounts.merge(entry.partition(), entry.file().rowCount(), Long::sum);
@@ -130,8 +182,64 @@ public class PostponeUtils {
         return table.copy(batchWriteOptions);
     }
 
+    public static FileStoreTable tableForPostponeCompact(
+            FileStoreTable table, int numBuckets, long snapshotId) {
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(BUCKET.key(), String.valueOf(numBuckets));
+        compactOptions.put(WRITE_ONLY.key(), "false");
+        compactOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
+        return table.copy(compactOptions);
+    }
+
     public static FileStoreTable tableForCommit(FileStoreTable table) {
         return table.copy(
                 Collections.singletonMap(BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET)));
+    }
+
+    /** A real bucket which requires background compaction. */
+    public static final class CompactBucket implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final int totalBuckets;
+
+        public CompactBucket(BinaryRow partition, int bucket, int totalBuckets) {
+            this.partition = partition.copy();
+            this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
+        }
+
+        public BinaryRow partition() {
+            return partition;
+        }
+
+        public int bucket() {
+            return bucket;
+        }
+
+        public int totalBuckets() {
+            return totalBuckets;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof CompactBucket)) {
+                return false;
+            }
+            CompactBucket that = (CompactBucket) o;
+            return bucket == that.bucket
+                    && totalBuckets == that.totalBuckets
+                    && Objects.equals(partition, that.partition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, totalBuckets);
+        }
     }
 }
