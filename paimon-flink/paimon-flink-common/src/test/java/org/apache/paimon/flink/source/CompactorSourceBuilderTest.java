@@ -70,16 +70,26 @@ public class CompactorSourceBuilderTest {
     }
 
     @Test
+    public void testBucketKeyUsesPartitionAndBucket() {
+        DataSplit split1 = dataSplit(1L, BinaryRow.EMPTY_ROW, 0, dataFile("file-1", 10L));
+        DataSplit split2 = dataSplit(2L, BinaryRow.EMPTY_ROW, 0, dataFile("file-2", 25L));
+        DataSplit split3 = dataSplit(3L, BinaryRow.EMPTY_ROW, 1, dataFile("file-3", 30L));
+
+        assertThat(CompactorSourceBuilder.bucketKey(split1))
+                .isEqualTo(CompactorSourceBuilder.bucketKey(split2));
+        assertThat(CompactorSourceBuilder.bucketKey(split1))
+                .isNotEqualTo(CompactorSourceBuilder.bucketKey(split3));
+    }
+
+    @Test
     public void testBucketFileSizeUsesTotalDataFileSize() {
         DataSplit split =
-                DataSplit.builder()
-                        .withSnapshot(1)
-                        .withPartition(BinaryRow.EMPTY_ROW)
-                        .withBucket(0)
-                        .withBucketPath("bucket-0")
-                        .withDataFiles(
-                                Arrays.asList(dataFile("file-1", 10L), dataFile("file-2", 25L)))
-                        .build();
+                dataSplit(
+                        1L,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        dataFile("file-1", 10L),
+                        dataFile("file-2", 25L));
 
         assertThat(CompactorSourceBuilder.bucketFileSize(split)).isEqualTo(35L);
     }
@@ -89,6 +99,17 @@ public class CompactorSourceBuilderTest {
         map.put(FlinkConnectorOptions.SCAN_PARALLELISM.key(), String.valueOf(scanParallelism));
         map.put(FlinkConnectorOptions.SINK_PARALLELISM.key(), String.valueOf(sinkParallelism));
         return Options.fromMap(map);
+    }
+
+    private static DataSplit dataSplit(
+            long snapshot, BinaryRow partition, int bucket, DataFileMeta... dataFiles) {
+        return DataSplit.builder()
+                .withSnapshot(snapshot)
+                .withPartition(partition)
+                .withBucket(bucket)
+                .withBucketPath("bucket-" + bucket)
+                .withDataFiles(Arrays.asList(dataFiles))
+                .build();
     }
 
     private static DataFileMeta dataFile(String fileName, long fileSize) {

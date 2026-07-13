@@ -102,6 +102,55 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
     }
 
     @Test
+    public void testGroupedSplitAllocationBalancesByBucketTotalWeight() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(2);
+
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        // Bucket 0 has two splits, each with weight 50. Bucket 1 has one split with weight 100.
+        // The assigner should first group by bucket, calculate bucket-level total weight, and then
+        // bin-pack the two bucket groups evenly across readers. This also guarantees all splits of
+        // the same bucket go to the same downstream writer.
+        splits.add(createSnapshotSplit(1, 0, Collections.emptyList()));
+        splits.add(createSnapshotSplit(2, 0, Collections.emptyList()));
+        splits.add(createSnapshotSplit(3, 1, Collections.emptyList()));
+
+        StaticFileStoreSplitEnumerator enumerator =
+                new StaticFileStoreSplitEnumerator(
+                        context,
+                        null,
+                        StaticFileStoreSource.createSplitAssigner(
+                                context,
+                                10,
+                                SplitAssignMode.FAIR,
+                                splits,
+                                split -> ((DataSplit) split.split()).bucket() == 0 ? 50L : 100L,
+                                split -> ((DataSplit) split.split()).bucket()));
+
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(assignments.values())
+                .anySatisfy(
+                        assignment ->
+                                assertThat(assignment.getAssignedSplits())
+                                        .containsExactlyInAnyOrder(splits.get(0), splits.get(1)));
+        assertThat(assignments.values())
+                .anySatisfy(
+                        assignment ->
+                                assertThat(assignment.getAssignedSplits())
+                                        .containsExactly(splits.get(2)));
+        assertThat(assignments.values())
+                .allSatisfy(
+                        assignment ->
+                                assertThat(groupedTotalWeight(assignment.getAssignedSplits()))
+                                        .isEqualTo(100L));
+    }
+
+    @Test
     public void testSplitBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
@@ -190,6 +239,12 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
                             int snapshotId = (int) ((DataSplit) split.split()).snapshotId();
                             return snapshotId == 1 || snapshotId == 2 ? 100L : 1L;
                         })
+                .sum();
+    }
+
+    private long groupedTotalWeight(List<FileStoreSourceSplit> splits) {
+        return splits.stream()
+                .mapToLong(split -> ((DataSplit) split.split()).bucket() == 0 ? 50L : 100L)
                 .sum();
     }
 
