@@ -60,6 +60,18 @@ class ESIndexOptionsTest {
     }
 
     @Test
+    void nativeVectorAlgorithmIsRejectedUpFront() {
+        Map<String, String> m = new HashMap<>();
+        m.put("global-index.es-index.fields.embedding.algorithm", "native");
+
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(m)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Vector algorithm 'native' is not supported")
+                .hasMessageContaining("hnsw")
+                .hasMessageContaining("diskbbq");
+    }
+
+    @Test
     void indexTypeLevelKeyIsDefaultAndFieldLevelOverrides() {
         Map<String, String> m = new HashMap<>();
         // index-type-level default for all vector fields ...

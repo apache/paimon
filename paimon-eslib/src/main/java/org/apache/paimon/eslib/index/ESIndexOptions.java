@@ -214,6 +214,12 @@ public class ESIndexOptions {
         String dimStr = resolve(options, fieldName, "dimension", null);
         int dimension = dimStr != null ? Integer.parseInt(dimStr) : inferDimension(dataType);
         String metric = resolve(options, fieldName, "metric", "cosine");
+        VectorAlgorithm vectorAlgorithm = VectorAlgorithm.fromName(algorithm);
+        if (vectorAlgorithm == VectorAlgorithm.NATIVE) {
+            throw new IllegalArgumentException(
+                    "Vector algorithm 'native' is not supported by paimon-eslib; "
+                            + "use 'hnsw' or 'diskbbq'");
+        }
 
         Map<String, String> params = new LinkedHashMap<>();
         String mStr = resolve(options, fieldName, "m", null);
@@ -230,7 +236,7 @@ public class ESIndexOptions {
         }
 
         return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.VECTOR)
-                .algorithm(VectorAlgorithm.fromName(algorithm))
+                .algorithm(vectorAlgorithm)
                 .dimension(dimension)
                 .metric(metric)
                 .algorithmParams(params)

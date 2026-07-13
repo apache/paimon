@@ -434,7 +434,7 @@ public class ESIndexGlobalIndexWriter
      * reader can provide an ArchiveDataProvider without re-parsing the archive. Format: [4-byte
      * file count] then for each file: [4-byte name len][name bytes][8-byte offset][8-byte length].
      *
-     * <p>The offsets MUST match {@link #packDirectory}'s interleaved layout: each file's data
+     * <p>The offsets MUST match {@link #packDirectoryStream}'s interleaved layout: each file's data
      * begins right after its own [nameLen][name][dataLen] header.
      */
     private byte[] buildMeta(java.io.File[] segFiles) throws IOException {

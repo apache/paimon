@@ -47,7 +47,7 @@ override it with `fields.<field>.type`:
 | `VECTOR<FLOAT>` / `ARRAY<FLOAT>` | Vector (ANN) | `vector` |
 | `STRING` | Full-text primary + keyword sub-field | `fulltext` or `keyword` |
 | `TIMESTAMP` / `DATE` | Long scalar | `date` |
-| numeric and other scalars | Scalar | — |
+| supported numeric scalars | Scalar | — |
 
 Text columns always provide both capabilities. A `fulltext` primary field gets a `<column>.keyword`
 exact-match sub-field; a `keyword` primary field gets a `<column>.fulltext` analyzed sub-field.
@@ -95,7 +95,7 @@ CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding,content,category,price',
     index_type => 'es-index',
-    options => 'global-index.es-index.fields.embedding.algorithm=diskbbq,global-index.es-index.fields.embedding.dimension=768,global-index.es-index.fields.embedding.metric=cosine,global-index.es-index.fields.content.analyzer=standard'
+    options => 'global-index.es-index.fields.embedding.algorithm=diskbbq,global-index.es-index.fields.embedding.dimension=768,global-index.es-index.fields.embedding.metric=cosine,global-index.es-index.fields.content.analyzer=standard,global-index.es-index.fields.category.type=keyword'
 );
 ```
 
@@ -115,7 +115,7 @@ CALL sys.create_global_index(
     `table` => 'db.my_table',
     index_column => 'embedding,content,category,price',
     index_type => 'es-index',
-    options => 'global-index.es-index.fields.embedding.algorithm=diskbbq,global-index.es-index.fields.embedding.dimension=768,global-index.es-index.fields.embedding.metric=cosine,global-index.es-index.fields.content.analyzer=standard'
+    options => 'global-index.es-index.fields.embedding.algorithm=diskbbq,global-index.es-index.fields.embedding.dimension=768,global-index.es-index.fields.embedding.metric=cosine,global-index.es-index.fields.content.analyzer=standard,global-index.es-index.fields.category.type=keyword'
 );
 ```
 
@@ -132,8 +132,8 @@ column.
 | Key | Applies to | Default | Description |
 |---|---|---|---|
 | `type` | any column | inferred from data type | Force the sub-index type: `vector`, `fulltext`, `keyword`, `date`. |
-| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw`, `diskbbq`, or `native`. `native` requires the native vector library on the classpath. |
-| `dimension` | vector | inferred | Vector dimension for `ARRAY<FLOAT>` columns. Taken from the type for `VECTOR<FLOAT>`. |
+| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw` or `diskbbq`. `native` is not supported by paimon-eslib. |
+| `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension. Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
 | `metric` | vector | `cosine` | Distance metric (for example `cosine`, `l2`, `dot_product`). Use the same metric at build and query time. |
 | `m` | vector (`hnsw`) | engine default | HNSW graph out-degree. |
 | `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width. |

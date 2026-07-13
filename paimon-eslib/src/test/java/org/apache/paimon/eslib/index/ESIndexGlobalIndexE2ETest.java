@@ -923,6 +923,7 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(0, GenericRow.of(1, Timestamp.fromEpochMillis(1000L)));
         writer.write(1, GenericRow.of(2, Timestamp.fromEpochMillis(2000L)));
         writer.write(2, GenericRow.of(3, Timestamp.fromEpochMillis(3000L)));
+        writer.write(3, GenericRow.of(null, null));
         ResultEntry entry = writer.finish().get(0);
 
         org.apache.paimon.fs.Path filePath =
@@ -952,6 +953,33 @@ class ESIndexGlobalIndexE2ETest {
         assertTrue(tsNe2s.isPresent(), "TIMESTAMP <> literal is index-evaluable");
         assertEquals(2, tsNe2s.get().results().getIntCardinality(), "two rows except 2000ms");
         assertTrue(contains(tsNe2s.get().results(), 0L) && contains(tsNe2s.get().results(), 2L));
+
+        Optional<GlobalIndexResult> dateBetween = reader.visitBetween(dateRef, 2, 3).join();
+        assertTrue(dateBetween.isPresent(), "DATE BETWEEN is index-evaluable");
+        assertEquals(2, dateBetween.get().results().getIntCardinality());
+        assertTrue(
+                contains(dateBetween.get().results(), 1L)
+                        && contains(dateBetween.get().results(), 2L));
+
+        Optional<GlobalIndexResult> dateNotBetween = reader.visitNotBetween(dateRef, 2, 3).join();
+        assertTrue(dateNotBetween.isPresent(), "DATE NOT BETWEEN is index-evaluable");
+        assertEquals(1, dateNotBetween.get().results().getIntCardinality());
+        assertTrue(contains(dateNotBetween.get().results(), 0L), "null rows must stay excluded");
+
+        Optional<GlobalIndexResult> reversedBetween = reader.visitBetween(dateRef, 3, 1).join();
+        assertTrue(reversedBetween.isPresent());
+        assertTrue(reversedBetween.get().results().isEmpty(), "reversed BETWEEN matches no row");
+
+        Optional<GlobalIndexResult> reversedNotBetween =
+                reader.visitNotBetween(dateRef, 3, 1).join();
+        assertTrue(reversedNotBetween.isPresent());
+        assertEquals(
+                3,
+                reversedNotBetween.get().results().getIntCardinality(),
+                "reversed NOT BETWEEN matches every non-null row");
+
+        assertTrue(reader.visitBetween(dateRef, null, 3).join().get().results().isEmpty());
+        assertTrue(reader.visitNotBetween(dateRef, 1, null).join().get().results().isEmpty());
 
         try {
             reader.close();
@@ -1110,34 +1138,34 @@ class ESIndexGlobalIndexE2ETest {
             // Force nprobe above DiskBBQ's parallel threshold. With the old shared one-thread pool,
             // the outer future occupied the only worker and then waited forever for its nested
             // cluster tasks. Separate pools must finish within the timeout.
-            int opensBeforeParallelSearch = fileReader.openCount();
             Optional<ScoredGlobalIndexResult> parallelResult =
                     reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
                             .get(30, TimeUnit.SECONDS);
             assertTrue(parallelResult.isPresent(), "single-thread DiskBBQ pool must not deadlock");
-            assertTrue(
-                    fileReader.openCount() > opensBeforeParallelSearch,
-                    "parallel DiskBBQ search must exercise ArchiveDataProvider forks");
             assertEquals(
                     fileReader.openCount() - fileReader.closeCount(),
                     reader.openStreamCount(),
                     "providers whose streams closed during search must unregister immediately");
 
-            // Repeat the same high-nprobe query. Every temporary fork that ESLib closes must
-            // disappear from Paimon's registry instead of accumulating as a closed object
-            // reference; any genuinely live provider remains available to reader.close().
-            int opensBeforeRepeatedSearch = fileReader.openCount();
-            Optional<ScoredGlobalIndexResult> repeatedResult =
-                    reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
-                            .get(30, TimeUnit.SECONDS);
-            assertTrue(repeatedResult.isPresent());
-            assertTrue(
-                    fileReader.openCount() > opensBeforeRepeatedSearch,
-                    "repeated search must create temporary per-cluster forks");
+            // Query-scoped IndexInput clones are not guaranteed to be closed by Lucene. Paimon's
+            // provider bridge must reuse a stream pool bounded by peak read concurrency instead of
+            // retaining one newly forked stream per rescore query until reader.close().
+            int opensAfterWarmup = fileReader.openCount();
+            int liveStreamsAfterWarmup = reader.openStreamCount();
+            for (int repeat = 0; repeat < 3; repeat++) {
+                Optional<ScoredGlobalIndexResult> repeatedResult =
+                        reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
+                                .get(30, TimeUnit.SECONDS);
+                assertTrue(repeatedResult.isPresent());
+            }
             assertEquals(
-                    fileReader.openCount() - fileReader.closeCount(),
+                    opensAfterWarmup,
+                    fileReader.openCount(),
+                    "repeated DiskBBQ rescore queries must reuse provider streams");
+            assertEquals(
+                    liveStreamsAfterWarmup,
                     reader.openStreamCount(),
-                    "only providers whose streams are still open may remain registered");
+                    "repeated DiskBBQ queries must not retain additional live streams");
         } finally {
             reader.close();
             queryExecutor.shutdownNow();

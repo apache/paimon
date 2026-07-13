@@ -49,9 +49,11 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -67,6 +69,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -92,9 +95,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     // Factory-owned pool used only by ESLib / DiskBBQ's internal parallel cluster search.
     private final ExecutorService searchExecutor;
 
-    // Identity semantics are intentional: distinct forks may wrap the same path and must each be
+    // Identity semantics are intentional: distinct streams may wrap the same path and must each be
     // tracked until their own provider closes.
-    private final Set<TrackedArchiveDataProvider> openProviders =
+    private final Set<TrackedArchiveStream> openProviders =
             Collections.newSetFromMap(new IdentityHashMap<>());
     // Queries hold the read lock for their complete load/search operation. close() takes the write
     // lock, so it cannot close or replace resources that an in-flight query is still using.
@@ -252,11 +255,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Applies {@link FullTextSearch#includeRowIds()} without changing top-K semantics. ESLib 1.0.3
-     * does not expose a full-text candidate-filter argument, so search progressively over-fetches
-     * until it has the requested number of included hits or has exhausted all matching documents.
-     * The table path normally supplies the whole shard row count as {@code limit}, making this a
-     * single search; the loop also preserves the direct reader API for smaller limits.
+     * Applies {@link FullTextSearch#includeRowIds()} without changing top-K semantics. ESLib does
+     * not expose a full-text candidate-filter argument, so search progressively over-fetches until
+     * it has the requested number of included hits or has exhausted all matching documents. The
+     * table path normally supplies the whole shard row count as {@code limit}, making this a single
+     * search; the loop also preserves the direct reader API for smaller limits.
      */
     private SearchResult fullTextSearch(
             FullTextQuerySpec spec, int limit, RoaringNavigableMap64 includeRowIds)
@@ -516,7 +519,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // (*.index)
             // dataProvider bridge Lucene's per-file reads into offset/length reads over the packed
             // archive
-            // fork() gives each IndexInput clone its own stream for concurrent search.
+            // The provider bridge pools streams across IndexInput clones so concurrent reads
+            // remain independent without opening one stream for every query-scoped clone.
             ArchiveDataProvider dataProvider = null;
             ESIndexSearcher candidateSearcher = null;
             try {
@@ -548,27 +552,146 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     private ArchiveDataProvider createProvider(GlobalIndexIOMeta meta) throws IOException {
+        TrackedArchiveStream rootProvider = createTrackedStream(meta);
+        return new PooledArchiveDataProvider(new ArchiveDataProviderPool(meta, rootProvider), true);
+    }
+
+    private TrackedArchiveStream createTrackedStream(GlobalIndexIOMeta meta) throws IOException {
         SeekableInputStream inputStream = fileReader.getInputStream(meta);
-        TrackedArchiveDataProvider provider = new TrackedArchiveDataProvider(meta, inputStream);
+        TrackedArchiveStream provider = new TrackedArchiveStream(inputStream);
         synchronized (openProviders) {
             openProviders.add(provider);
         }
         return provider;
     }
 
-    private final class TrackedArchiveDataProvider implements ArchiveDataProvider {
-        private final GlobalIndexIOMeta meta;
-        private final SeekableInputStream inputStream;
+    /** Lightweight fork handle sharing a stream pool owned by the root archive provider. */
+    private final class PooledArchiveDataProvider implements ArchiveDataProvider {
+        private final ArchiveDataProviderPool providerPool;
+        private final boolean ownsProviderPool;
         private final AtomicBoolean providerClosed = new AtomicBoolean();
 
-        private TrackedArchiveDataProvider(
-                GlobalIndexIOMeta meta, SeekableInputStream inputStream) {
-            this.meta = meta;
-            this.inputStream = inputStream;
+        private PooledArchiveDataProvider(
+                ArchiveDataProviderPool providerPool, boolean ownsProviderPool) {
+            this.providerPool = providerPool;
+            this.ownsProviderPool = ownsProviderPool;
         }
 
         @Override
         public byte[] readRange(long offset, int length) throws IOException {
+            if (providerClosed.get()) {
+                throw new IOException("Archive data provider is closed");
+            }
+            return providerPool.readRange(offset, length);
+        }
+
+        @Override
+        public ArchiveDataProvider fork() throws IOException {
+            if (providerClosed.get()) {
+                throw new IOException("Archive data provider is closed");
+            }
+            return new PooledArchiveDataProvider(providerPool, false);
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (!providerClosed.compareAndSet(false, true)) {
+                return;
+            }
+            if (!ownsProviderPool) {
+                return;
+            }
+            try {
+                providerPool.close();
+            } catch (IOException e) {
+                providerClosed.set(false);
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Borrows one seekable stream per atomic range read. Query-scoped IndexInput clones therefore
+     * create only lightweight handles; the number of real streams is bounded by peak concurrent
+     * reads and all streams are closed with the root archive provider.
+     */
+    private final class ArchiveDataProviderPool {
+        private final GlobalIndexIOMeta meta;
+        private final Deque<TrackedArchiveStream> availableProviders = new ArrayDeque<>();
+        private final Set<TrackedArchiveStream> allProviders =
+                Collections.newSetFromMap(new IdentityHashMap<>());
+        private boolean closed;
+
+        private ArchiveDataProviderPool(GlobalIndexIOMeta meta, TrackedArchiveStream rootProvider) {
+            this.meta = meta;
+            availableProviders.add(rootProvider);
+            allProviders.add(rootProvider);
+        }
+
+        private byte[] readRange(long offset, int length) throws IOException {
+            TrackedArchiveStream provider = acquire();
+            try {
+                return provider.readRange(offset, length);
+            } finally {
+                release(provider);
+            }
+        }
+
+        private synchronized TrackedArchiveStream acquire() throws IOException {
+            if (closed) {
+                throw new IOException("Archive data provider pool is closed");
+            }
+            TrackedArchiveStream provider = availableProviders.pollFirst();
+            if (provider == null) {
+                provider = createTrackedStream(meta);
+                allProviders.add(provider);
+            }
+            return provider;
+        }
+
+        private synchronized void release(TrackedArchiveStream provider) {
+            if (!closed) {
+                availableProviders.addFirst(provider);
+            }
+        }
+
+        private void close() throws IOException {
+            List<TrackedArchiveStream> providers;
+            synchronized (this) {
+                if (closed && allProviders.isEmpty()) {
+                    return;
+                }
+                closed = true;
+                providers = new ArrayList<>(allProviders);
+                availableProviders.clear();
+            }
+
+            IOException failure = null;
+            for (TrackedArchiveStream provider : providers) {
+                try {
+                    provider.close();
+                    synchronized (this) {
+                        allProviders.remove(provider);
+                    }
+                } catch (IOException e) {
+                    failure = mergeFailure(failure, e);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
+    }
+
+    private final class TrackedArchiveStream {
+        private final SeekableInputStream inputStream;
+        private final AtomicBoolean providerClosed = new AtomicBoolean();
+
+        private TrackedArchiveStream(SeekableInputStream inputStream) {
+            this.inputStream = inputStream;
+        }
+
+        private byte[] readRange(long offset, int length) throws IOException {
             byte[] buf = new byte[length];
             inputStream.seek(offset);
             int read = 0;
@@ -582,13 +705,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             return buf;
         }
 
-        @Override
-        public ArchiveDataProvider fork() throws IOException {
-            return createProvider(meta);
-        }
-
-        @Override
-        public void close() throws IOException {
+        private void close() throws IOException {
             if (!providerClosed.compareAndSet(false, true)) {
                 return;
             }
@@ -632,13 +749,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     private IOException closeTrackedProviders() {
-        List<TrackedArchiveDataProvider> providers;
+        List<TrackedArchiveStream> providers;
         synchronized (openProviders) {
             providers = new ArrayList<>(openProviders);
         }
 
         IOException failure = null;
-        for (TrackedArchiveDataProvider provider : providers) {
+        for (TrackedArchiveStream provider : providers) {
             try {
                 provider.close();
             } catch (IOException e) {
@@ -898,7 +1015,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * eslib-core 1.0.3 does not implement NOT_EQUAL / NOT_IN scalar predicates and falls through to
+     * ESLib does not implement NOT_EQUAL / NOT_IN scalar predicates and falls through to
      * MatchAllDocsQuery. Evaluate the negation here as exists(field) AND NOT matchingFilter, so
      * null rows are excluded and vector/hybrid includeRowIds cannot become an accidental full
      * match.
@@ -1083,6 +1200,42 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        if (from == null || to == null || isReversedRange(fieldRef, from, to)) {
+            return emptyFilterFuture();
+        }
+        return async(
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.scalar(
+                                        ScalarPredicate.range(
+                                                indexedScalarLiteral(fieldRef, from),
+                                                indexedScalarLiteral(fieldRef, to)))));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        if (from == null || to == null) {
+            return emptyFilterFuture();
+        }
+        return async(
+                () -> {
+                    if (isReversedRange(fieldRef, from, to)) {
+                        return dispatchFilter(fieldRef, IndexFilter.exists());
+                    }
+                    return dispatchExistingRowsNotMatching(
+                            fieldRef,
+                            IndexFilter.scalar(
+                                    ScalarPredicate.range(
+                                            indexedScalarLiteral(fieldRef, from),
+                                            indexedScalarLiteral(fieldRef, to))));
+                });
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
             FieldRef fieldRef, List<Object> literals) {
         List<Object> nonNullLiterals = withoutNullLiterals(literals);
@@ -1259,6 +1412,10 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private static CompletableFuture<Optional<GlobalIndexResult>> emptyFilterFuture() {
         return CompletableFuture.completedFuture(
                 Optional.of(GlobalIndexResult.create(new RoaringNavigableMap64())));
+    }
+
+    private static boolean isReversedRange(FieldRef fieldRef, Object from, Object to) {
+        return fieldRef.type() != null && compareLiteral(fieldRef.type(), from, to) > 0;
     }
 
     private static List<Object> withoutNullLiterals(List<Object> literals) {

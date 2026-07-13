@@ -32,8 +32,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Factory for creating ES multi-index global indexers. Supports vector (DiskBBQ/HNSW/Native),
- * fulltext (BM25), and scalar fields.
+ * Factory for creating ES multi-index global indexers. Supports vector (DiskBBQ/HNSW), fulltext
+ * (BM25), and scalar fields.
  */
 public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
 
