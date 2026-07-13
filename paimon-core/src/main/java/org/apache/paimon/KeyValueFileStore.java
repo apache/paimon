@@ -25,7 +25,6 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
-import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
@@ -40,7 +39,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -173,19 +171,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
         BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
-        if (options.primaryKeyVectorIndexEnabled()) {
-            String vectorColumn = options.primaryKeyVectorIndexColumn();
-            DataField vectorField = schema.nameToFieldMap().get(vectorColumn);
+        if (options.primaryKeyVectorIndexEnabled()
+                || !options.primaryKeyBTreeIndexColumns().isEmpty()
+                || !options.primaryKeyBitmapIndexColumns().isEmpty()) {
             primaryKeyIndexMaintainerFactory =
-                    BucketedPrimaryKeyIndexMaintainer.Factory.ofVector(
-                            new BucketedVectorIndexMaintainer.Factory(
-                                            newIndexFileHandler(),
-                                            newReaderFactoryBuilder(),
-                                            vectorField,
-                                            options.primaryKeyVectorDistanceMetric(vectorColumn),
-                                            options.primaryKeyVectorIndexType(vectorColumn))
-                                    .withIndexOptions(
-                                            options.primaryKeyVectorIndexOptions(vectorColumn)));
+                    BucketedPrimaryKeyIndexMaintainer.Factory.create(
+                            newIndexFileHandler(), newReaderFactoryBuilder(), schema);
         }
         return new KeyValueFileStoreWrite(
                 fileIO,
