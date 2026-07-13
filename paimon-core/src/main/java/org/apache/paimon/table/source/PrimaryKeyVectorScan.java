@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
@@ -74,6 +75,9 @@ public class PrimaryKeyVectorScan implements VectorScan {
 
         SnapshotReader snapshotReader =
                 table.newSnapshotReader().withSnapshot(snapshot).withMode(ScanMode.ALL).keepStats();
+        if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
+            snapshotReader.onlyReadRealBuckets();
+        }
         if (partitionFilter != null) {
             snapshotReader.withPartitionFilter(partitionFilter);
         }

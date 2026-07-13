@@ -24,7 +24,7 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
-import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -151,7 +151,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long maxSequenceNumber;
         @Nullable protected final DynamicBucketIndexMaintainer indexMaintainer;
         @Nullable protected final BucketedDvMaintainer deletionVectorsMaintainer;
-        @Nullable protected final BucketedVectorIndexMaintainer vectorIndexMaintainer;
+        @Nullable protected final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final CommitIncrement commitIncrement;
 
         protected State(
@@ -164,7 +164,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long maxSequenceNumber,
                 @Nullable DynamicBucketIndexMaintainer indexMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
-                @Nullable BucketedVectorIndexMaintainer vectorIndexMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
@@ -175,7 +175,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.maxSequenceNumber = maxSequenceNumber;
             this.indexMaintainer = indexMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
-            this.vectorIndexMaintainer = vectorIndexMaintainer;
+            this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.commitIncrement = commitIncrement;
         }
 
@@ -192,7 +192,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                     maxSequenceNumber,
                     indexMaintainer,
                     deletionVectorsMaintainer,
-                    vectorIndexMaintainer,
+                    primaryKeyIndexMaintainer,
                     commitIncrement);
         }
     }

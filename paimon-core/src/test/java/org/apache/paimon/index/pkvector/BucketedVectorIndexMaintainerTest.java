@@ -20,8 +20,11 @@ package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -65,6 +68,72 @@ class BucketedVectorIndexMaintainerTest {
     @AfterEach
     void shutdownExecutor() {
         executor.shutdownNow();
+    }
+
+    @Test
+    void testRestoreFiltersPayloadsByVectorDefinition() {
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data");
+        IndexFileMeta vectorPayload = payload("ann", data, 7, "test-vector-ann");
+        List<IndexFileMeta> restoredPayloads =
+                Arrays.asList(
+                        payload("btree", data, 3, "btree"),
+                        payload("bitmap", data, 5, "bitmap"),
+                        payload("other-ann", data, 8, "test-vector-ann"),
+                        vectorPayload);
+
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        new PkVectorAnnSegmentFile(LocalFileIO.create(), pathFactory()),
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        mock(PkVectorDataFileReader.Factory.class),
+                        Collections.singletonList(data),
+                        restoredPayloads,
+                        executor);
+
+        assertThat(maintainer.segments()).containsExactly(vectorPayload);
+    }
+
+    @Test
+    void testPreparedCommitCanBeAbortedByCoordinator() throws Exception {
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data");
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{1, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        new PkVectorAnnSegmentFile(LocalFileIO.create(), pathFactory()),
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        readerFactory,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(data),
+                                Collections.emptyList()),
+                        true);
+        assertThat(maintainer.segments()).hasSize(1);
+
+        commit.abort(new IllegalStateException("later definition failed"));
+
+        assertThat(maintainer.segments()).isEmpty();
+        assertThat(fileCount()).isZero();
     }
 
     @Test
@@ -189,8 +258,8 @@ class BucketedVectorIndexMaintainerTest {
 
             assertThat(commit.appendIncrement()).isPresent();
             IndexFileMeta segment = commit.appendIncrement().get().newIndexFiles().get(0);
-            assertThat(PkVectorSourceMeta.fromIndexFile(segment).sourceFiles())
-                    .extracting(PkVectorSourceFile::fileName)
+            assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles())
+                    .extracting(PrimaryKeyIndexSourceFile::fileName)
                     .containsExactly("data-2");
             assertThat(annFile.exists(segment)).isTrue();
         } finally {
@@ -253,8 +322,8 @@ class BucketedVectorIndexMaintainerTest {
         assertThat(increment.newIndexFiles()).hasSize(1);
         IndexFileMeta delta = increment.newIndexFiles().get(0);
         assertThat(delta.indexType()).isEqualTo("test-vector-ann");
-        assertThat(PkVectorSourceMeta.fromIndexFile(delta).sourceFiles())
-                .extracting(PkVectorSourceFile::fileName)
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(delta).sourceFiles())
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-3");
         assertThat(maintainer.segments()).containsExactly(initialAnn, delta);
     }
@@ -361,8 +430,10 @@ class BucketedVectorIndexMaintainerTest {
                 commit.appendIncrement().get();
         assertThat(increment.deletedIndexFiles()).containsExactlyInAnyOrder(ann1, ann2, ann3);
         assertThat(increment.newIndexFiles()).hasSize(1);
-        assertThat(PkVectorSourceMeta.fromIndexFile(increment.newIndexFiles().get(0)).sourceFiles())
-                .extracting(PkVectorSourceFile::fileName)
+        assertThat(
+                        PrimaryKeyIndexSourceMeta.fromIndexFile(increment.newIndexFiles().get(0))
+                                .sourceFiles())
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-1", "data-2", "data-3");
     }
 
@@ -653,6 +724,25 @@ class BucketedVectorIndexMaintainerTest {
                         null,
                         null)
                 .upgrade(1);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName, DataFileMeta source, int fieldId, String indexType) {
+        PrimaryKeyIndexSourceFile sourceFile =
+                new PrimaryKeyIndexSourceFile(source.fileName(), source.rowCount());
+        return new IndexFileMeta(
+                indexType,
+                fileName,
+                1,
+                source.rowCount(),
+                new GlobalIndexMeta(
+                        0,
+                        source.rowCount() - 1,
+                        fieldId,
+                        null,
+                        new byte[] {1},
+                        new PrimaryKeyIndexSourceMeta(sourceFile).serialize()),
+                null);
     }
 
     private IndexPathFactory pathFactory() {

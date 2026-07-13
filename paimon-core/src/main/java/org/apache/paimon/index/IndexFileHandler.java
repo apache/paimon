@@ -25,6 +25,7 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.pksorted.PkSortedIndexFile;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentFile;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestEntrySerializer;
@@ -87,6 +88,10 @@ public class IndexFileHandler {
 
     public PkVectorAnnSegmentFile pkVectorAnnSegment(BinaryRow partition, int bucket) {
         return new PkVectorAnnSegmentFile(fileIO, pathFactories.get(partition, bucket));
+    }
+
+    public PkSortedIndexFile pkSortedIndex(BinaryRow partition, int bucket) {
+        return new PkSortedIndexFile(fileIO, pathFactories.get(partition, bucket));
     }
 
     public Optional<IndexFileMeta> scanHashIndex(

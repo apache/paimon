@@ -29,6 +29,9 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
@@ -350,6 +353,8 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        validatePrimaryKeyIndexColumns(options);
+        validatePrimaryKeySortedIndexes(schema, options);
         validatePrimaryKeyVectorIndex(schema, options);
 
         validateMergeFunctionFactory(schema);
@@ -929,8 +934,9 @@ public class SchemaValidation {
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
                 options.mergeEngine());
         checkArgument(
-                options.bucket() > 0,
-                "Primary-key vector index requires fixed bucket mode (bucket > 0), but bucket is %s.",
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key vector index requires fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
                 options.bucket());
         checkArgument(
                 !options.pkClusteringOverride(),
@@ -957,6 +963,101 @@ public class SchemaValidation {
                 "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
                 indexColumn,
                 options.primaryKeyVectorDistanceMetric(indexColumn));
+    }
+
+    private static void validatePrimaryKeyIndexColumns(CoreOptions options) {
+        List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
+        List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
+        List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+
+        Set<String> indexedColumns = new HashSet<>();
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
+    }
+
+    private static void validateNoDuplicatePrimaryKeyIndexColumns(
+            List<String> columns, String optionKey) {
+        checkArgument(
+                new HashSet<>(columns).size() == columns.size(),
+                "%s must not contain duplicate columns, but is %s.",
+                optionKey,
+                columns);
+    }
+
+    private static void validateUniquePrimaryKeyIndexColumns(
+            Set<String> indexedColumns, List<String> columns) {
+        for (String column : columns) {
+            checkArgument(
+                    indexedColumns.add(column),
+                    "Column '%s' can own at most one primary-key index.",
+                    column);
+        }
+    }
+
+    private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
+        if (options.primaryKeyBTreeIndexColumns().isEmpty()
+                && options.primaryKeyBitmapIndexColumns().isEmpty()) {
+            return;
+        }
+
+        checkArgument(
+                options.deletionVectorsEnabled(),
+                "Primary-key BTree and Bitmap indexes require deletion-vectors.enabled = true.");
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key BTree and Bitmap indexes require a primary-key table.");
+        checkArgument(
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key BTree and Bitmap indexes require fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key BTree and Bitmap indexes require deletion-vectors.merge-on-read = false.");
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key BTree and Bitmap indexes do not support pk-clustering-override.");
+
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyBTreeIndexColumns(),
+                CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyBitmapIndexColumns(),
+                CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+
+        Map<String, DataField> fields = schema.nameToFieldMap();
+        for (String column : options.primaryKeyBTreeIndexColumns()) {
+            GlobalIndexer.create(
+                    BTreeGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyBTreeIndexOptions(column));
+        }
+        for (String column : options.primaryKeyBitmapIndexColumns()) {
+            GlobalIndexer.create(
+                    BitmapGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyBitmapIndexOptions(column));
+        }
+    }
+
+    private static void validatePrimaryKeySortedIndexColumns(
+            TableSchema schema, List<String> columns, String optionKey) {
+        for (String column : columns) {
+            checkArgument(
+                    schema.fieldNames().contains(column),
+                    "%s entry '%s' must reference an existing column.",
+                    optionKey,
+                    column);
+        }
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

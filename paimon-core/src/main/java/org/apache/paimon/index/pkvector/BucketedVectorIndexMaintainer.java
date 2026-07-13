@@ -22,6 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -90,12 +93,21 @@ public class BucketedVectorIndexMaintainer {
                         coreOptions.primaryKeyVectorIndexCompactionLevelFanout(),
                         coreOptions.primaryKeyVectorIndexCompactionStaleRatioThreshold());
         this.executor = executor;
+
+        List<IndexFileMeta> definitionPayloads = new ArrayList<>();
+        for (IndexFileMeta payload : restoredPayloads) {
+            if (algorithm.equals(payload.indexType())
+                    && payload.globalIndexMeta() != null
+                    && payload.globalIndexMeta().indexFieldId() == vectorFieldId) {
+                definitionPayloads.add(payload);
+            }
+        }
         PkVectorBucketIndexState restoredState =
-                new PkVectorBucketIndexState(vectorFieldId, algorithm, restoredPayloads);
+                new PkVectorBucketIndexState(vectorFieldId, algorithm, definitionPayloads);
         this.annSegments = new ArrayList<>(restoredState.annSegments());
         this.activeSourceFiles = new LinkedHashMap<>();
         for (DataFileMeta file : restoredDataFiles) {
-            if (PkVectorSourcePolicy.shouldRead(file)) {
+            if (PrimaryKeyIndexSourcePolicy.shouldRead(file)) {
                 activeSourceFiles.put(file.fileName(), file);
             }
         }
@@ -123,7 +135,7 @@ public class BucketedVectorIndexMaintainer {
                 }
             }
             for (DataFileMeta file : compactIncrement.compactAfter()) {
-                if (PkVectorSourcePolicy.shouldRead(file)) {
+                if (PrimaryKeyIndexSourcePolicy.shouldRead(file)) {
                     nextSources.put(file.fileName(), file);
                 }
             }
@@ -180,7 +192,12 @@ public class BucketedVectorIndexMaintainer {
                     !indexChanged || !hasCompactDataTransition
                             ? Optional.empty()
                             : Optional.of(new VectorIndexIncrement(created, removed));
-            return new VectorIndexCommit(appendChange, compactChange);
+            return new VectorIndexCommit(
+                    appendChange,
+                    compactChange,
+                    failure ->
+                            rollbackPrepareCommit(
+                                    originalSegments, originalSourceFiles, generated, failure));
         } catch (Throwable failure) {
             rollbackPrepareCommit(originalSegments, originalSourceFiles, generated, failure);
             if (failure instanceof Exception) {
@@ -200,7 +217,7 @@ public class BucketedVectorIndexMaintainer {
         pendingBuild = build;
     }
 
-    private void rollbackPrepareCommit(
+    private synchronized void rollbackPrepareCommit(
             List<IndexFileMeta> originalSegments,
             Map<String, DataFileMeta> originalSourceFiles,
             List<IndexFileMeta> generated,
@@ -294,7 +311,7 @@ public class BucketedVectorIndexMaintainer {
         List<IndexFileMeta> retained = new ArrayList<>(annSegments);
         retained.removeAll(build.inputSegments);
         Set<String> covered = coveredSources(retained);
-        for (PkVectorSourceFile source : sourceMeta(build.segment).sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile source : sourceMeta(build.segment).sourceFiles()) {
             DataFileMeta activeFile = activeSourceFiles.get(source.fileName());
             if (activeFile == null
                     || activeFile.rowCount() != source.rowCount()
@@ -326,8 +343,8 @@ public class BucketedVectorIndexMaintainer {
         try {
             List<PkVectorAnnSegmentFile.Source> sources = new ArrayList<>(files.size());
             for (DataFileMeta file : files) {
-                PkVectorSourceFile sourceFile =
-                        new PkVectorSourceFile(file.fileName(), file.rowCount());
+                PrimaryKeyIndexSourceFile sourceFile =
+                        new PrimaryKeyIndexSourceFile(file.fileName(), file.rowCount());
                 sources.add(
                         PkVectorAnnSegmentFile.Source.lazy(
                                 sourceFile, () -> vectorReaderFactory.create(file)));
@@ -347,8 +364,8 @@ public class BucketedVectorIndexMaintainer {
             if (file == null) {
                 continue;
             }
-            PkVectorSourceMeta sourceMeta = sourceMeta(entry.getValue());
-            for (PkVectorSourceFile source : sourceMeta.sourceFiles()) {
+            PrimaryKeyIndexSourceMeta sourceMeta = sourceMeta(entry.getValue());
+            for (PrimaryKeyIndexSourceFile source : sourceMeta.sourceFiles()) {
                 if (source.fileName().equals(entry.getKey())) {
                     checkArgument(
                             source.rowCount() == file.rowCount(),
@@ -436,7 +453,7 @@ public class BucketedVectorIndexMaintainer {
     private static List<DataFileMeta> eligibleFiles(List<DataFileMeta> files) {
         List<DataFileMeta> eligible = new ArrayList<>();
         for (DataFileMeta file : files) {
-            if (PkVectorSourcePolicy.shouldRead(file)) {
+            if (PrimaryKeyIndexSourcePolicy.shouldRead(file)) {
                 eligible.add(file);
             }
         }
@@ -455,15 +472,15 @@ public class BucketedVectorIndexMaintainer {
     private static Set<String> coveredSources(List<IndexFileMeta> segments) {
         Set<String> sources = new HashSet<>();
         for (IndexFileMeta ann : segments) {
-            for (PkVectorSourceFile source : sourceMeta(ann).sourceFiles()) {
+            for (PrimaryKeyIndexSourceFile source : sourceMeta(ann).sourceFiles()) {
                 sources.add(source.fileName());
             }
         }
         return sources;
     }
 
-    private static PkVectorSourceMeta sourceMeta(IndexFileMeta ann) {
-        return PkVectorSourceMeta.fromIndexFile(ann);
+    private static PrimaryKeyIndexSourceMeta sourceMeta(IndexFileMeta ann) {
+        return PrimaryKeyIndexSourceMeta.fromIndexFile(ann);
     }
 
     /** Vector index changes for Paimon's append snapshot followed by its compact snapshot. */
@@ -471,12 +488,15 @@ public class BucketedVectorIndexMaintainer {
 
         private final Optional<VectorIndexIncrement> appendIncrement;
         private final Optional<VectorIndexIncrement> compactIncrement;
+        private final AbortAction abortAction;
 
         private VectorIndexCommit(
                 Optional<VectorIndexIncrement> appendIncrement,
-                Optional<VectorIndexIncrement> compactIncrement) {
+                Optional<VectorIndexIncrement> compactIncrement,
+                AbortAction abortAction) {
             this.appendIncrement = appendIncrement;
             this.compactIncrement = compactIncrement;
+            this.abortAction = abortAction;
         }
 
         public Optional<VectorIndexIncrement> appendIncrement() {
@@ -486,6 +506,16 @@ public class BucketedVectorIndexMaintainer {
         public Optional<VectorIndexIncrement> compactIncrement() {
             return compactIncrement;
         }
+
+        public void abort(Throwable failure) {
+            abortAction.abort(failure);
+        }
+    }
+
+    @FunctionalInterface
+    private interface AbortAction {
+
+        void abort(Throwable failure);
     }
 
     /** Index-file additions and deletions emitted by one bucket state update. */

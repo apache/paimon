@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -161,7 +162,15 @@ class PrimaryKeyVectorIndexWriteTest {
         private void install(
                 RecordWriter<String> writer, BucketedVectorIndexMaintainer vectorMaintainer) {
             writers.computeIfAbsent(EMPTY_ROW, ignored -> new HashMap<>())
-                    .put(0, new WriterContainer<>(writer, 1, null, null, vectorMaintainer, null));
+                    .put(
+                            0,
+                            new WriterContainer<>(
+                                    writer,
+                                    1,
+                                    null,
+                                    null,
+                                    BucketedPrimaryKeyIndexMaintainer.ofVector(vectorMaintainer),
+                                    null));
         }
 
         @Override

@@ -25,14 +25,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.pkvector.PkVectorSourceFile;
-import org.apache.paimon.index.pkvector.PkVectorSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Filter;
@@ -55,10 +56,43 @@ import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests snapshot-consistent planning for bucket-local primary-key vector search. */
 class PrimaryKeyVectorScanTest {
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void testPostponeTableOnlyScansRealBuckets() {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, BucketMode.POSTPONE_BUCKET);
+        options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
+
+        FileStoreTable table = mock(FileStoreTable.class);
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.id()).thenReturn(11L);
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+        when(table.latestSnapshot()).thenReturn(Optional.of(snapshot));
+
+        SnapshotReader reader = mock(SnapshotReader.class, RETURNS_SELF);
+        SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
+        when(snapshotPlan.splits()).thenReturn(Collections.emptyList());
+        when(reader.read()).thenReturn(snapshotPlan);
+        when(table.newSnapshotReader()).thenReturn(reader);
+
+        IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
+        when(indexFileHandler.scan(eq(snapshot), any(Filter.class)))
+                .thenReturn(Collections.emptyList());
+        FileStore store = mock(FileStore.class);
+        when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
+        when(table.store()).thenReturn(store);
+
+        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
+
+        verify(reader).onlyReadRealBuckets();
+    }
 
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -189,8 +223,9 @@ class PrimaryKeyVectorScanTest {
 
     private static IndexFileMeta payloadFile(String indexType, int fieldId, String fileName) {
         byte[] sourceMeta =
-                new PkVectorSourceMeta(
-                                Collections.singletonList(new PkVectorSourceFile("data-1", 2)))
+                new PrimaryKeyIndexSourceMeta(
+                                Collections.singletonList(
+                                        new PrimaryKeyIndexSourceFile("data-1", 2)))
                         .serialize();
         return new IndexFileMeta(
                 indexType,

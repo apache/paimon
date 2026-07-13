@@ -36,7 +36,7 @@ public interface WriteRestore {
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
-            boolean scanVectorIndexPayloads);
+            boolean scanSourceIndexPayloads);
 
     @Nullable
     static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {
