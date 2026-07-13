@@ -37,7 +37,6 @@ import org.apache.paimon.types.VectorType;
 import org.elasticsearch.eslib.api.ESIndexBuilder;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -86,9 +85,12 @@ public class ESIndexGlobalIndexWriter
                 // flushPendingDocs
                 // is the back-stop.
                 builder.addNullDoc(docId);
+                builder.finishDocument(docId);
                 return;
             }
+            writeArrayPresence(field, docId);
             writeSingleField(fieldData, field, config, docId);
+            builder.finishDocument(docId);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write document to ES index", e);
         }
@@ -107,6 +109,7 @@ public class ESIndexGlobalIndexWriter
             docCount++;
             if (row == null) {
                 builder.addNullDoc(docId);
+                builder.finishDocument(docId);
                 return;
             }
             boolean wroteAny = false;
@@ -119,6 +122,7 @@ public class ESIndexGlobalIndexWriter
                 if (config == null) {
                     continue;
                 }
+                writeArrayPresence(field, docId);
                 writeField(row, i, field, config, docId);
                 wroteAny = true;
             }
@@ -129,6 +133,7 @@ public class ESIndexGlobalIndexWriter
                 // is the back-stop.
                 builder.addNullDoc(docId);
             }
+            builder.finishDocument(docId);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write document to ES index", e);
         }
@@ -146,7 +151,14 @@ public class ESIndexGlobalIndexWriter
                     vector = ((InternalVector) fieldData).toFloatArray();
                 }
                 if (vector != null) {
+                    validateVectorDimension(field.name(), vector, config);
                     builder.addVector(field.name(), docId, vector);
+                } else {
+                    throw new IllegalArgumentException(
+                            "Unsupported vector value for field '"
+                                    + field.name()
+                                    + "': "
+                                    + fieldData.getClass().getName());
                 }
                 break;
             case FULLTEXT:
@@ -171,7 +183,12 @@ public class ESIndexGlobalIndexWriter
                 }
                 break;
             default:
-                break;
+                throw new IllegalArgumentException(
+                        "Unsupported es-index type "
+                                + config.indexType()
+                                + " for field '"
+                                + field.name()
+                                + "'.");
         }
     }
 
@@ -182,6 +199,7 @@ public class ESIndexGlobalIndexWriter
             case VECTOR:
                 float[] vector = extractVector(row, pos, field.type());
                 if (vector != null) {
+                    validateVectorDimension(field.name(), vector, config);
                     builder.addVector(field.name(), docId, vector);
                 }
                 break;
@@ -207,7 +225,37 @@ public class ESIndexGlobalIndexWriter
                 }
                 break;
             default:
-                break;
+                throw new IllegalArgumentException(
+                        "Unsupported es-index type "
+                                + config.indexType()
+                                + " for field '"
+                                + field.name()
+                                + "'.");
+        }
+    }
+
+    private void writeArrayPresence(DataField field, long docId) throws IOException {
+        if (!(field.type() instanceof ArrayType)) {
+            return;
+        }
+        String presenceField = indexOptions.arrayPresenceField(field.name());
+        if (presenceField != null) {
+            builder.addScalarField(
+                    presenceField, docId, 1, org.elasticsearch.eslib.api.model.ScalarFieldType.INT);
+        }
+    }
+
+    private static void validateVectorDimension(
+            String fieldName, float[] vector, FieldIndexConfig config) {
+        if (vector.length != config.dimension()) {
+            throw new IllegalArgumentException(
+                    "Vector field '"
+                            + fieldName
+                            + "' expects dimension "
+                            + config.dimension()
+                            + " but received "
+                            + vector.length
+                            + ".");
         }
     }
 
@@ -251,9 +299,11 @@ public class ESIndexGlobalIndexWriter
             case ARRAY:
                 return extractScalarArray(row.getArray(pos), (ArrayType) type);
             case INTEGER:
-            case SMALLINT:
-            case TINYINT:
                 return row.getInt(pos);
+            case SMALLINT:
+                return (int) row.getShort(pos);
+            case TINYINT:
+                return (int) row.getByte(pos);
             case BIGINT:
                 return row.getLong(pos);
             case FLOAT:
@@ -430,35 +480,15 @@ public class ESIndexGlobalIndexWriter
     }
 
     /**
-     * Build metadata stored in ResultEntry. Encodes the file offset table (big-endian) so the
-     * reader can provide an ArchiveDataProvider without re-parsing the archive. Format: [4-byte
-     * file count] then for each file: [4-byte name len][name bytes][8-byte offset][8-byte length].
+     * Build the versioned metadata stored in ResultEntry. It persists the resolved per-field index
+     * configuration followed by the archive file offset table, so readers use the same mapping that
+     * built the index. {@link ESIndexFileMeta} also accepts the legacy offset-only format.
      *
      * <p>The offsets MUST match {@link #packDirectoryStream}'s interleaved layout: each file's data
      * begins right after its own [nameLen][name][dataLen] header.
      */
     private byte[] buildMeta(java.io.File[] segFiles) throws IOException {
-        if (segFiles.length == 0) {
-            return null;
-        }
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream dos = new DataOutputStream(baos);
-        dos.writeInt(segFiles.length);
-
-        long offset = 4; // past the [4-byte file count]
-        for (java.io.File file : segFiles) {
-            byte[] nameBytes = file.getName().getBytes(StandardCharsets.UTF_8);
-            long fileLen = file.length();
-            long dataOffset = offset + 4 + nameBytes.length + 8; // after this file's header
-            dos.writeInt(nameBytes.length);
-            dos.write(nameBytes);
-            dos.writeLong(dataOffset);
-            dos.writeLong(fileLen);
-            offset = dataOffset + fileLen; // next file's header starts here
-        }
-        dos.flush();
-        return baos.toByteArray();
+        return ESIndexFileMeta.write(segFiles, indexOptions.getFieldConfigs());
     }
 
     private static void deleteDirectory(Path dir) {

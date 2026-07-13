@@ -28,7 +28,11 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -45,17 +49,14 @@ import org.elasticsearch.eslib.api.model.SearchResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -87,6 +88,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private final List<GlobalIndexIOMeta> files;
     private final List<DataField> fields;
     private final ESIndexOptions indexOptions;
+    private final Map<String, long[]> fileOffsets;
+    private final boolean hasPersistedFieldConfigs;
     // Paimon's caller-owned executor is used only for the outer CompletableFuture. DiskBBQ must
     // never submit its cluster tasks to an executor already occupied by that outer task.
     private final ExecutorService queryExecutor;
@@ -139,7 +142,17 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         this.fileReader = fileReader;
         this.files = files;
         this.fields = fields;
-        this.indexOptions = indexOptions;
+        try {
+            ESIndexFileMeta.Parsed parsed = ESIndexFileMeta.read(files.get(0).metadata());
+            this.fileOffsets = parsed.fileOffsets();
+            this.hasPersistedFieldConfigs = parsed.hasFieldConfigs();
+            this.indexOptions =
+                    parsed.hasFieldConfigs()
+                            ? ESIndexOptions.fromFieldConfigs(parsed.fieldConfigs())
+                            : indexOptions;
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid es-index metadata", e);
+        }
         // A caller can accidentally pass the same executor for both roles. Keep its outer async
         // scheduling but disable nested DiskBBQ parallelism in that case; merely running the outer
         // operation inline is insufficient when the caller itself is already a worker of the pool.
@@ -170,13 +183,28 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         return async(
                 () -> {
                     try {
-                        ensureLoaded();
                         // Extract params before vector-search: query vector, field, result count
                         // (topK), candidate
                         float[] queryVector = vectorSearch.vector();
                         int topK = vectorSearch.limit();
                         int searchTopK = vectorSearchTopK(vectorSearch);
                         String fieldName = vectorSearch.fieldName();
+                        FieldIndexConfig config = indexOptions.getConfig(fieldName);
+                        if (config == null
+                                || config.indexType() != FieldIndexConfig.IndexType.VECTOR) {
+                            return Optional.empty();
+                        }
+                        if (queryVector.length != config.dimension()) {
+                            throw new IllegalArgumentException(
+                                    "Vector query for field '"
+                                            + fieldName
+                                            + "' expects dimension "
+                                            + config.dimension()
+                                            + " but received "
+                                            + queryVector.length
+                                            + ".");
+                        }
+                        ensureLoaded();
 
                         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
                         long[] candidateIds = includeRowIds == null ? null : toArray(includeRowIds);
@@ -348,11 +376,21 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     parseSpec(field, b.get("positive")),
                     parseSpec(field, b.get("negative")),
                     negativeBoost);
-        } else if (q.has("boolean")) {
+        } else if (q.has("boolean") || q.has("bool")) {
             List<FullTextQuerySpec> must = new ArrayList<>();
             List<FullTextQuerySpec> should = new ArrayList<>();
             List<FullTextQuerySpec> mustNot = new ArrayList<>();
-            JsonNode clauses = q.get("boolean").get("queries");
+            JsonNode booleanNode = q.has("boolean") ? q.get("boolean") : q.get("bool");
+            addBooleanClauses(field, booleanNode.get("must"), must);
+            addBooleanClauses(field, booleanNode.get("should"), should);
+            JsonNode namedMustNot =
+                    booleanNode.has("must_not")
+                            ? booleanNode.get("must_not")
+                            : booleanNode.get("mustNot");
+            addBooleanClauses(field, namedMustNot, mustNot);
+
+            // Keep the original tuple/object representation for compatibility.
+            JsonNode clauses = booleanNode.get("queries");
             if (clauses != null) {
                 for (JsonNode clause : clauses) {
                     String occur;
@@ -365,9 +403,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         child = clause.get("query");
                     }
                     FullTextQuerySpec spec = parseSpec(field, child);
-                    if ("Must".equalsIgnoreCase(occur)) {
+                    String normalizedOccur =
+                            occur.replace("_", "").replace("-", "").toLowerCase(Locale.ROOT);
+                    if ("must".equals(normalizedOccur)) {
                         must.add(spec);
-                    } else if ("MustNot".equalsIgnoreCase(occur)) {
+                    } else if ("mustnot".equals(normalizedOccur)) {
                         mustNot.add(spec);
                     } else {
                         should.add(spec);
@@ -377,6 +417,20 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             return new FullTextQuerySpec.Bool(must, should, mustNot);
         }
         throw new UnsupportedOperationException("Unsupported full-text query JSON: " + q);
+    }
+
+    private static void addBooleanClauses(
+            String field, JsonNode node, List<FullTextQuerySpec> destination) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                destination.add(parseSpec(field, child));
+            }
+        } else {
+            destination.add(parseSpec(field, node));
+        }
     }
 
     private static String queryText(JsonNode node) {
@@ -400,10 +454,33 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         ? FullTextParams.Operator.AND
                         : FullTextParams.Operator.OR;
         float boost = match.has("boost") ? (float) match.get("boost").asDouble() : 1.0f;
-        int fuzziness = match.has("fuzziness") ? match.get("fuzziness").asInt() : 0;
-        int maxExpansions = match.has("max_expansions") ? match.get("max_expansions").asInt() : 50;
-        int prefixLength = match.has("prefix_length") ? match.get("prefix_length").asInt() : 0;
+        int fuzziness = 0;
+        if (match.has("fuzziness")) {
+            JsonNode value = match.get("fuzziness");
+            if (value.isTextual() && "auto".equalsIgnoreCase(value.asText())) {
+                fuzziness = FullTextParams.AUTO_FUZZINESS;
+            } else if (value.isTextual()) {
+                try {
+                    fuzziness = Integer.parseInt(value.asText());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException(
+                            "fuzziness must be 0, 1, 2, or AUTO; got: " + value.asText(), e);
+                }
+            } else {
+                fuzziness = value.asInt();
+            }
+        }
+        int maxExpansions = intParam(match, "max_expansions", "maxExpansions", 50);
+        int prefixLength = intParam(match, "prefix_length", "prefixLength", 0);
         return new FullTextParams(operator, boost, fuzziness, maxExpansions, prefixLength);
+    }
+
+    private static int intParam(
+            JsonNode node, String snakeCaseName, String camelCaseName, int defaultValue) {
+        if (node.has(snakeCaseName)) {
+            return node.get(snakeCaseName).asInt();
+        }
+        return node.has(camelCaseName) ? node.get(camelCaseName).asInt() : defaultValue;
     }
 
     /**
@@ -497,8 +574,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             long loadStartNanos = System.nanoTime();
             GlobalIndexIOMeta meta = files.get(0);
             byte[] metaBytes = meta.metadata();
-            // Map each lucene file to its [start, end] byte offsets
-            Map<String, long[]> fileOffsets = parseFileOffsets(metaBytes);
 
             if (debugEnabled()) {
                 LOG.info(
@@ -659,30 +734,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
         failure.addSuppressed(next);
         return failure;
-    }
-
-    /**
-     * Parse file offset metadata (big-endian). Format: [4-byte count] then per file: [4-byte name
-     * length][name bytes][8-byte offset][8-byte length]
-     */
-    private Map<String, long[]> parseFileOffsets(byte[] metaBytes) throws IOException {
-        Map<String, long[]> offsets = new LinkedHashMap<>();
-        if (metaBytes == null || metaBytes.length == 0) {
-            return offsets;
-        }
-
-        DataInputStream dis = new DataInputStream(new ByteArrayInputStream(metaBytes));
-        int fileCount = dis.readInt();
-        for (int i = 0; i < fileCount; i++) {
-            int nameLen = dis.readInt();
-            byte[] nameBytes = new byte[nameLen];
-            dis.readFully(nameBytes);
-            String fileName = new String(nameBytes, StandardCharsets.UTF_8);
-            long offset = dis.readLong();
-            long length = dis.readLong();
-            offsets.put(fileName, new long[] {offset, length});
-        }
-        return offsets;
     }
 
     private static long[] toArray(RoaringNavigableMap64 bitmap) {
@@ -858,6 +909,25 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         if (config == null) {
             return Optional.empty();
         }
+        if (filter.filterType() == IndexFilter.FilterType.EXISTS
+                && fieldRef.type() instanceof ArrayType) {
+            String presenceField = indexOptions.arrayPresenceField(fieldRef.name());
+            if (!hasPersistedFieldConfigs || presenceField == null) {
+                return Optional.empty();
+            }
+            try {
+                return executeFilter(presenceField, filter);
+            } catch (UnsupportedOperationException | IllegalArgumentException e) {
+                return Optional.empty();
+            }
+        }
+        if (filter.filterType() != IndexFilter.FilterType.EXISTS
+                && losesTimestampPrecision(fieldRef.type())) {
+            // TIMESTAMP(6/9) is currently indexed at millisecond precision. Evaluating a value
+            // predicate against that lossy representation could prune a row that differs only in
+            // micro/nanoseconds, so leave those predicates to the raw scan.
+            return Optional.empty();
+        }
         if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
             // A FULLTEXT field is indexed as analyzer-produced tokens, which are not equivalent to
             // the raw column value, so ordinary predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
@@ -884,7 +954,19 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 && isKeywordRangeFilter(filter)) {
             return Optional.empty();
         }
-        return executeFilter(fieldRef.name(), filter);
+        try {
+            return executeFilter(fieldRef.name(), filter);
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static boolean losesTimestampPrecision(DataType type) {
+        if (type instanceof TimestampType) {
+            return ((TimestampType) type).getPrecision() > 3;
+        }
+        return type instanceof LocalZonedTimestampType
+                && ((LocalZonedTimestampType) type).getPrecision() > 3;
     }
 
     private static boolean isKeywordRangeFilter(IndexFilter filter) {

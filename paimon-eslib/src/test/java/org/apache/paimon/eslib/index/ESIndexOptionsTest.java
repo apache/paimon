@@ -44,7 +44,7 @@ class ESIndexOptionsTest {
 
     private static final List<DataField> FIELDS =
             Arrays.asList(
-                    new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())),
+                    new DataField(0, "embedding", DataTypes.VECTOR(128, DataTypes.FLOAT())),
                     new DataField(1, "title", DataTypes.STRING()));
 
     @Test
@@ -154,7 +154,7 @@ class ESIndexOptionsTest {
         // index-type-level default for all vector fields ...
         m.put("global-index.es-index.metric", "l2");
         m.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
-        m.put("global-index.es-index.fields.embedding.dimension", "8");
+        m.put("global-index.es-index.fields.embedding.dimension", "128");
         // ... overridden per-field
         m.put("global-index.es-index.fields.embedding.metric", "cosine");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
@@ -242,5 +242,75 @@ class ESIndexOptionsTest {
         assertThat(explicitOptions.getConfig("d").indexType())
                 .isEqualTo(FieldIndexConfig.IndexType.SCALAR);
         assertThat(explicitOptions.getConfig("d").scalarType()).isEqualTo(ScalarFieldType.LONG);
+    }
+
+    @Test
+    void arrayVectorRequiresDimensionAndGetsPresenceField() {
+        List<DataField> fields =
+                Arrays.asList(new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())));
+
+        assertThatThrownBy(() -> new ESIndexOptions(fields, new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires a positive dimension");
+
+        Map<String, String> configured = new HashMap<>();
+        configured.put("global-index.es-index.fields.embedding.dimension", "4");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(configured));
+        String presenceField = options.arrayPresenceField("embedding");
+        assertThat(presenceField).isEqualTo("embedding.__paimon_array_present");
+        assertThat(options.getConfig(presenceField).scalarType()).isEqualTo(ScalarFieldType.INT);
+    }
+
+    @Test
+    void invalidVectorDimensionMetricAndDiskBBQParametersAreRejected() {
+        Map<String, String> wrongDimension = new HashMap<>();
+        wrongDimension.put("global-index.es-index.fields.embedding.dimension", "64");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(wrongDimension)))
+                .hasMessageContaining("does not match the VECTOR type dimension 128");
+
+        Map<String, String> badMetric = new HashMap<>();
+        badMetric.put("global-index.es-index.fields.embedding.metric", "angular-ish");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(badMetric)))
+                .hasMessageContaining("Unknown vector metric 'angular-ish'");
+
+        Map<String, String> badVpc = new HashMap<>();
+        badVpc.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        badVpc.put("global-index.es-index.fields.embedding.vectors_per_cluster", "many");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(badVpc)))
+                .hasMessageContaining("vectors_per_cluster")
+                .hasMessageContaining("between 64 and 65536");
+
+        Map<String, String> hnswVpc = new HashMap<>();
+        hnswVpc.put("global-index.es-index.fields.embedding.vectors_per_cluster", "64");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(hnswVpc)))
+                .hasMessageContaining("requires algorithm=diskbbq");
+    }
+
+    @Test
+    void unknownAndIncompatibleExplicitTypesAreRejected() {
+        List<DataField> number = Arrays.asList(new DataField(0, "id", DataTypes.INT()));
+
+        Map<String, String> unknown = new HashMap<>();
+        unknown.put("global-index.es-index.fields.id.type", "mystery");
+        assertThatThrownBy(() -> new ESIndexOptions(number, Options.fromMap(unknown)))
+                .hasMessageContaining("Unknown es-index type 'mystery'");
+
+        Map<String, String> fulltextNumber = new HashMap<>();
+        fulltextNumber.put("global-index.es-index.fields.id.type", "fulltext");
+        assertThatThrownBy(() -> new ESIndexOptions(number, Options.fromMap(fulltextNumber)))
+                .hasMessageContaining("incompatible")
+                .hasMessageContaining("id");
+
+        Map<String, String> geo = new HashMap<>();
+        geo.put("global-index.es-index.fields.id.type", "geo_point");
+        assertThatThrownBy(() -> new ESIndexOptions(number, Options.fromMap(geo)))
+                .hasMessageContaining("geo_point")
+                .hasMessageContaining("not supported");
+
+        List<DataField> integerVector =
+                Arrays.asList(new DataField(0, "embedding", DataTypes.VECTOR(4, DataTypes.INT())));
+        assertThatThrownBy(() -> new ESIndexOptions(integerVector, new Options()))
+                .hasMessageContaining("Unsupported scalar type")
+                .hasMessageContaining("VECTOR");
     }
 }

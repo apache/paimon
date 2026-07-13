@@ -43,10 +43,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -224,6 +221,12 @@ class ESIndexGlobalIndexE2ETest {
         RoaringNavigableMap64 vrows = vr.get().results();
         assertEquals(5, vrows.getIntCardinality(), "k=5 results");
         assertTrue(contains(vrows, 0L), "row 0 (origin) recalled by HNSW");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        reader.visitVectorSearch(
+                                new VectorSearch(new float[] {0, 0, 0}, 5, "embedding")),
+                "query vectors must match the persisted build dimension");
 
         // --- full-text search: 10 rows contain "even" ---
         Optional<ScoredGlobalIndexResult> ft =
@@ -1073,6 +1076,159 @@ class ESIndexGlobalIndexE2ETest {
         }
     }
 
+    @Test
+    void buildTimeFieldConfigurationIsReadFromIndexMetadata(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = Arrays.asList(new DataField(0, "category", DataTypes.STRING()));
+        Map<String, String> buildOptionMap = new HashMap<>();
+        buildOptionMap.put("global-index.es-index.fields.category.type", "keyword");
+        ESIndexOptions buildOptions = new ESIndexOptions(fields, Options.fromMap(buildOptionMap));
+
+        java.nio.file.Path archiveDir = tmp.resolve("persisted-config");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, buildOptions);
+        writer.write(BinaryString.fromString("admin"), 0);
+        writer.write(BinaryString.fromString("viewer"), 1);
+        ResultEntry entry = writer.finish().get(0);
+
+        GlobalIndexIOMeta ioMeta = ioMeta(archiveDir, entry);
+        // Deliberately use the current/default FULLTEXT options. The reader must instead use the
+        // KEYWORD-primary layout persisted when this particular index was built.
+        ESIndexOptions currentTableOptions = new ESIndexOptions(fields, new Options());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, currentTableOptions);
+        try {
+            FieldRef category = new FieldRef(0, "category", DataTypes.STRING());
+            Optional<GlobalIndexResult> result = reader.visitEqual(category, "admin").join();
+            assertTrue(result.isPresent());
+            assertEquals(1, result.get().results().getIntCardinality());
+            assertTrue(contains(result.get().results(), 0L));
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    void tinySmallAndEmptyArrayNullSemanticsAreIndexed(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "tiny", DataTypes.TINYINT()),
+                        new DataField(1, "small", DataTypes.SMALLINT()),
+                        new DataField(2, "labels", DataTypes.ARRAY(DataTypes.INT())));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+
+        java.nio.file.Path archiveDir = tmp.resolve("small-types-empty-array");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(0, GenericRow.of((byte) 1, (short) 2, new GenericArray(new int[0])));
+        writer.write(1, GenericRow.of((byte) 2, (short) 3, null));
+        writer.write(2, GenericRow.of((byte) 3, (short) 4, new GenericArray(new int[] {7})));
+        ResultEntry entry = writer.finish().get(0);
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+        try {
+            Optional<GlobalIndexResult> tiny =
+                    reader.visitEqual(new FieldRef(0, "tiny", DataTypes.TINYINT()), (byte) 1)
+                            .join();
+            assertTrue(tiny.isPresent());
+            assertTrue(contains(tiny.get().results(), 0L));
+
+            Optional<GlobalIndexResult> small =
+                    reader.visitEqual(new FieldRef(1, "small", DataTypes.SMALLINT()), (short) 3)
+                            .join();
+            assertTrue(small.isPresent());
+            assertTrue(contains(small.get().results(), 1L));
+
+            FieldRef labels = new FieldRef(2, "labels", DataTypes.ARRAY(DataTypes.INT()));
+            Optional<GlobalIndexResult> isNull = reader.visitIsNull(labels).join();
+            assertTrue(isNull.isPresent());
+            assertEquals(1, isNull.get().results().getIntCardinality());
+            assertTrue(contains(isNull.get().results(), 1L));
+
+            Optional<GlobalIndexResult> isNotNull = reader.visitIsNotNull(labels).join();
+            assertTrue(isNotNull.isPresent());
+            assertEquals(2, isNotNull.get().results().getIntCardinality());
+            assertTrue(contains(isNotNull.get().results(), 0L));
+            assertTrue(contains(isNotNull.get().results(), 2L));
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    void highPrecisionTimestampPredicatesFallBackToRawScan(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = Arrays.asList(new DataField(0, "ts", DataTypes.TIMESTAMP(6)));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path archiveDir = tmp.resolve("timestamp-micros");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(Timestamp.fromEpochMillis(1_000L, 1_000), 0);
+        ResultEntry entry = writer.finish().get(0);
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+        try {
+            FieldRef ts = new FieldRef(0, "ts", DataTypes.TIMESTAMP(6));
+            assertTrue(
+                    reader.visitEqual(ts, Timestamp.fromEpochMillis(1_000L, 2_000))
+                            .join()
+                            .isEmpty(),
+                    "a lossy millisecond index must not evaluate microsecond predicates");
+            assertTrue(reader.visitIsNotNull(ts).join().isPresent());
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    void standardBooleanDslAndCamelCaseFuzzyParamsAreApplied(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = Arrays.asList(new DataField(0, "text", DataTypes.STRING()));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path archiveDir = tmp.resolve("boolean-dsl");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(BinaryString.fromString("administrator active"), 0);
+        writer.write(BinaryString.fromString("administrator disabled"), 1);
+        writer.write(BinaryString.fromString("viewer active"), 2);
+        ResultEntry entry = writer.finish().get(0);
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+        String query =
+                "{\"boolean\":{\"must\":[{\"match\":{\"query\":\"administrater\","
+                        + "\"fuzziness\":\"AUTO\",\"maxExpansions\":20,\"prefixLength\":0}}],"
+                        + "\"must_not\":[{\"match\":{\"query\":\"disabled\"}}]}}";
+        try {
+            Optional<ScoredGlobalIndexResult> result =
+                    reader.visitFullTextSearch(new FullTextSearch("text", query, 10)).join();
+            assertTrue(result.isPresent());
+            assertEquals(1, result.get().results().getIntCardinality());
+            assertTrue(contains(result.get().results(), 0L));
+        } finally {
+            reader.close();
+        }
+    }
+
+    private static GlobalIndexIOMeta ioMeta(java.nio.file.Path archiveDir, ResultEntry entry)
+            throws IOException {
+        return new GlobalIndexIOMeta(
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString()),
+                Files.size(archiveDir.resolve(entry.fileName())),
+                entry.meta());
+    }
+
     /**
      * Verifies the DiskBBQ vector codec write path through {@link ESIndexGlobalIndexWriter}.
      *
@@ -1141,18 +1297,9 @@ class ESIndexGlobalIndexE2ETest {
         assertNotNull(entry.meta(), "offset-table meta present");
 
         // --- writer-side check: the archive must contain the DiskBBQ IVF triplet, not HNSW
-        // vector files. Parses the offset-table meta (same wire format as
-        // ESIndexGlobalIndexReader#parseFileOffsets).
+        // vector files.
         Set<String> exts = new HashSet<>();
-        DataInputStream metaIn = new DataInputStream(new ByteArrayInputStream(entry.meta()));
-        int fileCount = metaIn.readInt();
-        for (int i = 0; i < fileCount; i++) {
-            int nameLen = metaIn.readInt();
-            byte[] nameBytes = new byte[nameLen];
-            metaIn.readFully(nameBytes);
-            metaIn.readLong(); // offset
-            metaIn.readLong(); // length
-            String name = new String(nameBytes, StandardCharsets.UTF_8);
+        for (String name : ESIndexFileMeta.read(entry.meta()).fileOffsets().keySet()) {
             int dot = name.lastIndexOf('.');
             if (dot >= 0) {
                 exts.add(name.substring(dot + 1));
