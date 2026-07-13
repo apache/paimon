@@ -16,15 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.pkvector;
+package org.apache.paimon.index.pk;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 
-/** Selects data files whose complete rows can be used to build vector index payloads. */
-public final class PkVectorSourcePolicy {
+/** Selects complete compacted data files for source-backed primary-key indexes. */
+public final class PrimaryKeyIndexSourcePolicy {
 
-    private PkVectorSourcePolicy() {}
+    private PrimaryKeyIndexSourcePolicy() {}
 
     public static boolean shouldWrite(FileSource fileSource, int level) {
         return fileSource == FileSource.COMPACT && level > 0;

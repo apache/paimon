@@ -26,8 +26,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.pkvector.PkVectorSourceFile;
-import org.apache.paimon.index.pkvector.PkVectorSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -99,9 +99,9 @@ class TableWriteCoordinatorTest extends TableTestBase {
         FileStoreTable table = getTable(identifier);
         write(table, GenericRow.of(1));
 
-        PkVectorSourceMeta sourceMeta =
-                new PkVectorSourceMeta(
-                        Collections.singletonList(new PkVectorSourceFile("data", 1)));
+        PrimaryKeyIndexSourceMeta sourceMeta =
+                new PrimaryKeyIndexSourceMeta(
+                        Collections.singletonList(new PrimaryKeyIndexSourceFile("data", 1)));
         IndexFileMeta ann =
                 new IndexFileMeta(
                         "test-vector-ann",

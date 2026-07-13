@@ -21,6 +21,8 @@ package org.apache.paimon.index.pkvector;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import javax.annotation.Nullable;
@@ -106,8 +108,8 @@ public class PrimaryKeyVectorBucketSearch {
         Set<String> activeSourceFiles = new HashSet<>(filesByName.keySet());
         Set<String> covered = new HashSet<>();
         for (IndexFileMeta ann : state.annSegments()) {
-            PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(ann);
-            for (PkVectorSourceFile source : sourceMeta.sourceFiles()) {
+            PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(ann);
+            for (PrimaryKeyIndexSourceFile source : sourceMeta.sourceFiles()) {
                 DataFileMeta file = filesByName.get(source.fileName());
                 if (file == null) {
                     continue;

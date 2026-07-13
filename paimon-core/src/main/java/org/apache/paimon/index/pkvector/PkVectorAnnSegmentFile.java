@@ -31,6 +31,8 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -65,7 +67,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             throws IOException {
         checkArgument(!sources.isEmpty(), "An ANN segment must reference source files.");
         long totalRowCount = 0;
-        List<PkVectorSourceFile> sourceFiles = new ArrayList<>(sources.size());
+        List<PrimaryKeyIndexSourceFile> sourceFiles = new ArrayList<>(sources.size());
         for (Source source : sources) {
             totalRowCount = Math.addExact(totalRowCount, source.sourceFile.rowCount());
             sourceFiles.add(source.sourceFile);
@@ -159,7 +161,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                                     vectorField.id(),
                                     null,
                                     payloadMetadata,
-                                    new PkVectorSourceMeta(sourceFiles).serialize()),
+                                    new PrimaryKeyIndexSourceMeta(sourceFiles).serialize()),
                             pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
             return segment;
@@ -173,8 +175,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
     }
 
-    private static PkVectorSourceFile sourceMetadata(DataFileMeta sourceFile) {
-        return new PkVectorSourceFile(sourceFile.fileName(), sourceFile.rowCount());
+    private static PrimaryKeyIndexSourceFile sourceMetadata(DataFileMeta sourceFile) {
+        return new PrimaryKeyIndexSourceFile(sourceFile.fileName(), sourceFile.rowCount());
     }
 
     private static String normalizeMetric(String metric) {
@@ -213,7 +215,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
     /** One vector source used while building an ANN segment. */
     public static class Source {
 
-        private final PkVectorSourceFile sourceFile;
+        private final PrimaryKeyIndexSourceFile sourceFile;
         @Nullable private final PkVectorReader vectors;
         @Nullable private final ReaderFactory readerFactory;
         private final LongPredicate excludedPosition;
@@ -228,7 +230,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
 
         Source(
-                PkVectorSourceFile sourceFile,
+                PrimaryKeyIndexSourceFile sourceFile,
                 PkVectorReader vectors,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
@@ -238,7 +240,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
 
         private Source(
-                PkVectorSourceFile sourceFile,
+                PrimaryKeyIndexSourceFile sourceFile,
                 ReaderFactory readerFactory,
                 LongPredicate excludedPosition) {
             this.sourceFile = sourceFile;
@@ -247,7 +249,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             this.excludedPosition = excludedPosition;
         }
 
-        static Source lazy(PkVectorSourceFile sourceFile, ReaderFactory readerFactory) {
+        static Source lazy(PrimaryKeyIndexSourceFile sourceFile, ReaderFactory readerFactory) {
             return new Source(sourceFile, readerFactory, position -> false);
         }
 

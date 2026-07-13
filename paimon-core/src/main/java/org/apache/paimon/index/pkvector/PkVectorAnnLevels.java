@@ -19,6 +19,8 @@
 package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.ArrayList;
@@ -88,7 +90,8 @@ final class PkVectorAnnLevels {
             IndexFileMeta segment, Map<String, DataFileMeta> activeSourceFiles) {
         long totalRows = 0;
         long staleRows = 0;
-        for (PkVectorSourceFile source : PkVectorSourceMeta.fromIndexFile(segment).sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile source :
+                PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
             totalRows = Math.addExact(totalRows, source.rowCount());
             DataFileMeta active = activeSourceFiles.get(source.fileName());
             if (active == null) {
@@ -107,8 +110,8 @@ final class PkVectorAnnLevels {
             List<IndexFileMeta> inputSegments, Map<String, DataFileMeta> activeSourceFiles) {
         Map<String, DataFileMeta> selectedSources = new TreeMap<>();
         for (IndexFileMeta segment : inputSegments) {
-            for (PkVectorSourceFile source :
-                    PkVectorSourceMeta.fromIndexFile(segment).sourceFiles()) {
+            for (PrimaryKeyIndexSourceFile source :
+                    PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
                 DataFileMeta active = activeSourceFiles.get(source.fileName());
                 if (active != null) {
                     checkArgument(
@@ -124,7 +127,8 @@ final class PkVectorAnnLevels {
 
     private static long buildRowCount(IndexFileMeta segment) {
         long rowCount = 0;
-        for (PkVectorSourceFile source : PkVectorSourceMeta.fromIndexFile(segment).sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile source :
+                PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
             rowCount = Math.addExact(rowCount, source.rowCount());
         }
         return rowCount;

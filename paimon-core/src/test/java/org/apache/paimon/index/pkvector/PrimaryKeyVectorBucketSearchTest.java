@@ -23,6 +23,8 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
@@ -111,7 +113,7 @@ class PrimaryKeyVectorBucketSearchTest {
         Map<String, String> searchOptions = Collections.singletonMap("nprobes", "8");
         when(annSearcher.search(
                         org.mockito.ArgumentMatchers.eq(ann),
-                        org.mockito.ArgumentMatchers.any(PkVectorSourceMeta.class),
+                        org.mockito.ArgumentMatchers.any(PrimaryKeyIndexSourceMeta.class),
                         org.mockito.ArgumentMatchers.any(float[].class),
                         org.mockito.ArgumentMatchers.eq(2),
                         org.mockito.ArgumentMatchers.eq(deletionVectors),
@@ -161,7 +163,7 @@ class PrimaryKeyVectorBucketSearchTest {
         Map<String, DeletionVector> deletionVectors = Collections.emptyMap();
         when(annSearcher.search(
                         org.mockito.ArgumentMatchers.eq(ann),
-                        org.mockito.ArgumentMatchers.any(PkVectorSourceMeta.class),
+                        org.mockito.ArgumentMatchers.any(PrimaryKeyIndexSourceMeta.class),
                         org.mockito.ArgumentMatchers.any(float[].class),
                         org.mockito.ArgumentMatchers.eq(1),
                         org.mockito.ArgumentMatchers.eq(deletionVectors),
@@ -274,11 +276,11 @@ class PrimaryKeyVectorBucketSearchTest {
     private static IndexFileMeta segment(String fileName, List<DataFileMeta> sources) {
         long rowCount = sources.stream().mapToLong(DataFileMeta::rowCount).sum();
         byte[] sourceMeta =
-                new PkVectorSourceMeta(
+                new PrimaryKeyIndexSourceMeta(
                                 sources.stream()
                                         .map(
                                                 source ->
-                                                        new PkVectorSourceFile(
+                                                        new PrimaryKeyIndexSourceFile(
                                                                 source.fileName(),
                                                                 source.rowCount()))
                                         .collect(java.util.stream.Collectors.toList()))

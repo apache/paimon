@@ -20,6 +20,8 @@ package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 
 import org.junit.jupiter.api.Test;
 
@@ -81,9 +83,9 @@ class PkVectorBucketIndexStateTest {
 
     private static IndexFileMeta segment(
             String segmentFileName, String sourceFileName, String indexType) {
-        PkVectorSourceFile sourceFile = new PkVectorSourceFile(sourceFileName, 10);
+        PrimaryKeyIndexSourceFile sourceFile = new PrimaryKeyIndexSourceFile(sourceFileName, 10);
         byte[] sourceMeta =
-                new PkVectorSourceMeta(Collections.singletonList(sourceFile)).serialize();
+                new PrimaryKeyIndexSourceMeta(Collections.singletonList(sourceFile)).serialize();
         return new IndexFileMeta(
                 indexType,
                 segmentFileName,
