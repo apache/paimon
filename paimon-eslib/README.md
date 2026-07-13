@@ -32,7 +32,8 @@ indexed according to their data type and per-field options.
 
 > **Plugin required.** `es-index` is provided by this `paimon-eslib` module. Make sure `paimon-eslib`
 > is on the classpath of your Spark or Flink job (and of any reader) before building or querying an
-> `es-index`.
+> `es-index`. The module and its ESLib/Lucene dependencies require Java 11 or newer; the root Maven
+> build intentionally skips `paimon-eslib` when it runs on JDK 8.
 
 See the general [Global Index](../docs/docs/multimodal-table/global-index.mdx) documentation for the
 required Data Evolution table properties, coverage/freshness behavior, and shared build options.
