@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index.pkvector;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -38,7 +39,7 @@ import java.util.function.LongPredicate;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** ANN plus exact data-file fallback search for one snapshot bucket. */
+/** ANN search plus search-mode-controlled exact fallback for one snapshot bucket. */
 public class PrimaryKeyVectorBucketSearch {
 
     private static final Comparator<PkVectorSearchResult> BEST_FIRST =
@@ -50,16 +51,19 @@ public class PrimaryKeyVectorBucketSearch {
     @Nullable private final PkVectorAnnSegmentSearcher annSearcher;
     private final Map<String, String> searchOptions;
     private final String metric;
+    private final GlobalIndexSearchMode searchMode;
 
     public PrimaryKeyVectorBucketSearch(
             PkVectorDataFileReader.Factory vectorReaderFactory,
             @Nullable PkVectorAnnSegmentSearcher annSearcher,
             Map<String, String> searchOptions,
-            String metric) {
+            String metric,
+            GlobalIndexSearchMode searchMode) {
         this.vectorReaderFactory = vectorReaderFactory;
         this.annSearcher = annSearcher;
         this.searchOptions = Collections.unmodifiableMap(new HashMap<>(searchOptions));
         this.metric = metric;
+        this.searchMode = searchMode;
     }
 
     public List<PkVectorSearchResult> search(
@@ -76,13 +80,17 @@ public class PrimaryKeyVectorBucketSearch {
         }
         PriorityQueue<PkVectorSearchResult> nearest =
                 new PriorityQueue<>(limit, BEST_FIRST.reversed());
+        Set<String> activeSourceFiles = new HashSet<>(filesByName.keySet());
         Set<String> covered = new HashSet<>();
         for (IndexFileMeta ann : state.annSegments()) {
             PkVectorSourceMeta sourceMeta = PkVectorSourceMeta.fromIndexFile(ann);
             for (PkVectorSourceFile source : sourceMeta.sourceFiles()) {
                 DataFileMeta file = filesByName.get(source.fileName());
+                if (file == null) {
+                    continue;
+                }
                 checkArgument(
-                        file != null && file.rowCount() == source.rowCount(),
+                        file.rowCount() == source.rowCount(),
                         "ANN source %s does not match the active data file.",
                         source.fileName());
                 covered.add(source.fileName());
@@ -90,22 +98,30 @@ public class PrimaryKeyVectorBucketSearch {
             checkArgument(annSearcher != null, "ANN search is not configured.");
             for (PkVectorSearchResult result :
                     annSearcher.search(
-                            ann, sourceMeta, query, limit, deletionVectors, searchOptions)) {
+                            ann,
+                            sourceMeta,
+                            query,
+                            limit,
+                            deletionVectors,
+                            activeSourceFiles,
+                            searchOptions)) {
                 add(nearest, result, limit);
             }
         }
 
-        for (DataFileMeta file : activeFiles) {
-            if (covered.contains(file.fileName())) {
-                continue;
-            }
-            DeletionVector dv = deletionVectors.get(file.fileName());
-            LongPredicate excluded = dv == null ? position -> false : dv::isDeleted;
-            try (PkVectorReader reader = vectorReaderFactory.create(file)) {
-                for (PkVectorSearchResult result :
-                        PkVectorExactSearcher.search(
-                                file.fileName(), reader, query, metric, limit, excluded)) {
-                    add(nearest, result, limit);
+        if (searchMode != GlobalIndexSearchMode.FAST) {
+            for (DataFileMeta file : activeFiles) {
+                if (covered.contains(file.fileName())) {
+                    continue;
+                }
+                DeletionVector dv = deletionVectors.get(file.fileName());
+                LongPredicate excluded = dv == null ? position -> false : dv::isDeleted;
+                try (PkVectorReader reader = vectorReaderFactory.create(file)) {
+                    for (PkVectorSearchResult result :
+                            PkVectorExactSearcher.search(
+                                    file.fileName(), reader, query, metric, limit, excluded)) {
+                        add(nearest, result, limit);
+                    }
                 }
             }
         }

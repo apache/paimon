@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index.pkvector;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -46,10 +47,39 @@ import static org.mockito.Mockito.when;
 class PrimaryKeyVectorBucketSearchTest {
 
     @Test
+    void testFastModeSkipsExactFallback() throws Exception {
+        DataFileMeta data = dataFile("data");
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+
+        List<PkVectorSearchResult> results =
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                null,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.FAST)
+                        .search(
+                                new PkVectorBucketIndexState(
+                                        7, "test-vector-ann", Collections.emptyList()),
+                                Collections.singletonList(data),
+                                Collections.emptyMap(),
+                                new float[] {0, 0},
+                                1);
+
+        assertThat(results).isEmpty();
+        verify(readerFactory, never()).create(data);
+    }
+
+    @Test
     void testRejectsNonPositiveLimitForEmptyBucket() {
         PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
         PrimaryKeyVectorBucketSearch search =
-                new PrimaryKeyVectorBucketSearch(readerFactory, null, Collections.emptyMap(), "l2");
+                new PrimaryKeyVectorBucketSearch(
+                        readerFactory,
+                        null,
+                        Collections.emptyMap(),
+                        "l2",
+                        GlobalIndexSearchMode.FULL);
 
         assertThatIllegalArgumentException()
                 .isThrownBy(
@@ -85,11 +115,18 @@ class PrimaryKeyVectorBucketSearchTest {
                         org.mockito.ArgumentMatchers.any(float[].class),
                         org.mockito.ArgumentMatchers.eq(2),
                         org.mockito.ArgumentMatchers.eq(deletionVectors),
+                        org.mockito.ArgumentMatchers.eq(
+                                new java.util.HashSet<>(Arrays.asList("data-1", "data-2"))),
                         org.mockito.ArgumentMatchers.eq(searchOptions)))
                 .thenReturn(Collections.singletonList(new PkVectorSearchResult("data-1", 1, 0.5F)));
 
         List<PkVectorSearchResult> results =
-                new PrimaryKeyVectorBucketSearch(readerFactory, annSearcher, searchOptions, "l2")
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                annSearcher,
+                                searchOptions,
+                                "l2",
+                                GlobalIndexSearchMode.FULL)
                         .search(
                                 state,
                                 Arrays.asList(data1, data2),
@@ -109,6 +146,45 @@ class PrimaryKeyVectorBucketSearchTest {
     }
 
     @Test
+    void testSearchesActivePartOfAnnWithInactiveSource() throws Exception {
+        DataFileMeta retired = dataFile("retired");
+        DataFileMeta active = dataFile("active");
+        IndexFileMeta ann = segment("ann", Arrays.asList(retired, active));
+        PkVectorAnnSegmentSearcher annSearcher = mock(PkVectorAnnSegmentSearcher.class);
+        Map<String, DeletionVector> deletionVectors = Collections.emptyMap();
+        when(annSearcher.search(
+                        org.mockito.ArgumentMatchers.eq(ann),
+                        org.mockito.ArgumentMatchers.any(PkVectorSourceMeta.class),
+                        org.mockito.ArgumentMatchers.any(float[].class),
+                        org.mockito.ArgumentMatchers.eq(1),
+                        org.mockito.ArgumentMatchers.eq(deletionVectors),
+                        org.mockito.ArgumentMatchers.eq(Collections.singleton("active")),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap())))
+                .thenReturn(Collections.singletonList(new PkVectorSearchResult("active", 0, 1F)));
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+
+        List<PkVectorSearchResult> results =
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                annSearcher,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.FULL)
+                        .search(
+                                new PkVectorBucketIndexState(
+                                        7, "test-vector-ann", Collections.singletonList(ann)),
+                                Collections.singletonList(active),
+                                deletionVectors,
+                                new float[] {0, 0},
+                                1);
+
+        assertThat(results)
+                .extracting(PkVectorSearchResult::dataFileName)
+                .containsExactly("active");
+        verify(readerFactory, never()).create(active);
+    }
+
+    @Test
     void testExactFallbackMergesFilesAndAppliesDeletionVectors() throws Exception {
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
@@ -123,7 +199,12 @@ class PrimaryKeyVectorBucketSearchTest {
         deletionVectors.put("data-1", data1Deletes);
 
         List<PkVectorSearchResult> results =
-                new PrimaryKeyVectorBucketSearch(readerFactory, null, Collections.emptyMap(), "l2")
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                null,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.DETAIL)
                         .search(
                                 new PkVectorBucketIndexState(
                                         7, "test-vector-ann", Collections.emptyList()),
@@ -180,18 +261,27 @@ class PrimaryKeyVectorBucketSearchTest {
     }
 
     private static IndexFileMeta segment(String fileName, DataFileMeta source) {
+        return segment(fileName, Collections.singletonList(source));
+    }
+
+    private static IndexFileMeta segment(String fileName, List<DataFileMeta> sources) {
+        long rowCount = sources.stream().mapToLong(DataFileMeta::rowCount).sum();
         byte[] sourceMeta =
                 new PkVectorSourceMeta(
-                                Collections.singletonList(
-                                        new PkVectorSourceFile(
-                                                source.fileName(), source.rowCount())))
+                                sources.stream()
+                                        .map(
+                                                source ->
+                                                        new PkVectorSourceFile(
+                                                                source.fileName(),
+                                                                source.rowCount()))
+                                        .collect(java.util.stream.Collectors.toList()))
                         .serialize();
         return new IndexFileMeta(
                 "test-vector-ann",
                 fileName,
                 100,
-                source.rowCount(),
-                new GlobalIndexMeta(0, source.rowCount() - 1, 7, null, new byte[] {1}, sourceMeta),
+                rowCount,
+                new GlobalIndexMeta(0, rowCount - 1, 7, null, new byte[] {1}, sourceMeta),
                 null);
     }
 }

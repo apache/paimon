@@ -890,6 +890,16 @@ public class SchemaValidation {
             return;
         }
 
+        checkArgument(
+                options.primaryKeyVectorIndexCompactionLevelFanout() > 1,
+                "%s must be greater than 1.",
+                CoreOptions.PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT.key());
+        double staleRatio = options.primaryKeyVectorIndexCompactionStaleRatioThreshold();
+        checkArgument(
+                staleRatio > 0 && staleRatio <= 1,
+                "%s must be in (0, 1].",
+                CoreOptions.PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD.key());
+
         List<String> indexColumns = options.primaryKeyVectorIndexColumns();
         checkArgument(
                 new HashSet<>(indexColumns).size() == indexColumns.size(),

@@ -198,7 +198,12 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         metric,
                         context.executor);
         PrimaryKeyVectorBucketSearch bucketSearch =
-                new PrimaryKeyVectorBucketSearch(readerFactory, annSearcher, searchOptions, metric);
+                new PrimaryKeyVectorBucketSearch(
+                        readerFactory,
+                        annSearcher,
+                        searchOptions,
+                        metric,
+                        table.coreOptions().globalIndexSearchMode());
         List<Candidate> candidates = new ArrayList<>();
         for (PkVectorSearchResult result :
                 bucketSearch.search(state, activeFiles, deletionVectors, query, limit)) {

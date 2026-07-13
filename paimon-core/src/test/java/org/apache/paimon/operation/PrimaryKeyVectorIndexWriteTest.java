@@ -45,6 +45,8 @@ import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -52,6 +54,56 @@ import static org.mockito.Mockito.when;
 
 /** Tests primary-key vector index publication through {@link AbstractFileStoreWrite}. */
 class PrimaryKeyVectorIndexWriteTest {
+
+    @Test
+    void testRestoreRebindsVectorIndexExecutor() throws Exception {
+        DataIncrement dataIncrement = DataIncrement.emptyIncrement();
+        CompactIncrement compactIncrement = CompactIncrement.emptyIncrement();
+        RecordWriter<String> writer = mock(RecordWriter.class);
+        when(writer.prepareCommit(false))
+                .thenReturn(new CommitIncrement(dataIncrement, compactIncrement, null));
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit =
+                mock(BucketedVectorIndexMaintainer.VectorIndexCommit.class);
+        when(vectorCommit.appendIncrement()).thenReturn(Optional.empty());
+        when(vectorCommit.compactIncrement()).thenReturn(Optional.empty());
+        BucketedVectorIndexMaintainer maintainer = mock(BucketedVectorIndexMaintainer.class);
+        when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
+                .thenReturn(vectorCommit);
+
+        TestingFileStoreWrite write = new TestingFileStoreWrite();
+        write.install(writer, maintainer);
+        List<FileStoreWrite.State<String>> states = write.checkpoint();
+
+        TestingFileStoreWrite restored = new TestingFileStoreWrite(mock(RecordWriter.class));
+        restored.restore(states);
+
+        verify(maintainer).withExecutor(any(ExecutorService.class));
+    }
+
+    @Test
+    void testCheckpointWaitsForPendingVectorIndexBuild() throws Exception {
+        DataIncrement dataIncrement = DataIncrement.emptyIncrement();
+        CompactIncrement compactIncrement = CompactIncrement.emptyIncrement();
+        RecordWriter<String> writer = mock(RecordWriter.class);
+        when(writer.prepareCommit(false))
+                .thenReturn(new CommitIncrement(dataIncrement, compactIncrement, null));
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit =
+                mock(BucketedVectorIndexMaintainer.VectorIndexCommit.class);
+        when(vectorCommit.appendIncrement()).thenReturn(Optional.empty());
+        when(vectorCommit.compactIncrement()).thenReturn(Optional.empty());
+        BucketedVectorIndexMaintainer maintainer = mock(BucketedVectorIndexMaintainer.class);
+        when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
+                .thenReturn(vectorCommit);
+
+        TestingFileStoreWrite write = new TestingFileStoreWrite();
+        write.install(writer, maintainer);
+
+        write.checkpoint();
+
+        verify(maintainer).prepareCommit(same(dataIncrement), same(compactIncrement), eq(true));
+    }
 
     @Test
     void testPublishesVectorChangesWithCompactDataTransition() throws Exception {
@@ -72,7 +124,7 @@ class PrimaryKeyVectorIndexWriteTest {
         when(vectorCommit.appendIncrement()).thenReturn(Optional.empty());
         when(vectorCommit.compactIncrement()).thenReturn(Optional.of(vectorIncrement));
         BucketedVectorIndexMaintainer maintainer = mock(BucketedVectorIndexMaintainer.class);
-        when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement)))
+        when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(false)))
                 .thenReturn(vectorCommit);
 
         TestingFileStoreWrite write = new TestingFileStoreWrite();
@@ -82,12 +134,18 @@ class PrimaryKeyVectorIndexWriteTest {
 
         assertThat(message.compactIncrement().newIndexFiles()).containsExactly(added);
         assertThat(message.compactIncrement().deletedIndexFiles()).containsExactly(deleted);
-        verify(maintainer).prepareCommit(same(dataIncrement), same(compactIncrement));
+        verify(maintainer).prepareCommit(same(dataIncrement), same(compactIncrement), eq(false));
     }
 
     private static class TestingFileStoreWrite extends AbstractFileStoreWrite<String> {
 
+        @Nullable private final RecordWriter<String> restoredWriter;
+
         private TestingFileStoreWrite() {
+            this(null);
+        }
+
+        private TestingFileStoreWrite(@Nullable RecordWriter<String> restoredWriter) {
             super(
                     mock(SnapshotManager.class),
                     mock(FileStoreScan.class),
@@ -97,6 +155,7 @@ class PrimaryKeyVectorIndexWriteTest {
                     "test-table",
                     new CoreOptions(new HashMap<>()),
                     RowType.of());
+            this.restoredWriter = restoredWriter;
         }
 
         private void install(
@@ -120,7 +179,10 @@ class PrimaryKeyVectorIndexWriteTest {
                 ExecutorService compactExecutor,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 boolean ignorePreviousFiles) {
-            throw new UnsupportedOperationException();
+            if (restoredWriter == null) {
+                throw new UnsupportedOperationException();
+            }
+            return restoredWriter;
         }
     }
 }
