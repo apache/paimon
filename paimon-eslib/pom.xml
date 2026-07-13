@@ -50,13 +50,21 @@ under the License.
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-core</artifactId>
-            <version>1.0.5</version>
+            <version>1.0.6</version>
             <classifier>lucene9</classifier>
+            <!-- Paimon supplies its own ArchiveDataProvider over FileIO; the standalone
+                 OSSRangeIndexInput and Aliyun SDK are not used in this module. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>com.aliyun.oss</groupId>
+                    <artifactId>aliyun-sdk-oss</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-simdvec</artifactId>
-            <version>1.0.5</version>
+            <version>1.0.6</version>
         </dependency>
         <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
              not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm

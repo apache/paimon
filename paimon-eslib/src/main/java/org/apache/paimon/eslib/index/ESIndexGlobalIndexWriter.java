@@ -33,24 +33,28 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.FileIOUtils;
 
 import org.elasticsearch.eslib.api.ESIndexBuilder;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 
+import java.io.Closeable;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Multi-column writer that builds ESLib (Lucene-based) indexes. Accepts InternalRow with all
  * indexed fields and produces a single archive file.
  */
 public class ESIndexGlobalIndexWriter
-        implements GlobalIndexSingleColumnWriter, GlobalIndexMultiColumnWriter {
+        implements GlobalIndexSingleColumnWriter, GlobalIndexMultiColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "es-index";
 
@@ -59,40 +63,67 @@ public class ESIndexGlobalIndexWriter
     private final ESIndexOptions indexOptions;
     private final ESIndexBuilder builder;
     private long docCount;
+    private Throwable writeFailure;
+    private boolean finished;
+    private boolean closed;
 
     public ESIndexGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, List<DataField> fields, ESIndexOptions indexOptions)
             throws IOException {
-        this.fileWriter = fileWriter;
-        this.fields = fields;
-        this.indexOptions = indexOptions;
+        this.fileWriter = Objects.requireNonNull(fileWriter, "fileWriter");
+        if (fields == null || fields.isEmpty()) {
+            throw new IllegalArgumentException("ES index requires at least one field");
+        }
+        this.indexOptions = Objects.requireNonNull(indexOptions, "indexOptions");
+        List<DataField> fieldsCopy = new ArrayList<>(fields.size());
+        for (DataField field : fields) {
+            DataField nonNullField = Objects.requireNonNull(field, "field");
+            if (indexOptions.getConfig(nonNullField.name()) == null) {
+                throw new IllegalArgumentException(
+                        "Missing es-index configuration for field '" + nonNullField.name() + "'");
+            }
+            fieldsCopy.add(nonNullField);
+        }
+        this.fields = Collections.unmodifiableList(fieldsCopy);
         this.builder = ESIndexBuilderFactory.create(indexOptions.getFieldConfigs());
         this.docCount = 0;
+        this.finished = false;
+        this.closed = false;
     }
 
     @Override
     public void write(Object fieldData, long relativeRowId) {
+        checkWritable();
         try {
             // Use the builder-supplied shard-relative row id as the Lucene docId (read side maps
-            // _ROW_ID = rangeFrom + docId); count every row so finish() reports the true rowCount.
+            // _ROW_ID = rangeFrom + docId). finishDocument pads any skipped positions, so the
+            // logical row count is the highest finished id plus one rather than the number of
+            // write() calls.
             long docId = relativeRowId;
-            docCount++;
             DataField field = fields.get(0);
-            FieldIndexConfig config = field == null ? null : indexOptions.getConfig(field.name());
-            if (fieldData == null || config == null) {
-                // Null value (or unindexed field): explicitly occupy this row's slot with an empty
-                // doc so docId<->rowId stays dense; the absent field marks it null.
+            FieldIndexConfig config = indexOptions.getConfig(field.name());
+            if (fieldData == null) {
+                // Null value: explicitly occupy this row's slot with an empty doc so
+                // docId<->rowId stays dense; the absent field marks it null.
                 // flushPendingDocs
                 // is the back-stop.
                 builder.addNullDoc(docId);
                 builder.finishDocument(docId);
+                docCount = docId + 1;
                 return;
             }
             writeArrayPresence(field, docId);
             writeSingleField(fieldData, field, config, docId);
             builder.finishDocument(docId);
+            docCount = docId + 1;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write document to ES index", e);
+            RuntimeException failure =
+                    new RuntimeException("Failed to write document to ES index", e);
+            writeFailure = failure;
+            throw failure;
+        } catch (RuntimeException | Error e) {
+            writeFailure = e;
+            throw e;
         }
     }
 
@@ -102,14 +133,15 @@ public class ESIndexGlobalIndexWriter
     }
 
     public void writeRow(long rowId, InternalRow row) {
+        checkWritable();
         try {
             // Use the shard-relative rowId supplied by the builder as the Lucene docId; the read
             // side reconstructs the absolute id as `_ROW_ID = rangeFrom + docId`. Count every row.
             long docId = rowId;
-            docCount++;
             if (row == null) {
                 builder.addNullDoc(docId);
                 builder.finishDocument(docId);
+                docCount = docId + 1;
                 return;
             }
             boolean wroteAny = false;
@@ -119,9 +151,6 @@ public class ESIndexGlobalIndexWriter
                 }
                 DataField field = fields.get(i);
                 FieldIndexConfig config = indexOptions.getConfig(field.name());
-                if (config == null) {
-                    continue;
-                }
                 writeArrayPresence(field, docId);
                 writeField(row, i, field, config, docId);
                 wroteAny = true;
@@ -134,8 +163,15 @@ public class ESIndexGlobalIndexWriter
                 builder.addNullDoc(docId);
             }
             builder.finishDocument(docId);
+            docCount = docId + 1;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write document to ES index", e);
+            RuntimeException failure =
+                    new RuntimeException("Failed to write document to ES index", e);
+            writeFailure = failure;
+            throw failure;
+        } catch (RuntimeException | Error e) {
+            writeFailure = e;
+            throw e;
         }
     }
 
@@ -145,7 +181,9 @@ public class ESIndexGlobalIndexWriter
         switch (config.indexType()) {
             case VECTOR:
                 float[] vector = null;
-                if (fieldData instanceof InternalArray) {
+                if (fieldData instanceof float[]) {
+                    vector = (float[]) fieldData;
+                } else if (fieldData instanceof InternalArray) {
                     vector = ((InternalArray) fieldData).toFloatArray();
                 } else if (fieldData instanceof InternalVector) {
                     vector = ((InternalVector) fieldData).toFloatArray();
@@ -352,18 +390,30 @@ public class ESIndexGlobalIndexWriter
     }
 
     private Object extractScalarArray(InternalArray array, ArrayType type) {
+        Object[] values = new Object[array.size()];
         switch (type.getElementType().getTypeRoot()) {
             case TINYINT:
-                return array.toByteArray();
+                for (int i = 0; i < array.size(); i++) {
+                    values[i] = array.isNullAt(i) ? null : (int) array.getByte(i);
+                }
+                return values;
             case SMALLINT:
-                return array.toShortArray();
+                for (int i = 0; i < array.size(); i++) {
+                    values[i] = array.isNullAt(i) ? null : (int) array.getShort(i);
+                }
+                return values;
             case INTEGER:
-                return array.toIntArray();
+                for (int i = 0; i < array.size(); i++) {
+                    values[i] = array.isNullAt(i) ? null : array.getInt(i);
+                }
+                return values;
             case BIGINT:
-                return array.toLongArray();
+                for (int i = 0; i < array.size(); i++) {
+                    values[i] = array.isNullAt(i) ? null : array.getLong(i);
+                }
+                return values;
             case CHAR:
             case VARCHAR:
-                String[] values = new String[array.size()];
                 for (int i = 0; i < array.size(); i++) {
                     values[i] = array.isNullAt(i) ? null : array.getString(i).toString();
                 }
@@ -377,7 +427,14 @@ public class ESIndexGlobalIndexWriter
 
     @Override
     public List<ResultEntry> finish() {
+        checkNotFinished();
+        finished = true;
+        Throwable failure = null;
         try {
+            if (writeFailure != null) {
+                throw new IllegalStateException(
+                        "Cannot finish ES index after a document write failed", writeFailure);
+            }
             if (docCount == 0) {
                 // Nothing was indexed, but the builder already eagerly created a temp directory and
                 // an open Lucene IndexWriter in its constructor; the finally block below releases
@@ -409,22 +466,84 @@ public class ESIndexGlobalIndexWriter
 
             return Collections.singletonList(new ResultEntry(fileName, docCount, meta));
         } catch (IOException e) {
-            throw new RuntimeException("Failed to finish ES index build", e);
+            RuntimeException wrapped = new RuntimeException("Failed to finish ES index build", e);
+            failure = wrapped;
+            throw wrapped;
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            throw e;
         } finally {
-            // Best-effort: close the builder (Lucene IndexWriter + Directory) and remove the temp
-            // directory on every path — empty shard, success, or mid-build failure.
-            closeBuilderQuietly();
+            try {
+                close();
+            } catch (Throwable cleanupFailure) {
+                if (failure != null) {
+                    failure.addSuppressed(cleanupFailure);
+                } else {
+                    rethrowCleanupFailure(cleanupFailure);
+                }
+            }
         }
     }
 
-    private void closeBuilderQuietly() {
+    @Override
+    public void close() throws IOException {
+        finished = true;
+        if (closed) {
+            return;
+        }
+        Throwable failure = null;
         try {
             builder.close();
-        } catch (IOException ignored) {
-            // The archive (if any) is already fully streamed to the output file; a failure to
-            // close the now-redundant builder must not mask the build result.
+        } catch (Throwable e) {
+            failure = e;
         }
-        deleteDirectory(builder.getOutputDir());
+        try {
+            FileIOUtils.deleteDirectory(builder.getOutputDir().toFile());
+        } catch (Throwable e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
+            }
+        }
+        if (failure != null) {
+            if (failure instanceof IOException) {
+                throw (IOException) failure;
+            }
+            if (failure instanceof RuntimeException) {
+                throw (RuntimeException) failure;
+            }
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            throw new IOException("Failed to clean up ES index builder", failure);
+        }
+        closed = true;
+    }
+
+    private static void rethrowCleanupFailure(Throwable failure) {
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        throw new RuntimeException("Failed to clean up ES index builder", failure);
+    }
+
+    private void checkNotFinished() {
+        if (finished) {
+            throw new IllegalStateException("ES index writer is already finished");
+        }
+    }
+
+    private void checkWritable() {
+        checkNotFinished();
+        if (writeFailure != null) {
+            throw new IllegalStateException(
+                    "ES index writer cannot accept rows after a document write failed",
+                    writeFailure);
+        }
     }
 
     /**
@@ -488,16 +607,13 @@ public class ESIndexGlobalIndexWriter
      * begins right after its own [nameLen][name][dataLen] header.
      */
     private byte[] buildMeta(java.io.File[] segFiles) throws IOException {
-        return ESIndexFileMeta.write(segFiles, indexOptions.getFieldConfigs());
-    }
-
-    private static void deleteDirectory(Path dir) {
-        java.io.File[] segFiles = dir.toFile().listFiles();
-        if (segFiles != null) {
-            for (java.io.File file : segFiles) {
-                file.delete();
-            }
+        List<String> indexedFieldNames = new ArrayList<>(fields.size());
+        List<String> indexedFieldTypes = new ArrayList<>(fields.size());
+        for (DataField field : fields) {
+            indexedFieldNames.add(field.name());
+            indexedFieldTypes.add(field.type().copy(true).asSQLString());
         }
-        dir.toFile().delete();
+        return ESIndexFileMeta.write(
+                segFiles, indexedFieldNames, indexedFieldTypes, indexOptions.getFieldConfigs());
     }
 }

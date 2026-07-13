@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ESIndexGlobalIndexReaderDebugTest {
 
@@ -68,13 +69,14 @@ class ESIndexGlobalIndexReaderDebugTest {
                                 10,
                                 "embedding",
                                 Map.of("hnsw.num_candidates", "5"))));
-        assertEquals(
-                10,
-                ESIndexGlobalIndexReader.vectorSearchTopK(
-                        new VectorSearch(
-                                new float[] {1.0f},
-                                10,
-                                "embedding",
-                                Map.of("hnsw.num_candidates", "bad"))));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        ESIndexGlobalIndexReader.vectorSearchTopK(
+                                new VectorSearch(
+                                        new float[] {1.0f},
+                                        10,
+                                        "embedding",
+                                        Map.of("hnsw.num_candidates", "bad"))));
     }
 }

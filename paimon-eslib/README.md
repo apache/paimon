@@ -133,13 +133,13 @@ column.
 |---|---|---|---|
 | `type` | any column | inferred from data type | Force the sub-index type: `vector`, `fulltext`, `keyword`, `date`. |
 | `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw` or `diskbbq`. `native` is not supported by paimon-eslib. |
-| `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension. Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
+| `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension (1–4096). Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
 | `metric` | vector | `cosine` | Distance metric (for example `cosine`, `l2`, `dot_product`). Use the same metric at build and query time. |
 | `m` | vector (`hnsw`) | engine default | HNSW graph out-degree; valid range: 1–512. |
 | `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width; valid range: 1–3200. |
-| `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ. |
-| `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field. |
-| `read-search-threads` | index-type only | `-1` | DiskBBQ cluster-search pool size. `-1` uses CPU/2; `0` makes DiskBBQ search serial. Outer reader futures use Paimon's caller-owned executor. Key: `global-index.es-index.read-search-threads`. |
+| `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ; valid range: 64–65536. |
+| `centroids_per_parent_cluster` | vector (`diskbbq`) | engine default | Number of child centroids per parent cluster for DiskBBQ; valid range: 2–384. |
+| `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field: `standard`, `whitespace`, `simple`, or `keyword`. |
 
 ## Query
 
@@ -155,7 +155,8 @@ SELECT * FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5)
 -- Full-text search on a companion full-text column, using the JSON query DSL
 SELECT * FROM full_text_search(
     'my_table',
-    '{"match":{"column":"content","terms":"paimon lake format"}}',
+    'content',
+    '{"match":{"query":"paimon lake format"}}',
     10
 );
 ```

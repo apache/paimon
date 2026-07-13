@@ -31,28 +31,55 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Versioned metadata for an archived ESLib index. */
 final class ESIndexFileMeta {
 
     private static final int MAGIC = 0x45534D31; // "ESM1"
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final int CONFIG_ONLY_VERSION = 1;
 
     private ESIndexFileMeta() {}
 
-    static byte[] write(File[] files, Map<String, FieldIndexConfig> fieldConfigs)
+    static byte[] write(
+            File[] files,
+            List<String> indexedFieldNames,
+            List<String> indexedFieldTypes,
+            Map<String, FieldIndexConfig> fieldConfigs)
             throws IOException {
         if (files.length == 0) {
-            return null;
+            throw new IOException("Cannot write es-index metadata without Lucene files");
+        }
+        if (indexedFieldNames.isEmpty()) {
+            throw new IOException("Cannot write es-index metadata without indexed fields");
+        }
+        if (indexedFieldTypes.size() != indexedFieldNames.size()) {
+            throw new IOException(
+                    "ES index field name/type count mismatch: names="
+                            + indexedFieldNames.size()
+                            + ", types="
+                            + indexedFieldTypes.size());
         }
 
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(bytes);
         out.writeInt(MAGIC);
         out.writeInt(VERSION);
+        out.writeInt(indexedFieldNames.size());
+        for (int i = 0; i < indexedFieldNames.size(); i++) {
+            String fieldName = indexedFieldNames.get(i);
+            if (!fieldConfigs.containsKey(fieldName)) {
+                throw new IOException(
+                        "Missing primary field config in es-index metadata: " + fieldName);
+            }
+            writeString(out, fieldName);
+            writeString(out, indexedFieldTypes.get(i));
+        }
         out.writeInt(fieldConfigs.size());
         for (Map.Entry<String, FieldIndexConfig> entry : fieldConfigs.entrySet()) {
             FieldIndexConfig config = entry.getValue();
@@ -77,18 +104,45 @@ final class ESIndexFileMeta {
 
     static Parsed read(byte[] metadata) throws IOException {
         if (metadata == null || metadata.length == 0) {
-            return new Parsed(Collections.emptyMap(), Collections.emptyMap(), false);
+            return new Parsed(
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    Collections.emptyMap(),
+                    false);
         }
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(metadata));
         int first = in.readInt();
         if (first != MAGIC) {
-            return new Parsed(Collections.emptyMap(), readOffsets(in, first), false);
+            Map<String, long[]> offsets = readOffsets(in, first);
+            requireFullyConsumed(in);
+            return new Parsed(
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    offsets,
+                    false);
         }
 
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version != CONFIG_ONLY_VERSION && version != VERSION) {
             throw new IOException("Unsupported es-index metadata version: " + version);
+        }
+
+        List<String> indexedFieldNames = new ArrayList<>();
+        List<String> indexedFieldTypes = new ArrayList<>();
+        if (version >= VERSION) {
+            int indexedFieldCount = readCount(in, "indexed field");
+            for (int i = 0; i < indexedFieldCount; i++) {
+                String fieldName = readString(in);
+                if (indexedFieldNames.contains(fieldName)) {
+                    throw new IOException(
+                            "Duplicate indexed field in es-index metadata: " + fieldName);
+                }
+                indexedFieldNames.add(fieldName);
+                indexedFieldTypes.add(readString(in));
+            }
         }
 
         int configCount = readCount(in, "field config");
@@ -106,25 +160,87 @@ final class ESIndexFileMeta {
             int parameterCount = readCount(in, "algorithm parameter");
             Map<String, String> parameters = new LinkedHashMap<>();
             for (int j = 0; j < parameterCount; j++) {
-                parameters.put(readString(in), readString(in));
+                String parameterName = readString(in);
+                String parameterValue = readString(in);
+                if (parameters.put(parameterName, parameterValue) != null) {
+                    throw new IOException(
+                            "Duplicate algorithm parameter in es-index metadata for field '"
+                                    + fieldName
+                                    + "': "
+                                    + parameterName);
+                }
             }
 
-            FieldIndexConfig config =
-                    FieldIndexConfig.builder(fieldName, indexType)
-                            .algorithm(algorithm)
-                            .dimension(dimension)
-                            .metric(metric)
-                            .analyzer(analyzer)
-                            .scalarType(scalarType)
-                            .algorithmParams(parameters)
-                            .build();
+            final FieldIndexConfig config;
+            try {
+                config =
+                        FieldIndexConfig.builder(fieldName, indexType)
+                                .algorithm(algorithm)
+                                .dimension(dimension)
+                                .metric(metric)
+                                .analyzer(analyzer)
+                                .scalarType(scalarType)
+                                .algorithmParams(parameters)
+                                .build();
+            } catch (IllegalArgumentException | NullPointerException e) {
+                throw new IOException(
+                        "Invalid field config in es-index metadata for field '" + fieldName + "'",
+                        e);
+            }
             if (configs.put(fieldName, config) != null) {
                 throw new IOException("Duplicate field config in es-index metadata: " + fieldName);
             }
         }
 
         int fileCount = readCount(in, "file");
-        return new Parsed(configs, readOffsets(in, fileCount), true);
+        Map<String, long[]> offsets = readOffsets(in, fileCount);
+        requireFullyConsumed(in);
+        if (version == CONFIG_ONLY_VERSION) {
+            indexedFieldNames = inferIndexedFieldNames(configs);
+        }
+        for (String fieldName : indexedFieldNames) {
+            if (!configs.containsKey(fieldName)) {
+                throw new IOException(
+                        "Missing primary field config in es-index metadata: " + fieldName);
+            }
+        }
+        return new Parsed(indexedFieldNames, indexedFieldTypes, configs, offsets, true);
+    }
+
+    /**
+     * Version 1 did not store the ordered primary-field list. Its writer emitted each primary
+     * config immediately followed by its generated multi-fields, so recover that order for indexes
+     * created before the explicit mapping was added.
+     */
+    private static List<String> inferIndexedFieldNames(Map<String, FieldIndexConfig> fieldConfigs) {
+        List<Map.Entry<String, FieldIndexConfig>> entries =
+                new ArrayList<>(fieldConfigs.entrySet());
+        List<String> fields = new ArrayList<>();
+        for (int i = 0; i < entries.size(); ) {
+            Map.Entry<String, FieldIndexConfig> primary = entries.get(i++);
+            String fieldName = primary.getKey();
+            fields.add(fieldName);
+            if (primary.getValue().indexType() == FieldIndexConfig.IndexType.FULLTEXT
+                    && i < entries.size()
+                    && entries.get(i)
+                            .getKey()
+                            .equals(fieldName + ESIndexOptions.KEYWORD_SUBFIELD_SUFFIX)) {
+                i++;
+            } else if (primary.getValue().indexType() == FieldIndexConfig.IndexType.KEYWORD
+                    && i < entries.size()
+                    && entries.get(i)
+                            .getKey()
+                            .equals(fieldName + ESIndexOptions.FULLTEXT_SUBFIELD_SUFFIX)) {
+                i++;
+            }
+            if (i < entries.size()
+                    && entries.get(i)
+                            .getKey()
+                            .equals(fieldName + ESIndexOptions.ARRAY_PRESENCE_SUBFIELD_SUFFIX)) {
+                i++;
+            }
+        }
+        return fields;
     }
 
     private static void writeOffsets(DataOutputStream out, File[] files) throws IOException {
@@ -152,12 +268,20 @@ final class ESIndexFileMeta {
             String name = readString(in);
             long offset = in.readLong();
             long length = in.readLong();
-            if (offset < 0 || length < 0) {
-                throw new IOException("Negative file offset/length in es-index metadata: " + name);
+            if (offset < 0 || length < 0 || offset > Long.MAX_VALUE - length) {
+                throw new IOException("Invalid file offset/length in es-index metadata: " + name);
             }
-            offsets.put(name, new long[] {offset, length});
+            if (offsets.put(name, new long[] {offset, length}) != null) {
+                throw new IOException("Duplicate file offset in es-index metadata: " + name);
+            }
         }
         return offsets;
+    }
+
+    private static void requireFullyConsumed(DataInputStream in) throws IOException {
+        if (in.available() != 0) {
+            throw new IOException("Trailing bytes in es-index metadata: " + in.available());
+        }
     }
 
     private static int readCount(DataInputStream in, String description) throws IOException {
@@ -216,17 +340,31 @@ final class ESIndexFileMeta {
     }
 
     static final class Parsed {
+        private final List<String> indexedFieldNames;
+        private final List<String> indexedFieldTypes;
         private final Map<String, FieldIndexConfig> fieldConfigs;
         private final Map<String, long[]> fileOffsets;
         private final boolean hasFieldConfigs;
 
         private Parsed(
+                List<String> indexedFieldNames,
+                List<String> indexedFieldTypes,
                 Map<String, FieldIndexConfig> fieldConfigs,
                 Map<String, long[]> fileOffsets,
                 boolean hasFieldConfigs) {
+            this.indexedFieldNames = indexedFieldNames;
+            this.indexedFieldTypes = indexedFieldTypes;
             this.fieldConfigs = fieldConfigs;
             this.fileOffsets = fileOffsets;
             this.hasFieldConfigs = hasFieldConfigs;
+        }
+
+        List<String> indexedFieldNames() {
+            return indexedFieldNames;
+        }
+
+        List<String> indexedFieldTypes() {
+            return indexedFieldTypes;
         }
 
         Map<String, FieldIndexConfig> fieldConfigs() {

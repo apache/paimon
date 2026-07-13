@@ -24,12 +24,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Factory for creating ES multi-index global indexers. Supports vector (DiskBBQ/HNSW), fulltext
@@ -38,18 +32,6 @@ import java.util.concurrent.TimeUnit;
 public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
 
     public static final String IDENTIFIER = "es-index";
-
-    private static final String READ_SEARCH_THREADS_KEY =
-            "global-index.es-index.read-search-threads";
-    private static final int DEFAULT_READ_SEARCH_THREADS = -1;
-
-    // Cache one shared DiskBBQ cluster-search pool per resolved thread count, so tables/reads
-    // configured with different global-index.es-index.read-search-threads values each get their own
-    // pool instead of all reusing whichever pool was created first. A value of 0 maps to null
-    // (serial DiskBBQ search) and is never cached. Paimon's caller executor independently schedules
-    // the outer reader future.
-    private static final ConcurrentMap<Integer, ExecutorService> READ_SEARCH_EXECUTORS =
-            new ConcurrentHashMap<>();
 
     @Override
     public String identifier() {
@@ -63,10 +45,7 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new ESIndexGlobalIndexer(
-                java.util.Collections.singletonList(field),
-                options,
-                getOrCreateReadSearchExecutor(options));
+        return new ESIndexGlobalIndexer(java.util.Collections.singletonList(field), options);
     }
 
     @Override
@@ -80,40 +59,6 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
             fields.add(indexField);
             fields.addAll(extraFields);
         }
-        return new ESIndexGlobalIndexer(fields, options, getOrCreateReadSearchExecutor(options));
-    }
-
-    /**
-     * Returns the shared DiskBBQ cluster-search thread pool. Default (unset or -1) creates a pool
-     * sized to CPU/2. Set to 0 to disable DiskBBQ parallel search (returns null → serial only).
-     */
-    private static ExecutorService getOrCreateReadSearchExecutor(Options options) {
-        int threads = options.getInteger(READ_SEARCH_THREADS_KEY, DEFAULT_READ_SEARCH_THREADS);
-        if (threads == 0) {
-            // Explicitly disable async/searcher parallelism for this reader (serial execution).
-            return null;
-        }
-        int resolved =
-                threads < 0 ? Math.max(2, Runtime.getRuntime().availableProcessors() / 2) : threads;
-        return READ_SEARCH_EXECUTORS.computeIfAbsent(
-                resolved, ESIndexGlobalIndexerFactory::createExecutor);
-    }
-
-    private static ExecutorService createExecutor(int threads) {
-        ThreadPoolExecutor executor =
-                new ThreadPoolExecutor(
-                        threads,
-                        threads,
-                        60L,
-                        TimeUnit.SECONDS,
-                        new LinkedBlockingQueue<>(256),
-                        r -> {
-                            Thread t = new Thread(r, "paimon-es-search");
-                            t.setDaemon(true);
-                            return t;
-                        },
-                        new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.allowCoreThreadTimeOut(true);
-        return executor;
+        return new ESIndexGlobalIndexer(fields, options);
     }
 }

@@ -31,8 +31,10 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -44,6 +46,7 @@ import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.FullTextParams;
 import org.elasticsearch.eslib.api.model.FullTextQuerySpec;
 import org.elasticsearch.eslib.api.model.IndexFilter;
+import org.elasticsearch.eslib.api.model.ScalarFieldType;
 import org.elasticsearch.eslib.api.model.ScalarPredicate;
 import org.elasticsearch.eslib.api.model.SearchResult;
 import org.slf4j.Logger;
@@ -54,10 +57,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -83,18 +89,19 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private static final String HNSW_EF_SEARCH_OPTION = "hnsw.ef_search";
     private static final String NUM_CANDIDATES_OPTION = "num_candidates";
     private static final int DEFAULT_SAMPLE_LIMIT = 20;
+    private static final int MAX_FULL_TEXT_QUERY_DEPTH = 64;
 
     private final GlobalIndexFileReader fileReader;
     private final List<GlobalIndexIOMeta> files;
     private final List<DataField> fields;
+    private final Map<String, String> logicalToPhysicalFields;
+    private final Set<String> incompatibleLogicalFields;
     private final ESIndexOptions indexOptions;
     private final Map<String, long[]> fileOffsets;
     private final boolean hasPersistedFieldConfigs;
-    // Paimon's caller-owned executor is used only for the outer CompletableFuture. DiskBBQ must
-    // never submit its cluster tasks to an executor already occupied by that outer task.
+    // Paimon's caller-owned executor schedules the outer CompletableFuture. The standalone ES940
+    // reader currently scores clusters serially and does not accept a per-reader scoring pool.
     private final ExecutorService queryExecutor;
-    // Factory-owned pool used only by ESLib / DiskBBQ's internal parallel cluster search.
-    private final ExecutorService searchExecutor;
 
     // Identity semantics are intentional: distinct streams may wrap the same path and must each be
     // tracked until their own provider closes.
@@ -115,20 +122,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
             ESIndexOptions indexOptions) {
-        this(fileReader, files, fields, indexOptions, null, null);
-    }
-
-    /**
-     * Creates a reader that executes the outer operation inline and reserves {@code searchExecutor}
-     * exclusively for ESLib's internal search work.
-     */
-    public ESIndexGlobalIndexReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            List<DataField> fields,
-            ESIndexOptions indexOptions,
-            ExecutorService searchExecutor) {
-        this(fileReader, files, fields, indexOptions, null, searchExecutor);
+        this(fileReader, files, fields, indexOptions, null);
     }
 
     public ESIndexGlobalIndexReader(
@@ -136,39 +130,224 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
             ESIndexOptions indexOptions,
-            ExecutorService queryExecutor,
-            ExecutorService searchExecutor) {
+            ExecutorService queryExecutor) {
+        Objects.requireNonNull(files, "files");
         checkArgument(files.size() == 1, "Expected exactly one ES index file per shard");
-        this.fileReader = fileReader;
-        this.files = files;
-        this.fields = fields;
+        this.fileReader = Objects.requireNonNull(fileReader, "fileReader");
+        this.files = Collections.unmodifiableList(new ArrayList<>(files));
+        this.fields =
+                Collections.unmodifiableList(
+                        new ArrayList<>(Objects.requireNonNull(fields, "fields")));
+        ESIndexOptions fallbackIndexOptions = Objects.requireNonNull(indexOptions, "indexOptions");
         try {
-            ESIndexFileMeta.Parsed parsed = ESIndexFileMeta.read(files.get(0).metadata());
+            GlobalIndexIOMeta archiveMeta =
+                    Objects.requireNonNull(this.files.get(0), "index file metadata");
+            ESIndexFileMeta.Parsed parsed = ESIndexFileMeta.read(archiveMeta.metadata());
             this.fileOffsets = parsed.fileOffsets();
+            validateArchiveOffsets(archiveMeta, fileOffsets);
             this.hasPersistedFieldConfigs = parsed.hasFieldConfigs();
             this.indexOptions =
                     parsed.hasFieldConfigs()
                             ? ESIndexOptions.fromFieldConfigs(parsed.fieldConfigs())
-                            : indexOptions;
+                            : fallbackIndexOptions;
+            List<String> physicalFields =
+                    parsed.hasFieldConfigs()
+                            ? parsed.indexedFieldNames()
+                            : currentFieldNames(this.fields);
+            this.logicalToPhysicalFields =
+                    createFieldMapping(this.fields, physicalFields, this.indexOptions);
+            this.incompatibleLogicalFields =
+                    findIncompatibleFields(
+                            this.fields,
+                            physicalFields,
+                            parsed.indexedFieldTypes(),
+                            this.indexOptions,
+                            parsed.hasFieldConfigs());
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid es-index metadata", e);
         }
-        // A caller can accidentally pass the same executor for both roles. Keep its outer async
-        // scheduling but disable nested DiskBBQ parallelism in that case; merely running the outer
-        // operation inline is insufficient when the caller itself is already a worker of the pool.
-        boolean sameExecutor = queryExecutor != null && queryExecutor == searchExecutor;
         this.queryExecutor = queryExecutor;
-        this.searchExecutor = sameExecutor ? null : searchExecutor;
         this.loaded = false;
         this.closed = false;
     }
 
-    ExecutorService queryExecutor() {
-        return queryExecutor;
+    private static List<String> currentFieldNames(List<DataField> fields) throws IOException {
+        List<String> names = new ArrayList<>(fields.size());
+        for (DataField field : fields) {
+            if (field == null) {
+                throw new IOException("Null current field in es-index reader");
+            }
+            names.add(field.name());
+        }
+        return names;
     }
 
-    ExecutorService searchExecutor() {
-        return searchExecutor;
+    private static Map<String, String> createFieldMapping(
+            List<DataField> currentFields, List<String> physicalFields, ESIndexOptions indexOptions)
+            throws IOException {
+        if (physicalFields.size() != currentFields.size()) {
+            throw new IOException(
+                    "ES index field count does not match current schema: indexed="
+                            + physicalFields.size()
+                            + ", current="
+                            + currentFields.size());
+        }
+        Map<String, String> mapping = new HashMap<>();
+        Set<String> physicalNames = new HashSet<>();
+        for (int i = 0; i < currentFields.size(); i++) {
+            DataField current = currentFields.get(i);
+            if (current == null) {
+                throw new IOException("Null current field in es-index reader at position " + i);
+            }
+            String physical = physicalFields.get(i);
+            if (physical == null || physical.isEmpty()) {
+                throw new IOException(
+                        "Empty indexed field name in es-index metadata at position " + i);
+            }
+            if (indexOptions.getConfig(physical) == null) {
+                throw new IOException(
+                        "Missing primary field config in es-index metadata: " + physical);
+            }
+            if (mapping.put(current.name(), physical) != null) {
+                throw new IOException(
+                        "Duplicate current field in es-index reader: " + current.name());
+            }
+            if (!physicalNames.add(physical)) {
+                throw new IOException("Duplicate indexed field in es-index metadata: " + physical);
+            }
+        }
+        return Collections.unmodifiableMap(mapping);
+    }
+
+    private String physicalField(String logicalField) {
+        return logicalToPhysicalFields.get(logicalField);
+    }
+
+    private FieldIndexConfig logicalFieldConfig(String logicalField) {
+        if (incompatibleLogicalFields.contains(logicalField)) {
+            return null;
+        }
+        String physicalField = physicalField(logicalField);
+        return physicalField == null ? null : indexOptions.getConfig(physicalField);
+    }
+
+    private static Set<String> findIncompatibleFields(
+            List<DataField> currentFields,
+            List<String> physicalFields,
+            List<String> indexedFieldTypes,
+            ESIndexOptions indexOptions,
+            boolean hasPersistedFieldConfigs)
+            throws IOException {
+        if (!indexedFieldTypes.isEmpty() && indexedFieldTypes.size() != currentFields.size()) {
+            throw new IOException(
+                    "ES index field type count does not match current schema: indexed="
+                            + indexedFieldTypes.size()
+                            + ", current="
+                            + currentFields.size());
+        }
+        if (!hasPersistedFieldConfigs) {
+            return Collections.emptySet();
+        }
+
+        Set<String> incompatible = new HashSet<>();
+        for (int i = 0; i < currentFields.size(); i++) {
+            DataField current = currentFields.get(i);
+            boolean compatible;
+            if (!indexedFieldTypes.isEmpty()) {
+                compatible =
+                        current.type().copy(true).asSQLString().equals(indexedFieldTypes.get(i));
+            } else {
+                compatible =
+                        legacyTypeCompatible(
+                                current.type(), indexOptions.getConfig(physicalFields.get(i)));
+            }
+            if (!compatible) {
+                incompatible.add(current.name());
+            }
+        }
+        return incompatible.isEmpty()
+                ? Collections.emptySet()
+                : Collections.unmodifiableSet(incompatible);
+    }
+
+    private static boolean legacyTypeCompatible(DataType type, FieldIndexConfig config) {
+        if (config == null) {
+            return false;
+        }
+        switch (config.indexType()) {
+            case VECTOR:
+                if (type instanceof VectorType) {
+                    VectorType vectorType = (VectorType) type;
+                    return vectorType.getElementType().getTypeRoot() == DataTypeRoot.FLOAT
+                            && vectorType.getLength() == config.dimension();
+                }
+                return type instanceof ArrayType
+                        && ((ArrayType) type).getElementType().getTypeRoot() == DataTypeRoot.FLOAT;
+            case FULLTEXT:
+            case KEYWORD:
+                return type.getTypeRoot() == DataTypeRoot.CHAR
+                        || type.getTypeRoot() == DataTypeRoot.VARCHAR;
+            case SCALAR:
+            case DATE:
+                return expectedScalarType(type) == config.scalarType();
+            default:
+                return false;
+        }
+    }
+
+    private static ScalarFieldType expectedScalarType(DataType type) {
+        DataType valueType = type instanceof ArrayType ? ((ArrayType) type).getElementType() : type;
+        switch (valueType.getTypeRoot()) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+                return ScalarFieldType.INT;
+            case BIGINT:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return ScalarFieldType.LONG;
+            case FLOAT:
+                return ScalarFieldType.FLOAT;
+            case DOUBLE:
+                return ScalarFieldType.DOUBLE;
+            case CHAR:
+            case VARCHAR:
+                return ScalarFieldType.KEYWORD;
+            default:
+                return null;
+        }
+    }
+
+    private static void validateArchiveOffsets(
+            GlobalIndexIOMeta archiveMeta, Map<String, long[]> fileOffsets) throws IOException {
+        if (archiveMeta.fileSize() < 0) {
+            throw new IOException("Negative es-index archive size: " + archiveMeta.fileSize());
+        }
+        if (fileOffsets.isEmpty()) {
+            throw new IOException("ES index metadata contains no Lucene files");
+        }
+        for (Map.Entry<String, long[]> entry : fileOffsets.entrySet()) {
+            long[] range = entry.getValue();
+            if (range == null
+                    || range.length != 2
+                    || range[0] < 0
+                    || range[1] < 0
+                    || range[0] > archiveMeta.fileSize() - range[1]) {
+                throw new IOException(
+                        "File range exceeds es-index archive size for "
+                                + entry.getKey()
+                                + ": archiveSize="
+                                + archiveMeta.fileSize()
+                                + ", range="
+                                + sample(range, range == null ? 0 : range.length, 2));
+            }
+        }
+    }
+
+    ExecutorService queryExecutor() {
+        return queryExecutor;
     }
 
     int openStreamCount() {
@@ -180,6 +359,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
+        Objects.requireNonNull(vectorSearch, "vectorSearch");
         return async(
                 () -> {
                     try {
@@ -187,21 +367,36 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         // (topK), candidate
                         float[] queryVector = vectorSearch.vector();
                         int topK = vectorSearch.limit();
+                        if (topK <= 0) {
+                            throw new IllegalArgumentException(
+                                    "Vector search limit must be positive; got: " + topK);
+                        }
                         int searchTopK = vectorSearchTopK(vectorSearch);
                         String fieldName = vectorSearch.fieldName();
-                        FieldIndexConfig config = indexOptions.getConfig(fieldName);
-                        if (config == null
-                                || config.indexType() != FieldIndexConfig.IndexType.VECTOR) {
+                        String physicalField = physicalField(fieldName);
+                        if (physicalField == null) {
                             return Optional.empty();
                         }
-                        if (queryVector.length != config.dimension()) {
+                        FieldIndexConfig config = indexOptions.getConfig(physicalField);
+                        if (config == null
+                                || config.indexType() != FieldIndexConfig.IndexType.VECTOR) {
+                            if (incompatibleLogicalFields.contains(fieldName)) {
+                                throw incompatibleSearchSchema(fieldName, "vector");
+                            }
+                            return Optional.empty();
+                        }
+                        if (incompatibleLogicalFields.contains(fieldName)
+                                && !vectorTypeCompatible(fieldName, config)) {
+                            throw incompatibleSearchSchema(fieldName, "vector");
+                        }
+                        if (queryVector == null || queryVector.length != config.dimension()) {
                             throw new IllegalArgumentException(
                                     "Vector query for field '"
                                             + fieldName
                                             + "' expects dimension "
                                             + config.dimension()
                                             + " but received "
-                                            + queryVector.length
+                                            + (queryVector == null ? "null" : queryVector.length)
                                             + ".");
                         }
                         ensureLoaded();
@@ -226,7 +421,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
                         SearchResult result =
                                 searcher.vectorSearch(
-                                        fieldName, queryVector, searchTopK, candidateIds);
+                                        physicalField, queryVector, searchTopK, candidateIds);
                         if (debugEnabled()) {
                             LOG.info(
                                     "PAIMON_ESLIB_VECTOR_SEARCH_RESULT field={} topK={} searchTopK={} resultCount={} ids={} scores={}",
@@ -245,7 +440,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                                     result.count,
                                                     DEFAULT_SAMPLE_LIMIT));
                         }
-                        return toScoredResult(result);
+                        return toScoredResult(result, topK);
                     } catch (IOException e) {
                         throw new RuntimeException("Vector search failed", e);
                     }
@@ -255,12 +450,26 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
             FullTextSearch fullTextSearch) {
+        Objects.requireNonNull(fullTextSearch, "fullTextSearch");
         return async(
                 () -> {
                     try {
-                        ensureLoaded();
+                        if (fullTextSearch.limit() <= 0) {
+                            throw new IllegalArgumentException(
+                                    "Full-text search limit must be positive; got: "
+                                            + fullTextSearch.limit());
+                        }
+                        String physicalField = physicalField(fullTextSearch.fieldName());
                         String searchField =
-                                indexOptions.fullTextSearchField(fullTextSearch.fieldName());
+                                physicalField == null
+                                        ? null
+                                        : indexOptions.fullTextSearchField(physicalField);
+                        if (physicalField != null
+                                && incompatibleLogicalFields.contains(fullTextSearch.fieldName())
+                                && (searchField == null
+                                        || !isCurrentTextField(fullTextSearch.fieldName()))) {
+                            throw incompatibleSearchSchema(fullTextSearch.fieldName(), "full-text");
+                        }
                         if (searchField == null) {
                             return Optional.empty();
                         }
@@ -268,16 +477,54 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         // FULLTEXT primary field is searched directly; a KEYWORD primary field is
                         // searched through its analyzed .fulltext multi-field.
                         FullTextQuerySpec spec = parseSpec(searchField, fullTextSearch.query());
+                        ensureLoaded();
                         SearchResult result =
                                 fullTextSearch(
                                         spec,
                                         fullTextSearch.limit(),
                                         fullTextSearch.includeRowIds());
-                        return toScoredResult(result);
+                        return toScoredResult(result, fullTextSearch.limit());
                     } catch (IOException e) {
                         throw new RuntimeException("Full-text search failed", e);
                     }
                 });
+    }
+
+    private boolean vectorTypeCompatible(String logicalField, FieldIndexConfig config) {
+        DataType currentType = currentFieldType(logicalField);
+        if (currentType instanceof VectorType) {
+            VectorType vectorType = (VectorType) currentType;
+            return vectorType.getElementType().getTypeRoot() == DataTypeRoot.FLOAT
+                    && vectorType.getLength() == config.dimension();
+        }
+        return currentType instanceof ArrayType
+                && ((ArrayType) currentType).getElementType().getTypeRoot() == DataTypeRoot.FLOAT;
+    }
+
+    private boolean isCurrentTextField(String logicalField) {
+        DataType currentType = currentFieldType(logicalField);
+        return currentType != null
+                && (currentType.getTypeRoot() == DataTypeRoot.CHAR
+                        || currentType.getTypeRoot() == DataTypeRoot.VARCHAR);
+    }
+
+    private DataType currentFieldType(String logicalField) {
+        for (DataField field : fields) {
+            if (field.name().equals(logicalField)) {
+                return field.type();
+            }
+        }
+        return null;
+    }
+
+    private static IllegalStateException incompatibleSearchSchema(
+            String logicalField, String searchType) {
+        return new IllegalStateException(
+                "The persisted es-index for field '"
+                        + logicalField
+                        + "' is incompatible with the current schema and cannot safely answer "
+                        + searchType
+                        + " search. Rebuild the es-index after the schema change.");
     }
 
     /**
@@ -342,9 +589,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     /**
      * Parses the {@link FullTextSearch#query()} JSON DSL into an eslib {@link FullTextQuerySpec}.
      */
-    private static FullTextQuerySpec parseSpec(String field, String json) {
+    static FullTextQuerySpec parseSpec(String field, String json) {
         try {
-            return parseSpec(field, JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(json));
+            return parseSpec(field, JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(json), 0);
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid full-text query JSON: " + json, e);
         }
@@ -356,61 +603,135 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
      * FullTextSearch#fieldName()} (the flat model carries a single field); the query semantics come
      * from the JSON. The caller resolves the logical Paimon field to its physical FULLTEXT field.
      */
-    private static FullTextQuerySpec parseSpec(String field, JsonNode q) {
+    private static FullTextQuerySpec parseSpec(String field, JsonNode q, int depth) {
+        if (depth >= MAX_FULL_TEXT_QUERY_DEPTH) {
+            throw new IllegalArgumentException(
+                    "Full-text query exceeds the maximum nesting depth of "
+                            + MAX_FULL_TEXT_QUERY_DEPTH);
+        }
+        requireObject(q, "full-text query");
+        requireOnlyFields(
+                q,
+                "full-text query",
+                "match",
+                "match_phrase",
+                "phrase",
+                "boost",
+                "boolean",
+                "bool");
+        int queryTypeCount =
+                present(q, "match")
+                        + present(q, "match_phrase")
+                        + present(q, "phrase")
+                        + present(q, "boost")
+                        + present(q, "boolean")
+                        + present(q, "bool");
+        if (queryTypeCount != 1) {
+            throw new IllegalArgumentException(
+                    "Full-text query must contain exactly one supported query type: " + q);
+        }
         if (q.has("match")) {
-            JsonNode m = q.get("match");
+            JsonNode m = requireObject(q.get("match"), "match query");
+            requireOnlyFields(
+                    m,
+                    "match query",
+                    "query",
+                    "terms",
+                    "operator",
+                    "boost",
+                    "fuzziness",
+                    "max_expansions",
+                    "maxExpansions",
+                    "prefix_length",
+                    "prefixLength");
             return new FullTextQuerySpec.Match(field, queryText(m), parseParams(m));
         } else if (q.has("match_phrase") || q.has("phrase")) {
-            JsonNode p = q.has("match_phrase") ? q.get("match_phrase") : q.get("phrase");
-            int slop = p.has("slop") ? p.get("slop").asInt() : 0;
+            JsonNode p =
+                    requireObject(
+                            q.has("match_phrase") ? q.get("match_phrase") : q.get("phrase"),
+                            "phrase query");
+            requireOnlyFields(p, "phrase query", "query", "terms", "slop");
+            int slop = p.has("slop") ? intValue(p.get("slop"), "slop") : 0;
             return new FullTextQuerySpec.Phrase(field, queryText(p), slop);
         } else if (q.has("boost")) {
-            JsonNode b = q.get("boost");
+            JsonNode b = requireObject(q.get("boost"), "boost query");
+            requireOnlyFields(
+                    b, "boost query", "positive", "negative", "negative_boost", "negativeBoost");
+            rejectAliasPair(b, "negative_boost", "negativeBoost");
             float negativeBoost = 0.5f;
             if (b.has("negative_boost")) {
-                negativeBoost = (float) b.get("negative_boost").asDouble();
+                negativeBoost = floatValue(b.get("negative_boost"), "negative_boost");
             } else if (b.has("negativeBoost")) {
-                negativeBoost = (float) b.get("negativeBoost").asDouble();
+                negativeBoost = floatValue(b.get("negativeBoost"), "negativeBoost");
             }
             return new FullTextQuerySpec.Boost(
-                    parseSpec(field, b.get("positive")),
-                    parseSpec(field, b.get("negative")),
+                    parseSpec(field, required(b, "positive"), depth + 1),
+                    parseSpec(field, required(b, "negative"), depth + 1),
                     negativeBoost);
         } else if (q.has("boolean") || q.has("bool")) {
             List<FullTextQuerySpec> must = new ArrayList<>();
             List<FullTextQuerySpec> should = new ArrayList<>();
             List<FullTextQuerySpec> mustNot = new ArrayList<>();
-            JsonNode booleanNode = q.has("boolean") ? q.get("boolean") : q.get("bool");
-            addBooleanClauses(field, booleanNode.get("must"), must);
-            addBooleanClauses(field, booleanNode.get("should"), should);
+            JsonNode booleanNode =
+                    requireObject(
+                            q.has("boolean") ? q.get("boolean") : q.get("bool"), "boolean query");
+            requireOnlyFields(
+                    booleanNode,
+                    "boolean query",
+                    "must",
+                    "should",
+                    "must_not",
+                    "mustNot",
+                    "queries");
+            rejectAliasPair(booleanNode, "must_not", "mustNot");
+            addBooleanClauses(field, booleanNode.get("must"), must, depth + 1);
+            addBooleanClauses(field, booleanNode.get("should"), should, depth + 1);
             JsonNode namedMustNot =
                     booleanNode.has("must_not")
                             ? booleanNode.get("must_not")
                             : booleanNode.get("mustNot");
-            addBooleanClauses(field, namedMustNot, mustNot);
+            addBooleanClauses(field, namedMustNot, mustNot, depth + 1);
 
             // Keep the original tuple/object representation for compatibility.
             JsonNode clauses = booleanNode.get("queries");
-            if (clauses != null) {
+            if (clauses != null && !clauses.isNull()) {
+                if (!clauses.isArray()) {
+                    throw new IllegalArgumentException(
+                            "Boolean 'queries' must be an array: " + clauses);
+                }
                 for (JsonNode clause : clauses) {
                     String occur;
                     JsonNode child;
                     if (clause.isArray()) {
-                        occur = clause.get(0).asText();
+                        if (clause.size() != 2 || !clause.get(0).isTextual()) {
+                            throw new IllegalArgumentException(
+                                    "Boolean tuple clause must be [occur, query]: " + clause);
+                        }
+                        occur = clause.get(0).textValue();
                         child = clause.get(1);
                     } else {
-                        occur = clause.has("occur") ? clause.get("occur").asText() : "Should";
-                        child = clause.get("query");
+                        JsonNode clauseObject = requireObject(clause, "boolean clause");
+                        requireOnlyFields(clauseObject, "boolean clause", "occur", "query");
+                        JsonNode occurNode = clauseObject.get("occur");
+                        if (occurNode != null && !occurNode.isTextual()) {
+                            throw new IllegalArgumentException(
+                                    "Boolean clause 'occur' must be a string: " + occurNode);
+                        }
+                        occur = occurNode == null ? "Should" : occurNode.textValue();
+                        child = required(clauseObject, "query");
                     }
-                    FullTextQuerySpec spec = parseSpec(field, child);
+                    FullTextQuerySpec spec = parseSpec(field, child, depth + 1);
                     String normalizedOccur =
                             occur.replace("_", "").replace("-", "").toLowerCase(Locale.ROOT);
                     if ("must".equals(normalizedOccur)) {
                         must.add(spec);
                     } else if ("mustnot".equals(normalizedOccur)) {
                         mustNot.add(spec);
-                    } else {
+                    } else if ("should".equals(normalizedOccur)) {
                         should.add(spec);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "Boolean occur must be MUST, SHOULD, or MUST_NOT; got: " + occur);
                     }
                 }
             }
@@ -420,26 +741,30 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     private static void addBooleanClauses(
-            String field, JsonNode node, List<FullTextQuerySpec> destination) {
+            String field, JsonNode node, List<FullTextQuerySpec> destination, int depth) {
         if (node == null || node.isNull()) {
             return;
         }
         if (node.isArray()) {
             for (JsonNode child : node) {
-                destination.add(parseSpec(field, child));
+                destination.add(parseSpec(field, child, depth));
             }
         } else {
-            destination.add(parseSpec(field, node));
+            destination.add(parseSpec(field, node, depth));
         }
     }
 
     private static String queryText(JsonNode node) {
-        if (node.has("query")) {
-            return node.get("query").asText();
-        } else if (node.has("terms")) {
-            return node.get("terms").asText();
+        if (node.has("query") && node.has("terms")) {
+            throw new IllegalArgumentException(
+                    "Full-text query cannot contain both 'query' and 'terms': " + node);
         }
-        throw new IllegalArgumentException("Full-text query missing 'query'/'terms': " + node);
+        JsonNode text = node.has("query") ? node.get("query") : node.get("terms");
+        if (text == null || !text.isTextual()) {
+            throw new IllegalArgumentException(
+                    "Full-text query requires a string 'query' or 'terms': " + node);
+        }
+        return text.textValue();
     }
 
     /**
@@ -449,11 +774,17 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
      * their defaults.
      */
     private static FullTextParams parseParams(JsonNode match) {
-        FullTextParams.Operator operator =
-                match.has("operator") && "and".equalsIgnoreCase(match.get("operator").asText())
-                        ? FullTextParams.Operator.AND
-                        : FullTextParams.Operator.OR;
-        float boost = match.has("boost") ? (float) match.get("boost").asDouble() : 1.0f;
+        FullTextParams.Operator operator = FullTextParams.Operator.OR;
+        if (match.has("operator")) {
+            String value = match.get("operator").asText();
+            if ("and".equalsIgnoreCase(value)) {
+                operator = FullTextParams.Operator.AND;
+            } else if (!"or".equalsIgnoreCase(value)) {
+                throw new IllegalArgumentException(
+                        "Full-text match operator must be AND or OR; got: " + value);
+            }
+        }
+        float boost = match.has("boost") ? floatValue(match.get("boost"), "boost") : 1.0f;
         int fuzziness = 0;
         if (match.has("fuzziness")) {
             JsonNode value = match.get("fuzziness");
@@ -467,7 +798,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                             "fuzziness must be 0, 1, 2, or AUTO; got: " + value.asText(), e);
                 }
             } else {
-                fuzziness = value.asInt();
+                fuzziness = intValue(value, "fuzziness");
             }
         }
         int maxExpansions = intParam(match, "max_expansions", "maxExpansions", 50);
@@ -477,17 +808,87 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private static int intParam(
             JsonNode node, String snakeCaseName, String camelCaseName, int defaultValue) {
+        rejectAliasPair(node, snakeCaseName, camelCaseName);
         if (node.has(snakeCaseName)) {
-            return node.get(snakeCaseName).asInt();
+            return intValue(node.get(snakeCaseName), snakeCaseName);
         }
-        return node.has(camelCaseName) ? node.get(camelCaseName).asInt() : defaultValue;
+        return node.has(camelCaseName)
+                ? intValue(node.get(camelCaseName), camelCaseName)
+                : defaultValue;
+    }
+
+    private static int present(JsonNode node, String field) {
+        return node.has(field) ? 1 : 0;
+    }
+
+    private static JsonNode requireObject(JsonNode node, String description) {
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException(description + " must be a JSON object: " + node);
+        }
+        return node;
+    }
+
+    private static void requireOnlyFields(
+            JsonNode node, String description, String... allowedFields) {
+        Set<String> allowed = new HashSet<>(Arrays.asList(allowedFields));
+        Iterator<String> fields = node.fieldNames();
+        while (fields.hasNext()) {
+            String field = fields.next();
+            if (!allowed.contains(field)) {
+                throw new IllegalArgumentException(
+                        "Unknown field '" + field + "' in " + description + ": " + node);
+            }
+        }
+    }
+
+    private static void rejectAliasPair(JsonNode node, String first, String second) {
+        if (node.has(first) && node.has(second)) {
+            throw new IllegalArgumentException(
+                    "Full-text query cannot contain both '"
+                            + first
+                            + "' and '"
+                            + second
+                            + "': "
+                            + node);
+        }
+    }
+
+    private static JsonNode required(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            throw new IllegalArgumentException("Missing full-text query field: " + field);
+        }
+        return value;
+    }
+
+    private static int intValue(JsonNode value, String name) {
+        if (value != null && value.isIntegralNumber() && value.canConvertToInt()) {
+            return value.intValue();
+        }
+        if (value != null && value.isTextual()) {
+            try {
+                return Integer.parseInt(value.textValue());
+            } catch (NumberFormatException ignored) {
+                // Report the same parameter-specific error below.
+            }
+        }
+        throw new IllegalArgumentException(name + " must be an integer; got: " + value);
+    }
+
+    private static float floatValue(JsonNode value, String name) {
+        if (value == null || (!value.isNumber() && !value.isTextual())) {
+            throw new IllegalArgumentException(name + " must be a number; got: " + value);
+        }
+        try {
+            return Float.parseFloat(value.asText());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(name + " must be a number; got: " + value, e);
+        }
     }
 
     /**
      * Run {@code body} on Paimon's caller-owned query executor when one is available, otherwise
-     * execute it inline. The separate {@link #searchExecutor} is reserved for DiskBBQ's internal
-     * cluster tasks; using one pool for both layers can deadlock when the outer tasks occupy every
-     * worker and wait for nested tasks submitted to the same pool.
+     * execute it inline.
      */
     private <T> CompletableFuture<T> async(Supplier<T> body) {
         Supplier<T> guardedBody =
@@ -501,9 +902,21 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     }
                 };
         if (queryExecutor != null) {
-            return CompletableFuture.supplyAsync(guardedBody, queryExecutor);
+            try {
+                return CompletableFuture.supplyAsync(guardedBody, queryExecutor);
+            } catch (Throwable failure) {
+                CompletableFuture<T> future = new CompletableFuture<>();
+                future.completeExceptionally(failure);
+                return future;
+            }
         }
-        return CompletableFuture.completedFuture(guardedBody.get());
+        CompletableFuture<T> future = new CompletableFuture<>();
+        try {
+            future.complete(guardedBody.get());
+        } catch (Throwable failure) {
+            future.completeExceptionally(failure);
+        }
+        return future;
     }
 
     static int vectorSearchTopK(VectorSearch vectorSearch) {
@@ -526,20 +939,26 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
         try {
             int parsed = Integer.parseInt(value.trim());
-            return parsed > 0 ? parsed : -1;
+            if (parsed <= 0) {
+                throw new IllegalArgumentException(
+                        "Vector search option '" + key + "' must be positive; got: " + value);
+            }
+            return parsed;
         } catch (NumberFormatException e) {
-            return -1;
+            throw new IllegalArgumentException(
+                    "Vector search option '" + key + "' must be an integer; got: " + value, e);
         }
     }
 
-    private Optional<ScoredGlobalIndexResult> toScoredResult(SearchResult result) {
+    private Optional<ScoredGlobalIndexResult> toScoredResult(SearchResult result, int limit) {
         if (result == null || result.count == 0) {
             return Optional.empty();
         }
 
+        int count = Math.min(result.count, limit);
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-        Map<Long, Float> scoreMap = new HashMap<>(result.count);
-        for (int i = 0; i < result.count; i++) {
+        Map<Long, Float> scoreMap = new HashMap<>(count);
+        for (int i = 0; i < count; i++) {
             long id = result.ids[i];
             bitmap.add(id);
             scoreMap.put(id, result.scores[i]);
@@ -602,12 +1021,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 // searcher and leak its directory/providers.
                 dataProvider = createProvider(meta);
                 candidateSearcher = ESIndexBuilderFactory.createSearcher();
-                candidateSearcher.load(
-                        dataProvider, fileOffsets, indexOptions.getFieldConfigs(), searchExecutor);
+                candidateSearcher.load(dataProvider, fileOffsets, indexOptions.getFieldConfigs());
             } catch (IOException | RuntimeException | Error failure) {
-                IOException cleanupFailure = cleanupFailedLoad(candidateSearcher, dataProvider);
+                Throwable cleanupFailure = cleanupFailedLoad(candidateSearcher, dataProvider);
                 if (cleanupFailure != null) {
-                    failure.addSuppressed(cleanupFailure);
+                    addSuppressed(failure, cleanupFailure);
                 }
                 throw failure;
             }
@@ -626,6 +1044,10 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private ArchiveDataProvider createProvider(GlobalIndexIOMeta meta) throws IOException {
         SeekableInputStream inputStream = fileReader.getInputStream(meta);
+        if (inputStream == null) {
+            throw new IOException(
+                    "Global index file reader returned a null stream for " + meta.filePath());
+        }
         TrackedArchiveDataProvider provider = new TrackedArchiveDataProvider(meta, inputStream);
         synchronized (openProviders) {
             openProviders.add(provider);
@@ -654,7 +1076,15 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 if (n < 0) {
                     throw new IOException("Unexpected EOF at offset " + (offset + read));
                 }
-                read += n;
+                if (n == 0) {
+                    int single = inputStream.read();
+                    if (single < 0) {
+                        throw new IOException("Unexpected EOF at offset " + (offset + read));
+                    }
+                    buf[read++] = (byte) single;
+                } else {
+                    read += n;
+                }
             }
             return buf;
         }
@@ -688,56 +1118,67 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private IOException cleanupFailedLoad(
+    private Throwable cleanupFailedLoad(
             ESIndexSearcher candidateSearcher, ArchiveDataProvider dataProvider) {
-        IOException failure = null;
+        Throwable failure = null;
         if (candidateSearcher != null) {
             try {
                 candidateSearcher.close();
-            } catch (IOException e) {
+            } catch (Throwable e) {
                 failure = e;
             }
         }
         if (dataProvider != null) {
             try {
                 dataProvider.close();
-            } catch (IOException e) {
+            } catch (Throwable e) {
                 failure = mergeFailure(failure, e);
             }
         }
         return mergeFailure(failure, closeTrackedProviders());
     }
 
-    private IOException closeTrackedProviders() {
+    private Throwable closeTrackedProviders() {
         List<TrackedArchiveDataProvider> providers;
         synchronized (openProviders) {
             providers = new ArrayList<>(openProviders);
         }
 
-        IOException failure = null;
+        Throwable failure = null;
         for (TrackedArchiveDataProvider provider : providers) {
             try {
                 provider.close();
-            } catch (IOException e) {
+            } catch (Throwable e) {
                 failure = mergeFailure(failure, e);
             }
         }
         return failure;
     }
 
-    private static IOException mergeFailure(IOException failure, IOException next) {
+    private static Throwable mergeFailure(Throwable failure, Throwable next) {
         if (next == null) {
             return failure;
         }
         if (failure == null) {
             return next;
         }
-        failure.addSuppressed(next);
+        addSuppressed(failure, next);
         return failure;
     }
 
+    private static void addSuppressed(Throwable failure, Throwable suppressed) {
+        if (failure != suppressed) {
+            failure.addSuppressed(suppressed);
+        }
+    }
+
     private static long[] toArray(RoaringNavigableMap64 bitmap) {
-        long[] arr = new long[(int) bitmap.getIntCardinality()];
+        long cardinality = bitmap.getLongCardinality();
+        if (cardinality > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "Candidate row-id bitmap is too large to materialize: " + cardinality);
+        }
+        long[] arr = new long[(int) cardinality];
         int i = 0;
         for (long id : bitmap) {
             arr[i++] = id;
@@ -837,18 +1278,18 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         Lock writeLock = lifecycleLock.writeLock();
         writeLock.lock();
         try {
-            if (closed) {
-                return;
-            }
+            // Prevent new queries on the first attempt, but keep cleanup retryable. A seekable
+            // stream may fail to close transiently; TrackedArchiveDataProvider then remains in
+            // openProviders with its close guard reset so a later close() can retry it.
             closed = true;
 
-            IOException failure = null;
+            Throwable failure = null;
             ESIndexSearcher currentSearcher = searcher;
-            searcher = null;
             if (currentSearcher != null) {
                 try {
                     currentSearcher.close();
-                } catch (IOException e) {
+                    searcher = null;
+                } catch (Throwable e) {
                     failure = e;
                 }
             }
@@ -856,11 +1297,24 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             failure = mergeFailure(failure, closeTrackedProviders());
             loaded = false;
             if (failure != null) {
-                throw failure;
+                rethrowCloseFailure(failure);
             }
         } finally {
             writeLock.unlock();
         }
+    }
+
+    private static void rethrowCloseFailure(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        throw new IOException("Failed to close ES index reader", failure);
     }
 
     // =================== unified filter dispatch =====================
@@ -904,60 +1358,89 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Optional<GlobalIndexResult> dispatchFilter(FieldRef fieldRef, IndexFilter filter) {
-        FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
-        if (config == null) {
+    private Optional<GlobalIndexResult> conservativeAllRows(String logicalField) {
+        if (physicalField(logicalField) == null) {
             return Optional.empty();
+        }
+        try {
+            ensureLoaded();
+            RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+            for (long id : searcher.allRowIds()) {
+                bitmap.add(id);
+            }
+            return Optional.of(GlobalIndexResult.create(bitmap));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to read conservative ES index rows for field: " + logicalField, e);
+        }
+    }
+
+    private boolean canEvaluateFilter(FieldRef fieldRef, IndexFilter filter) {
+        String physicalField = physicalField(fieldRef.name());
+        FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
+        if (physicalField == null || config == null) {
+            return false;
         }
         if (filter.filterType() == IndexFilter.FilterType.EXISTS
                 && fieldRef.type() instanceof ArrayType) {
-            String presenceField = indexOptions.arrayPresenceField(fieldRef.name());
-            if (!hasPersistedFieldConfigs || presenceField == null) {
-                return Optional.empty();
-            }
-            try {
-                return executeFilter(presenceField, filter);
-            } catch (UnsupportedOperationException | IllegalArgumentException e) {
-                return Optional.empty();
-            }
+            return hasPersistedFieldConfigs
+                    && indexOptions.arrayPresenceField(physicalField) != null;
         }
         if (filter.filterType() != IndexFilter.FilterType.EXISTS
                 && losesTimestampPrecision(fieldRef.type())) {
-            // TIMESTAMP(6/9) is currently indexed at millisecond precision. Evaluating a value
-            // predicate against that lossy representation could prune a row that differs only in
-            // micro/nanoseconds, so leave those predicates to the raw scan.
-            return Optional.empty();
+            return false;
+        }
+        switch (config.indexType()) {
+            case FULLTEXT:
+                return indexOptions.keywordSubField(physicalField) != null
+                        && !isKeywordRangeFilter(filter);
+            case KEYWORD:
+                return !isKeywordRangeFilter(filter);
+            case SCALAR:
+            case DATE:
+                return filter.filterType() == IndexFilter.FilterType.SCALAR
+                        || filter.filterType() == IndexFilter.FilterType.EXISTS;
+            case VECTOR:
+                return filter.filterType() == IndexFilter.FilterType.EXISTS;
+            default:
+                return false;
+        }
+    }
+
+    private Optional<GlobalIndexResult> dispatchFilter(FieldRef fieldRef, IndexFilter filter) {
+        String physicalField = physicalField(fieldRef.name());
+        FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
+        if (!canEvaluateFilter(fieldRef, filter)) {
+            return conservativeAllRows(fieldRef.name());
+        }
+        if (filter.filterType() == IndexFilter.FilterType.EXISTS
+                && fieldRef.type() instanceof ArrayType) {
+            String presenceField = indexOptions.arrayPresenceField(physicalField);
+            try {
+                return executeFilter(presenceField, filter);
+            } catch (UnsupportedOperationException | IllegalArgumentException e) {
+                return conservativeAllRows(fieldRef.name());
+            }
         }
         if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
             // A FULLTEXT field is indexed as analyzer-produced tokens, which are not equivalent to
             // the raw column value, so ordinary predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
             // cannot run on it directly. Route them to the keyword multi-field sub-field
             // (content.keyword) when present — it holds the exact value and serves these correctly.
-            // Without the sub-field, fall back to raw scan (Optional.empty). Full-text search
-            // (visitFullTextSearch) still targets the analyzed primary field.
-            String subField = indexOptions.keywordSubField(fieldRef.name());
-            if (subField != null) {
-                if (isKeywordRangeFilter(filter)) {
-                    return Optional.empty();
-                }
-                try {
-                    return executeFilter(subField, filter);
-                } catch (UnsupportedOperationException | IllegalArgumentException e) {
-                    // The keyword sub-field serves term/IN/prefix/wildcard/exists but not e.g. a
-                    // numeric range on a string; fall back to raw scan rather than failing.
-                    return Optional.empty();
-                }
+            // Without the sub-field, conservatively retain every row so the caller can evaluate
+            // the predicate. Full-text search (visitFullTextSearch) still targets the analyzed
+            // primary field.
+            String subField = indexOptions.keywordSubField(physicalField);
+            try {
+                return executeFilter(subField, filter);
+            } catch (UnsupportedOperationException | IllegalArgumentException e) {
+                return conservativeAllRows(fieldRef.name());
             }
-            return Optional.empty();
-        }
-        if (config.indexType() == FieldIndexConfig.IndexType.KEYWORD
-                && isKeywordRangeFilter(filter)) {
-            return Optional.empty();
         }
         try {
-            return executeFilter(fieldRef.name(), filter);
+            return executeFilter(physicalField, filter);
         } catch (UnsupportedOperationException | IllegalArgumentException e) {
-            return Optional.empty();
+            return conservativeAllRows(fieldRef.name());
         }
     }
 
@@ -982,13 +1465,15 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * ESLib does not implement NOT_EQUAL / NOT_IN scalar predicates and falls through to
-     * MatchAllDocsQuery. Evaluate the negation here as exists(field) AND NOT matchingFilter, so
-     * null rows are excluded and vector/hybrid includeRowIds cannot become an accidental full
-     * match.
+     * Evaluates a SQL negation as exists(field) AND NOT matchingFilter. Keeping the complement at
+     * the Paimon layer works for both scalar and keyword fields and preserves SQL null semantics.
      */
     private Optional<GlobalIndexResult> dispatchExistingRowsNotMatching(
             FieldRef fieldRef, IndexFilter matchingFilter) {
+        if (!canEvaluateFilter(fieldRef, IndexFilter.exists())
+                || !canEvaluateFilter(fieldRef, matchingFilter)) {
+            return conservativeAllRows(fieldRef.name());
+        }
         Optional<GlobalIndexResult> existing = dispatchFilter(fieldRef, IndexFilter.exists());
         if (existing.isEmpty()) {
             return Optional.empty();
@@ -1005,7 +1490,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     private IndexFilter exactValueFilter(FieldRef fieldRef, Object literal) {
-        FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
+        FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
         if (config != null
                 && (config.indexType() == FieldIndexConfig.IndexType.KEYWORD
                         || config.indexType() == FieldIndexConfig.IndexType.FULLTEXT)) {
@@ -1076,9 +1561,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
         return async(
                 () -> {
-                    FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
+                    FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
                     if (config == null) {
-                        return Optional.empty();
+                        return conservativeAllRows(fieldRef.name());
                     }
                     FieldIndexConfig.IndexType type = config.indexType();
                     if (type == FieldIndexConfig.IndexType.KEYWORD

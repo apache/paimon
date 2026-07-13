@@ -28,8 +28,10 @@ import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.UnionGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -54,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -162,6 +165,93 @@ class ESIndexGlobalIndexE2ETest {
         }
     }
 
+    /** Can make stream-close attempts fail until the test explicitly allows retry cleanup. */
+    private static final class TransientCloseFailureFileReader implements GlobalIndexFileReader {
+        private final LocalFileIO fio = LocalFileIO.create();
+        private final AtomicBoolean failCloses = new AtomicBoolean();
+
+        @Override
+        public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+            return new SeekableInputStreamWrapper(fio.newInputStream(meta.filePath())) {
+                private final AtomicBoolean streamClosed = new AtomicBoolean();
+
+                @Override
+                public void close() throws IOException {
+                    if (streamClosed.get()) {
+                        return;
+                    }
+                    if (failCloses.get()) {
+                        throw new IOException("transient close failure");
+                    }
+                    if (streamClosed.compareAndSet(false, true)) {
+                        super.close();
+                    }
+                }
+            };
+        }
+
+        void setCloseFailures(boolean fail) {
+            failCloses.set(fail);
+        }
+    }
+
+    @Test
+    void closeWithoutFinishReleasesBuilderAndPreventsFurtherUse(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = List.of(new DataField(0, "title", DataTypes.STRING()));
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(
+                        new LocalDirWriter(tmp), fields, new ESIndexOptions(fields, new Options()));
+
+        writer.write(BinaryString.fromString("uncommitted"), 0);
+        writer.close();
+        writer.close();
+
+        assertThrows(IllegalStateException.class, writer::finish);
+        assertThrows(
+                IllegalStateException.class,
+                () -> writer.write(BinaryString.fromString("late"), 1));
+        try (java.util.stream.Stream<java.nio.file.Path> filesInArchive = Files.list(tmp)) {
+            assertEquals(0L, filesInArchive.count(), "close must not publish a partial archive");
+        }
+    }
+
+    @Test
+    void failedWriteCannotPublishPartialIndex(@TempDir java.nio.file.Path tmp) throws IOException {
+        List<DataField> fields =
+                List.of(
+                        new DataField(
+                                0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT().notNull())));
+        Map<String, String> opt = new HashMap<>();
+        opt.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        opt.put("global-index.es-index.fields.embedding.dimension", "2");
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(
+                        new LocalDirWriter(tmp),
+                        fields,
+                        new ESIndexOptions(fields, Options.fromMap(opt)));
+
+        writer.write(new float[] {1.0f, 2.0f}, 0);
+        IllegalArgumentException writeFailure =
+                assertThrows(
+                        IllegalArgumentException.class, () -> writer.write(new float[] {3.0f}, 1));
+        IllegalStateException retryFailure =
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> writer.write(new float[] {4.0f, 5.0f}, 2));
+        assertEquals(writeFailure, retryFailure.getCause());
+
+        IllegalStateException finishFailure =
+                assertThrows(IllegalStateException.class, writer::finish);
+        assertEquals(writeFailure, finishFailure.getCause());
+        try (java.util.stream.Stream<java.nio.file.Path> filesInArchive = Files.list(tmp)) {
+            assertEquals(
+                    0L,
+                    filesInArchive.count(),
+                    "finish must not publish an index after a partial document write");
+        }
+    }
+
     @Test
     void writeArchiveThenReadAndSearch(@TempDir java.nio.file.Path tmp) throws IOException {
         List<DataField> fields =
@@ -202,6 +292,8 @@ class ESIndexGlobalIndexE2ETest {
         ResultEntry entry = entries.get(0);
         assertEquals(20L, entry.rowCount(), "row count");
         assertNotNull(entry.meta(), "offset-table meta present");
+        assertThrows(IllegalStateException.class, writer::finish);
+        assertThrows(IllegalStateException.class, () -> writer.write(new float[] {1, 1, 1, 1}, 20));
 
         // --- reconstruct reader over the archive ---
         org.apache.paimon.fs.Path filePath =
@@ -221,12 +313,29 @@ class ESIndexGlobalIndexE2ETest {
         RoaringNavigableMap64 vrows = vr.get().results();
         assertEquals(5, vrows.getIntCardinality(), "k=5 results");
         assertTrue(contains(vrows, 0L), "row 0 (origin) recalled by HNSW");
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        reader.visitVectorSearch(
-                                new VectorSearch(new float[] {0, 0, 0}, 5, "embedding")),
-                "query vectors must match the persisted build dimension");
+        Optional<ScoredGlobalIndexResult> overFetched =
+                reader.visitVectorSearch(
+                                new VectorSearch(
+                                        new float[] {0, 0, 0, 0},
+                                        3,
+                                        "embedding",
+                                        Map.of("hnsw.num_candidates", "10")))
+                        .join();
+        assertTrue(overFetched.isPresent());
+        assertEquals(
+                3,
+                overFetched.get().results().getIntCardinality(),
+                "num_candidates must not change the requested result limit");
+        CompletionException invalidDimension =
+                assertThrows(
+                        CompletionException.class,
+                        () ->
+                                reader.visitVectorSearch(
+                                                new VectorSearch(
+                                                        new float[] {0, 0, 0}, 5, "embedding"))
+                                        .join(),
+                        "query vectors must match the persisted build dimension");
+        assertTrue(invalidDimension.getCause() instanceof IllegalArgumentException);
 
         // --- full-text search: 10 rows contain "even" ---
         Optional<ScoredGlobalIndexResult> ft =
@@ -308,11 +417,13 @@ class ESIndexGlobalIndexE2ETest {
                 20,
                 reader.visitLike(titleRef, "doc%").join().get().results().getIntCardinality(),
                 "LIKE 'doc%' on title.keyword matches all 20 'document ...' titles");
-        // A range predicate on a string keyword sub-field is unsupported -> falls back to empty
-        // (not an error).
-        assertTrue(
-                reader.visitGreaterThan(titleRef, "abc").join().isEmpty(),
-                "> (range) on a keyword sub-field is unsupported and falls back to empty");
+        // A range predicate on a string keyword sub-field is unsupported. Return the complete
+        // shard as a conservative result so a union with differently configured shards cannot
+        // drop rows; Paimon's residual predicate performs the actual comparison.
+        Optional<GlobalIndexResult> unsupportedTitleRange =
+                reader.visitGreaterThan(titleRef, "abc").join();
+        assertTrue(unsupportedTitleRange.isPresent());
+        assertEquals(20, unsupportedTitleRange.get().results().getIntCardinality());
 
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
@@ -359,6 +470,194 @@ class ESIndexGlobalIndexE2ETest {
             reader.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void readsIndexAfterIndexedColumnsAreRenamed(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> buildFields =
+                Arrays.asList(
+                        new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())),
+                        new DataField(1, "title", DataTypes.STRING()),
+                        new DataField(2, "category", DataTypes.STRING()),
+                        new DataField(3, "price", DataTypes.INT()));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        optionMap.put("global-index.es-index.fields.embedding.dimension", "2");
+        optionMap.put("global-index.es-index.fields.embedding.metric", "l2");
+        optionMap.put("global-index.es-index.fields.category.type", "keyword");
+        ESIndexOptions buildOptions = new ESIndexOptions(buildFields, Options.fromMap(optionMap));
+
+        java.nio.file.Path archiveDir = tmp.resolve("renamed-fields");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(
+                        new LocalDirWriter(archiveDir), buildFields, buildOptions);
+        writer.write(
+                0,
+                GenericRow.of(
+                        new GenericArray(new float[] {0, 0}),
+                        BinaryString.fromString("Apache Paimon"),
+                        BinaryString.fromString("docs"),
+                        10));
+        writer.write(
+                1,
+                GenericRow.of(
+                        new GenericArray(new float[] {10, 10}),
+                        BinaryString.fromString("Other engine"),
+                        BinaryString.fromString("other"),
+                        20));
+        ResultEntry entry = writer.finish().get(0);
+
+        List<DataField> currentFields =
+                Arrays.asList(
+                        new DataField(0, "vector", DataTypes.ARRAY(DataTypes.FLOAT())),
+                        new DataField(1, "headline", DataTypes.STRING()),
+                        new DataField(2, "kind", DataTypes.STRING()),
+                        new DataField(3, "cost", DataTypes.INT()));
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(),
+                        List.of(ioMeta(archiveDir, entry)),
+                        currentFields,
+                        buildOptions);
+        try {
+            Optional<ScoredGlobalIndexResult> vector =
+                    reader.visitVectorSearch(new VectorSearch(new float[] {0, 0}, 1, "vector"))
+                            .join();
+            assertTrue(vector.isPresent());
+            assertTrue(contains(vector.get().results(), 0L));
+
+            Optional<ScoredGlobalIndexResult> fullText =
+                    reader.visitFullTextSearch(
+                                    new FullTextSearch("headline", matchQuery("paimon"), 10))
+                            .join();
+            assertTrue(fullText.isPresent());
+            assertTrue(contains(fullText.get().results(), 0L));
+
+            Optional<GlobalIndexResult> keyword =
+                    reader.visitEqual(new FieldRef(2, "kind", DataTypes.STRING()), "docs").join();
+            assertTrue(keyword.isPresent());
+            assertTrue(contains(keyword.get().results(), 0L));
+
+            Optional<GlobalIndexResult> scalar =
+                    reader.visitEqual(new FieldRef(3, "cost", DataTypes.INT()), 20).join();
+            assertTrue(scalar.isPresent());
+            assertTrue(contains(scalar.get().results(), 1L));
+        } finally {
+            reader.close();
+        }
+
+        List<DataField> widenedFields =
+                Arrays.asList(
+                        currentFields.get(0),
+                        currentFields.get(1),
+                        currentFields.get(2),
+                        new DataField(3, "cost", DataTypes.BIGINT()));
+        ESIndexGlobalIndexReader widenedReader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(),
+                        List.of(ioMeta(archiveDir, entry)),
+                        widenedFields,
+                        buildOptions);
+        try {
+            Optional<GlobalIndexResult> widenedFallback =
+                    widenedReader
+                            .visitLessThan(
+                                    new FieldRef(3, "cost", DataTypes.BIGINT()), 3_000_000_000L)
+                            .join();
+            assertTrue(widenedFallback.isPresent());
+            assertEquals(
+                    2,
+                    widenedFallback.get().results().getIntCardinality(),
+                    "a widened field must keep every old INT-indexed row");
+        } finally {
+            widenedReader.close();
+        }
+
+        List<DataField> resizedVectorFields =
+                Arrays.asList(
+                        new DataField(0, "vector", DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                        currentFields.get(1),
+                        currentFields.get(2),
+                        currentFields.get(3));
+        ESIndexGlobalIndexReader resizedVectorReader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(),
+                        List.of(ioMeta(archiveDir, entry)),
+                        resizedVectorFields,
+                        buildOptions);
+        try {
+            CompletionException failure =
+                    assertThrows(
+                            CompletionException.class,
+                            () ->
+                                    resizedVectorReader
+                                            .visitVectorSearch(
+                                                    new VectorSearch(
+                                                            new float[] {0, 0, 0}, 1, "vector"))
+                                            .join());
+            assertTrue(failure.getCause() instanceof IllegalStateException);
+            assertTrue(failure.getCause().getMessage().contains("Rebuild the es-index"));
+        } finally {
+            resizedVectorReader.close();
+        }
+    }
+
+    @Test
+    void mixedSchemaShardsDoNotDropRowsFromAnOlderScalarType(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> oldFields = List.of(new DataField(0, "old_value", DataTypes.INT()));
+        ESIndexOptions oldOptions = new ESIndexOptions(oldFields, new Options());
+        java.nio.file.Path oldDir = tmp.resolve("old-int");
+        Files.createDirectories(oldDir);
+        ESIndexGlobalIndexWriter oldWriter =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(oldDir), oldFields, oldOptions);
+        oldWriter.write(1, 0);
+        oldWriter.write(100, 1);
+        ResultEntry oldEntry = oldWriter.finish().get(0);
+
+        List<DataField> currentFields = List.of(new DataField(0, "value", DataTypes.BIGINT()));
+        ESIndexOptions currentOptions = new ESIndexOptions(currentFields, new Options());
+        java.nio.file.Path currentDir = tmp.resolve("current-bigint");
+        Files.createDirectories(currentDir);
+        ESIndexGlobalIndexWriter currentWriter =
+                new ESIndexGlobalIndexWriter(
+                        new LocalDirWriter(currentDir), currentFields, currentOptions);
+        currentWriter.write(3_000_000_000L, 0);
+        currentWriter.write(5L, 1);
+        ResultEntry currentEntry = currentWriter.finish().get(0);
+
+        ESIndexGlobalIndexReader oldReader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(),
+                        List.of(ioMeta(oldDir, oldEntry)),
+                        currentFields,
+                        currentOptions);
+        ESIndexGlobalIndexReader currentReader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(),
+                        List.of(ioMeta(currentDir, currentEntry)),
+                        currentFields,
+                        currentOptions);
+        UnionGlobalIndexReader union =
+                new UnionGlobalIndexReader(
+                        Arrays.asList(
+                                new OffsetGlobalIndexReader(oldReader, 0, 1),
+                                new OffsetGlobalIndexReader(currentReader, 2, 3)));
+        try {
+            Optional<GlobalIndexResult> candidates =
+                    union.visitLessThan(
+                                    new FieldRef(0, "value", DataTypes.BIGINT()), 3_000_000_000L)
+                            .join();
+            assertTrue(candidates.isPresent());
+            assertEquals(3, candidates.get().results().getIntCardinality());
+            assertTrue(contains(candidates.get().results(), 0L));
+            assertTrue(contains(candidates.get().results(), 1L));
+            assertTrue(contains(candidates.get().results(), 3L));
+        } finally {
+            union.close();
         }
     }
 
@@ -517,9 +816,11 @@ class ESIndexGlobalIndexE2ETest {
             assertTrue(nullRange.get().results().isEmpty());
 
             Optional<GlobalIndexResult> keywordRange = reader.visitGreaterThan(kRef, "a").join();
-            assertTrue(
-                    keywordRange.isEmpty(),
-                    "unsupported KEYWORD ordering must request raw-scan fallback, not throw");
+            assertTrue(keywordRange.isPresent());
+            assertEquals(
+                    4,
+                    keywordRange.get().results().getIntCardinality(),
+                    "unsupported KEYWORD ordering must conservatively retain the whole shard");
         } finally {
             reader.close();
         }
@@ -636,6 +937,35 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
+    void skippedRowIdsAreCountedAndRemainSearchableAsNull(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = List.of(new DataField(0, "k", DataTypes.STRING()));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path archiveDir = tmp.resolve("archive-skipped-row");
+        Files.createDirectories(archiveDir);
+
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(BinaryString.fromString("row0"), 0);
+        writer.write(BinaryString.fromString("row2"), 2);
+        ResultEntry entry = writer.finish().get(0);
+        assertEquals(3L, entry.rowCount(), "the padded row-id position is a logical row");
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+        try {
+            Optional<GlobalIndexResult> nullRows =
+                    reader.visitIsNull(new FieldRef(0, "k", DataTypes.STRING())).join();
+            assertTrue(nullRows.isPresent());
+            assertEquals(1, nullRows.get().results().getIntCardinality());
+            assertTrue(contains(nullRows.get().results(), 1L));
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
     void likeHonorsSqlEscapeAndLuceneLiterals(@TempDir java.nio.file.Path tmp) throws IOException {
         // Paimon's default SQL LIKE escape is '\': \_ and \% are literals, while unescaped '%' /
         // '_'
@@ -741,16 +1071,10 @@ class ESIndexGlobalIndexE2ETest {
                         filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
         ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
-        ExecutorService searchExecutor = Executors.newFixedThreadPool(4);
         ExecutorService closeExecutor = Executors.newSingleThreadExecutor();
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        fileReader,
-                        List.of(ioMeta),
-                        fields,
-                        options,
-                        queryExecutor,
-                        searchExecutor);
+                        fileReader, List.of(ioMeta), fields, options, queryExecutor);
 
         try {
             FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
@@ -785,7 +1109,6 @@ class ESIndexGlobalIndexE2ETest {
             fileReader.releaseOpen();
             reader.close();
             queryExecutor.shutdownNow();
-            searchExecutor.shutdownNow();
             closeExecutor.shutdownNow();
         }
     }
@@ -804,20 +1127,21 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(BinaryString.fromString("x"), 0);
         ResultEntry entry = writer.finish().get(0);
         java.nio.file.Path badArchive = dir.resolve(entry.fileName());
+        long declaredArchiveSize = Files.size(badArchive);
         // Keep the valid offset metadata, but truncate the archive so failure happens after the
         // root provider (and potentially Lucene forks) have actually been opened.
         Files.write(badArchive, new byte[] {1, 2, 3, 4});
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
                         new org.apache.paimon.fs.Path(badArchive.toString()),
-                        Files.size(badArchive),
+                        declaredArchiveSize,
                         entry.meta());
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
         fileReader.releaseOpen();
         ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        fileReader, List.of(ioMeta), fields, options, queryExecutor, null);
+                        fileReader, List.of(ioMeta), fields, options, queryExecutor);
         FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
 
         try {
@@ -1127,6 +1451,8 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(0, GenericRow.of((byte) 1, (short) 2, new GenericArray(new int[0])));
         writer.write(1, GenericRow.of((byte) 2, (short) 3, null));
         writer.write(2, GenericRow.of((byte) 3, (short) 4, new GenericArray(new int[] {7})));
+        writer.write(
+                3, GenericRow.of((byte) 4, (short) 5, new GenericArray(new Object[] {null, 8})));
         ResultEntry entry = writer.finish().get(0);
 
         ESIndexGlobalIndexReader reader =
@@ -1153,12 +1479,48 @@ class ESIndexGlobalIndexE2ETest {
 
             Optional<GlobalIndexResult> isNotNull = reader.visitIsNotNull(labels).join();
             assertTrue(isNotNull.isPresent());
-            assertEquals(2, isNotNull.get().results().getIntCardinality());
+            assertEquals(3, isNotNull.get().results().getIntCardinality());
             assertTrue(contains(isNotNull.get().results(), 0L));
             assertTrue(contains(isNotNull.get().results(), 2L));
+            assertTrue(contains(isNotNull.get().results(), 3L));
+
+            Optional<GlobalIndexResult> nullElementIsNotZero = reader.visitEqual(labels, 0).join();
+            assertTrue(nullElementIsNotZero.isPresent());
+            assertEquals(0, nullElementIsNotZero.get().results().getIntCardinality());
+
+            Optional<GlobalIndexResult> nonNullElement = reader.visitEqual(labels, 8).join();
+            assertTrue(nonNullElement.isPresent());
+            assertEquals(1, nonNullElement.get().results().getIntCardinality());
+            assertTrue(contains(nonNullElement.get().results(), 3L));
         } finally {
             reader.close();
         }
+    }
+
+    @Test
+    void closeCanRetryTransientStreamFailures(@TempDir java.nio.file.Path tmp) throws Exception {
+        List<DataField> fields = Arrays.asList(new DataField(0, "id", DataTypes.INT()));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path archiveDir = tmp.resolve("retry-close");
+        Files.createDirectories(archiveDir);
+
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(1, 0);
+        ResultEntry entry = writer.finish().get(0);
+
+        TransientCloseFailureFileReader fileReader = new TransientCloseFailureFileReader();
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        fileReader, List.of(ioMeta(archiveDir, entry)), fields, options);
+        assertTrue(reader.visitEqual(new FieldRef(0, "id", DataTypes.INT()), 1).join().isPresent());
+
+        fileReader.setCloseFailures(true);
+        assertThrows(IOException.class, reader::close);
+        assertTrue(reader.openStreamCount() > 0, "the failed provider remains registered");
+        fileReader.setCloseFailures(false);
+        reader.close();
+        assertEquals(0, reader.openStreamCount());
     }
 
     @Test
@@ -1178,11 +1540,13 @@ class ESIndexGlobalIndexE2ETest {
                         new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
         try {
             FieldRef ts = new FieldRef(0, "ts", DataTypes.TIMESTAMP(6));
-            assertTrue(
-                    reader.visitEqual(ts, Timestamp.fromEpochMillis(1_000L, 2_000))
-                            .join()
-                            .isEmpty(),
-                    "a lossy millisecond index must not evaluate microsecond predicates");
+            Optional<GlobalIndexResult> fallback =
+                    reader.visitEqual(ts, Timestamp.fromEpochMillis(1_000L, 2_000)).join();
+            assertTrue(fallback.isPresent());
+            assertEquals(
+                    1,
+                    fallback.get().results().getIntCardinality(),
+                    "a lossy millisecond index must conservatively retain every row");
             assertTrue(reader.visitIsNotNull(ts).join().isPresent());
         } finally {
             reader.close();
@@ -1216,6 +1580,22 @@ class ESIndexGlobalIndexE2ETest {
             assertTrue(result.isPresent());
             assertEquals(1, result.get().results().getIntCardinality());
             assertTrue(contains(result.get().results(), 0L));
+
+            Optional<ScoredGlobalIndexResult> emptyBool =
+                    reader.visitFullTextSearch(new FullTextSearch("text", "{\"bool\":{}}", 10))
+                            .join();
+            assertTrue(emptyBool.isPresent());
+            assertEquals(3, emptyBool.get().results().getIntCardinality());
+
+            String pureNegativeQuery =
+                    "{\"bool\":{\"must_not\":[{\"match\":{\"query\":\"disabled\"}}]}}";
+            Optional<ScoredGlobalIndexResult> pureNegative =
+                    reader.visitFullTextSearch(new FullTextSearch("text", pureNegativeQuery, 10))
+                            .join();
+            assertTrue(pureNegative.isPresent());
+            assertEquals(2, pureNegative.get().results().getIntCardinality());
+            assertTrue(contains(pureNegative.get().results(), 0L));
+            assertTrue(contains(pureNegative.get().results(), 2L));
         } finally {
             reader.close();
         }
@@ -1234,16 +1614,15 @@ class ESIndexGlobalIndexE2ETest {
      *
      * <p>Distinct from {@link #writeArchiveThenReadAndSearch} (which uses {@code algorithm=hnsw}),
      * this test sets {@code algorithm=diskbbq} so the writer should pick {@code
-     * ES920DiskBBQVectorsFormat} via {@code PaimonLucene912Codec.getKnnVectorsFormatForField},
+     * ES940DiskBBQVectorsFormat} via {@code PaimonLucene9Codec.getKnnVectorsFormatForField},
      * causing {@code IVFVectorsWriter#flush} (in practice {@code mergeOneFieldIVF} via {@code
      * IndexWriter.forceMerge(1)}) to emit the IVF triplet ({@code .cenivf} / {@code .clivf} /
      * {@code .mivf}) into the archive instead of the HNSW triplet ({@code .vec} / {@code .vex} /
      * {@code .vem}).
      *
      * <p>Assertions cover the writer path end-to-end (archive contents, scalar/keyword/numeric
-     * filters round-tripping through the DiskBBQ-built segment). Vector-search recall through
-     * {@code KnnFloatVectorQuery} → {@code DiskBBQVectorsReader.search} is exercised but the recall
-     * assertion is lenient — see TODO inline.
+     * filters round-tripping through the DiskBBQ-built segment), plus a deterministic vector-search
+     * assertion whose nearest results must all come from the queried cluster.
      */
     @Test
     void writeDiskBBQArchiveThenReadAndSearch(@TempDir java.nio.file.Path tmp) throws Exception {
@@ -1257,7 +1636,7 @@ class ESIndexGlobalIndexE2ETest {
         opt.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
         opt.put("global-index.es-index.fields.embedding.dimension", "32");
         opt.put("global-index.es-index.fields.embedding.metric", "l2");
-        // 64 is the MIN_VECTORS_PER_CLUSTER allowed by ES920DiskBBQVectorsFormat — picking the
+        // 64 is the MIN_VECTORS_PER_CLUSTER allowed by ES940DiskBBQVectorsFormat — picking the
         // minimum lets a small fixture still produce multiple IVF clusters.
         opt.put("global-index.es-index.fields.embedding.vectors_per_cluster", "64");
         ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
@@ -1324,15 +1703,9 @@ class ESIndexGlobalIndexE2ETest {
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
         fileReader.releaseOpen();
         ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
-        ExecutorService diskBBQExecutor = Executors.newSingleThreadExecutor();
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        fileReader,
-                        List.of(ioMeta),
-                        fields,
-                        options,
-                        queryExecutor,
-                        diskBBQExecutor);
+                        fileReader, List.of(ioMeta), fields, options, queryExecutor);
 
         try {
             // --- scalar filters round-trip through a DiskBBQ-built segment ---
@@ -1367,13 +1740,10 @@ class ESIndexGlobalIndexE2ETest {
                         "row " + rid + " must be from cluster 0 (rowId < " + perCluster + ")");
             }
 
-            // Force nprobe above DiskBBQ's parallel threshold. With the old shared one-thread pool,
-            // the outer future occupied the only worker and then waited forever for its nested
-            // cluster tasks. Separate pools must finish within the timeout.
-            Optional<ScoredGlobalIndexResult> parallelResult =
+            Optional<ScoredGlobalIndexResult> broadResult =
                     reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
                             .get(30, TimeUnit.SECONDS);
-            assertTrue(parallelResult.isPresent(), "single-thread DiskBBQ pool must not deadlock");
+            assertTrue(broadResult.isPresent(), "broad DiskBBQ search returns a result");
             assertEquals(
                     fileReader.openCount() - fileReader.closeCount(),
                     reader.openStreamCount(),
@@ -1401,7 +1771,6 @@ class ESIndexGlobalIndexE2ETest {
         } finally {
             reader.close();
             queryExecutor.shutdownNow();
-            diskBBQExecutor.shutdownNow();
         }
         assertEquals(
                 fileReader.openCount(),

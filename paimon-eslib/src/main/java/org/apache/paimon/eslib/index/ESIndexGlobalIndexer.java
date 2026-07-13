@@ -28,6 +28,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -39,17 +41,10 @@ public class ESIndexGlobalIndexer implements GlobalIndexer {
 
     private final List<DataField> fields;
     private final ESIndexOptions indexOptions;
-    private final ExecutorService searchExecutor;
 
     public ESIndexGlobalIndexer(List<DataField> fields, Options options) {
-        this(fields, options, null);
-    }
-
-    public ESIndexGlobalIndexer(
-            List<DataField> fields, Options options, ExecutorService searchExecutor) {
-        this.fields = fields;
-        this.indexOptions = new ESIndexOptions(fields, options);
-        this.searchExecutor = searchExecutor;
+        this.fields = Collections.unmodifiableList(new ArrayList<>(fields));
+        this.indexOptions = new ESIndexOptions(this.fields, options);
     }
 
     @Override
@@ -62,11 +57,6 @@ public class ESIndexGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
-        // Keep the two execution layers separate. The caller-provided executor schedules the outer
-        // CompletableFuture, while the factory-resolved pool is reserved for DiskBBQ's internal
-        // cluster tasks. Sharing one bounded pool lets outer tasks occupy every worker and then
-        // deadlock waiting for nested cluster tasks submitted to that same pool.
-        return new ESIndexGlobalIndexReader(
-                fileReader, files, fields, indexOptions, executor, searchExecutor);
+        return new ESIndexGlobalIndexReader(fileReader, files, fields, indexOptions, executor);
     }
 }

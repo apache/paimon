@@ -30,7 +30,9 @@ import org.elasticsearch.eslib.api.model.BuiltinAnalyzer;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.ScalarFieldType;
 import org.elasticsearch.eslib.api.model.VectorAlgorithm;
+import org.elasticsearch.eslib.diskbbq.es94.ES940DiskBBQVectorsFormat;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,6 +57,8 @@ import java.util.Set;
  * </pre>
  */
 public class ESIndexOptions {
+
+    private static final int MAX_VECTOR_DIMENSION = 4096;
 
     /**
      * Index-type-level key prefix (e.g. {@code global-index.es-index.metric}); overridden by
@@ -83,7 +87,10 @@ public class ESIndexOptions {
         this.fieldConfigs = new LinkedHashMap<>();
         Set<String> logicalFieldNames = new HashSet<>();
         for (DataField field : fields) {
-            logicalFieldNames.add(field.name());
+            if (!logicalFieldNames.add(field.name())) {
+                throw new IllegalArgumentException(
+                        "Duplicate field name in es-index: " + field.name());
+            }
         }
         for (DataField field : fields) {
             FieldIndexConfig config = parseFieldConfig(field, options);
@@ -94,7 +101,8 @@ public class ESIndexOptions {
             if (isTextType(field.type())
                     && config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
                 String subField = field.name() + KEYWORD_SUBFIELD_SUFFIX;
-                fieldConfigs.put(
+                putGeneratedFieldConfig(
+                        logicalFieldNames,
                         subField,
                         FieldIndexConfig.builder(subField, FieldIndexConfig.IndexType.KEYWORD)
                                 .scalarType(ScalarFieldType.KEYWORD)
@@ -103,26 +111,34 @@ public class ESIndexOptions {
                     && config.indexType() == FieldIndexConfig.IndexType.KEYWORD) {
                 String subField = field.name() + FULLTEXT_SUBFIELD_SUFFIX;
                 String analyzer = resolve(options, field.name(), "analyzer", "standard");
-                fieldConfigs.put(
+                putGeneratedFieldConfig(
+                        logicalFieldNames,
                         subField,
                         FieldIndexConfig.builder(subField, FieldIndexConfig.IndexType.FULLTEXT)
-                                .analyzer(BuiltinAnalyzer.fromName(analyzer))
+                                .analyzer(parseAnalyzer(field.name(), analyzer))
                                 .build());
             }
             if (field.type() instanceof ArrayType) {
                 String presenceField = field.name() + ARRAY_PRESENCE_SUBFIELD_SUFFIX;
-                if (logicalFieldNames.contains(presenceField)
-                        || fieldConfigs.containsKey(presenceField)) {
-                    throw new IllegalArgumentException(
-                            "Field name conflicts with reserved es-index array presence field: "
-                                    + presenceField);
-                }
-                fieldConfigs.put(
+                putGeneratedFieldConfig(
+                        logicalFieldNames,
                         presenceField,
                         FieldIndexConfig.builder(presenceField, FieldIndexConfig.IndexType.SCALAR)
                                 .scalarType(ScalarFieldType.INT)
                                 .build());
             }
+        }
+    }
+
+    private void putGeneratedFieldConfig(
+            Set<String> logicalFieldNames,
+            String generatedFieldName,
+            FieldIndexConfig generatedConfig) {
+        if (logicalFieldNames.contains(generatedFieldName)
+                || fieldConfigs.putIfAbsent(generatedFieldName, generatedConfig) != null) {
+            throw new IllegalArgumentException(
+                    "Field name conflicts with reserved es-index generated field: "
+                            + generatedFieldName);
         }
     }
 
@@ -136,7 +152,7 @@ public class ESIndexOptions {
     }
 
     public Map<String, FieldIndexConfig> getFieldConfigs() {
-        return fieldConfigs;
+        return Collections.unmodifiableMap(fieldConfigs);
     }
 
     public FieldIndexConfig getConfig(String fieldName) {
@@ -177,11 +193,15 @@ public class ESIndexOptions {
      */
     private static String resolve(
             Options options, String fieldName, String key, String defaultValue) {
-        String value = options.getString(FIELDS_PREFIX + fieldName + "." + key, null);
+        String value = resolveField(options, fieldName, key);
         if (value == null) {
             value = options.getString(INDEX_TYPE_PREFIX + key, null);
         }
         return value == null ? defaultValue : value;
+    }
+
+    private static String resolveField(Options options, String fieldName, String key) {
+        return options.getString(FIELDS_PREFIX + fieldName + "." + key, null);
     }
 
     private FieldIndexConfig parseFieldConfig(DataField field, Options options) {
@@ -203,7 +223,7 @@ public class ESIndexOptions {
             // makes the exact field primary and adds a FULLTEXT sub-field instead.
             String analyzer = resolve(options, field.name(), "analyzer", "standard");
             return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.FULLTEXT)
-                    .analyzer(BuiltinAnalyzer.fromName(analyzer))
+                    .analyzer(parseAnalyzer(field.name(), analyzer))
                     .build();
         } else if (isTemporalType(dataType)) {
             // ESLib does not implement DATE scalar filters. Store DATE/TIMESTAMP as a
@@ -226,7 +246,7 @@ public class ESIndexOptions {
                 requireTextType(fieldName, typeName, dataType);
                 String analyzer = resolve(options, fieldName, "analyzer", "standard");
                 return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.FULLTEXT)
-                        .analyzer(BuiltinAnalyzer.fromName(analyzer))
+                        .analyzer(parseAnalyzer(fieldName, analyzer))
                         .build();
             case "keyword":
                 requireTextType(fieldName, typeName, dataType);
@@ -295,11 +315,31 @@ public class ESIndexOptions {
                                 + ".");
             }
         }
+        if (dimension > MAX_VECTOR_DIMENSION) {
+            throw new IllegalArgumentException(
+                    "Vector field '"
+                            + fieldName
+                            + "' dimension "
+                            + dimension
+                            + " exceeds the maximum supported dimension "
+                            + MAX_VECTOR_DIMENSION
+                            + ".");
+        }
         String metric = validateMetric(fieldName, resolve(options, fieldName, "metric", "cosine"));
 
         Map<String, String> params = new LinkedHashMap<>();
-        String mStr = resolve(options, fieldName, "m", null);
-        String efStr = resolve(options, fieldName, "ef_construction", null);
+        // Table-level algorithm parameters are defaults only for fields using that algorithm. A
+        // table can contain HNSW and DiskBBQ fields at the same time, so a global HNSW parameter
+        // must not make a DiskBBQ field invalid (and vice versa). Field-level parameters remain
+        // strict because they unambiguously target this field.
+        String mStr =
+                vectorAlgorithm == VectorAlgorithm.HNSW
+                        ? resolve(options, fieldName, "m", null)
+                        : resolveField(options, fieldName, "m");
+        String efStr =
+                vectorAlgorithm == VectorAlgorithm.HNSW
+                        ? resolve(options, fieldName, "ef_construction", null)
+                        : resolveField(options, fieldName, "ef_construction");
         if (vectorAlgorithm == VectorAlgorithm.HNSW) {
             putBoundedPositiveIntegerParameter(
                     params, fieldName, "m", mStr, Lucene99HnswVectorsFormat.MAXIMUM_MAX_CONN);
@@ -317,7 +357,10 @@ public class ESIndexOptions {
                             + algorithm
                             + "; these parameters require algorithm=hnsw.");
         }
-        String vpcStr = resolve(options, fieldName, "vectors_per_cluster", null);
+        String vpcStr =
+                vectorAlgorithm == VectorAlgorithm.DISKBBQ
+                        ? resolve(options, fieldName, "vectors_per_cluster", null)
+                        : resolveField(options, fieldName, "vectors_per_cluster");
         if (vectorAlgorithm == VectorAlgorithm.DISKBBQ) {
             putBoundedPositiveIntegerParameter(
                     params, fieldName, "vectors_per_cluster", vpcStr, 64, 1 << 16);
@@ -329,6 +372,26 @@ public class ESIndexOptions {
                             + algorithm
                             + "; this parameter requires algorithm=diskbbq.");
         }
+        String cpcStr =
+                vectorAlgorithm == VectorAlgorithm.DISKBBQ
+                        ? resolve(options, fieldName, "centroids_per_parent_cluster", null)
+                        : resolveField(options, fieldName, "centroids_per_parent_cluster");
+        if (vectorAlgorithm == VectorAlgorithm.DISKBBQ) {
+            putBoundedPositiveIntegerParameter(
+                    params,
+                    fieldName,
+                    "centroids_per_parent_cluster",
+                    cpcStr,
+                    ES940DiskBBQVectorsFormat.MIN_CENTROIDS_PER_PARENT_CLUSTER,
+                    ES940DiskBBQVectorsFormat.MAX_CENTROIDS_PER_PARENT_CLUSTER);
+        } else if (cpcStr != null) {
+            throw new IllegalArgumentException(
+                    "Vector field '"
+                            + fieldName
+                            + "' configures centroids_per_parent_cluster but algorithm is "
+                            + algorithm
+                            + "; this parameter requires algorithm=diskbbq.");
+        }
 
         return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.VECTOR)
                 .algorithm(vectorAlgorithm)
@@ -336,6 +399,19 @@ public class ESIndexOptions {
                 .metric(metric)
                 .algorithmParams(params)
                 .build();
+    }
+
+    private static BuiltinAnalyzer parseAnalyzer(String fieldName, String analyzerName) {
+        BuiltinAnalyzer analyzer = BuiltinAnalyzer.fromName(analyzerName);
+        if (analyzer == BuiltinAnalyzer.IK_SMART || analyzer == BuiltinAnalyzer.IK_MAX_WORD) {
+            throw new IllegalArgumentException(
+                    "Analyzer '"
+                            + analyzerName
+                            + "' is not supported by paimon-eslib for field '"
+                            + fieldName
+                            + "'; use standard, whitespace, simple, or keyword.");
+        }
+        return analyzer;
     }
 
     private static void putBoundedPositiveIntegerParameter(

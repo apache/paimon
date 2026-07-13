@@ -149,6 +149,29 @@ class ESIndexOptionsTest {
     }
 
     @Test
+    void tableLevelAlgorithmParametersOnlyApplyToMatchingAlgorithms() {
+        Map<String, String> diskOptions = new HashMap<>();
+        diskOptions.put("global-index.es-index.m", "30");
+        diskOptions.put("global-index.es-index.ef_construction", "360");
+        diskOptions.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        diskOptions.put("global-index.es-index.centroids_per_parent_cluster", "24");
+        FieldIndexConfig diskConfig =
+                new ESIndexOptions(FIELDS, Options.fromMap(diskOptions)).getConfig("embedding");
+        assertThat(diskConfig.algorithmParams()).doesNotContainKeys("m", "ef_construction");
+        assertThat(diskConfig.algorithmParams())
+                .containsEntry("centroids_per_parent_cluster", "24");
+
+        Map<String, String> hnswOptions = new HashMap<>();
+        hnswOptions.put("global-index.es-index.vectors_per_cluster", "384");
+        hnswOptions.put("global-index.es-index.centroids_per_parent_cluster", "24");
+        hnswOptions.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        FieldIndexConfig hnswConfig =
+                new ESIndexOptions(FIELDS, Options.fromMap(hnswOptions)).getConfig("embedding");
+        assertThat(hnswConfig.algorithmParams())
+                .doesNotContainKeys("vectors_per_cluster", "centroids_per_parent_cluster");
+    }
+
+    @Test
     void indexTypeLevelKeyIsDefaultAndFieldLevelOverrides() {
         Map<String, String> m = new HashMap<>();
         // index-type-level default for all vector fields ...
@@ -166,8 +189,7 @@ class ESIndexOptionsTest {
     @Test
     void globalIndexPrefixedKeysAreRead() {
         // Keys use the full global-index.es-index. prefix (the persisted table-property / ES-mount
-        // convention). The parser reads them, so an explicit analyzer makes the field FULLTEXT
-        // instead of the default KEYWORD.
+        // convention). The parser reads the explicitly configured analyzer.
         Map<String, String> m = new HashMap<>();
         m.put("global-index.es-index.fields.title.analyzer", "standard");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
@@ -268,6 +290,12 @@ class ESIndexOptionsTest {
         assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(wrongDimension)))
                 .hasMessageContaining("does not match the VECTOR type dimension 128");
 
+        List<DataField> oversizedVector =
+                Arrays.asList(
+                        new DataField(0, "embedding", DataTypes.VECTOR(4097, DataTypes.FLOAT())));
+        assertThatThrownBy(() -> new ESIndexOptions(oversizedVector, new Options()))
+                .hasMessageContaining("maximum supported dimension 4096");
+
         Map<String, String> badMetric = new HashMap<>();
         badMetric.put("global-index.es-index.fields.embedding.metric", "angular-ish");
         assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(badMetric)))
@@ -280,10 +308,37 @@ class ESIndexOptionsTest {
                 .hasMessageContaining("vectors_per_cluster")
                 .hasMessageContaining("between 64 and 65536");
 
+        Map<String, String> badCpc = new HashMap<>();
+        badCpc.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        badCpc.put("global-index.es-index.fields.embedding.centroids_per_parent_cluster", "1");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(badCpc)))
+                .hasMessageContaining("centroids_per_parent_cluster")
+                .hasMessageContaining("between 2 and 384");
+
         Map<String, String> hnswVpc = new HashMap<>();
         hnswVpc.put("global-index.es-index.fields.embedding.vectors_per_cluster", "64");
         assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(hnswVpc)))
                 .hasMessageContaining("requires algorithm=diskbbq");
+
+        Map<String, String> hnswCpc = new HashMap<>();
+        hnswCpc.put("global-index.es-index.fields.embedding.centroids_per_parent_cluster", "16");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(hnswCpc)))
+                .hasMessageContaining("requires algorithm=diskbbq");
+    }
+
+    @Test
+    void unsupportedIkAnalyzerIsRejectedBeforeIndexBuild() {
+        Map<String, String> options = new HashMap<>();
+        options.put("global-index.es-index.fields.title.analyzer", "ik_smart");
+
+        assertThatThrownBy(
+                        () ->
+                                new ESIndexOptions(
+                                        Arrays.asList(
+                                                new DataField(0, "title", DataTypes.STRING())),
+                                        Options.fromMap(options)))
+                .hasMessageContaining("not supported by paimon-eslib")
+                .hasMessageContaining("standard, whitespace, simple, or keyword");
     }
 
     @Test
@@ -312,5 +367,37 @@ class ESIndexOptionsTest {
         assertThatThrownBy(() -> new ESIndexOptions(integerVector, new Options()))
                 .hasMessageContaining("Unsupported scalar type")
                 .hasMessageContaining("VECTOR");
+    }
+
+    @Test
+    void generatedFieldNamesCannotCollideWithLogicalColumns() {
+        List<DataField> keywordCollision =
+                Arrays.asList(
+                        new DataField(0, "title", DataTypes.STRING()),
+                        new DataField(1, "title.keyword", DataTypes.STRING()));
+        assertThatThrownBy(() -> new ESIndexOptions(keywordCollision, new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved es-index generated field")
+                .hasMessageContaining("title.keyword");
+
+        List<DataField> presenceCollision =
+                Arrays.asList(
+                        new DataField(0, "labels", DataTypes.ARRAY(DataTypes.INT())),
+                        new DataField(1, "labels.__paimon_array_present", DataTypes.INT()));
+        assertThatThrownBy(() -> new ESIndexOptions(presenceCollision, new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved es-index generated field")
+                .hasMessageContaining("labels.__paimon_array_present");
+    }
+
+    @Test
+    void fieldConfigViewIsImmutable() {
+        ESIndexOptions options =
+                new ESIndexOptions(
+                        Arrays.asList(new DataField(0, "id", DataTypes.INT())), new Options());
+
+        assertThatThrownBy(() -> options.getFieldConfigs().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(options.getConfig("id")).isNotNull();
     }
 }
