@@ -255,21 +255,19 @@ class RayReadByRowIdTest(unittest.TestCase):
             read_by_row_id(target, src, self.catalog_options, projection=["age"],
                            dynamic_options={"scan.snapshot-id": "1", "scan.tag-name": "x"})
 
-    def test_time_travel_before_row_tracking_raises(self):
+    def test_row_tracking_cannot_be_enabled_after_data(self):
+        # row-tracking.enabled / data-evolution.enabled are immutable once the
+        # table has snapshots (Java parity), so a "snapshot predates
+        # row-tracking" state can no longer be constructed through ALTER; the
+        # alter itself is rejected instead.
         from pypaimon.schema.schema_change import SchemaChange
         name = self._create(options={})   # plain table: no data-evolution / row-tracking
         self._write(name, pa.Table.from_pydict(
             {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
-        self.catalog.alter_table(name, [
-            SchemaChange.set_option("row-tracking.enabled", "true"),
-            SchemaChange.set_option("data-evolution.enabled", "true")])
-        self._write(name, pa.Table.from_pydict(
-            {"id": [2], "name": ["b"], "age": [2]}, schema=self.pa_schema))
-        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
-        # snapshot 1 predates row-tracking -> clear error, not a silent empty read
-        with self.assertRaisesRegex(ValueError, "row-tracking|data-evolution"):
-            read_by_row_id(name, src, self.catalog_options, projection=["age"],
-                           dynamic_options={"scan.snapshot-id": "1"})
+        with self.assertRaisesRegex(RuntimeError, "not supported yet"):
+            self.catalog.alter_table(name, [
+                SchemaChange.set_option("row-tracking.enabled", "true"),
+                SchemaChange.set_option("data-evolution.enabled", "true")])
 
     def test_pins_base_snapshot(self):
         import importlib

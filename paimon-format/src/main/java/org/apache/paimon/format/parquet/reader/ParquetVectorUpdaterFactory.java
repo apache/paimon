@@ -157,7 +157,13 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(IntType intType) {
-            return c -> new IntegerUpdater();
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT64) {
+                    return new IntegerFromLongUpdater();
+                }
+                return new IntegerUpdater();
+            };
         }
 
         @Override
@@ -167,7 +173,13 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(FloatType floatType) {
-            return c -> new FloatUpdater();
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.DOUBLE) {
+                    return new FloatFromDoubleUpdater();
+                }
+                return new FloatUpdater();
+            };
         }
 
         @Override
@@ -337,6 +349,40 @@ public class ParquetVectorUpdaterFactory {
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             values.setInt(offset, dictionary.decodeToInt(dictionaryIds.getInt(offset)));
+        }
+    }
+
+    private static class IntegerFromLongUpdater implements ParquetVectorUpdater<WritableIntVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableIntVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                values.setInt(offset + i, Math.toIntExact(valuesReader.readLong()));
+            }
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipLongs(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableIntVector values, VectorizedValuesReader valuesReader) {
+            values.setInt(offset, Math.toIntExact(valuesReader.readLong()));
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableIntVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setInt(
+                    offset, Math.toIntExact(dictionary.decodeToLong(dictionaryIds.getInt(offset))));
         }
     }
 
@@ -679,6 +725,41 @@ public class ParquetVectorUpdaterFactory {
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             values.setFloat(offset, dictionary.decodeToFloat(dictionaryIds.getInt(offset)));
+        }
+    }
+
+    private static class FloatFromDoubleUpdater
+            implements ParquetVectorUpdater<WritableFloatVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableFloatVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                values.setFloat(offset + i, (float) valuesReader.readDouble());
+            }
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipDoubles(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableFloatVector values, VectorizedValuesReader valuesReader) {
+            values.setFloat(offset, (float) valuesReader.readDouble());
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableFloatVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setFloat(
+                    offset, (float) dictionary.decodeToDouble(dictionaryIds.getInt(offset)));
         }
     }
 

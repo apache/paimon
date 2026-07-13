@@ -55,6 +55,67 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
     private static final int DIMENSION = 2;
 
     @Test
+    public void testPrimaryKeyVectorSearch() throws Exception {
+        createPrimaryKeyVectorTable("PK_T");
+
+        sql(
+                "INSERT INTO PK_T VALUES "
+                        + "(1, ARRAY[CAST(3.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(2, ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(3, ARRAY[CAST(2.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+
+        List<Row> result = searchPrimaryKeyVectorTable("PK_T", 2, "id");
+
+        assertThat(result)
+                .extracting(row -> row.getField(0).toString())
+                .containsExactlyInAnyOrder("{\"id\":\"2\"}", "{\"id\":\"3\"}");
+    }
+
+    @Test
+    public void testPrimaryKeyVectorSearchAfterUpdateAndDelete() throws Exception {
+        createPrimaryKeyVectorTable("PK_UPDATE_T");
+
+        sql(
+                "INSERT INTO PK_UPDATE_T VALUES "
+                        + "(1, ARRAY[CAST(3.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(2, ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+        sql(
+                "INSERT INTO PK_UPDATE_T VALUES "
+                        + "(1, ARRAY[CAST(0.5 AS FLOAT), CAST(0.0 AS FLOAT)])");
+
+        List<Row> updated = searchPrimaryKeyVectorTable("PK_UPDATE_T", 1, "id");
+        assertThat(updated)
+                .extracting(row -> row.getField(0).toString())
+                .containsExactly("{\"id\":\"1\"}");
+
+        sql("DELETE FROM PK_UPDATE_T WHERE id = 1");
+
+        List<Row> afterDelete = searchPrimaryKeyVectorTable("PK_UPDATE_T", 1, "id");
+        assertThat(afterDelete)
+                .extracting(row -> row.getField(0).toString())
+                .containsExactly("{\"id\":\"2\"}");
+    }
+
+    @Test
+    public void testPartialUpdatePrimaryKeyVectorSearch() throws Exception {
+        createPartialUpdatePrimaryKeyVectorTable("PK_PARTIAL_T");
+
+        sql(
+                "INSERT INTO PK_PARTIAL_T VALUES "
+                        + "(1, 'keep', ARRAY[CAST(3.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(2, 'other', ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+        sql(
+                "INSERT INTO PK_PARTIAL_T (id, vec) VALUES "
+                        + "(1, ARRAY[CAST(0.5 AS FLOAT), CAST(0.0 AS FLOAT)])");
+
+        List<Row> result = searchPrimaryKeyVectorTable("PK_PARTIAL_T", 1, "id,payload");
+
+        assertThat(result)
+                .extracting(row -> row.getField(0).toString())
+                .containsExactly("{\"id\":\"1\",\"payload\":\"keep\"}");
+    }
+
+    @Test
     public void testVectorSearchBasic() throws Exception {
         createVectorTable("T");
         FileStoreTable table = paimonTable("T");
@@ -200,6 +261,64 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         + "%s"
                         + ")",
                 tableName, DIMENSION, formattedExtraOptions);
+    }
+
+    private void createPrimaryKeyVectorTable(String tableName) {
+        sql(
+                "CREATE TABLE %s ("
+                        + "id INT, "
+                        + "vec ARRAY<FLOAT>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ("
+                        + "'bucket' = '2', "
+                        + "'file.format' = 'json', "
+                        + "'file.compression' = 'none', "
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'vector-field' = 'vec', "
+                        + "'field.vec.vector-dim' = '%d', "
+                        + "'pk-vector.index.columns' = 'vec', "
+                        + "'fields.vec.pk-vector.index.type' = '%s', "
+                        + "'fields.vec.pk-vector.distance.metric' = 'l2', "
+                        + "'test.vector.dimension' = '%d', "
+                        + "'test.vector.metric' = 'l2'"
+                        + ")",
+                tableName, DIMENSION, TestVectorGlobalIndexerFactory.IDENTIFIER, DIMENSION);
+    }
+
+    private List<Row> searchPrimaryKeyVectorTable(String tableName, int topK, String projection) {
+        return sql(
+                "CALL sys.vector_search("
+                        + "`table` => 'default.%s', "
+                        + "vector_column => 'vec', "
+                        + "query_vector => '0.0,0.0', "
+                        + "top_k => %d, "
+                        + "projection => '%s')",
+                tableName, topK, projection);
+    }
+
+    private void createPartialUpdatePrimaryKeyVectorTable(String tableName) {
+        sql(
+                "CREATE TABLE %s ("
+                        + "id INT, "
+                        + "payload STRING, "
+                        + "vec ARRAY<FLOAT>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ("
+                        + "'bucket' = '1', "
+                        + "'file.format' = 'json', "
+                        + "'file.compression' = 'none', "
+                        + "'merge-engine' = 'partial-update', "
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'deletion-vectors.merge-on-read' = 'false', "
+                        + "'vector-field' = 'vec', "
+                        + "'field.vec.vector-dim' = '%d', "
+                        + "'pk-vector.index.columns' = 'vec', "
+                        + "'fields.vec.pk-vector.index.type' = '%s', "
+                        + "'fields.vec.pk-vector.distance.metric' = 'l2', "
+                        + "'test.vector.dimension' = '%d', "
+                        + "'test.vector.metric' = 'l2'"
+                        + ")",
+                tableName, DIMENSION, TestVectorGlobalIndexerFactory.IDENTIFIER, DIMENSION);
     }
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {

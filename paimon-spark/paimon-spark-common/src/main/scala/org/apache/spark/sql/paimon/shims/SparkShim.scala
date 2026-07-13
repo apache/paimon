@@ -133,6 +133,19 @@ trait SparkShim {
       copyOnWriteScan: Option[PaimonCopyOnWriteScan],
       operationType: Option[Snapshot.Operation]): BatchWrite
 
+  /**
+   * Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for the delta write of
+   * deletion-vector append tables. Declared to return `BatchWrite` instead of `DeltaBatchWrite` so
+   * that loading the shim class on Spark runtimes without the delta write API never links against
+   * it; the caller (only loaded behind the Spark 3.5+ delta gate) casts to `DeltaBatchWrite`.
+   */
+  def createPaimonDeltaBatchWrite(
+      table: FileStoreTable,
+      rowSchema: StructType,
+      rowIdSchema: StructType,
+      operationType: Snapshot.Operation,
+      readSnapshotId: Option[Long]): BatchWrite
+
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
       table: FormatTable,

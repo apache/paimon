@@ -27,6 +27,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
@@ -75,6 +77,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
@@ -670,18 +673,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
-        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
+        DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
+        IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
         for (CommitMessage message : commitMessages) {
-            DataFilePathFactory pathFactory = factories.get(message.partition(), message.bucket());
+            DataFilePathFactory dataPathFactory =
+                    dataFactories.get(message.partition(), message.bucket());
+            IndexPathFactory indexPathFactory =
+                    indexFactories.get(message.partition(), message.bucket());
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
-            List<DataFileMeta> toDelete = new ArrayList<>();
-            toDelete.addAll(commitMessage.newFilesIncrement().newFiles());
-            toDelete.addAll(commitMessage.newFilesIncrement().changelogFiles());
-            toDelete.addAll(commitMessage.compactIncrement().compactAfter());
-            toDelete.addAll(commitMessage.compactIncrement().changelogFiles());
+            List<DataFileMeta> dataFilesToDelete = new ArrayList<>();
+            dataFilesToDelete.addAll(commitMessage.newFilesIncrement().newFiles());
+            dataFilesToDelete.addAll(commitMessage.newFilesIncrement().changelogFiles());
+            dataFilesToDelete.addAll(commitMessage.compactIncrement().compactAfter());
+            dataFilesToDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
-            for (DataFileMeta file : toDelete) {
-                fileIO.deleteQuietly(pathFactory.toPath(file));
+            for (DataFileMeta file : dataFilesToDelete) {
+                fileIO.deleteQuietly(dataPathFactory.toPath(file));
+            }
+
+            List<IndexFileMeta> indexFilesToDelete = new ArrayList<>();
+            indexFilesToDelete.addAll(commitMessage.newFilesIncrement().newIndexFiles());
+            indexFilesToDelete.addAll(commitMessage.compactIncrement().newIndexFiles());
+            for (IndexFileMeta file : indexFilesToDelete) {
+                fileIO.deleteQuietly(indexPathFactory.toPath(file));
             }
         }
     }

@@ -67,7 +67,8 @@ public class FileSystemWriteRestore implements WriteRestore {
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
-            boolean scanDeleteVectorsIndex) {
+            boolean scanDeleteVectorsIndex,
+            boolean scanVectorIndexPayloads) {
         // NOTE: don't use snapshotManager.latestSnapshot() here,
         // because we don't want to flood the catalog with high concurrency
         Snapshot snapshot = snapshotManager.latestSnapshotFromFileSystem();
@@ -92,7 +93,17 @@ public class FileSystemWriteRestore implements WriteRestore {
                     indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
         }
 
+        List<IndexFileMeta> vectorIndexPayloads = null;
+        if (scanVectorIndexPayloads) {
+            vectorIndexPayloads = indexFileHandler.scanSourceIndexes(snapshot, partition, bucket);
+        }
+
         return new RestoreFiles(
-                snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
+                snapshot,
+                totalBuckets,
+                restoreFiles,
+                dynamicBucketIndex,
+                deleteVectorsIndex,
+                vectorIndexPayloads);
     }
 }

@@ -109,10 +109,20 @@ public class InternalRowUtils {
                                     mapType.getValueType());
                 }
                 InternalArray keyArray1 = map1.keyArray();
+                InternalArray keyArray2 = map2.keyArray();
+                InternalArray valueArray1 = map1.valueArray();
+                InternalArray valueArray2 = map2.valueArray();
+                boolean[] matched = new boolean[map2.size()];
                 for (int i = 0; i < map1.size(); i++) {
-                    Object key = get(keyArray1, i, mapType.getKeyType());
-                    if (!map2.contains(key)
-                            || !equals(map1.get(key), map2.get(key), mapType.getValueType())) {
+                    if (!hasEqualMapEntry(
+                            keyArray1,
+                            valueArray1,
+                            i,
+                            keyArray2,
+                            valueArray2,
+                            matched,
+                            mapType.getKeyType(),
+                            mapType.getValueType())) {
                         return false;
                     }
                 }
@@ -135,6 +145,33 @@ public class InternalRowUtils {
             }
         }
         return true;
+    }
+
+    private static boolean hasEqualMapEntry(
+            InternalArray keyArray1,
+            InternalArray valueArray1,
+            int pos1,
+            InternalArray keyArray2,
+            InternalArray valueArray2,
+            boolean[] matched,
+            DataType keyType,
+            DataType valueType) {
+        Object key1 = get(keyArray1, pos1, keyType);
+        Object value1 = get(valueArray1, pos1, valueType);
+        for (int j = 0; j < keyArray2.size(); j++) {
+            if (matched[j]) {
+                continue;
+            }
+            Object key2 = get(keyArray2, j, keyType);
+            if (equals(key1, key2, keyType)) {
+                Object value2 = get(valueArray2, j, valueType);
+                if (equals(value1, value2, valueType)) {
+                    matched[j] = true;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static int hash(Object data, DataType dataType) {
@@ -167,10 +204,12 @@ public class InternalRowUtils {
                                 (InternalMap) data, mapType.getKeyType(), mapType.getValueType());
             }
             InternalArray keyArray = map.keyArray();
+            InternalArray valueArray = map.valueArray();
             for (int i = 0; i < map.size(); i++) {
                 Object key = get(keyArray, i, mapType.getKeyType());
-                result = 37 * result + hash(key, mapType.getKeyType());
-                result = 37 * result + hash(map.get(key), mapType.getValueType());
+                Object value = get(valueArray, i, mapType.getValueType());
+                result +=
+                        37 * hash(key, mapType.getKeyType()) + hash(value, mapType.getValueType());
             }
         } else if (data instanceof byte[]) {
             result = Arrays.hashCode((byte[]) data);

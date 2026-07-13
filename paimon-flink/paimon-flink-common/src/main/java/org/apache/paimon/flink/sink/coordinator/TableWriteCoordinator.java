@@ -118,7 +118,8 @@ public class TableWriteCoordinator {
             throws IOException {
         if (snapshot == null) {
             return new PagedCoordinationResponse(
-                    serializeObject(new ScanCoordinationResponse(null, null, null, null, null)),
+                    serializeObject(
+                            new ScanCoordinationResponse(null, null, null, null, null, null)),
                     null);
         }
 
@@ -161,7 +162,7 @@ public class TableWriteCoordinator {
     public synchronized ScanCoordinationResponse scan(ScanCoordinationRequest request)
             throws IOException {
         if (snapshot == null) {
-            return new ScanCoordinationResponse(null, null, null, null, null);
+            return new ScanCoordinationResponse(null, null, null, null, null, null);
         }
 
         BinaryRow partition = deserializeBinaryRow(request.partition());
@@ -183,8 +184,18 @@ public class TableWriteCoordinator {
                     indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
         }
 
+        List<IndexFileMeta> vectorIndexPayloads = null;
+        if (request.scanVectorIndexPayloads()) {
+            vectorIndexPayloads = indexFileHandler.scanSourceIndexes(snapshot, partition, bucket);
+        }
+
         return new ScanCoordinationResponse(
-                snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
+                snapshot,
+                totalBuckets,
+                restoreFiles,
+                dynamicBucketIndex,
+                deleteVectorsIndex,
+                vectorIndexPayloads);
     }
 
     public synchronized long latestCommittedIdentifier(String user) {

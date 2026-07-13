@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFrom
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, ReplaceData}
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, ReplaceData, WriteDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.DELETE
 import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -59,8 +59,40 @@ object Spark41DeleteMetadataRestore extends RewriteRowLevelCommand with PureAppe
           val origRelation = rd.originalTable.asInstanceOf[DataSourceV2Relation]
           val fs = origRelation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]
           DeleteFromPaimonTableCommand(origRelation, fs, rd.condition)
+        // The delta-based DELETE form of unaware-bucket deletion-vector append tables: restore
+        // metadata-only DELETE to the V1 command for the same truncate fast path, instead of
+        // marking every row of the dropped partitions in deletion vectors.
+        case wd: WriteDelta if isMetadataOnlyDeleteOnDvPaimon(wd) =>
+          val origRelation = wd.originalTable.asInstanceOf[DataSourceV2Relation]
+          val fs = origRelation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]
+          DeleteFromPaimonTableCommand(origRelation, fs, wd.condition)
       }
     }
+  }
+
+  /** The [[WriteDelta]] counterpart of [[isMetadataOnlyDeleteOnAppendOnlyPaimon]]. */
+  private def isMetadataOnlyDeleteOnDvPaimon(wd: WriteDelta): Boolean = {
+    val writeIsDelete = wd.table match {
+      case r: DataSourceV2Relation =>
+        r.table match {
+          case op: RowLevelOperationTable => op.operation.command() == DELETE
+          case _ => false
+        }
+      case _ => false
+    }
+    writeIsDelete && (wd.originalTable match {
+      case r: DataSourceV2Relation if targetsV2DeltaTable(r) =>
+        r.table match {
+          case spk: SparkTable =>
+            spk.getTable match {
+              case fs: FileStoreTable =>
+                OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(fs, wd.condition)
+              case _ => false
+            }
+          case _ => false
+        }
+      case _ => false
+    })
   }
 
   /**

@@ -44,6 +44,18 @@
                 <artifactId>commons-beanutils</artifactId>
                 <version>${commons.beanutils.version}</version>
             </dependency>
+            <dependency>
+                <!-- Bumped for security purposes (CVE-2025-48924); aligns bundled version with NOTICE -->
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>3.18.0</version>
+            </dependency>
+            <dependency>
+                <!-- Bumped for security purposes; aligns bundled version with NOTICE -->
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>${snappy.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

@@ -350,6 +350,8 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        validatePrimaryKeyVectorIndex(schema, options);
+
         validateMergeFunctionFactory(schema);
 
         validateMapStorageLayout(schema, options);
@@ -881,6 +883,80 @@ public class SchemaValidation {
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
         }
+    }
+
+    private static void validatePrimaryKeyVectorIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyVectorIndexEnabled()) {
+            return;
+        }
+
+        checkArgument(
+                options.primaryKeyVectorIndexCompactionLevelFanout() > 1,
+                "%s must be greater than 1.",
+                CoreOptions.PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT.key());
+        double staleRatio = options.primaryKeyVectorIndexCompactionStaleRatioThreshold();
+        checkArgument(
+                staleRatio > 0 && staleRatio <= 1,
+                "%s must be in (0, 1].",
+                CoreOptions.PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD.key());
+
+        List<String> indexColumns = options.primaryKeyVectorIndexColumns();
+        checkArgument(
+                new HashSet<>(indexColumns).size() == indexColumns.size(),
+                "pk-vector.index.columns must not contain duplicate columns, but is %s.",
+                indexColumns);
+        checkArgument(
+                indexColumns.size() == 1,
+                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        String indexType = options.primaryKeyVectorIndexType(indexColumn);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "pk-vector.index.columns must contain a non-empty column.");
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexType),
+                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
+                indexColumn);
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key vector index requires a primary-key table.");
+        checkArgument(
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
+                "Primary-key vector index requires deletion-vectors.enabled = true.");
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
+                options.mergeEngine());
+        checkArgument(
+                options.bucket() > 0,
+                "Primary-key vector index requires fixed bucket mode (bucket > 0), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key vector index does not support pk-clustering-override.");
+        options.primaryKeyVectorIndexOptions(indexColumn);
+
+        DataField vectorField =
+                schema.fields().stream()
+                        .filter(field -> field.name().equals(indexColumn))
+                        .findFirst()
+                        .orElse(null);
+        checkArgument(
+                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
+                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
+                indexColumn);
+        checkArgument(
+                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
+                        == DataTypeRoot.FLOAT,
+                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
+                indexColumn);
+        checkArgument(
+                Arrays.asList("l2", "cosine", "inner_product")
+                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
+                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                indexColumn,
+                options.primaryKeyVectorDistanceMetric(indexColumn));
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

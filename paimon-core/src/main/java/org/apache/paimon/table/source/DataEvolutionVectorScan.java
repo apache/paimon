@@ -46,8 +46,8 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Implementation for {@link VectorScan}. */
-public class VectorScanImpl implements VectorScan {
+/** Data-evolution implementation for {@link VectorScan}. */
+public class DataEvolutionVectorScan implements VectorScan {
 
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
@@ -55,7 +55,7 @@ public class VectorScanImpl implements VectorScan {
     private final DataField vectorColumn;
     private final Map<String, String> options;
 
-    public VectorScanImpl(
+    public DataEvolutionVectorScan(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,
