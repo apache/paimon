@@ -22,6 +22,7 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalArray;
@@ -66,6 +67,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
+    private final BlobFetchMetricReporter blobFetchMetricReporter;
     private final String blobFieldName;
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
@@ -85,10 +87,35 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             PositionOutputStream out,
             @Nullable BlobConsumer writeConsumer,
             RowType type,
+            boolean writeNullOnMissingFile) {
+        this(out, writeConsumer, type, writeNullOnMissingFile, false);
+    }
+
+    public BlobFormatWriter(
+            PositionOutputStream out,
+            @Nullable BlobConsumer writeConsumer,
+            RowType type,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure) {
+        this(
+                out,
+                writeConsumer,
+                type,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                BlobFetchMetricReporter.NOOP);
+    }
+
+    public BlobFormatWriter(
+            PositionOutputStream out,
+            @Nullable BlobConsumer writeConsumer,
+            RowType type,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter) {
         this.out = out;
         this.writeConsumer = writeConsumer;
+        this.blobFetchMetricReporter = blobFetchMetricReporter;
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
@@ -115,11 +142,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     @Override
     public void addElement(InternalRow element) throws IOException {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
-        if (element.isNullAt(0)) {
-            writeNullElement();
-            return;
-        }
-
         elementWriter.addElement(element);
     }
 
@@ -131,15 +153,23 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
         @Override
         public void addElement(InternalRow element) throws IOException {
+            if (element.isNullAt(0)) {
+                recordPreCheckedMissingFileNull(element);
+                writeNullElement();
+                return;
+            }
+
             Blob blob;
             try {
                 blob = element.getBlob(0);
             } catch (RuntimeException e) {
                 if (shouldWriteNullOnFetchFailure(e)) {
                     logWriteNullOnFetchFailure(e, null);
+                    blobFetchMetricReporter.recordFetchFailureNullWritten(e);
                     writeNullElement();
                     return;
                 }
+                blobFetchMetricReporter.recordFetchFailure(e);
                 throw e;
             }
             if (blob == BlobPlaceholder.INSTANCE) {
@@ -155,6 +185,11 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
         @Override
         public void addElement(InternalRow element) throws IOException {
+            if (element.isNullAt(0)) {
+                writeNullElement();
+                return;
+            }
+
             InternalArray array = element.getArray(0);
             if (array == BlobArrayPlaceholder.INSTANCE) {
                 lengths.add(PLACE_HOLDER_LENGTH);
@@ -189,6 +224,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 out.flush();
             }
         }
+        blobFetchMetricReporter.recordSuccess(descriptor.length());
     }
 
     private void addBlobArray(InternalArray array) throws IOException {
@@ -224,6 +260,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             if (writeConsumer != null) {
                 flush |= writeConsumer.accept(blobFieldName, descriptor);
             }
+            blobFetchMetricReporter.recordSuccess(descriptor.length());
         }
 
         byte[] elementIndexBytes = DeltaVarintCompressor.compress(elementLengths);
@@ -248,8 +285,10 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         } catch (RuntimeException e) {
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, null);
+                blobFetchMetricReporter.recordFetchFailureNullWritten(e);
                 return null;
             }
+            blobFetchMetricReporter.recordFetchFailure(e);
             throw e;
         }
     }
@@ -266,6 +305,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         blobUri(blob),
                         blobFieldName,
                         e);
+                blobFetchMetricReporter.recordMissingFileNullWritten(true);
                 if (writeNullElement) {
                     writeNullElement();
                 }
@@ -273,11 +313,13 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             }
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, blob);
+                blobFetchMetricReporter.recordFetchFailureNullWritten(e);
                 if (writeNullElement) {
                     writeNullElement();
                 }
                 return null;
             }
+            blobFetchMetricReporter.recordFetchFailure(e);
             throw e;
         }
     }
@@ -290,6 +332,9 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 write(tmpBuffer, bytesRead);
                 bytesRead = stream.read(tmpBuffer);
             }
+        } catch (IOException | RuntimeException e) {
+            blobFetchMetricReporter.recordFetchFailure(e);
+            throw e;
         }
 
         return new BlobDescriptor(pathString, blobPos, out.getPos() - blobPos);
@@ -323,6 +368,17 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         }
     }
 
+    private void recordPreCheckedMissingFileNull(InternalRow element) {
+        if (!writeNullOnMissingFile) {
+            return;
+        }
+        Blob blob = element.getBlob(0);
+        if (blob instanceof BlobRef) {
+            BlobDescriptor descriptor = ((BlobRef) blob).toDescriptor();
+            blobFetchMetricReporter.recordMissingFileNullWritten(isHttpUri(descriptor.uri()));
+        }
+    }
+
     private void writeNullElement() throws IOException {
         lengths.add(NULL_LENGTH);
         if (writeConsumer != null) {
@@ -335,6 +391,11 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             return ((BlobRef) blob).toDescriptor().uri();
         }
         return "unknown";
+    }
+
+    private static boolean isHttpUri(String uri) {
+        return uri.regionMatches(true, 0, "http://", 0, "http://".length())
+                || uri.regionMatches(true, 0, "https://", 0, "https://".length());
     }
 
     private void write(byte[] bytes) throws IOException {

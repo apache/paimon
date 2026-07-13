@@ -26,10 +26,11 @@ from pathlib import Path
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.common.options import Options
 from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
@@ -1872,6 +1873,71 @@ class BlobEndToEndTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
             reader.read_arrow_batch()
         reader.close()
+
+    def test_reject_malformed_array_blob_payloads(self):
+        cases = [
+            (
+                self._array_blob_payload(b"a", [1], version=0),
+                "Unsupported ARRAY<BLOB> payload version",
+            ),
+            (
+                self._array_blob_payload(b"a", [1], element_count=0x80000000),
+                "Invalid ARRAY<BLOB> element count",
+            ),
+            (
+                self._array_blob_payload(b"a", [1], index_length=100),
+                "Invalid ARRAY<BLOB> element index length",
+            ),
+            (
+                self._array_blob_payload(b"", [], index=b"\x80"),
+                "Invalid ARRAY<BLOB> element index",
+            ),
+            (
+                self._array_blob_payload(b"a", [-2]),
+                "Invalid ARRAY<BLOB> element length",
+            ),
+            (
+                self._array_blob_payload(b"a", [2]),
+                "element lengths exceed the payload data length",
+            ),
+        ]
+
+        field = DataField(0, "blob_array", ArrayType(True, AtomicType("BLOB")))
+        for payload, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                iterator = BlobRecordIterator(
+                    None,
+                    "unused",
+                    [],
+                    [],
+                    field,
+                    input_stream=io.BytesIO(payload),
+                )
+                with self.assertRaisesRegex(ValueError, expected_message):
+                    iterator._read_blob_array(0, len(payload))
+
+    @staticmethod
+    def _array_blob_payload(
+        data, element_lengths, version=BlobRecordIterator.ARRAY_VERSION,
+        element_count=None, index_length=None, index=None,
+    ):
+        if index is None:
+            index = DeltaVarintCompressor.compress(element_lengths)
+        if element_count is None:
+            element_count = len(element_lengths)
+        if index_length is None:
+            index_length = len(index)
+        return (
+            struct.pack(
+                '<IBI',
+                BlobRecordIterator.ARRAY_MAGIC_NUMBER,
+                version,
+                element_count,
+            )
+            + data
+            + index
+            + struct.pack('<I', index_length)
+        )
 
 
 class BlobParallelismTest(unittest.TestCase):

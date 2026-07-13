@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -37,6 +38,7 @@ public class BlobFileContext {
     private final boolean writeNullOnFetchFailure;
 
     private @Nullable BlobConsumer blobConsumer;
+    private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     private BlobFileContext(
             Set<String> blobDescriptorFields,
@@ -78,6 +80,12 @@ public class BlobFileContext {
         return this;
     }
 
+    public BlobFileContext withBlobFetchMetricReporter(
+            BlobFetchMetricReporter blobFetchMetricReporter) {
+        this.blobFetchMetricReporter = blobFetchMetricReporter;
+        return this;
+    }
+
     public BlobFileContext withWriteType(RowType writeType) {
         if (writeType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
             return null;
@@ -104,5 +112,9 @@ public class BlobFileContext {
 
     public boolean writeNullOnFetchFailure() {
         return writeNullOnFetchFailure;
+    }
+
+    public BlobFetchMetricReporter blobFetchMetricReporter() {
+        return blobFetchMetricReporter;
     }
 }

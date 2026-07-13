@@ -34,7 +34,9 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -45,12 +47,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BlobFileFormat}. */
 public class BlobFileFormatTest {
@@ -109,6 +114,51 @@ public class BlobFileFormatTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getArray(0)).isSameAs(BlobArrayPlaceholder.INSTANCE);
+    }
+
+    @Test
+    public void testRejectUnsupportedArrayBlobPayloadVersion() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + Integer.BYTES] = 0,
+                "Unsupported ARRAY<BLOB> payload version");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobElementCount() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> {
+                    int countPosition = position + Integer.BYTES + 1;
+                    Arrays.fill(bytes, countPosition, countPosition + Integer.BYTES, (byte) 0xff);
+                },
+                "Invalid ARRAY<BLOB> element count");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobIndexLength() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> {
+                    int indexLengthPosition = position + length - Integer.BYTES;
+                    Arrays.fill(
+                            bytes,
+                            indexLengthPosition,
+                            indexLengthPosition + Integer.BYTES,
+                            (byte) 0xff);
+                },
+                "Invalid ARRAY<BLOB> element index length");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobElementLength() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + length - Integer.BYTES - 1] = 3,
+                "Invalid ARRAY<BLOB> element length");
+    }
+
+    @Test
+    public void testRejectArrayBlobElementLengthMismatch() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + length - Integer.BYTES - 1] = 4,
+                "element lengths exceed the payload data length");
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {
@@ -181,6 +231,43 @@ public class BlobFileFormatTest {
         // assert
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).isSameAs(BlobPlaceholder.INSTANCE);
+    }
+
+    private void assertMalformedArrayPayload(
+            ArrayPayloadCorruptor corruptor, String expectedMessage) throws IOException {
+        BlobFileFormat format = new BlobFileFormat();
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(
+                    GenericRow.of(new GenericArray(new Object[] {new BlobData("a".getBytes())})));
+            writer.close();
+        }
+
+        int payloadPosition;
+        int payloadLength;
+        try (SeekableInputStream input = fileIO.newInputStream(file)) {
+            BlobFileMeta fileMeta = new BlobFileMeta(input, fileIO.getFileSize(file), null);
+            payloadPosition = Math.toIntExact(fileMeta.blobOffset(0) + Integer.BYTES);
+            payloadLength = Math.toIntExact(fileMeta.blobLength(0) - 16);
+        }
+
+        java.nio.file.Path localFile = Paths.get(file.toUri());
+        byte[] bytes = Files.readAllBytes(localFile);
+        corruptor.corrupt(bytes, payloadPosition, payloadLength);
+        Files.write(localFile, bytes);
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        assertThatThrownBy(
+                        () -> {
+                            try (FileRecordReader<InternalRow> reader =
+                                    readerFactory.createReader(context)) {
+                                reader.forEachRemaining(ignored -> {});
+                            }
+                        })
+                .hasMessageContaining(expectedMessage);
     }
 
     @Test
@@ -298,5 +385,9 @@ public class BlobFileFormatTest {
             }
         }
         result.add(bytes);
+    }
+
+    private interface ArrayPayloadCorruptor {
+        void corrupt(byte[] bytes, int position, int length);
     }
 }

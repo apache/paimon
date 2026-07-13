@@ -23,6 +23,7 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
@@ -399,6 +400,81 @@ public class BlobFormatWriterTest {
 
         assertThat(metricReporter.missingFileNullWritten).isEqualTo(0);
         assertThat(metricReporter.httpNotFound).isEqualTo(0);
+    }
+
+    @Test
+    public void testArrayBlobFetchMetricReporter(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        true,
+                        true,
+                        metricReporter);
+
+        writer.addElement(
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {
+                                    Blob.fromData("image".getBytes()),
+                                    new BlobRef(
+                                            failingHttpReader(500),
+                                            new BlobDescriptor(
+                                                    "https://example.com/error.jpg", 0, -1)),
+                                    new BlobRef(
+                                            failingHttpReader(404),
+                                            new BlobDescriptor(
+                                                    "https://example.com/missing.jpg", 0, -1)),
+                                    null
+                                })));
+        writer.addElement(GenericRow.of((Object) null));
+        writer.close();
+
+        assertThat(metricReporter.success).isEqualTo(1);
+        assertThat(metricReporter.successBytes).isEqualTo(5);
+        assertThat(metricReporter.missingFileNullWritten).isEqualTo(1);
+        assertThat(metricReporter.httpNotFound).isEqualTo(1);
+        assertThat(metricReporter.fetchFailureNullWritten).isEqualTo(1);
+        assertThat(metricReporter.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testArrayBlobFetchMetricReporterForUnhandledFailure(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        false,
+                        false,
+                        metricReporter);
+
+        assertThatThrownBy(
+                        () ->
+                                writer.addElement(
+                                        GenericRow.of(
+                                                new GenericArray(
+                                                        new Object[] {
+                                                            new BlobRef(
+                                                                    failingHttpReader(500),
+                                                                    new BlobDescriptor(
+                                                                            "https://example.com/error.jpg",
+                                                                            0,
+                                                                            -1))
+                                                        }))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("HTTP error code: 500");
+        assertThat(metricReporter.failure).isEqualTo(1);
+        assertThat(metricReporter.fetchFailureNullWritten).isEqualTo(0);
     }
 
     private static void assertBlobPayload(Blob blob, byte[] expected) throws Exception {

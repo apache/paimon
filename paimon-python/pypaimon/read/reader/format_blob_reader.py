@@ -263,6 +263,8 @@ class BlobRecordIterator:
     ARRAY_VERSION = 1
     ARRAY_MAGIC_NUMBER = 1094861634
     ARRAY_NULL_ELEMENT_LENGTH = -1
+    ARRAY_INDEX_LENGTH_SIZE = 4
+    MIN_ARRAY_PAYLOAD_LENGTH = ARRAY_HEADER_SIZE + ARRAY_INDEX_LENGTH_SIZE
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
 
@@ -323,6 +325,11 @@ class BlobRecordIterator:
         return data
 
     def _read_blob_array(self, position: int, length: int):
+        if position < 0 or length < self.MIN_ARRAY_PAYLOAD_LENGTH:
+            raise ValueError(
+                f"Invalid ARRAY<BLOB> payload position or length: {position}, {length}"
+            )
+
         stream = self.input_stream
         close_stream = False
         if stream is None:
@@ -336,28 +343,62 @@ class BlobRecordIterator:
             magic, version, element_count = struct.unpack('<IBI', header)
             if magic != self.ARRAY_MAGIC_NUMBER:
                 raise ValueError(f"Invalid ARRAY<BLOB> payload magic number: {magic}")
-            if version > self.ARRAY_VERSION:
+            if version != self.ARRAY_VERSION:
                 raise ValueError(f"Unsupported ARRAY<BLOB> payload version: {version}")
+            if element_count > 0x7fffffff:
+                raise ValueError(f"Invalid ARRAY<BLOB> element count: {element_count}")
 
-            index_length_position = position + length - 4
+            payload_end = position + length
+            element_data_start = position + self.ARRAY_HEADER_SIZE
+            index_length_position = payload_end - self.ARRAY_INDEX_LENGTH_SIZE
             stream.seek(index_length_position)
-            index_length_bytes = self._read_fully_from(stream, 4)
-            if len(index_length_bytes) != 4:
+            index_length_bytes = self._read_fully_from(stream, self.ARRAY_INDEX_LENGTH_SIZE)
+            if len(index_length_bytes) != self.ARRAY_INDEX_LENGTH_SIZE:
                 raise IOError("Invalid ARRAY<BLOB> payload: cannot read index length")
             index_length = struct.unpack('<I', index_length_bytes)[0]
+            maximum_index_length = length - self.MIN_ARRAY_PAYLOAD_LENGTH
+            if index_length > 0x7fffffff or index_length > maximum_index_length:
+                raise ValueError(
+                    f"Invalid ARRAY<BLOB> element index length: {index_length}"
+                )
+            if element_count > index_length:
+                raise ValueError(
+                    "ARRAY<BLOB> element count exceeds element index length."
+                )
 
-            stream.seek(index_length_position - index_length)
+            element_index_start = index_length_position - index_length
+            stream.seek(element_index_start)
             index_bytes = self._read_fully_from(stream, index_length)
             if len(index_bytes) != index_length:
                 raise IOError("Invalid ARRAY<BLOB> payload: cannot read element index")
+            self._validate_array_element_index(index_bytes)
             element_lengths = DeltaVarintCompressor.decompress(index_bytes)
             if len(element_lengths) != element_count:
                 raise ValueError(
                     "ARRAY<BLOB> element count does not match element index length."
                 )
 
+            element_data_length = element_index_start - element_data_start
+            total_element_length = 0
+            for element_length in element_lengths:
+                if element_length == self.ARRAY_NULL_ELEMENT_LENGTH:
+                    continue
+                if element_length < 0:
+                    raise ValueError(
+                        f"Invalid ARRAY<BLOB> element length: {element_length}"
+                    )
+                if element_length > element_data_length - total_element_length:
+                    raise ValueError(
+                        "ARRAY<BLOB> element lengths exceed the payload data length."
+                    )
+                total_element_length += element_length
+            if total_element_length != element_data_length:
+                raise ValueError(
+                    "ARRAY<BLOB> element lengths do not match the payload data length."
+                )
+
             blobs = []
-            element_offset = position + self.ARRAY_HEADER_SIZE
+            element_offset = element_data_start
             for element_length in element_lengths:
                 if element_length == self.ARRAY_NULL_ELEMENT_LENGTH:
                     blobs.append(None)
@@ -377,6 +418,18 @@ class BlobRecordIterator:
         finally:
             if close_stream:
                 stream.close()
+
+    @staticmethod
+    def _validate_array_element_index(index_bytes: bytes) -> None:
+        varint_length = 0
+        for value in index_bytes:
+            varint_length += 1
+            if varint_length > 10:
+                raise ValueError("Invalid ARRAY<BLOB> element index.")
+            if value & 0x80 == 0:
+                varint_length = 0
+        if varint_length != 0:
+            raise ValueError("Invalid ARRAY<BLOB> element index.")
 
     def _read_fully(self, length: int) -> bytes:
         return self._read_fully_from(self.input_stream, length)

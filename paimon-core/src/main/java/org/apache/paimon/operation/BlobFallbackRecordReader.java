@@ -61,7 +61,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int blobIndex;
     private final int fieldCount;
     private final int rowIdIndex;
     private final int seqNumIndex;
@@ -77,7 +76,6 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             RowType readRowType,
             int blobIndex)
             throws IOException {
-        this.blobIndex = blobIndex;
         this.fieldCount = readRowType.getFieldCount();
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());

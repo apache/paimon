@@ -43,6 +43,11 @@ import java.nio.ByteOrder;
 /** {@link FileRecordReader} for blob file. */
 public class BlobFormatReader implements FileRecordReader<InternalRow> {
 
+    private static final int ARRAY_HEADER_LENGTH = 9;
+    private static final int ARRAY_INDEX_LENGTH_SIZE = Integer.BYTES;
+    private static final int MIN_ARRAY_PAYLOAD_LENGTH =
+            ARRAY_HEADER_LENGTH + ARRAY_INDEX_LENGTH_SIZE;
+
     private final FileIO fileIO;
     private final Path filePath;
     private final String filePathString;
@@ -162,9 +167,15 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
         if (in == null) {
             throw new IllegalStateException("Input stream must be available for ARRAY<BLOB>.");
         }
+        if (position < 0
+                || length < MIN_ARRAY_PAYLOAD_LENGTH
+                || position > Long.MAX_VALUE - length) {
+            throw new IllegalArgumentException(
+                    "Invalid ARRAY<BLOB> payload position or length: " + position + ", " + length);
+        }
 
         try {
-            byte[] header = new byte[9];
+            byte[] header = new byte[ARRAY_HEADER_LENGTH];
             in.seek(position);
             IOUtils.readFully(in, header);
             ByteBuffer headerBuffer = littleEndianBuffer(header);
@@ -174,29 +185,75 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                         "Invalid ARRAY<BLOB> payload magic number: " + magic);
             }
             byte version = headerBuffer.get();
-            if (version > BlobFormatWriter.ARRAY_VERSION) {
+            if (version != BlobFormatWriter.ARRAY_VERSION) {
                 throw new UnsupportedOperationException(
                         "Unsupported ARRAY<BLOB> payload version: " + version);
             }
             int elementCount = headerBuffer.getInt();
+            if (elementCount < 0) {
+                throw new IllegalArgumentException(
+                        "Invalid ARRAY<BLOB> element count: " + elementCount);
+            }
 
-            long elementIndexLengthPosition = position + length - Integer.BYTES;
-            byte[] indexLengthBytes = new byte[Integer.BYTES];
+            long payloadEnd = position + length;
+            long elementDataStart = position + ARRAY_HEADER_LENGTH;
+            long elementIndexLengthPosition = payloadEnd - ARRAY_INDEX_LENGTH_SIZE;
+            byte[] indexLengthBytes = new byte[ARRAY_INDEX_LENGTH_SIZE];
             in.seek(elementIndexLengthPosition);
             IOUtils.readFully(in, indexLengthBytes);
             int elementIndexLength = littleEndianBuffer(indexLengthBytes).getInt();
+            long maximumIndexLength = length - MIN_ARRAY_PAYLOAD_LENGTH;
+            if (elementIndexLength < 0 || elementIndexLength > maximumIndexLength) {
+                throw new IllegalArgumentException(
+                        "Invalid ARRAY<BLOB> element index length: " + elementIndexLength);
+            }
+            if (elementCount > elementIndexLength) {
+                throw new IllegalArgumentException(
+                        "ARRAY<BLOB> element count exceeds element index length.");
+            }
 
             byte[] elementIndexBytes = new byte[elementIndexLength];
-            in.seek(elementIndexLengthPosition - elementIndexLength);
+            long elementIndexStart = elementIndexLengthPosition - elementIndexLength;
+            in.seek(elementIndexStart);
             IOUtils.readFully(in, elementIndexBytes);
-            long[] elementLengths = DeltaVarintCompressor.decompress(elementIndexBytes);
+            long[] elementLengths;
+            try {
+                elementLengths = DeltaVarintCompressor.decompress(elementIndexBytes);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("Invalid ARRAY<BLOB> element index.", e);
+            }
             if (elementLengths.length != elementCount) {
                 throw new IllegalArgumentException(
                         "ARRAY<BLOB> element count does not match element index length.");
             }
 
+            long elementDataLength = elementIndexStart - elementDataStart;
+            long totalElementLength = 0;
+            for (long elementLength : elementLengths) {
+                if (elementLength == BlobFormatWriter.ARRAY_NULL_ELEMENT_LENGTH) {
+                    continue;
+                }
+                if (elementLength < 0) {
+                    throw new IllegalArgumentException(
+                            "Invalid ARRAY<BLOB> element length: " + elementLength);
+                }
+                if (!blobAsDescriptor && elementLength > Integer.MAX_VALUE) {
+                    throw new IllegalArgumentException(
+                            "ARRAY<BLOB> inline element is too large: " + elementLength);
+                }
+                if (elementLength > elementDataLength - totalElementLength) {
+                    throw new IllegalArgumentException(
+                            "ARRAY<BLOB> element lengths exceed the payload data length.");
+                }
+                totalElementLength += elementLength;
+            }
+            if (totalElementLength != elementDataLength) {
+                throw new IllegalArgumentException(
+                        "ARRAY<BLOB> element lengths do not match the payload data length.");
+            }
+
             Object[] blobs = new Object[elementCount];
-            long elementOffset = position + header.length;
+            long elementOffset = elementDataStart;
             for (int i = 0; i < elementCount; i++) {
                 long elementLength = elementLengths[i];
                 if (elementLength == BlobFormatWriter.ARRAY_NULL_ELEMENT_LENGTH) {
