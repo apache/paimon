@@ -141,10 +141,10 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
         this.splits = splits;
-        this.weightFunc = weightFunc;
+        this.weightFunc = weightFunc == null ? split -> split.split().rowCount() : weightFunc;
         this.groupFunc = groupFunc;
         this.pendingSplitAssignment =
-                createBatchFairSplitAssignment(splits, parallelism, weightFunc, groupFunc);
+                createBatchFairSplitAssignment(splits, parallelism, this.weightFunc, groupFunc);
         this.numberOfPendingSplits = new AtomicInteger(splits.size());
     }
 
