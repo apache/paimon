@@ -227,5 +227,14 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
             Assertions.assertThat(extraFiles.size()).isEqualTo(0);
         }
+
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
+        Assertions.assertThat(table.snapshotManager().latestSnapshotId())
+                .isEqualTo(latestSnapshotId);
     }
 }
