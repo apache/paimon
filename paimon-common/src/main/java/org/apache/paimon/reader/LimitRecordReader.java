@@ -47,6 +47,7 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
 
     @Override
     @Nullable
+    @SuppressWarnings("unchecked")
     public RecordIterator<T> readBatch() throws IOException {
         if (recordCount.get() >= limit) {
             return null;
@@ -54,6 +55,9 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
         RecordIterator<T> iterator = reader.readBatch();
         if (iterator == null) {
             return null;
+        }
+        if (iterator instanceof ScoreRecordIterator) {
+            return new LimitScoreRecordIterator<>((ScoreRecordIterator<T>) iterator);
         }
         return new LimitRecordIterator<>(iterator);
     }
@@ -87,6 +91,27 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
         @Override
         public void releaseBatch() {
             iterator.releaseBatch();
+        }
+    }
+
+    private class LimitScoreRecordIterator<T> extends LimitRecordIterator<T>
+            implements ScoreRecordIterator<T> {
+
+        private final ScoreRecordIterator<T> iterator;
+
+        private LimitScoreRecordIterator(ScoreRecordIterator<T> iterator) {
+            super(iterator);
+            this.iterator = iterator;
+        }
+
+        @Override
+        public float returnedScore() {
+            return iterator.returnedScore();
+        }
+
+        @Override
+        public long returnedRowId() {
+            return iterator.returnedRowId();
         }
     }
 }
