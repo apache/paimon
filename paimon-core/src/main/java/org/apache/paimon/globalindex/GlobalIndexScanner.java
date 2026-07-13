@@ -187,7 +187,8 @@ public class GlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        if (indexFiles.isEmpty()) {
+        List<IndexFileMeta> ordinaryIndexFiles = ordinaryGlobalIndexFiles(indexFiles);
+        if (ordinaryIndexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
@@ -199,7 +200,7 @@ public class GlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        ordinaryIndexFiles));
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -241,7 +242,7 @@ public class GlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
@@ -259,6 +260,17 @@ public class GlobalIndexScanner implements Closeable {
                     return false;
                 };
         return indexFileFilter;
+    }
+
+    private static List<IndexFileMeta> ordinaryGlobalIndexFiles(
+            Collection<IndexFileMeta> indexFiles) {
+        return indexFiles.stream()
+                .filter(
+                        indexFile -> {
+                            GlobalIndexMeta meta = indexFile.globalIndexMeta();
+                            return meta != null && meta.sourceMeta() == null;
+                        })
+                .collect(Collectors.toList());
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {

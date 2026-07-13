@@ -169,7 +169,16 @@ public class BucketedSortedIndexMaintainer {
                     changed && hasCompactDataTransition
                             ? Optional.of(new SortedIndexIncrement(created, removed))
                             : Optional.empty();
-            return new SortedIndexCommit(appendChange, compactChange);
+            return new SortedIndexCommit(
+                    appendChange,
+                    compactChange,
+                    failure ->
+                            rollbackPrepareCommit(
+                                    originalSourceFiles,
+                                    originalGroups,
+                                    originalRestoredDeletions,
+                                    created,
+                                    failure));
         } catch (Throwable failure) {
             rollbackPrepareCommit(
                     originalSourceFiles,
@@ -187,7 +196,7 @@ public class BucketedSortedIndexMaintainer {
         }
     }
 
-    private void rollbackPrepareCommit(
+    private synchronized void rollbackPrepareCommit(
             Map<String, DataFileMeta> originalSourceFiles,
             List<PkSortedIndexGroup> originalGroups,
             List<IndexFileMeta> originalRestoredDeletions,
@@ -498,12 +507,15 @@ public class BucketedSortedIndexMaintainer {
 
         private final Optional<SortedIndexIncrement> appendIncrement;
         private final Optional<SortedIndexIncrement> compactIncrement;
+        private final AbortAction abortAction;
 
         private SortedIndexCommit(
                 Optional<SortedIndexIncrement> appendIncrement,
-                Optional<SortedIndexIncrement> compactIncrement) {
+                Optional<SortedIndexIncrement> compactIncrement,
+                AbortAction abortAction) {
             this.appendIncrement = appendIncrement;
             this.compactIncrement = compactIncrement;
+            this.abortAction = abortAction;
         }
 
         public Optional<SortedIndexIncrement> appendIncrement() {
@@ -513,6 +525,16 @@ public class BucketedSortedIndexMaintainer {
         public Optional<SortedIndexIncrement> compactIncrement() {
             return compactIncrement;
         }
+
+        public void abort(Throwable failure) {
+            abortAction.abort(failure);
+        }
+    }
+
+    @FunctionalInterface
+    private interface AbortAction {
+
+        void abort(Throwable failure);
     }
 
     /** Index-file additions and deletions emitted by one sorted definition. */

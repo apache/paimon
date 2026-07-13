@@ -93,8 +93,17 @@ public class BucketedVectorIndexMaintainer {
                         coreOptions.primaryKeyVectorIndexCompactionLevelFanout(),
                         coreOptions.primaryKeyVectorIndexCompactionStaleRatioThreshold());
         this.executor = executor;
+
+        List<IndexFileMeta> definitionPayloads = new ArrayList<>();
+        for (IndexFileMeta payload : restoredPayloads) {
+            if (algorithm.equals(payload.indexType())
+                    && payload.globalIndexMeta() != null
+                    && payload.globalIndexMeta().indexFieldId() == vectorFieldId) {
+                definitionPayloads.add(payload);
+            }
+        }
         PkVectorBucketIndexState restoredState =
-                new PkVectorBucketIndexState(vectorFieldId, algorithm, restoredPayloads);
+                new PkVectorBucketIndexState(vectorFieldId, algorithm, definitionPayloads);
         this.annSegments = new ArrayList<>(restoredState.annSegments());
         this.activeSourceFiles = new LinkedHashMap<>();
         for (DataFileMeta file : restoredDataFiles) {
@@ -183,7 +192,12 @@ public class BucketedVectorIndexMaintainer {
                     !indexChanged || !hasCompactDataTransition
                             ? Optional.empty()
                             : Optional.of(new VectorIndexIncrement(created, removed));
-            return new VectorIndexCommit(appendChange, compactChange);
+            return new VectorIndexCommit(
+                    appendChange,
+                    compactChange,
+                    failure ->
+                            rollbackPrepareCommit(
+                                    originalSegments, originalSourceFiles, generated, failure));
         } catch (Throwable failure) {
             rollbackPrepareCommit(originalSegments, originalSourceFiles, generated, failure);
             if (failure instanceof Exception) {
@@ -203,7 +217,7 @@ public class BucketedVectorIndexMaintainer {
         pendingBuild = build;
     }
 
-    private void rollbackPrepareCommit(
+    private synchronized void rollbackPrepareCommit(
             List<IndexFileMeta> originalSegments,
             Map<String, DataFileMeta> originalSourceFiles,
             List<IndexFileMeta> generated,
@@ -474,12 +488,15 @@ public class BucketedVectorIndexMaintainer {
 
         private final Optional<VectorIndexIncrement> appendIncrement;
         private final Optional<VectorIndexIncrement> compactIncrement;
+        private final AbortAction abortAction;
 
         private VectorIndexCommit(
                 Optional<VectorIndexIncrement> appendIncrement,
-                Optional<VectorIndexIncrement> compactIncrement) {
+                Optional<VectorIndexIncrement> compactIncrement,
+                AbortAction abortAction) {
             this.appendIncrement = appendIncrement;
             this.compactIncrement = compactIncrement;
+            this.abortAction = abortAction;
         }
 
         public Optional<VectorIndexIncrement> appendIncrement() {
@@ -489,6 +506,16 @@ public class BucketedVectorIndexMaintainer {
         public Optional<VectorIndexIncrement> compactIncrement() {
             return compactIncrement;
         }
+
+        public void abort(Throwable failure) {
+            abortAction.abort(failure);
+        }
+    }
+
+    @FunctionalInterface
+    private interface AbortAction {
+
+        void abort(Throwable failure);
     }
 
     /** Index-file additions and deletions emitted by one bucket state update. */
