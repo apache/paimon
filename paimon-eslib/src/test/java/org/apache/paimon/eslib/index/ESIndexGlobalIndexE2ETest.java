@@ -22,6 +22,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.heap.HeapFloatVector;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
@@ -249,6 +251,31 @@ class ESIndexGlobalIndexE2ETest {
                     0L,
                     filesInArchive.count(),
                     "finish must not publish an index after a partial document write");
+        }
+    }
+
+    @Test
+    void vectorNullElementsAreRejectedBeforeIndexing(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields =
+                List.of(new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())));
+        Map<String, String> opt = new HashMap<>();
+        opt.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        opt.put("global-index.es-index.fields.embedding.dimension", "2");
+
+        HeapFloatVector elements = new HeapFloatVector(2);
+        elements.setFloat(0, 1.0f);
+        elements.setNullAt(1);
+        ColumnarArray vector = new ColumnarArray(elements, 0, 2);
+
+        try (ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(
+                        new LocalDirWriter(tmp),
+                        fields,
+                        new ESIndexOptions(fields, Options.fromMap(opt)))) {
+            IllegalArgumentException failure =
+                    assertThrows(IllegalArgumentException.class, () -> writer.write(vector, 0));
+            assertTrue(failure.getMessage().contains("must not contain null elements"));
         }
     }
 

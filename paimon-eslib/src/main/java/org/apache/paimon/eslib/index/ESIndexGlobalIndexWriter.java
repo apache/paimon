@@ -20,7 +20,6 @@ package org.apache.paimon.eslib.index;
 
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
@@ -184,9 +183,7 @@ public class ESIndexGlobalIndexWriter
                 if (fieldData instanceof float[]) {
                     vector = (float[]) fieldData;
                 } else if (fieldData instanceof InternalArray) {
-                    vector = ((InternalArray) fieldData).toFloatArray();
-                } else if (fieldData instanceof InternalVector) {
-                    vector = ((InternalVector) fieldData).toFloatArray();
+                    vector = materializeVector((InternalArray) fieldData, field.name());
                 }
                 if (vector != null) {
                     validateVectorDimension(field.name(), vector, config);
@@ -235,7 +232,7 @@ public class ESIndexGlobalIndexWriter
             throws IOException {
         switch (config.indexType()) {
             case VECTOR:
-                float[] vector = extractVector(row, pos, field.type());
+                float[] vector = extractVector(row, pos, field);
                 if (vector != null) {
                     validateVectorDimension(field.name(), vector, config);
                     builder.addVector(field.name(), docId, vector);
@@ -323,13 +320,26 @@ public class ESIndexGlobalIndexWriter
         }
     }
 
-    private float[] extractVector(InternalRow row, int pos, DataType type) {
-        if (type instanceof VectorType) {
-            InternalVector vec = row.getVector(pos);
-            return vec.toFloatArray();
+    private float[] extractVector(InternalRow row, int pos, DataField field) {
+        InternalArray vector =
+                field.type() instanceof VectorType ? row.getVector(pos) : row.getArray(pos);
+        return materializeVector(vector, field.name());
+    }
+
+    private static float[] materializeVector(InternalArray vector, String fieldName) {
+        float[] values = new float[vector.size()];
+        for (int i = 0; i < vector.size(); i++) {
+            if (vector.isNullAt(i)) {
+                throw new IllegalArgumentException(
+                        "Vector field '"
+                                + fieldName
+                                + "' must not contain null elements; found null at position "
+                                + i
+                                + ".");
+            }
+            values[i] = vector.getFloat(i);
         }
-        InternalArray array = row.getArray(pos);
-        return array.toFloatArray();
+        return values;
     }
 
     private Object extractScalar(InternalRow row, int pos, DataType type) {
