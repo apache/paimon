@@ -410,6 +410,119 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
+    void fullTextSearchHonorsIncludeRowIdsBeforeTopK(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields = Arrays.asList(new DataField(0, "t", DataTypes.STRING()));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path dir = tmp.resolve("fulltext-live-rows");
+        Files.createDirectories(dir);
+
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(dir), fields, options);
+        writer.write(BinaryString.fromString("paimon paimon paimon paimon"), 0);
+        writer.write(BinaryString.fromString("paimon paimon"), 1);
+        writer.write(BinaryString.fromString("paimon"), 2);
+        ResultEntry entry = writer.finish().get(0);
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
+                        Files.size(dir.resolve(entry.fileName())),
+                        entry.meta());
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+        try {
+            FullTextSearch unfiltered = new FullTextSearch("t", matchQuery("paimon"), 1);
+            Optional<ScoredGlobalIndexResult> top = reader.visitFullTextSearch(unfiltered).join();
+            assertTrue(top.isPresent());
+            assertTrue(contains(top.get().results(), 0L), "row 0 is the unfiltered top hit");
+
+            RoaringNavigableMap64 includeRowIds = new RoaringNavigableMap64();
+            includeRowIds.add(2L);
+            FullTextSearch filtered =
+                    new FullTextSearch("t", matchQuery("paimon"), 1)
+                            .withIncludeRowIds(includeRowIds);
+            Optional<ScoredGlobalIndexResult> result = reader.visitFullTextSearch(filtered).join();
+            assertTrue(result.isPresent(), "the included lower-ranked row must still be found");
+            assertEquals(1, result.get().results().getIntCardinality());
+            assertTrue(
+                    contains(result.get().results(), 2L),
+                    "includeRowIds must be applied before selecting the effective top-K");
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    void nullLiteralsFollowSqlThreeValuedLogicAndKeywordRangeFallsBack(
+            @TempDir java.nio.file.Path tmp) throws IOException {
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.k.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(optionMap));
+        java.nio.file.Path dir = tmp.resolve("null-literal-semantics");
+        Files.createDirectories(dir);
+
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(dir), fields, options);
+        writer.write(BinaryString.fromString(""), 0);
+        writer.write(BinaryString.fromString("a"), 1);
+        writer.write(null, 2);
+        writer.write(BinaryString.fromString("b"), 3);
+        ResultEntry entry = writer.finish().get(0);
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
+                        Files.size(dir.resolve(entry.fileName())),
+                        entry.meta());
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+        FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+        try {
+            Optional<GlobalIndexResult> equalNull = reader.visitEqual(kRef, null).join();
+            assertTrue(equalNull.isPresent());
+            assertTrue(
+                    equalNull.get().results().isEmpty(),
+                    "k = NULL must not match the real empty-string row");
+
+            Optional<GlobalIndexResult> notEqualNull = reader.visitNotEqual(kRef, null).join();
+            assertTrue(notEqualNull.isPresent());
+            assertTrue(notEqualNull.get().results().isEmpty(), "k <> NULL is UNKNOWN for all rows");
+
+            Optional<GlobalIndexResult> in = reader.visitIn(kRef, Arrays.asList(null, "a")).join();
+            assertTrue(in.isPresent());
+            assertEquals(1, in.get().results().getIntCardinality());
+            assertTrue(contains(in.get().results(), 1L), "NULL is ignored in a positive IN list");
+
+            Optional<GlobalIndexResult> onlyNullIn =
+                    reader.visitIn(kRef, Arrays.asList(null, null)).join();
+            assertTrue(onlyNullIn.isPresent());
+            assertTrue(onlyNullIn.get().results().isEmpty());
+
+            Optional<GlobalIndexResult> notInWithNull =
+                    reader.visitNotIn(kRef, Arrays.asList("a", null)).join();
+            assertTrue(notInWithNull.isPresent());
+            assertTrue(
+                    notInWithNull.get().results().isEmpty(),
+                    "NOT IN containing NULL is UNKNOWN for every row");
+
+            Optional<GlobalIndexResult> nullRange = reader.visitGreaterThan(kRef, null).join();
+            assertTrue(nullRange.isPresent());
+            assertTrue(nullRange.get().results().isEmpty());
+
+            Optional<GlobalIndexResult> keywordRange = reader.visitGreaterThan(kRef, "a").join();
+            assertTrue(
+                    keywordRange.isEmpty(),
+                    "unsupported KEYWORD ordering must request raw-scan fallback, not throw");
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
     void arrayLongLabelsRoundTripAsMultiValueScalar(@TempDir java.nio.file.Path tmp)
             throws IOException {
         List<DataField> fields =
@@ -624,11 +737,17 @@ class ESIndexGlobalIndexE2ETest {
                 new GlobalIndexIOMeta(
                         filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
+        ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
         ExecutorService searchExecutor = Executors.newFixedThreadPool(4);
         ExecutorService closeExecutor = Executors.newSingleThreadExecutor();
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        fileReader, List.of(ioMeta), fields, options, searchExecutor);
+                        fileReader,
+                        List.of(ioMeta),
+                        fields,
+                        options,
+                        queryExecutor,
+                        searchExecutor);
 
         try {
             FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
@@ -662,8 +781,61 @@ class ESIndexGlobalIndexE2ETest {
         } finally {
             fileReader.releaseOpen();
             reader.close();
+            queryExecutor.shutdownNow();
             searchExecutor.shutdownNow();
             closeExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void failedLazyLoadClosesStreamsBeforeRetry(@TempDir java.nio.file.Path tmp) throws Exception {
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.k.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(optionMap));
+
+        java.nio.file.Path dir = tmp.resolve("failed-lazy-load");
+        Files.createDirectories(dir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(dir), fields, options);
+        writer.write(BinaryString.fromString("x"), 0);
+        ResultEntry entry = writer.finish().get(0);
+        java.nio.file.Path badArchive = dir.resolve(entry.fileName());
+        // Keep the valid offset metadata, but truncate the archive so failure happens after the
+        // root provider (and potentially Lucene forks) have actually been opened.
+        Files.write(badArchive, new byte[] {1, 2, 3, 4});
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        new org.apache.paimon.fs.Path(badArchive.toString()),
+                        Files.size(badArchive),
+                        entry.meta());
+        BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
+        fileReader.releaseOpen();
+        ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        fileReader, List.of(ioMeta), fields, options, queryExecutor, null);
+        FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+
+        try {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                int opensBeforeAttempt = fileReader.openCount();
+                assertThrows(
+                        RuntimeException.class,
+                        () -> reader.visitEqual(kRef, "x").join(),
+                        "invalid archive load must fail");
+                assertTrue(
+                        fileReader.openCount() > opensBeforeAttempt,
+                        "each failed attempt must open the archive provider");
+                assertEquals(
+                        fileReader.openCount(),
+                        fileReader.closeCount(),
+                        "failed load must close every stream before a retry");
+                assertEquals(0, reader.openStreamCount(), "failed load retains no tracked stream");
+            }
+        } finally {
+            reader.close();
+            queryExecutor.shutdownNow();
         }
     }
 
@@ -805,7 +977,7 @@ class ESIndexGlobalIndexE2ETest {
      * assertion is lenient — see TODO inline.
      */
     @Test
-    void writeDiskBBQArchiveThenReadAndSearch(@TempDir java.nio.file.Path tmp) throws IOException {
+    void writeDiskBBQArchiveThenReadAndSearch(@TempDir java.nio.file.Path tmp) throws Exception {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())),
@@ -889,42 +1061,92 @@ class ESIndexGlobalIndexE2ETest {
         long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
 
+        BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
+        fileReader.releaseOpen();
+        ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
+        ExecutorService diskBBQExecutor = Executors.newSingleThreadExecutor();
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta), fields, options);
-
-        // --- scalar filters round-trip through a DiskBBQ-built segment ---
-        FieldRef categoryRef = new FieldRef(1, "category", DataTypes.STRING());
-        Optional<GlobalIndexResult> kw = reader.visitEqual(categoryRef, "c1").join();
-        assertTrue(kw.isPresent(), "keyword filter on diskbbq index returns a result");
-        assertEquals(perCluster, kw.get().results().getIntCardinality(), "perCluster rows in c1");
-
-        // --- numeric filter: price in [perCluster, 2*perCluster) → exactly cluster 1's rows ---
-        FieldRef priceRef = new FieldRef(2, "price", DataTypes.INT());
-        Optional<GlobalIndexResult> sf = reader.visitGreaterOrEqual(priceRef, perCluster).join();
-        Optional<GlobalIndexResult> sfMax = reader.visitLessThan(priceRef, perCluster * 2).join();
-        assertTrue(sf.isPresent() && sfMax.isPresent(), "numeric filters return results");
-        RoaringNavigableMap64 range =
-                RoaringNavigableMap64.and(sf.get().results(), sfMax.get().results());
-        assertEquals(perCluster, range.getIntCardinality(), "perCluster rows in [pc, 2*pc)");
-
-        // --- vector search via DiskBBQ: top-5 from cluster-0 center must all be cluster 0. ---
-        Optional<ScoredGlobalIndexResult> vr =
-                reader.visitVectorSearch(new VectorSearch(centers[0], 5, "embedding")).join();
-        assertTrue(vr.isPresent(), "diskbbq vector search returns a result");
-        RoaringNavigableMap64 vrows = vr.get().results();
-        assertEquals(5, vrows.getIntCardinality(), "k=5 results");
-        for (long rid : vrows) {
-            assertTrue(
-                    rid < perCluster,
-                    "row " + rid + " must be from cluster 0 (rowId < " + perCluster + ")");
-        }
+                        fileReader,
+                        List.of(ioMeta),
+                        fields,
+                        options,
+                        queryExecutor,
+                        diskBBQExecutor);
 
         try {
+            // --- scalar filters round-trip through a DiskBBQ-built segment ---
+            FieldRef categoryRef = new FieldRef(1, "category", DataTypes.STRING());
+            Optional<GlobalIndexResult> kw = reader.visitEqual(categoryRef, "c1").join();
+            assertTrue(kw.isPresent(), "keyword filter on diskbbq index returns a result");
+            assertEquals(
+                    perCluster, kw.get().results().getIntCardinality(), "perCluster rows in c1");
+
+            // --- numeric filter: price in [perCluster, 2*perCluster) → exactly cluster 1's rows
+            // ---
+            FieldRef priceRef = new FieldRef(2, "price", DataTypes.INT());
+            Optional<GlobalIndexResult> sf =
+                    reader.visitGreaterOrEqual(priceRef, perCluster).join();
+            Optional<GlobalIndexResult> sfMax =
+                    reader.visitLessThan(priceRef, perCluster * 2).join();
+            assertTrue(sf.isPresent() && sfMax.isPresent(), "numeric filters return results");
+            RoaringNavigableMap64 range =
+                    RoaringNavigableMap64.and(sf.get().results(), sfMax.get().results());
+            assertEquals(perCluster, range.getIntCardinality(), "perCluster rows in [pc, 2*pc)");
+
+            // --- vector search via DiskBBQ: top-5 from cluster-0 center must all be cluster 0. ---
+            Optional<ScoredGlobalIndexResult> vr =
+                    reader.visitVectorSearch(new VectorSearch(centers[0], 5, "embedding"))
+                            .get(30, TimeUnit.SECONDS);
+            assertTrue(vr.isPresent(), "diskbbq vector search returns a result");
+            RoaringNavigableMap64 vrows = vr.get().results();
+            assertEquals(5, vrows.getIntCardinality(), "k=5 results");
+            for (long rid : vrows) {
+                assertTrue(
+                        rid < perCluster,
+                        "row " + rid + " must be from cluster 0 (rowId < " + perCluster + ")");
+            }
+
+            // Force nprobe above DiskBBQ's parallel threshold. With the old shared one-thread pool,
+            // the outer future occupied the only worker and then waited forever for its nested
+            // cluster tasks. Separate pools must finish within the timeout.
+            int opensBeforeParallelSearch = fileReader.openCount();
+            Optional<ScoredGlobalIndexResult> parallelResult =
+                    reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
+                            .get(30, TimeUnit.SECONDS);
+            assertTrue(parallelResult.isPresent(), "single-thread DiskBBQ pool must not deadlock");
+            assertTrue(
+                    fileReader.openCount() > opensBeforeParallelSearch,
+                    "parallel DiskBBQ search must exercise ArchiveDataProvider forks");
+            assertEquals(
+                    fileReader.openCount() - fileReader.closeCount(),
+                    reader.openStreamCount(),
+                    "providers whose streams closed during search must unregister immediately");
+
+            // Repeat the same high-nprobe query. Every temporary fork that ESLib closes must
+            // disappear from Paimon's registry instead of accumulating as a closed object
+            // reference; any genuinely live provider remains available to reader.close().
+            int opensBeforeRepeatedSearch = fileReader.openCount();
+            Optional<ScoredGlobalIndexResult> repeatedResult =
+                    reader.visitVectorSearch(new VectorSearch(centers[0], 256, "embedding"))
+                            .get(30, TimeUnit.SECONDS);
+            assertTrue(repeatedResult.isPresent());
+            assertTrue(
+                    fileReader.openCount() > opensBeforeRepeatedSearch,
+                    "repeated search must create temporary per-cluster forks");
+            assertEquals(
+                    fileReader.openCount() - fileReader.closeCount(),
+                    reader.openStreamCount(),
+                    "only providers whose streams are still open may remain registered");
+        } finally {
             reader.close();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            queryExecutor.shutdownNow();
+            diskBBQExecutor.shutdownNow();
         }
+        assertEquals(
+                fileReader.openCount(),
+                fileReader.closeCount(),
+                "reader close must release every persistent DiskBBQ stream");
     }
 
     /**

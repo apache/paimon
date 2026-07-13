@@ -36,9 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * Verifies that the read/search executor controlled by {@code
- * global-index.es-index.read-search-threads} (resolved in the factory and stored on the indexer) is
- * the one actually handed to the reader, rather than the caller-supplied executor.
+ * Verifies that the factory-configured DiskBBQ executor and Paimon's caller-owned async executor
+ * remain separate when handed to the reader.
  */
 class ESIndexGlobalIndexerExecutorTest {
 
@@ -51,7 +50,7 @@ class ESIndexGlobalIndexerExecutorTest {
     }
 
     @Test
-    void configuredExecutorIsUsedInsteadOfCallerExecutor() {
+    void configuredAndCallerExecutorsAreKeptSeparate() {
         ExecutorService configured = Executors.newSingleThreadExecutor();
         ExecutorService caller = Executors.newSingleThreadExecutor();
         try {
@@ -59,9 +58,13 @@ class ESIndexGlobalIndexerExecutorTest {
                     new ESIndexGlobalIndexer(FIELDS, new Options(), configured);
             GlobalIndexReader reader = indexer.createReader(meta -> null, oneFile(), caller);
             assertSame(
+                    caller,
+                    ((ESIndexGlobalIndexReader) reader).queryExecutor(),
+                    "outer reader futures must use Paimon's caller executor");
+            assertSame(
                     configured,
                     ((ESIndexGlobalIndexReader) reader).searchExecutor(),
-                    "reader must use the ES-configured executor, not the caller's");
+                    "DiskBBQ must use the ES-configured executor");
         } finally {
             configured.shutdownNow();
             caller.shutdownNow();
@@ -69,18 +72,41 @@ class ESIndexGlobalIndexerExecutorTest {
     }
 
     @Test
-    void zeroThreadsDisablesAsyncEvenWhenCallerProvidesExecutor() {
+    void zeroThreadsDisablesOnlyDiskBBQParallelism() {
         ExecutorService caller = Executors.newSingleThreadExecutor();
         try {
-            // read-search-threads = 0 -> factory passes a null pool -> serial; the caller executor
-            // must NOT be substituted, otherwise the option could not disable async execution.
+            // read-search-threads = 0 -> factory passes a null DiskBBQ pool. The outer future still
+            // uses Paimon's caller-owned executor; substituting it as the DiskBBQ pool would
+            // reintroduce the nested-executor deadlock.
             ESIndexGlobalIndexer indexer = new ESIndexGlobalIndexer(FIELDS, new Options(), null);
             GlobalIndexReader reader = indexer.createReader(meta -> null, oneFile(), caller);
+            assertSame(caller, ((ESIndexGlobalIndexReader) reader).queryExecutor());
             assertNull(
                     ((ESIndexGlobalIndexReader) reader).searchExecutor(),
-                    "read-search-threads=0 must leave the reader serial (null executor)");
+                    "read-search-threads=0 must leave DiskBBQ serial");
         } finally {
             caller.shutdownNow();
+        }
+    }
+
+    @Test
+    void sameExecutorDisablesNestedDiskBBQParallelism() {
+        ExecutorService shared = Executors.newSingleThreadExecutor();
+        try {
+            ESIndexGlobalIndexReader reader =
+                    new ESIndexGlobalIndexReader(
+                            meta -> null,
+                            oneFile(),
+                            FIELDS,
+                            new ESIndexOptions(FIELDS, new Options()),
+                            shared,
+                            shared);
+            assertSame(shared, reader.queryExecutor());
+            assertNull(
+                    reader.searchExecutor(),
+                    "DiskBBQ must be serial when both execution layers receive the same pool");
+        } finally {
+            shared.shutdownNow();
         }
     }
 }

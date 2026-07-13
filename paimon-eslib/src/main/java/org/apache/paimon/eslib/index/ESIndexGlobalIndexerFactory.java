@@ -43,10 +43,11 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
             "global-index.es-index.read-search-threads";
     private static final int DEFAULT_READ_SEARCH_THREADS = -1;
 
-    // Cache one shared pool per resolved thread count, so tables/reads configured with different
-    // global-index.es-index.read-search-threads values each get their own pool instead of all
-    // reusing whichever pool was created first. A value of 0 maps to null (serial / async disabled)
-    // and is never cached.
+    // Cache one shared DiskBBQ cluster-search pool per resolved thread count, so tables/reads
+    // configured with different global-index.es-index.read-search-threads values each get their own
+    // pool instead of all reusing whichever pool was created first. A value of 0 maps to null
+    // (serial DiskBBQ search) and is never cached. Paimon's caller executor independently schedules
+    // the outer reader future.
     private static final ConcurrentMap<Integer, ExecutorService> READ_SEARCH_EXECUTORS =
             new ConcurrentHashMap<>();
 
@@ -83,8 +84,8 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     /**
-     * Returns the shared read/search thread pool. Default (unset or -1) creates a pool sized to
-     * CPU/2. Set to 0 to disable parallel search (returns null → serial only).
+     * Returns the shared DiskBBQ cluster-search thread pool. Default (unset or -1) creates a pool
+     * sized to CPU/2. Set to 0 to disable DiskBBQ parallel search (returns null → serial only).
      */
     private static ExecutorService getOrCreateReadSearchExecutor(Options options) {
         int threads = options.getInteger(READ_SEARCH_THREADS_KEY, DEFAULT_READ_SEARCH_THREADS);

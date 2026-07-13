@@ -50,14 +50,19 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
@@ -81,9 +86,16 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private final List<GlobalIndexIOMeta> files;
     private final List<DataField> fields;
     private final ESIndexOptions indexOptions;
+    // Paimon's caller-owned executor is used only for the outer CompletableFuture. DiskBBQ must
+    // never submit its cluster tasks to an executor already occupied by that outer task.
+    private final ExecutorService queryExecutor;
+    // Factory-owned pool used only by ESLib / DiskBBQ's internal parallel cluster search.
     private final ExecutorService searchExecutor;
 
-    private final List<SeekableInputStream> allStreams = new ArrayList<>();
+    // Identity semantics are intentional: distinct forks may wrap the same path and must each be
+    // tracked until their own provider closes.
+    private final Set<TrackedArchiveDataProvider> openProviders =
+            Collections.newSetFromMap(new IdentityHashMap<>());
     // Queries hold the read lock for their complete load/search operation. close() takes the write
     // lock, so it cannot close or replace resources that an in-flight query is still using.
     private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock();
@@ -99,7 +111,20 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
             ESIndexOptions indexOptions) {
-        this(fileReader, files, fields, indexOptions, null);
+        this(fileReader, files, fields, indexOptions, null, null);
+    }
+
+    /**
+     * Creates a reader that executes the outer operation inline and reserves {@code searchExecutor}
+     * exclusively for ESLib's internal search work.
+     */
+    public ESIndexGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            List<DataField> fields,
+            ESIndexOptions indexOptions,
+            ExecutorService searchExecutor) {
+        this(fileReader, files, fields, indexOptions, null, searchExecutor);
     }
 
     public ESIndexGlobalIndexReader(
@@ -107,19 +132,35 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
             ESIndexOptions indexOptions,
+            ExecutorService queryExecutor,
             ExecutorService searchExecutor) {
         checkArgument(files.size() == 1, "Expected exactly one ES index file per shard");
         this.fileReader = fileReader;
         this.files = files;
         this.fields = fields;
         this.indexOptions = indexOptions;
-        this.searchExecutor = searchExecutor;
+        // A caller can accidentally pass the same executor for both roles. Keep its outer async
+        // scheduling but disable nested DiskBBQ parallelism in that case; merely running the outer
+        // operation inline is insufficient when the caller itself is already a worker of the pool.
+        boolean sameExecutor = queryExecutor != null && queryExecutor == searchExecutor;
+        this.queryExecutor = queryExecutor;
+        this.searchExecutor = sameExecutor ? null : searchExecutor;
         this.loaded = false;
         this.closed = false;
     }
 
+    ExecutorService queryExecutor() {
+        return queryExecutor;
+    }
+
     ExecutorService searchExecutor() {
         return searchExecutor;
+    }
+
+    int openStreamCount() {
+        synchronized (openProviders) {
+            return openProviders.size();
+        }
     }
 
     @Override
@@ -136,11 +177,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         int searchTopK = vectorSearchTopK(vectorSearch);
                         String fieldName = vectorSearch.fieldName();
 
-                        long[] candidateIds = null;
                         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
-                        if (includeRowIds != null) {
-                            candidateIds = toArray(includeRowIds);
-                        }
+                        long[] candidateIds = includeRowIds == null ? null : toArray(includeRowIds);
 
                         if (debugEnabled()) {
                             LOG.info(
@@ -201,12 +239,75 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         // FULLTEXT primary field is searched directly; a KEYWORD primary field is
                         // searched through its analyzed .fulltext multi-field.
                         FullTextQuerySpec spec = parseSpec(searchField, fullTextSearch.query());
-                        SearchResult result = searcher.fullTextSearch(spec, fullTextSearch.limit());
+                        SearchResult result =
+                                fullTextSearch(
+                                        spec,
+                                        fullTextSearch.limit(),
+                                        fullTextSearch.includeRowIds());
                         return toScoredResult(result);
                     } catch (IOException e) {
                         throw new RuntimeException("Full-text search failed", e);
                     }
                 });
+    }
+
+    /**
+     * Applies {@link FullTextSearch#includeRowIds()} without changing top-K semantics. ESLib 1.0.3
+     * does not expose a full-text candidate-filter argument, so search progressively over-fetches
+     * until it has the requested number of included hits or has exhausted all matching documents.
+     * The table path normally supplies the whole shard row count as {@code limit}, making this a
+     * single search; the loop also preserves the direct reader API for smaller limits.
+     */
+    private SearchResult fullTextSearch(
+            FullTextQuerySpec spec, int limit, RoaringNavigableMap64 includeRowIds)
+            throws IOException {
+        if (includeRowIds == null) {
+            return searcher.fullTextSearch(spec, limit);
+        }
+        if (includeRowIds.isEmpty()) {
+            return emptySearchResult();
+        }
+
+        int searchLimit = limit;
+        while (true) {
+            SearchResult unfiltered = searcher.fullTextSearch(spec, searchLimit);
+            SearchResult filtered = filterSearchResult(unfiltered, includeRowIds, limit);
+            if (filtered.count >= limit
+                    || filtered.count >= includeRowIds.getLongCardinality()
+                    || unfiltered == null
+                    || unfiltered.count < searchLimit
+                    || searchLimit == Integer.MAX_VALUE) {
+                return filtered;
+            }
+            searchLimit =
+                    searchLimit >= Integer.MAX_VALUE / 2 ? Integer.MAX_VALUE : searchLimit * 2;
+        }
+    }
+
+    private static SearchResult filterSearchResult(
+            SearchResult result, RoaringNavigableMap64 includeRowIds, int limit) {
+        if (result == null || result.count == 0) {
+            return emptySearchResult();
+        }
+        int capacity = Math.min(limit, result.count);
+        long[] ids = new long[capacity];
+        float[] scores = new float[capacity];
+        int count = 0;
+        for (int i = 0; i < result.count && count < limit; i++) {
+            if (includeRowIds.contains(result.ids[i])) {
+                ids[count] = result.ids[i];
+                scores[count] = result.scores[i];
+                count++;
+            }
+        }
+        if (count == 0) {
+            return emptySearchResult();
+        }
+        return new SearchResult(Arrays.copyOf(ids, count), Arrays.copyOf(scores, count), count);
+    }
+
+    private static SearchResult emptySearchResult() {
+        return new SearchResult(new long[0], new float[0], 0);
     }
 
     /**
@@ -305,9 +406,10 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Run {@code body} on the search executor when one is available, otherwise execute it inline
-     * and return an already-completed future. Mirrors {@code VectorGlobalIndexReader}'s use of
-     * {@link CompletableFuture#supplyAsync} while staying safe when no executor was provided.
+     * Run {@code body} on Paimon's caller-owned query executor when one is available, otherwise
+     * execute it inline. The separate {@link #searchExecutor} is reserved for DiskBBQ's internal
+     * cluster tasks; using one pool for both layers can deadlock when the outer tasks occupy every
+     * worker and wait for nested tasks submitted to the same pool.
      */
     private <T> CompletableFuture<T> async(Supplier<T> body) {
         Supplier<T> guardedBody =
@@ -320,8 +422,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         readLock.unlock();
                     }
                 };
-        if (searchExecutor != null) {
-            return CompletableFuture.supplyAsync(guardedBody, searchExecutor);
+        if (queryExecutor != null) {
+            return CompletableFuture.supplyAsync(guardedBody, queryExecutor);
         }
         return CompletableFuture.completedFuture(guardedBody.get());
     }
@@ -415,12 +517,24 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // dataProvider bridge Lucene's per-file reads into offset/length reads over the packed
             // archive
             // fork() gives each IndexInput clone its own stream for concurrent search.
-            ArchiveDataProvider dataProvider = createProvider(meta);
-
-            searcher = ESIndexBuilderFactory.createSearcher();
-            // Mount the packed archive as a Lucene index:then open the reader/searcher.
-            searcher.load(
-                    dataProvider, fileOffsets, indexOptions.getFieldConfigs(), searchExecutor);
+            ArchiveDataProvider dataProvider = null;
+            ESIndexSearcher candidateSearcher = null;
+            try {
+                // Mount the packed archive as a Lucene index, then open the reader/searcher. Keep
+                // it local until load succeeds so a retry cannot overwrite a partially loaded
+                // searcher and leak its directory/providers.
+                dataProvider = createProvider(meta);
+                candidateSearcher = ESIndexBuilderFactory.createSearcher();
+                candidateSearcher.load(
+                        dataProvider, fileOffsets, indexOptions.getFieldConfigs(), searchExecutor);
+            } catch (IOException | RuntimeException | Error failure) {
+                IOException cleanupFailure = cleanupFailedLoad(candidateSearcher, dataProvider);
+                if (cleanupFailure != null) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw failure;
+            }
+            searcher = candidateSearcher;
             loaded = true;
             if (debugEnabled()) {
                 LOG.info(
@@ -435,35 +549,114 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private ArchiveDataProvider createProvider(GlobalIndexIOMeta meta) throws IOException {
         SeekableInputStream inputStream = fileReader.getInputStream(meta);
-        synchronized (allStreams) {
-            allStreams.add(inputStream);
+        TrackedArchiveDataProvider provider = new TrackedArchiveDataProvider(meta, inputStream);
+        synchronized (openProviders) {
+            openProviders.add(provider);
         }
-        return new ArchiveDataProvider() {
-            @Override
-            public byte[] readRange(long offset, int length) throws IOException {
-                byte[] buf = new byte[length];
-                inputStream.seek(offset);
-                int read = 0;
-                while (read < length) {
-                    int n = inputStream.read(buf, read, length - read);
-                    if (n < 0) {
-                        throw new IOException("Unexpected EOF at offset " + (offset + read));
-                    }
-                    read += n;
+        return provider;
+    }
+
+    private final class TrackedArchiveDataProvider implements ArchiveDataProvider {
+        private final GlobalIndexIOMeta meta;
+        private final SeekableInputStream inputStream;
+        private final AtomicBoolean providerClosed = new AtomicBoolean();
+
+        private TrackedArchiveDataProvider(
+                GlobalIndexIOMeta meta, SeekableInputStream inputStream) {
+            this.meta = meta;
+            this.inputStream = inputStream;
+        }
+
+        @Override
+        public byte[] readRange(long offset, int length) throws IOException {
+            byte[] buf = new byte[length];
+            inputStream.seek(offset);
+            int read = 0;
+            while (read < length) {
+                int n = inputStream.read(buf, read, length - read);
+                if (n < 0) {
+                    throw new IOException("Unexpected EOF at offset " + (offset + read));
                 }
-                return buf;
+                read += n;
             }
+            return buf;
+        }
 
-            @Override
-            public ArchiveDataProvider fork() throws IOException {
-                return createProvider(meta);
+        @Override
+        public ArchiveDataProvider fork() throws IOException {
+            return createProvider(meta);
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (!providerClosed.compareAndSet(false, true)) {
+                return;
             }
-
-            @Override
-            public void close() throws IOException {
+            boolean closeSucceeded = false;
+            try {
                 inputStream.close();
+                closeSucceeded = true;
+            } finally {
+                // Retain a provider whose close failed so reader close / failed-load cleanup can
+                // make one final best-effort attempt.
+                if (closeSucceeded) {
+                    synchronized (openProviders) {
+                        openProviders.remove(this);
+                    }
+                } else {
+                    // Allow failed-load cleanup or the reader's final close to retry.
+                    providerClosed.set(false);
+                }
             }
-        };
+        }
+    }
+
+    private IOException cleanupFailedLoad(
+            ESIndexSearcher candidateSearcher, ArchiveDataProvider dataProvider) {
+        IOException failure = null;
+        if (candidateSearcher != null) {
+            try {
+                candidateSearcher.close();
+            } catch (IOException e) {
+                failure = e;
+            }
+        }
+        if (dataProvider != null) {
+            try {
+                dataProvider.close();
+            } catch (IOException e) {
+                failure = mergeFailure(failure, e);
+            }
+        }
+        return mergeFailure(failure, closeTrackedProviders());
+    }
+
+    private IOException closeTrackedProviders() {
+        List<TrackedArchiveDataProvider> providers;
+        synchronized (openProviders) {
+            providers = new ArrayList<>(openProviders);
+        }
+
+        IOException failure = null;
+        for (TrackedArchiveDataProvider provider : providers) {
+            try {
+                provider.close();
+            } catch (IOException e) {
+                failure = mergeFailure(failure, e);
+            }
+        }
+        return failure;
+    }
+
+    private static IOException mergeFailure(IOException failure, IOException next) {
+        if (next == null) {
+            return failure;
+        }
+        if (failure == null) {
+            return next;
+        }
+        failure.addSuppressed(next);
+        return failure;
     }
 
     /**
@@ -607,20 +800,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 }
             }
 
-            synchronized (allStreams) {
-                for (SeekableInputStream stream : allStreams) {
-                    try {
-                        stream.close();
-                    } catch (IOException e) {
-                        if (failure == null) {
-                            failure = e;
-                        } else {
-                            failure.addSuppressed(e);
-                        }
-                    }
-                }
-                allStreams.clear();
-            }
+            failure = mergeFailure(failure, closeTrackedProviders());
             loaded = false;
             if (failure != null) {
                 throw failure;
@@ -685,6 +865,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // (visitFullTextSearch) still targets the analyzed primary field.
             String subField = indexOptions.keywordSubField(fieldRef.name());
             if (subField != null) {
+                if (isKeywordRangeFilter(filter)) {
+                    return Optional.empty();
+                }
                 try {
                     return executeFilter(subField, filter);
                 } catch (UnsupportedOperationException | IllegalArgumentException e) {
@@ -695,7 +878,23 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             }
             return Optional.empty();
         }
+        if (config.indexType() == FieldIndexConfig.IndexType.KEYWORD
+                && isKeywordRangeFilter(filter)) {
+            return Optional.empty();
+        }
         return executeFilter(fieldRef.name(), filter);
+    }
+
+    private static boolean isKeywordRangeFilter(IndexFilter filter) {
+        if (filter.filterType() != IndexFilter.FilterType.SCALAR) {
+            return false;
+        }
+        ScalarPredicate.Op op = ((IndexFilter.ScalarFilter) filter).predicate().op();
+        return op == ScalarPredicate.Op.LESS_THAN
+                || op == ScalarPredicate.Op.LESS_OR_EQUAL
+                || op == ScalarPredicate.Op.GREATER_THAN
+                || op == ScalarPredicate.Op.GREATER_OR_EQUAL
+                || op == ScalarPredicate.Op.RANGE;
     }
 
     /**
@@ -788,6 +987,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () -> {
                     FieldIndexConfig config = indexOptions.getConfig(fieldRef.name());
@@ -811,6 +1013,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchExistingRowsNotMatching(
@@ -820,6 +1025,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -832,6 +1040,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -844,6 +1055,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -856,6 +1070,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -868,18 +1085,26 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
             FieldRef fieldRef, List<Object> literals) {
+        List<Object> nonNullLiterals = withoutNullLiterals(literals);
+        if (nonNullLiterals.isEmpty()) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
                                 fieldRef,
                                 IndexFilter.scalar(
                                         ScalarPredicate.in(
-                                                indexedScalarLiterals(fieldRef, literals)))));
+                                                indexedScalarLiterals(
+                                                        fieldRef, nonNullLiterals)))));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
+        if (literals == null || literals.contains(null)) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchExistingRowsNotMatching(
@@ -894,6 +1119,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -905,6 +1133,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -917,6 +1148,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -929,6 +1163,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return emptyFilterFuture();
+        }
         return async(
                 () ->
                         dispatchFilter(
@@ -1019,7 +1256,25 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     // =================== helpers =====================
 
+    private static CompletableFuture<Optional<GlobalIndexResult>> emptyFilterFuture() {
+        return CompletableFuture.completedFuture(
+                Optional.of(GlobalIndexResult.create(new RoaringNavigableMap64())));
+    }
+
+    private static List<Object> withoutNullLiterals(List<Object> literals) {
+        if (literals == null || literals.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Object> result = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            if (literal != null) {
+                result.add(literal);
+            }
+        }
+        return result;
+    }
+
     private static String str(Object literal) {
-        return literal == null ? "" : literal.toString();
+        return literal.toString();
     }
 }

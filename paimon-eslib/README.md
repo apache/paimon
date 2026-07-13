@@ -139,7 +139,7 @@ column.
 | `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width. |
 | `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ. |
 | `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field. |
-| `read-search-threads` | index-type only | `-1` | Read/search thread pool size. `-1` uses CPU/2; `0` disables parallel search (serial). Key: `global-index.es-index.read-search-threads`. |
+| `read-search-threads` | index-type only | `-1` | DiskBBQ cluster-search pool size. `-1` uses CPU/2; `0` makes DiskBBQ search serial. Outer reader futures use Paimon's caller-owned executor. Key: `global-index.es-index.read-search-threads`. |
 
 ## Query
 

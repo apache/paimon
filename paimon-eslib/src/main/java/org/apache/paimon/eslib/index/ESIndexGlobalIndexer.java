@@ -62,13 +62,11 @@ public class ESIndexGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
-        // The ES read/search executor is governed solely by global-index.es-index.read-search-
-        // threads (resolved in the factory): a sized pool for N>0 or the default, and null for 0
-        // (serial — async/searcher parallelism disabled). We pass that stored executor straight
-        // through so the option is authoritative; the caller-provided executor is intentionally
-        // not used here, otherwise the option would be silently ignored (0 would not disable, and
-        // a custom size would not take effect).
+        // Keep the two execution layers separate. The caller-provided executor schedules the outer
+        // CompletableFuture, while the factory-resolved pool is reserved for DiskBBQ's internal
+        // cluster tasks. Sharing one bounded pool lets outer tasks occupy every worker and then
+        // deadlock waiting for nested cluster tasks submitted to that same pool.
         return new ESIndexGlobalIndexReader(
-                fileReader, files, fields, indexOptions, searchExecutor);
+                fileReader, files, fields, indexOptions, executor, searchExecutor);
     }
 }
