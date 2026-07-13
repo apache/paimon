@@ -32,6 +32,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -40,6 +41,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +71,65 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         assertThat(result)
                 .extracting(row -> row.getField(0).toString())
                 .containsExactlyInAnyOrder("{\"id\":\"2\"}", "{\"id\":\"3\"}");
+    }
+
+    @Test
+    public void testPostponeBucketBuildsVectorIndexDuringCompact() throws Exception {
+        createPostponePrimaryKeyVectorTable("POSTPONE_PK_T");
+
+        sql(
+                "INSERT INTO POSTPONE_PK_T VALUES "
+                        + "(1, ARRAY[CAST(3.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(2, ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(3, ARRAY[CAST(2.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+
+        assertThat(sql("SELECT * FROM POSTPONE_PK_T")).isEmpty();
+        assertThat(sql("SELECT bucket FROM `POSTPONE_PK_T$buckets`"))
+                .allMatch(row -> !Integer.valueOf(-2).equals(row.getField(0)));
+        assertThat(sql("SELECT file_path FROM `POSTPONE_PK_T$files` WHERE level = 0")).isNotEmpty();
+        FileStoreTable table = paimonTable("POSTPONE_PK_T");
+        long snapshotId = table.latestSnapshot().get().id();
+        assertThat(PostponeUtils.getLevel0Buckets(table, snapshotId)).isNotEmpty();
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.POSTPONE_PK_T')");
+
+        assertThat(paimonTable("POSTPONE_PK_T").latestSnapshot().get().id())
+                .isGreaterThan(snapshotId);
+        assertThat(sql("SELECT id FROM POSTPONE_PK_T"))
+                .extracting(row -> row.getField(0))
+                .containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(searchPrimaryKeyVectorTable("POSTPONE_PK_T", 2, "id"))
+                .extracting(row -> row.getField(0).toString())
+                .containsExactlyInAnyOrder("{\"id\":\"2\"}", "{\"id\":\"3\"}");
+
+        sql(
+                "INSERT INTO POSTPONE_PK_T VALUES "
+                        + "(4, ARRAY[CAST(0.5 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(6, ARRAY[CAST(6.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+        sql(
+                "INSERT INTO POSTPONE_PK_T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES "
+                        + "(5, ARRAY[CAST(1.5 AS FLOAT), CAST(0.0 AS FLOAT)]), "
+                        + "(7, ARRAY[CAST(7.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+        assertThat(sql("SELECT id FROM POSTPONE_PK_T"))
+                .extracting(row -> row.getField(0))
+                .containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(sql("SELECT bucket FROM `POSTPONE_PK_T$buckets`"))
+                .extracting(row -> row.getField(0))
+                .contains(-2);
+        assertThat(sql("SELECT file_path FROM `POSTPONE_PK_T$files` WHERE level = 0")).isNotEmpty();
+
+        sql("CALL sys.compact(`table` => 'default.POSTPONE_PK_T')");
+
+        assertThat(sql("SELECT id FROM POSTPONE_PK_T"))
+                .extracting(row -> row.getField(0))
+                .containsExactlyInAnyOrder(1, 2, 3, 4, 5, 6, 7);
+        assertThat(sql("SELECT bucket FROM `POSTPONE_PK_T$buckets`"))
+                .allMatch(row -> !Integer.valueOf(-2).equals(row.getField(0)));
+        assertThat(sql("SELECT file_path FROM `POSTPONE_PK_T$files` WHERE level = 0")).isEmpty();
+        assertThat(searchPrimaryKeyVectorTable("POSTPONE_PK_T", 2, "id"))
+                .extracting(row -> row.getField(0).toString())
+                .containsExactlyInAnyOrder("{\"id\":\"4\"}", "{\"id\":\"2\"}");
     }
 
     @Test
@@ -274,6 +335,31 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         + "'file.format' = 'json', "
                         + "'file.compression' = 'none', "
                         + "'deletion-vectors.enabled' = 'true', "
+                        + "'vector-field' = 'vec', "
+                        + "'field.vec.vector-dim' = '%d', "
+                        + "'pk-vector.index.columns' = 'vec', "
+                        + "'fields.vec.pk-vector.index.type' = '%s', "
+                        + "'fields.vec.pk-vector.distance.metric' = 'l2', "
+                        + "'test.vector.dimension' = '%d', "
+                        + "'test.vector.metric' = 'l2'"
+                        + ")",
+                tableName, DIMENSION, TestVectorGlobalIndexerFactory.IDENTIFIER, DIMENSION);
+    }
+
+    private void createPostponePrimaryKeyVectorTable(String tableName) {
+        sql(
+                "CREATE TABLE %s ("
+                        + "id INT, "
+                        + "vec ARRAY<FLOAT>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ("
+                        + "'bucket' = '-2', "
+                        + "'write-only' = 'true', "
+                        + "'postpone.batch-write-fixed-bucket' = 'true', "
+                        + "'file.format' = 'json', "
+                        + "'file.compression' = 'deflate', "
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'deletion-vectors.merge-on-read' = 'false', "
                         + "'vector-field' = 'vec', "
                         + "'field.vec.vector-dim' = '%d', "
                         + "'pk-vector.index.columns' = 'vec', "

@@ -39,7 +39,8 @@ is built separately from writes, see
 
 A table with a primary-key vector index must satisfy all of the following:
 
-- It is a primary-key table in fixed-bucket mode (`bucket > 0`).
+- It is a primary-key table in fixed-bucket mode (`bucket > 0`) or postpone-bucket mode
+  (`bucket = -2`).
 - `deletion-vectors.enabled` is `true`, except for `first-row`, where it must be `false`.
 - Its merge engine is `deduplicate`, `partial-update`, `aggregation`, or `first-row`.
 - The indexed column is a `VECTOR` whose element type is `FLOAT`.
@@ -114,6 +115,12 @@ Paimon builds immutable ANN segments from complete compact-output data files ins
 The index segment records the source data files and maps ANN ordinals back to their physical row
 positions. Compact-output data-file and index-file changes are committed atomically, so a reader
 never observes an index from a different compact-output snapshot.
+
+For a postpone-bucket table, foreground writes remain write-only. Fixed-bucket batch writes produce
+Level-0 files in real buckets, while postponed writes produce files in bucket `-2`. These rows do not
+become visible to normal reads or vector search until a batch compact runs. The background compact
+processes both kinds of pending files, builds their ANN indexes, and publishes the data and index
+changes in one atomic commit.
 
 ANN compaction is configured independently from data compaction. It does not inherit
 `vector.target-file-size`, `num-sorted-run.compaction-trigger`, or

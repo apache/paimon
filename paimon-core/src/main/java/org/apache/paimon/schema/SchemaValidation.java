@@ -929,8 +929,9 @@ public class SchemaValidation {
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
                 options.mergeEngine());
         checkArgument(
-                options.bucket() > 0,
-                "Primary-key vector index requires fixed bucket mode (bucket > 0), but bucket is %s.",
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key vector index requires fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
                 options.bucket());
         checkArgument(
                 !options.pkClusteringOverride(),
