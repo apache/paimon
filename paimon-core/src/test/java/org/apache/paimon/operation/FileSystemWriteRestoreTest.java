@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 class FileSystemWriteRestoreTest {
 
     @Test
-    void testRestoreFromPinnedSnapshot() {
+    void testRestoreFromPinnedSnapshotForPostponeBucket() {
         Snapshot pinned = mock(Snapshot.class);
         Snapshot latest = mock(Snapshot.class);
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
@@ -70,14 +70,14 @@ class FileSystemWriteRestoreTest {
         RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
 
         assertThat(restored.snapshot()).isSameAs(pinned);
-        assertThat(restored.vectorIndexPayloads()).containsExactly(ann);
+        assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
         verify(scan).withSnapshot(pinned);
         verify(indexFileHandler).scanSourceIndexes(pinned, EMPTY_ROW, 0);
         verify(snapshotManager, never()).latestSnapshotFromFileSystem();
     }
 
     @Test
-    void testRestoreVectorIndexPayloadsWithoutDirectory() {
+    void testRestoreSourceIndexPayloadsWithoutDirectory() {
         Snapshot snapshot = mock(Snapshot.class);
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
         when(snapshotManager.latestSnapshotFromFileSystem()).thenReturn(snapshot);
@@ -100,6 +100,6 @@ class FileSystemWriteRestoreTest {
 
         RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
 
-        assertThat(restored.vectorIndexPayloads()).containsExactly(ann);
+        assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
     }
 }
