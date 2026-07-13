@@ -189,6 +189,16 @@ public class StaticFileStoreSource extends FlinkSource {
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
             Collection<FileStoreSourceSplit> splits,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc) {
+        return createSplitAssigner(
+                context, splitBatchSize, splitAssignMode, splits, splitWeightFunc, null);
+    }
+
+    public static SplitAssigner createSplitAssigner(
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            Collection<FileStoreSourceSplit> splits,
             @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc,
             @Nullable SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc) {
         switch (splitAssignMode) {
