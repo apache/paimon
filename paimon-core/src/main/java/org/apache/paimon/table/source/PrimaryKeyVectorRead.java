@@ -20,10 +20,13 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentSearcher;
 import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
@@ -34,9 +37,13 @@ import org.apache.paimon.index.pkvector.PrimaryKeyVectorBucketSearch;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 
 import java.io.IOException;
@@ -47,6 +54,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +95,8 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
     private final float[] query;
     protected final int limit;
     private final String metric;
+    private final int refineFactor;
+    private final int indexedLimit;
 
     public PrimaryKeyVectorRead(
             FileStoreTable table,
@@ -111,6 +121,10 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         this.limit = limit;
         this.metric =
                 normalize(table.coreOptions().primaryKeyVectorDistanceMetric(vectorField.name()));
+        this.refineFactor =
+                VectorSearchRefineOptions.resolve(
+                        this.searchOptions, table.options(), vectorField.name(), indexType);
+        this.indexedLimit = VectorSearchRefineOptions.searchLimit(limit, refineFactor);
     }
 
     private static KeyValueFileStore keyValueStore(FileStoreTable table) {
@@ -152,25 +166,48 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         return splits;
     }
 
-    protected List<Candidate> searchBuckets(List<BucketVectorSearchSplit> splits) {
+    protected SearchResult searchBuckets(List<BucketVectorSearchSplit> splits) {
         try {
             SearchContext context = new SearchContext(table);
-            List<Candidate> candidates = new ArrayList<>();
+            List<Candidate> indexedCandidates = new ArrayList<>();
+            List<Candidate> exactCandidates = new ArrayList<>();
             for (BucketVectorSearchSplit split : splits) {
-                candidates.addAll(search(split, context));
+                SearchResult result = search(split, context);
+                indexedCandidates.addAll(result.indexedCandidates());
+                exactCandidates.addAll(result.exactCandidates());
             }
-            return topK(candidates, limit);
+            return new SearchResult(
+                    topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
         } catch (IOException e) {
             throw new RuntimeException("Failed to search primary-key vector index.", e);
         }
     }
 
     protected GlobalIndexResult createResult(
-            PrimaryKeyVectorScan.Plan plan, List<Candidate> candidates) {
+            PrimaryKeyVectorScan.Plan plan, SearchResult searchResult) {
+        List<Candidate> indexedCandidates = topK(searchResult.indexedCandidates(), indexedLimit);
+        if (refineFactor > 0 && !indexedCandidates.isEmpty()) {
+            indexedCandidates = rerank(plan, indexedCandidates);
+        } else {
+            indexedCandidates = topK(indexedCandidates, limit);
+        }
+        List<Candidate> candidates = new ArrayList<>(indexedCandidates);
+        candidates.addAll(topK(searchResult.exactCandidates(), limit));
         return new PrimaryKeyVectorResult(plan, topK(candidates, limit), metric);
     }
 
-    private List<Candidate> search(BucketVectorSearchSplit split, SearchContext context)
+    protected SearchResult mergeSearchResults(List<SearchResult> results) {
+        List<Candidate> indexedCandidates = new ArrayList<>();
+        List<Candidate> exactCandidates = new ArrayList<>();
+        for (SearchResult result : results) {
+            indexedCandidates.addAll(result.indexedCandidates());
+            exactCandidates.addAll(result.exactCandidates());
+        }
+        return new SearchResult(
+                topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
+    }
+
+    private SearchResult search(BucketVectorSearchSplit split, SearchContext context)
             throws IOException {
         DataSplit dataSplit = split.dataSplit();
         List<DataFileMeta> activeFiles =
@@ -204,18 +241,115 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         searchOptions,
                         metric,
                         table.coreOptions().globalIndexSearchMode());
-        List<Candidate> candidates = new ArrayList<>();
-        for (PkVectorSearchResult result :
-                bucketSearch.search(state, activeFiles, deletionVectors, query, limit)) {
+        PrimaryKeyVectorBucketSearch.Result result =
+                bucketSearch.search(
+                        state, activeFiles, deletionVectors, query, indexedLimit, limit);
+        return new SearchResult(
+                candidates(dataSplit, result.indexedCandidates()),
+                candidates(dataSplit, result.exactCandidates()));
+    }
+
+    private static List<Candidate> candidates(
+            DataSplit split, List<PkVectorSearchResult> searchResults) {
+        List<Candidate> candidates = new ArrayList<>(searchResults.size());
+        for (PkVectorSearchResult result : searchResults) {
             candidates.add(
                     new Candidate(
-                            dataSplit.partition(),
-                            dataSplit.bucket(),
+                            split.partition(),
+                            split.bucket(),
                             result.dataFileName(),
                             result.rowPosition(),
                             result.distance()));
         }
         return candidates;
+    }
+
+    private List<Candidate> rerank(
+            PrimaryKeyVectorScan.Plan plan, List<Candidate> indexedCandidates) {
+        Map<PhysicalPosition, Candidate> candidatesByPosition = new HashMap<>();
+        for (Candidate candidate : indexedCandidates) {
+            PhysicalPosition position = new PhysicalPosition(candidate);
+            checkArgument(
+                    candidatesByPosition.put(position, candidate) == null,
+                    "Duplicate primary-key vector candidate %s.",
+                    position);
+        }
+
+        List<IndexedSplit> splits =
+                new PrimaryKeyVectorResult(plan, indexedCandidates, metric).splits();
+        TableRead read = table.newReadBuilder().withReadType(RowType.of(vectorField)).newRead();
+        List<Candidate> reranked = new ArrayList<>(indexedCandidates.size());
+        try {
+            for (IndexedSplit split : splits) {
+                rerankSplit(read, split, candidatesByPosition, reranked);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to rerank primary-key vector candidates.", e);
+        }
+        checkArgument(
+                candidatesByPosition.isEmpty(),
+                "Failed to read %s primary-key vector candidates for reranking.",
+                candidatesByPosition.size());
+        return topK(reranked, limit);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void rerankSplit(
+            TableRead read,
+            IndexedSplit split,
+            Map<PhysicalPosition, Candidate> candidatesByPosition,
+            List<Candidate> reranked)
+            throws IOException {
+        DataSplit dataSplit = split.dataSplit();
+        checkArgument(
+                dataSplit.dataFiles().size() == 1,
+                "Primary-key vector rerank split must contain exactly one data file.");
+        String dataFileName = dataSplit.dataFiles().get(0).fileName();
+        try (RecordReader<InternalRow> reader = read.createReader(split)) {
+            checkArgument(
+                    reader instanceof ScoreRecordReader,
+                    "Primary-key vector rerank requires a score record reader.");
+            ScoreRecordReader<InternalRow> scoreReader = (ScoreRecordReader<InternalRow>) reader;
+            ScoreRecordIterator<InternalRow> batch;
+            while ((batch = scoreReader.readBatch()) != null) {
+                try {
+                    InternalRow row;
+                    while ((row = batch.next()) != null) {
+                        PhysicalPosition position =
+                                new PhysicalPosition(
+                                        dataSplit.partition(),
+                                        dataSplit.bucket(),
+                                        dataFileName,
+                                        batch.returnedRowId());
+                        Candidate candidate = candidatesByPosition.remove(position);
+                        checkArgument(
+                                candidate != null,
+                                "Primary-key vector rerank read unexpected position %s.",
+                                position);
+                        checkArgument(
+                                !row.isNullAt(0),
+                                "Primary-key vector candidate %s contains a null vector.",
+                                position);
+                        float[] vector = row.getVector(0).toFloatArray();
+                        checkArgument(
+                                vector.length == query.length,
+                                "Primary-key vector candidate %s has dimension %s instead of %s.",
+                                position,
+                                vector.length,
+                                query.length);
+                        reranked.add(
+                                new Candidate(
+                                        candidate.partition(),
+                                        candidate.bucket(),
+                                        candidate.dataFileName(),
+                                        candidate.rowPosition(),
+                                        VectorSearchMetric.computeDistance(query, vector, metric)));
+                    }
+                } finally {
+                    batch.releaseBatch();
+                }
+            }
+        }
     }
 
     private Map<String, DeletionVector> deletionVectors(DataSplit split, FileIO fileIO)
@@ -302,6 +436,78 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
 
         public float distance() {
             return distance;
+        }
+    }
+
+    /** Separately bounded approximate-index and exact-fallback candidates. */
+    public static class SearchResult implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<Candidate> indexedCandidates;
+        private final List<Candidate> exactCandidates;
+
+        public SearchResult(List<Candidate> indexedCandidates, List<Candidate> exactCandidates) {
+            this.indexedCandidates =
+                    Collections.unmodifiableList(new ArrayList<>(indexedCandidates));
+            this.exactCandidates = Collections.unmodifiableList(new ArrayList<>(exactCandidates));
+        }
+
+        public List<Candidate> indexedCandidates() {
+            return indexedCandidates;
+        }
+
+        public List<Candidate> exactCandidates() {
+            return exactCandidates;
+        }
+    }
+
+    private static class PhysicalPosition {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final String dataFileName;
+        private final long rowPosition;
+
+        private PhysicalPosition(Candidate candidate) {
+            this(
+                    candidate.partition(),
+                    candidate.bucket(),
+                    candidate.dataFileName(),
+                    candidate.rowPosition());
+        }
+
+        private PhysicalPosition(
+                BinaryRow partition, int bucket, String dataFileName, long rowPosition) {
+            this.partition = partition.copy();
+            this.bucket = bucket;
+            this.dataFileName = dataFileName;
+            this.rowPosition = rowPosition;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PhysicalPosition that = (PhysicalPosition) o;
+            return bucket == that.bucket
+                    && rowPosition == that.rowPosition
+                    && partition.equals(that.partition)
+                    && dataFileName.equals(that.dataFileName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, dataFileName, rowPosition);
+        }
+
+        @Override
+        public String toString() {
+            return dataFileName + '@' + rowPosition + " in bucket " + bucket;
         }
     }
 

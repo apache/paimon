@@ -50,23 +50,72 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
     }
 
     private Schema vectorSchema(String mergeEngine, boolean deletionVectorsEnabled) {
-        return Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column("embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
-                .primaryKey("id")
-                .option(CoreOptions.BUCKET.key(), "1")
-                .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine)
-                .option(
-                        CoreOptions.DELETION_VECTORS_ENABLED.key(),
-                        Boolean.toString(deletionVectorsEnabled))
-                .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
-                .option(
-                        "fields.embedding.pk-vector.index.type",
-                        TestVectorGlobalIndexerFactory.IDENTIFIER)
-                .option("fields.embedding.pk-vector.distance.metric", "l2")
-                .option("test.vector.dimension", "2")
-                .option("test.vector.metric", "l2")
-                .build();
+        return vectorSchema(mergeEngine, deletionVectorsEnabled, false);
+    }
+
+    private Schema vectorSchema(
+            String mergeEngine, boolean deletionVectorsEnabled, boolean reverseScore) {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine)
+                        .option(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(),
+                                Boolean.toString(deletionVectorsEnabled))
+                        .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
+                        .option(
+                                "fields.embedding.pk-vector.index.type",
+                                TestVectorGlobalIndexerFactory.IDENTIFIER)
+                        .option("fields.embedding.pk-vector.distance.metric", "l2")
+                        .option("test.vector.dimension", "2")
+                        .option("test.vector.metric", "l2");
+        if (reverseScore) {
+            builder.option("test.vector.reverse-score", "true");
+        }
+        return builder.build();
+    }
+
+    @Test
+    void testRefineFactorReranksAnnCandidates() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("deduplicate", true, true), false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {1, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {2, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {3, 0})));
+
+        GlobalIndexResult approximate =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .executeLocal();
+        assertThat(readIds(table, approximate)).containsExactly(3);
+
+        GlobalIndexResult refined =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .withOption("refine_factor", "3")
+                        .executeLocal();
+        assertThat(readIds(table, refined)).containsExactly(1);
+
+        GlobalIndexResult factorOne =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .withOption("refine_factor", "1")
+                        .executeLocal();
+        assertThat(readIds(table, factorOne)).containsExactly(3);
+        assertThat(((PrimaryKeyVectorResult) factorOne).splits().get(0).scores())
+                .containsExactly(0.1F);
     }
 
     @Test
@@ -162,5 +211,16 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         }
 
         assertThat(ids).containsExactly(1);
+    }
+
+    private static List<Integer> readIds(FileStoreTable table, GlobalIndexResult result)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 }

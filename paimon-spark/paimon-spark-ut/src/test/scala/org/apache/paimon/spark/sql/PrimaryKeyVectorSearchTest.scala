@@ -152,6 +152,47 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("distributed primary-key vector search reranks candidates on driver") {
+    withTable("T") {
+      createVectorTable(
+        bucket = 4,
+        extraOptions = Seq(
+          "global-index.thread-num" -> "2",
+          "test.vector.reverse-score" -> "true",
+          "fields.embedding.test-vector-ann.refine_factor" -> "16")
+      )
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f)),
+                  |  (2, array(2.0f, 0.0f)),
+                  |  (3, array(3.0f, 0.0f)),
+                  |  (4, array(4.0f, 0.0f)),
+                  |  (5, array(5.0f, 0.0f)),
+                  |  (6, array(6.0f, 0.0f)),
+                  |  (7, array(7.0f, 0.0f)),
+                  |  (8, array(8.0f, 0.0f))
+                  |""".stripMargin)
+
+      val jobGroup = s"primary-key-vector-rerank-${System.nanoTime()}"
+      spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+      try {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+          val ids = spark
+            .sql("""
+                   |SELECT id
+                   |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 1)
+                   |""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+          assert(ids.toSeq == Seq(1))
+        }
+      } finally {
+        spark.sparkContext.clearJobGroup()
+      }
+      assert(spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).nonEmpty)
+    }
+  }
+
   test("primary-key vector search prunes partitions before top k") {
     withTable("T") {
       createVectorTable(

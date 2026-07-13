@@ -140,6 +140,38 @@ required. Batch writes which wait for compaction can publish the data and its in
 
 ## Search
 
+### Exact Rerank
+
+Primary-key vector search can retrieve more ANN candidates and rerank them with the original
+vectors stored in the table. For example, the following table option retrieves up to four times
+the requested Top-K from the `ivf-flat` index before computing exact distances:
+
+```sql
+'fields.embedding.ivf-flat.refine_factor' = '4'
+```
+
+The option is disabled by default. Its configuration semantics are the same as for a Data
+Evolution vector index:
+
+- `refine_factor`, `refine-factor`, `rerank_factor`, and `rerank-factor` are accepted.
+- A query option overrides every table option. Within either set of options, field and index
+  prefixes take precedence over less specific prefixes. For example,
+  `fields.embedding.ivf-flat.refine_factor` takes precedence over
+  `fields.embedding.ivf.refine_factor`, which takes precedence over `ivf.refine_factor` and then
+  `refine_factor`. The normalized underscore form of an index type, such as `ivf_flat`, is also
+  accepted after the configured index name.
+- The factor must be a positive integer. A factor of `1` performs exact reranking without
+  retrieving additional ANN candidates.
+
+Only candidates returned by ANN can win the rerank, so a larger factor can improve recall but does
+not guarantee the exact global Top-K. It also increases ANN work and data-file I/O. Files without
+an active ANN segment are already searched exactly and are kept separate from approximate
+candidates until the final Top-K merge.
+
+For distributed Spark searches, executors return bounded ANN and exact candidate streams. The
+driver globally merges the ANN candidates and rereads their original vectors for exact reranking;
+this does not start a second Spark job.
+
 ### Spark SQL
 
 Use the `vector_search` table-valued function. Spark exposes the ANN score through the

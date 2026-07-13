@@ -73,13 +73,36 @@ public class PrimaryKeyVectorBucketSearch {
             float[] query,
             int limit)
             throws IOException {
-        checkArgument(limit > 0, "Vector search limit must be positive.");
+        Result result = search(state, activeFiles, deletionVectors, query, limit, limit);
+        PriorityQueue<PkVectorSearchResult> nearest =
+                new PriorityQueue<>(limit, BEST_FIRST.reversed());
+        for (PkVectorSearchResult candidate : result.indexedCandidates) {
+            add(nearest, candidate, limit);
+        }
+        for (PkVectorSearchResult candidate : result.exactCandidates) {
+            add(nearest, candidate, limit);
+        }
+        return sorted(nearest);
+    }
+
+    public Result search(
+            PkVectorBucketIndexState state,
+            List<DataFileMeta> activeFiles,
+            Map<String, DeletionVector> deletionVectors,
+            float[] query,
+            int indexedLimit,
+            int exactLimit)
+            throws IOException {
+        checkArgument(indexedLimit > 0, "Vector indexed search limit must be positive.");
+        checkArgument(exactLimit > 0, "Vector exact search limit must be positive.");
         Map<String, DataFileMeta> filesByName = new HashMap<>();
         for (DataFileMeta file : activeFiles) {
             checkArgument(filesByName.put(file.fileName(), file) == null, "Duplicate data file.");
         }
-        PriorityQueue<PkVectorSearchResult> nearest =
-                new PriorityQueue<>(limit, BEST_FIRST.reversed());
+        PriorityQueue<PkVectorSearchResult> indexedNearest =
+                new PriorityQueue<>(indexedLimit, BEST_FIRST.reversed());
+        PriorityQueue<PkVectorSearchResult> exactNearest =
+                new PriorityQueue<>(exactLimit, BEST_FIRST.reversed());
         Set<String> activeSourceFiles = new HashSet<>(filesByName.keySet());
         Set<String> covered = new HashSet<>();
         for (IndexFileMeta ann : state.annSegments()) {
@@ -101,11 +124,11 @@ public class PrimaryKeyVectorBucketSearch {
                             ann,
                             sourceMeta,
                             query,
-                            limit,
+                            indexedLimit,
                             deletionVectors,
                             activeSourceFiles,
                             searchOptions)) {
-                add(nearest, result, limit);
+                add(indexedNearest, result, indexedLimit);
             }
         }
 
@@ -119,12 +142,16 @@ public class PrimaryKeyVectorBucketSearch {
                 try (PkVectorReader reader = vectorReaderFactory.create(file)) {
                     for (PkVectorSearchResult result :
                             PkVectorExactSearcher.search(
-                                    file.fileName(), reader, query, metric, limit, excluded)) {
-                        add(nearest, result, limit);
+                                    file.fileName(), reader, query, metric, exactLimit, excluded)) {
+                        add(exactNearest, result, exactLimit);
                     }
                 }
             }
         }
+        return new Result(sorted(indexedNearest), sorted(exactNearest));
+    }
+
+    private static List<PkVectorSearchResult> sorted(PriorityQueue<PkVectorSearchResult> nearest) {
         List<PkVectorSearchResult> result = new ArrayList<>(nearest);
         Collections.sort(result, BEST_FIRST);
         return Collections.unmodifiableList(result);
@@ -139,6 +166,28 @@ public class PrimaryKeyVectorBucketSearch {
         } else if (BEST_FIRST.compare(candidate, nearest.peek()) < 0) {
             nearest.poll();
             nearest.add(candidate);
+        }
+    }
+
+    /** Separately bounded approximate-index and exact-fallback candidates. */
+    public static class Result {
+
+        private final List<PkVectorSearchResult> indexedCandidates;
+        private final List<PkVectorSearchResult> exactCandidates;
+
+        private Result(
+                List<PkVectorSearchResult> indexedCandidates,
+                List<PkVectorSearchResult> exactCandidates) {
+            this.indexedCandidates = indexedCandidates;
+            this.exactCandidates = exactCandidates;
+        }
+
+        public List<PkVectorSearchResult> indexedCandidates() {
+            return indexedCandidates;
+        }
+
+        public List<PkVectorSearchResult> exactCandidates() {
+            return exactCandidates;
         }
     }
 }

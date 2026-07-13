@@ -301,17 +301,7 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected int indexedSearchLimit(String indexType) {
-        int refineFactor = configuredRefineFactor(indexType);
-        if (refineFactor == 0) {
-            return limit;
-        }
-        if (limit > Integer.MAX_VALUE / refineFactor) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Vector search limit overflow: limit=%d, refine factor=%d",
-                            limit, refineFactor));
-        }
-        return limit * refineFactor;
+        return VectorSearchRefineOptions.searchLimit(limit, configuredRefineFactor(indexType));
     }
 
     protected ScoredGlobalIndexResult maybeRerankIndexedResult(
@@ -721,73 +711,11 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected int configuredRefineFactor(String indexType) {
-        String value = configuredRefineFactor(options, indexType);
-        if (value == null) {
-            value = configuredRefineFactor(table.options(), indexType);
-        }
-        if (value == null) {
-            return 0;
-        }
-        try {
-            int factor = Integer.parseInt(value);
-            if (factor <= 0) {
-                throw new IllegalArgumentException(
-                        "Vector refine factor must be positive, got: " + value);
-            }
-            return factor;
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Invalid vector refine factor: " + value + ". Must be an integer.", e);
-        }
-    }
-
-    @Nullable
-    private String configuredRefineFactor(Map<String, String> options, String indexType) {
-        List<String> prefixes = new ArrayList<>();
-        String fieldPrefix = "fields." + vectorColumn.name() + ".";
-        addRefinePrefixes(prefixes, fieldPrefix, indexType);
-        addRefinePrefixes(prefixes, "", indexType);
-
-        for (String prefix : prefixes) {
-            String value = refineFactorOption(options, prefix + "refine_factor");
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "refine-factor");
-            }
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "rerank_factor");
-            }
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "rerank-factor");
-            }
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
-    }
-
-    private static void addRefinePrefixes(List<String> prefixes, String base, String indexType) {
-        if (indexType != null && !indexType.isEmpty()) {
-            prefixes.add(base + indexType + ".");
-            String normalizedIndexType = normalizeIndexType(indexType);
-            if (!normalizedIndexType.equals(indexType)) {
-                prefixes.add(base + normalizedIndexType + ".");
-            }
-            if (normalizedIndexType.startsWith("ivf")) {
-                prefixes.add(base + "ivf.");
-            }
-        }
-        prefixes.add(base);
-    }
-
-    @Nullable
-    private static String refineFactorOption(Map<String, String> options, String key) {
-        String value = options.get(key);
-        return value == null ? null : value.trim();
-    }
-
-    private static String normalizeIndexType(String indexType) {
-        return indexType.toLowerCase().replace('-', '_');
+        return VectorSearchRefineOptions.resolve(
+                options,
+                table == null ? Collections.emptyMap() : table.options(),
+                vectorColumn.name(),
+                indexType);
     }
 
     private static IndexFileMeta firstVectorIndexFile(List<IndexVectorSearchSplit> splits) {
