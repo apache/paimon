@@ -151,7 +151,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 
-    private boolean isPrimaryKeyVectorSearch() {
+    protected boolean isPrimaryKeyVectorSearch() {
         return vectorColumn != null
                 && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
     }

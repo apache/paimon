@@ -912,13 +912,8 @@ public class SchemaValidation {
                 !schema.primaryKeys().isEmpty(),
                 "Primary-key vector index requires a primary-key table.");
         checkArgument(
-                options.deletionVectorsEnabled(),
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key vector index requires deletion-vectors.enabled = true.");
-        checkArgument(
-                options.mergeEngine() == MergeEngine.DEDUPLICATE
-                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
-                "Primary-key vector index only supports merge-engine = deduplicate or partial-update, but is %s.",
-                options.mergeEngine());
         checkArgument(
                 !options.deletionVectorsMergeOnRead(),
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",

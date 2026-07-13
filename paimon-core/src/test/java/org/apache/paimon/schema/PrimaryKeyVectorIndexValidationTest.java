@@ -124,6 +124,33 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
+    void testSupportsAggregationMergeEngine() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "aggregation");
+
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testSupportsFirstRowWithoutDeletionVectors() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
+
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testRejectsFirstRowWithDeletionVectors() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining(
+                        "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine");
+    }
+
+    @Test
     void testPartialUpdateRejectsDeletionVectorMergeOnRead() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");

@@ -21,8 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -33,7 +33,7 @@ import java.util.function.IntFunction;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Reads selected physical file positions and exposes their vector-search scores. */
-public class PrimaryKeyVectorPositionReader implements RecordReader<InternalRow> {
+public class PrimaryKeyVectorPositionReader implements ScoreRecordReader<InternalRow> {
 
     private final FileRecordReader<InternalRow> reader;
     private final RoaringBitmap32 rowPositions;
