@@ -27,7 +27,7 @@ import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
 
@@ -278,18 +278,16 @@ public class FileStoreSourceSplitReader
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
-        @Nullable private final RowType rowType;
         private final Set<Integer> blobFields;
 
         private FileStoreRecordIterator(@Nullable RowType rowType) {
-            this.rowType = rowType;
-            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndex(rowType);
+            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndexes(rowType);
         }
 
-        private Set<Integer> blobFieldIndex(RowType rowType) {
+        private Set<Integer> blobFieldIndexes(RowType rowType) {
             Set<Integer> result = new HashSet<>();
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                if (BlobType.isBlobFileField(rowType.getTypeAt(i))) {
                     result.add(i);
                 }
             }
@@ -320,8 +318,8 @@ public class FileStoreSourceSplitReader
 
             recordAndPosition.setNext(
                     blobFields.isEmpty()
-                            ? new FlinkRowData(row, rowType, blobAsDescriptor)
-                            : new FlinkRowDataWithBlob(row, rowType, blobFields, blobAsDescriptor));
+                            ? new FlinkRowData(row)
+                            : new FlinkRowDataWithBlob(row, blobFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();
