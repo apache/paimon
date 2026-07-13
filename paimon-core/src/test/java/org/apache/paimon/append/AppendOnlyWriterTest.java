@@ -621,6 +621,46 @@ public class AppendOnlyWriterTest {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapIgnoresUnreadableRestoredFile(String fileFormat)
+            throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, writeType, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+
+        DataFileMeta restoredFile =
+                writeSharedShreddingFile(writer, sharedShreddingRow(1, "a", 10L));
+        writer.close();
+        context.fileIO.delete(context.pathFactory.toPath(restoredFile), false);
+
+        MapSharedShreddingContext restoredContext =
+                MapSharedShreddingCoreUtils.createAndRestoreContext(
+                        writeType,
+                        Collections.singletonList(restoredFile),
+                        context.pathFactory,
+                        context.options,
+                        context.fileIO);
+        assertThat(restoredContext).isNotNull();
+        assertThat(restoredContext.computeNextK()).containsEntry("tags", 3);
+
+        SharedShreddingAppendContext newContext =
+                new SharedShreddingAppendContext(
+                        context.options,
+                        context.pathFactory,
+                        context.fileIO,
+                        context.format,
+                        restoredContext);
+        AppendOnlyWriter newWriter = createSharedShreddingAppendWriter(writeType, newContext);
+        DataFileMeta newFile = writeSharedShreddingFile(newWriter, sharedShreddingRow(2, "b", 20L));
+        newWriter.close();
+
+        assertThat(readSharedShreddingFieldMeta(newContext, newFile, "tags").numColumns())
+                .isEqualTo(3);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
     public void testSharedShreddingMapDoesNotSupportBlob(String fileFormat) throws Exception {
         RowType writeType =
                 DataTypes.ROW(

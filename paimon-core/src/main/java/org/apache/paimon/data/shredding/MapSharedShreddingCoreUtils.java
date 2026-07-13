@@ -28,10 +28,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -40,6 +42,8 @@ import java.util.Set;
 
 /** Core utilities for shared-shredding MAP write and restore flows. */
 public class MapSharedShreddingCoreUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MapSharedShreddingCoreUtils.class);
 
     private MapSharedShreddingCoreUtils() {}
 
@@ -112,7 +116,11 @@ public class MapSharedShreddingCoreUtils {
                     pendingFieldNames.remove(fieldName);
                 }
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                LOG.warn(
+                        "Failed to restore MAP shared-shredding statistics from file {}. "
+                                + "Skipping this file.",
+                        pathFactory.toPath(file),
+                        e);
             }
         }
     }
