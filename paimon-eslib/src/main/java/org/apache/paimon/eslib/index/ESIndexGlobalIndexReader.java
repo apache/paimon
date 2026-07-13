@@ -58,6 +58,8 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -82,6 +84,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private final ExecutorService searchExecutor;
 
     private final List<SeekableInputStream> allStreams = new ArrayList<>();
+    // Queries hold the read lock for their complete load/search operation. close() takes the write
+    // lock, so it cannot close or replace resources that an in-flight query is still using.
+    private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock();
+    // Serializes the one-time lazy load while still allowing already-loaded queries to run in
+    // parallel under lifecycleLock's read lock.
     private final Object loadLock = new Object();
     private volatile ESIndexSearcher searcher;
     private volatile boolean closed;
@@ -303,10 +310,20 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
      * {@link CompletableFuture#supplyAsync} while staying safe when no executor was provided.
      */
     private <T> CompletableFuture<T> async(Supplier<T> body) {
+        Supplier<T> guardedBody =
+                () -> {
+                    Lock readLock = lifecycleLock.readLock();
+                    readLock.lock();
+                    try {
+                        return body.get();
+                    } finally {
+                        readLock.unlock();
+                    }
+                };
         if (searchExecutor != null) {
-            return CompletableFuture.supplyAsync(body, searchExecutor);
+            return CompletableFuture.supplyAsync(guardedBody, searchExecutor);
         }
-        return CompletableFuture.completedFuture(body.get());
+        return CompletableFuture.completedFuture(guardedBody.get());
     }
 
     static int vectorSearchTopK(VectorSearch vectorSearch) {
@@ -363,6 +380,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             return;
         }
         synchronized (loadLock) {
+            // close() may have won the lifecycle write lock while this operation was waiting to
+            // start. Recheck under the load lock before opening any stream or creating a searcher.
+            checkNotClosed();
             if (loaded) {
                 return;
             }
@@ -568,21 +588,46 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        closed = true;
-        if (searcher != null) {
-            searcher.close();
+        Lock writeLock = lifecycleLock.writeLock();
+        writeLock.lock();
+        try {
+            if (closed) {
+                return;
+            }
+            closed = true;
+
+            IOException failure = null;
+            ESIndexSearcher currentSearcher = searcher;
             searcher = null;
-        }
-        synchronized (allStreams) {
-            for (SeekableInputStream stream : allStreams) {
+            if (currentSearcher != null) {
                 try {
-                    stream.close();
-                } catch (IOException ignored) {
+                    currentSearcher.close();
+                } catch (IOException e) {
+                    failure = e;
                 }
             }
-            allStreams.clear();
+
+            synchronized (allStreams) {
+                for (SeekableInputStream stream : allStreams) {
+                    try {
+                        stream.close();
+                    } catch (IOException e) {
+                        if (failure == null) {
+                            failure = e;
+                        } else {
+                            failure.addSuppressed(e);
+                        }
+                    }
+                }
+                allStreams.clear();
+            }
+            loaded = false;
+            if (failure != null) {
+                throw failure;
+            }
+        } finally {
+            writeLock.unlock();
         }
-        loaded = false;
     }
 
     // =================== unified filter dispatch =====================
@@ -912,16 +957,29 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Translate a SQL LIKE pattern into a Lucene wildcard pattern. paimon evaluates LIKE with no
-     * escape character ({@code Like -> sqlToRegexLike(pattern, null)}), so {@code %} and {@code _}
-     * are the only wildcards; {@code *}, {@code ?} and {@code \} are ordinary characters in SQL and
-     * are therefore escaped for Lucene rather than passed through as wildcards.
+     * Translate a SQL LIKE pattern into a Lucene wildcard pattern. Paimon's default SQL LIKE escape
+     * is {@code \}: escaped {@code _}, {@code %}, and {@code \} are literals, while unescaped
+     * {@code %} and {@code _} are the only SQL wildcards. Lucene's own wildcard metacharacters are
+     * escaped whenever they represent literal input.
      */
     private static String sqlLikeToWildcard(String sql) {
         StringBuilder sb = new StringBuilder(sql.length() + 4);
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
             switch (c) {
+                case '\\':
+                    if (i == sql.length() - 1) {
+                        throw invalidLikeEscapeSequence(sql, i);
+                    }
+                    char escaped = sql.charAt(++i);
+                    if (escaped != '_' && escaped != '%' && escaped != '\\') {
+                        throw invalidLikeEscapeSequence(sql, i - 1);
+                    }
+                    if (escaped == '\\') {
+                        sb.append('\\');
+                    }
+                    sb.append(escaped);
+                    break;
                 case '%':
                     sb.append('*');
                     break;
@@ -930,7 +988,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     break;
                 case '*':
                 case '?':
-                case '\\':
                     sb.append('\\').append(c);
                     break;
                 default:
@@ -938,6 +995,10 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             }
         }
         return sb.toString();
+    }
+
+    private static RuntimeException invalidLikeEscapeSequence(String pattern, int position) {
+        return new RuntimeException("Invalid escape sequence '" + pattern + "', " + position);
     }
 
     // =================== null checks =====================

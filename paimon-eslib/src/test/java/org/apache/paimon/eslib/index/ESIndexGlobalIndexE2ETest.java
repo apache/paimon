@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -55,9 +56,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -99,6 +110,58 @@ class ESIndexGlobalIndexE2ETest {
         @Override
         public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
             return fio.newInputStream(meta.filePath());
+        }
+    }
+
+    /** Blocks the first lazy-load stream open and counts every stream's lifecycle. */
+    private static final class BlockingCountingFileReader implements GlobalIndexFileReader {
+        private final LocalFileIO fio = LocalFileIO.create();
+        private final CountDownLatch firstOpenStarted = new CountDownLatch(1);
+        private final CountDownLatch allowOpen = new CountDownLatch(1);
+        private final AtomicInteger openCount = new AtomicInteger();
+        private final AtomicInteger closeCount = new AtomicInteger();
+
+        @Override
+        public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+            firstOpenStarted.countDown();
+            try {
+                allowOpen.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting to open index stream", e);
+            }
+
+            openCount.incrementAndGet();
+            return new SeekableInputStreamWrapper(fio.newInputStream(meta.filePath())) {
+                private final AtomicBoolean streamClosed = new AtomicBoolean();
+
+                @Override
+                public void close() throws IOException {
+                    if (streamClosed.compareAndSet(false, true)) {
+                        try {
+                            super.close();
+                        } finally {
+                            closeCount.incrementAndGet();
+                        }
+                    }
+                }
+            };
+        }
+
+        boolean awaitFirstOpen() throws InterruptedException {
+            return firstOpenStarted.await(10, TimeUnit.SECONDS);
+        }
+
+        void releaseOpen() {
+            allowOpen.countDown();
+        }
+
+        int openCount() {
+            return openCount.get();
+        }
+
+        int closeCount() {
+            return closeCount.get();
         }
     }
 
@@ -457,26 +520,29 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
-    void likeTreatsStarAsLiteralButPercentAndUnderscoreAsWildcards(@TempDir java.nio.file.Path tmp)
-            throws IOException {
-        // SQL LIKE has no default escape char (paimon: Like -> sqlToRegexLike(pattern, null)), so
-        // '%' / '_' are the only wildcards while '*' / '?' are ordinary characters. The reader must
-        // escape '*' for Lucene's WildcardQuery: "a*c" must match ONLY the literal "a*c", not the
-        // wildcard a<anything>c. The naive replace('%','*').replace('_','?') would have matched all
-        // three rows for "a*c".
+    void likeHonorsSqlEscapeAndLuceneLiterals(@TempDir java.nio.file.Path tmp) throws IOException {
+        // Paimon's default SQL LIKE escape is '\': \_ and \% are literals, while unescaped '%' /
+        // '_'
+        // are wildcards. '*' / '?' are ordinary SQL characters and must also be escaped before the
+        // pattern reaches Lucene's WildcardQuery.
         List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
-        // No analyzer on "k" -> KEYWORD (exact-term) index; WildcardQuery matches the whole term.
-        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.k.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(optionMap));
 
         java.nio.file.Path archiveDir = tmp.resolve("archive-like");
         Files.createDirectories(archiveDir);
         LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
         ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
 
-        // row0="abc", row1="a*c" (literal star), row2="axc"
+        // Lucene metacharacter cases plus SQL backslash-escape cases.
         writer.write(BinaryString.fromString("abc"), 0);
         writer.write(BinaryString.fromString("a*c"), 1);
         writer.write(BinaryString.fromString("axc"), 2);
+        writer.write(BinaryString.fromString("admin_001"), 3);
+        writer.write(BinaryString.fromString("adminX001"), 4);
+        writer.write(BinaryString.fromString("admin%done"), 5);
+        writer.write(BinaryString.fromString("admin\\path"), 6);
         List<ResultEntry> entries = writer.finish();
         ResultEntry entry = entries.get(0);
 
@@ -503,10 +569,101 @@ class ESIndexGlobalIndexE2ETest {
         RoaringNavigableMap64 pctHits = reader.visitLike(kRef, "a%c").join().get().results();
         assertEquals(3, pctHits.getIntCardinality(), "LIKE 'a%c' matches all a*c rows");
 
+        // LIKE 'admin\_%': '\_' is a literal underscore and '%' remains a wildcard.
+        RoaringNavigableMap64 escapedUnderHits =
+                reader.visitLike(kRef, "admin\\_%").join().get().results();
+        assertEquals(
+                1,
+                escapedUnderHits.getIntCardinality(),
+                "escaped underscore matches only the literal underscore");
+        assertTrue(contains(escapedUnderHits, 3L), "escaped underscore matches admin_001");
+
+        // LIKE 'admin\%%': '\%' is a literal percent followed by a wildcard percent.
+        RoaringNavigableMap64 escapedPctHits =
+                reader.visitLike(kRef, "admin\\%%").join().get().results();
+        assertEquals(
+                1,
+                escapedPctHits.getIntCardinality(),
+                "escaped percent matches only the literal percent");
+        assertTrue(contains(escapedPctHits, 5L), "escaped percent matches admin%done");
+
+        // LIKE 'admin\\%': '\\' is one literal backslash followed by a wildcard percent.
+        RoaringNavigableMap64 escapedSlashHits =
+                reader.visitLike(kRef, "admin\\\\%").join().get().results();
+        assertEquals(
+                1,
+                escapedSlashHits.getIntCardinality(),
+                "escaped backslash matches one literal backslash");
+        assertTrue(contains(escapedSlashHits, 6L), "escaped backslash matches admin\\path");
+
         try {
             reader.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void closeWaitsForInFlightLoadAndClosesEveryStream(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.k.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(optionMap));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-concurrent-close");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(BinaryString.fromString("admin_001"), 0);
+        ResultEntry entry = writer.finish().get(0);
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+        BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
+        ExecutorService searchExecutor = Executors.newFixedThreadPool(4);
+        ExecutorService closeExecutor = Executors.newSingleThreadExecutor();
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        fileReader, List.of(ioMeta), fields, options, searchExecutor);
+
+        try {
+            FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+            CompletableFuture<Optional<GlobalIndexResult>> searchFuture =
+                    reader.visitEqual(kRef, "admin_001");
+            assertTrue(fileReader.awaitFirstOpen(), "lazy load reached the blocking stream open");
+
+            CountDownLatch closeStarted = new CountDownLatch(1);
+            Future<?> closeFuture =
+                    closeExecutor.submit(
+                            () -> {
+                                closeStarted.countDown();
+                                reader.close();
+                                return null;
+                            });
+            assertTrue(closeStarted.await(10, TimeUnit.SECONDS), "close task started");
+            assertThrows(
+                    TimeoutException.class,
+                    () -> closeFuture.get(200, TimeUnit.MILLISECONDS),
+                    "close must wait for the in-flight load/search operation");
+
+            fileReader.releaseOpen();
+            Optional<GlobalIndexResult> result = searchFuture.get(10, TimeUnit.SECONDS);
+            assertTrue(result.isPresent(), "in-flight search completes before close");
+            assertEquals(1, result.get().results().getIntCardinality(), "one exact match");
+            closeFuture.get(10, TimeUnit.SECONDS);
+            assertEquals(
+                    fileReader.openCount(),
+                    fileReader.closeCount(),
+                    "close releases every stream opened during lazy loading");
+        } finally {
+            fileReader.releaseOpen();
+            reader.close();
+            searchExecutor.shutdownNow();
+            closeExecutor.shutdownNow();
         }
     }
 
