@@ -124,13 +124,21 @@ public class PostgresTypeUtils {
                 return DataTypes.ARRAY(DataTypes.DOUBLE());
             case PG_NUMERIC:
                 // see SPARK-26538: handle numeric without explicit precision and scale.
-                if (precision > 0) {
+                // Postgres numeric allows precision up to 1000, but Paimon DECIMAL max is 38.
+                // Fall back to STRING when out of range, mirroring MySqlTypeUtils.
+                if (precision > DecimalType.MAX_PRECISION) {
+                    return DataTypes.STRING();
+                } else if (precision > 0) {
                     return DataTypes.DECIMAL(precision, scale);
                 }
                 return DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18);
             case PG_NUMERIC_ARRAY:
                 // see SPARK-26538: handle numeric without explicit precision and scale.
-                if (precision > 0) {
+                // Postgres numeric allows precision up to 1000, but Paimon DECIMAL max is 38.
+                // Fall back to STRING when out of range, mirroring MySqlTypeUtils.
+                if (precision > DecimalType.MAX_PRECISION) {
+                    return DataTypes.ARRAY(DataTypes.STRING());
+                } else if (precision > 0) {
                     return DataTypes.ARRAY(DataTypes.DECIMAL(precision, scale));
                 }
                 return DataTypes.ARRAY(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18));
