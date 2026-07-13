@@ -71,9 +71,7 @@ public interface SnapshotReader {
     FileStorePathFactory pathFactory();
 
     @Nullable
-    default IndexFileHandler indexFileHandler() {
-        return null;
-    }
+    IndexFileHandler indexFileHandler();
 
     SnapshotReader withSnapshot(long snapshotId);
 

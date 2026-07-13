@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -323,6 +324,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public FileStorePathFactory pathFactory() {
             return wrapped.pathFactory();
+        }
+
+        @Override
+        public IndexFileHandler indexFileHandler() {
+            return wrapped.indexFileHandler();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {

@@ -59,6 +59,13 @@ public class AuditLogTableTest extends TableTestBase {
     }
 
     @Test
+    public void testSnapshotReaderExposesIndexFileHandler() throws Exception {
+        AuditLogTable auditLogTable = createAuditLogTable("audit_table_index_handler", false);
+
+        assertThat(auditLogTable.newSnapshotReader().indexFileHandler()).isNotNull();
+    }
+
+    @Test
     public void testReadSequenceNumberWithTableOption() throws Exception {
         AuditLogTable auditLogTable = createAuditLogTable("audit_table_with_seq", true);
         assertThat(auditLogTable.rowType().getFieldNames())
