@@ -72,6 +72,39 @@ class ESIndexOptionsTest {
     }
 
     @Test
+    void hnswConstructionParametersAreRead() {
+        Map<String, String> m = new HashMap<>();
+        m.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        m.put("global-index.es-index.fields.embedding.dimension", "128");
+        m.put("global-index.es-index.fields.embedding.m", "30");
+        m.put("global-index.es-index.fields.embedding.ef_construction", "360");
+
+        FieldIndexConfig emb =
+                new ESIndexOptions(FIELDS, Options.fromMap(m)).getConfig("embedding");
+
+        assertThat(emb.algorithm()).isEqualTo(VectorAlgorithm.HNSW);
+        assertThat(emb.getIntParam("m", 16)).isEqualTo(30);
+        assertThat(emb.getIntParam("ef_construction", 100)).isEqualTo(360);
+    }
+
+    @Test
+    void invalidHnswConstructionParametersAreRejected() {
+        Map<String, String> nonPositive = new HashMap<>();
+        nonPositive.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        nonPositive.put("global-index.es-index.fields.embedding.m", "0");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(nonPositive)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be a positive integer");
+
+        Map<String, String> wrongAlgorithm = new HashMap<>();
+        wrongAlgorithm.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        wrongAlgorithm.put("global-index.es-index.fields.embedding.ef_construction", "360");
+        assertThatThrownBy(() -> new ESIndexOptions(FIELDS, Options.fromMap(wrongAlgorithm)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("require algorithm=hnsw");
+    }
+
+    @Test
     void indexTypeLevelKeyIsDefaultAndFieldLevelOverrides() {
         Map<String, String> m = new HashMap<>();
         // index-type-level default for all vector fields ...

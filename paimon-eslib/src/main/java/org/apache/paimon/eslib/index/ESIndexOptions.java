@@ -223,12 +223,17 @@ public class ESIndexOptions {
 
         Map<String, String> params = new LinkedHashMap<>();
         String mStr = resolve(options, fieldName, "m", null);
-        if (mStr != null) {
-            params.put("m", mStr);
-        }
         String efStr = resolve(options, fieldName, "ef_construction", null);
-        if (efStr != null) {
-            params.put("ef_construction", efStr);
+        if (vectorAlgorithm == VectorAlgorithm.HNSW) {
+            putPositiveIntegerParameter(params, fieldName, "m", mStr);
+            putPositiveIntegerParameter(params, fieldName, "ef_construction", efStr);
+        } else if (mStr != null || efStr != null) {
+            throw new IllegalArgumentException(
+                    "Vector field '"
+                            + fieldName
+                            + "' configures m/ef_construction but algorithm is "
+                            + algorithm
+                            + "; these parameters require algorithm=hnsw.");
         }
         String vpcStr = resolve(options, fieldName, "vectors_per_cluster", null);
         if (vpcStr != null) {
@@ -241,6 +246,34 @@ public class ESIndexOptions {
                 .metric(metric)
                 .algorithmParams(params)
                 .build();
+    }
+
+    private static void putPositiveIntegerParameter(
+            Map<String, String> params, String fieldName, String key, String rawValue) {
+        if (rawValue == null) {
+            return;
+        }
+        final int value;
+        try {
+            value = Integer.parseInt(rawValue);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Invalid HNSW parameter '"
+                            + key
+                            + "' for vector field '"
+                            + fieldName
+                            + "': must be a positive integer.",
+                    e);
+        }
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid HNSW parameter '"
+                            + key
+                            + "' for vector field '"
+                            + fieldName
+                            + "': must be a positive integer.");
+        }
+        params.put(key, String.valueOf(value));
     }
 
     private static ScalarFieldType mapScalarType(DataType type) {
