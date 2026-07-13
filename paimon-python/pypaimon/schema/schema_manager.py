@@ -294,6 +294,26 @@ def _get_type_root(data_type) -> str:
     return getattr(data_type, 'type', '')
 
 
+def _normalize_key_list(value: str) -> List[str]:
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+
+def _is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) -> bool:
+    """Values whose canonical home is outside the options map (or the implicit
+    default) are not a change when replayed. Mirrors the Java SchemaManager's
+    isUnchangedNormalizedKey."""
+    if old_value is not None or new_value is None:
+        return False
+    if key == "primary-key":
+        return _normalize_key_list(new_value) == old_table_schema.primary_keys
+    if key == "partition":
+        return _normalize_key_list(new_value) == old_table_schema.partition_keys
+    if key == "type":
+        # a table created without an explicit type is of the default type
+        return new_value == CoreOptions.TYPE.default_value()
+    return False
+
+
 def _assert_not_updating_partition_keys(
         schema: 'TableSchema', field_names: List[str], operation: str):
     if len(field_names) > 1:
@@ -646,10 +666,44 @@ class SchemaManager:
         disable_null_to_not_null = str(old_table_schema.options.get(
             'alter-column-null-to-not-null.disabled', 'true')).lower() != 'false'
 
+        # Structural options cannot be changed once the table has snapshots
+        # (mirrors the Java SchemaManager checkAlterTableOption /
+        # checkResetTableOption guards). The snapshot check is lazy so that
+        # alters without option changes never pay for it.
+        has_snapshots: Optional[bool] = None
+
+        def _has_snapshots() -> bool:
+            nonlocal has_snapshots
+            if has_snapshots is None:
+                from pypaimon.snapshot.snapshot_manager import SnapshotManager
+                has_snapshots = SnapshotManager(
+                    self.file_io, self.table_path, self.branch
+                ).get_latest_snapshot() is not None
+            return has_snapshots
+
         for change in changes:
             if isinstance(change, SetOption):
+                # compare against the accumulated options so repeated changes to
+                # the same key in one batch apply in order
+                old_value = new_options.get(change.key)
+                unchanged = (old_value == change.value
+                             or _is_unchanged_normalized_key(
+                                 change.key, old_value, change.value, old_table_schema))
+                if unchanged:
+                    continue
+                # the type decides the table implementation, and table kinds like
+                # format tables never create Paimon snapshots but can still hold
+                # data -- reject independently of the snapshot check
+                if change.key == "type":
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
                 new_options[change.key] = change.value
             elif isinstance(change, RemoveOption):
+                if change.key == "type":
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
                 new_options.pop(change.key, None)
             elif isinstance(change, UpdateComment):
                 new_comment = change.comment
