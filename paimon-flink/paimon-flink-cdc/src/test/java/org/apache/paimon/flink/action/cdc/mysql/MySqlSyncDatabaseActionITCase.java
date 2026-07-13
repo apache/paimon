@@ -801,6 +801,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             tableName = getNewTableName(pick);
             records = recordsMap.get(tableName);
 
+            // Wait for the newly added table to finish its incremental snapshot before altering it.
+            // Under load a snapshot split can capture the post-ALTER schema and the binlog split
+            // then replays pre-ALTER rows against it (row smaller than column index error).
+            Thread.sleep(10000);
+
             statement.executeUpdate(
                     String.format(
                             "ALTER TABLE `%s`.`%s` ADD COLUMN v2 INT", databaseName, tableName));
