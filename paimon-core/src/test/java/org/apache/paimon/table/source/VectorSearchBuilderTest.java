@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
@@ -217,6 +218,55 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(result.results()).contains(2L, 3L);
         assertThat(result.results()).doesNotContain(0L, 1L);
         assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
+    public void testVectorLiveRowPlanningSkipsUnindexedDeletionVectors() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_unindexed_deletion_vector"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_unindexed_deletion_vector"));
+
+        float[][] indexedVectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+        writeVectors(table, indexedVectors);
+        writeVectors(table, new float[][] {{2.0f, 0.0f}, {3.0f, 0.0f}});
+        buildAndCommitVectorIndex(table, indexedVectors, new Range(0, 1));
+        commitDeletionVectors(table, 3L);
+
+        DeletionFile unindexedDeletionFile = null;
+        for (Split split : table.newSnapshotReader().read().splits()) {
+            if (!(split instanceof DataSplit)) {
+                continue;
+            }
+            DataSplit dataSplit = (DataSplit) split;
+            List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
+            if (deletionFiles == null) {
+                continue;
+            }
+            for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+                if (dataSplit
+                        .dataFiles()
+                        .get(i)
+                        .nonNullRowIdRange()
+                        .hasIntersection(new Range(3, 3))) {
+                    unindexedDeletionFile = deletionFiles.get(i);
+                }
+            }
+        }
+        assertThat(unindexedDeletionFile).isNotNull();
+        assertThat(table.fileIO().delete(new Path(unindexedDeletionFile.path()), false)).isTrue();
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(0L, 1L);
     }
 
     @Test

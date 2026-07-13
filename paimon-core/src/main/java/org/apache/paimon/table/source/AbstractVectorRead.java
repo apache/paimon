@@ -127,13 +127,18 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
-        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        List<Range> indexedRowRanges = new ArrayList<>(splits.size());
+        for (IndexVectorSearchSplit split : splits) {
+            indexedRowRanges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+        }
+
+        RoaringNavigableMap64 liveRows =
+                GlobalIndexLiveRowFilter.liveRows(table, partitionFilter, indexedRowRanges);
         RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
-        for (IndexVectorSearchSplit split : splits) {
-            Range splitRange = new Range(split.rowRangeStart(), split.rowRangeEnd());
+        for (Range splitRange : indexedRowRanges) {
             RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
