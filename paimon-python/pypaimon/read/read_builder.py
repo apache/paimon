@@ -273,6 +273,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
                 level_histogram=per_split_levels,
                 deletion_file_count=dv_count_here,
                 file_paths=list(getattr(split, 'file_paths', []) or []),
+                data_files=list(files),
             ))
 
     fps_min, fps_max, fps_avg = _min_max_avg(files_per_split)
