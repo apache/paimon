@@ -167,7 +167,7 @@ public class ESIndexOptions {
                     .analyzer(BuiltinAnalyzer.fromName(analyzer))
                     .build();
         } else if (isTimestampType(dataType)) {
-            // eslib-core 1.0.3 does not implement DATE scalar filters. Store DATE/TIMESTAMP as a
+            // ESLib does not implement DATE scalar filters. Store DATE/TIMESTAMP as a
             // long scalar instead (DATE = epoch day, TIMESTAMP = epoch millis) so predicate
             // filtering uses the supported LONG query path.
             return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.SCALAR)

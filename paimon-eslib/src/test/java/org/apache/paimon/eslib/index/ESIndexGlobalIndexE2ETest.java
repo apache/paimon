@@ -1232,9 +1232,9 @@ class ESIndexGlobalIndexE2ETest {
                     reader.openStreamCount(),
                     "providers whose streams closed during search must unregister immediately");
 
-            // Query-scoped IndexInput clones are not guaranteed to be closed by Lucene. Paimon's
-            // provider bridge must reuse a stream pool bounded by peak read concurrency instead of
-            // retaining one newly forked stream per rescore query until reader.close().
+            // Query-scoped IndexInput clones are not guaranteed to be closed by Lucene. ESLib's
+            // ArchiveIndexInput must reuse provider forks bounded by peak read concurrency instead
+            // of retaining one newly forked stream per rescore query until reader.close().
             int opensAfterWarmup = fileReader.openCount();
             int liveStreamsAfterWarmup = reader.openStreamCount();
             for (int repeat = 0; repeat < 3; repeat++) {
