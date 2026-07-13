@@ -1494,11 +1494,23 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.</td>
         </tr>
         <tr>
+            <td><h5>sort-compaction.max-input-files</h5></td>
+            <td style="word-wrap: break-word;">500000</td>
+            <td>Integer</td>
+            <td>Maximum number of input files allowed in a sort compact plan. Each input file is embedded in the Flink job graph via the planned DataSplits. Compact in smaller partition batches when this limit is exceeded.</td>
+        </tr>
+        <tr>
             <td><h5>sort-compaction.range-strategy</h5></td>
             <td style="word-wrap: break-word;">SIZE</td>
             <td><p>Enum</p></td>
             <td>The range strategy of sort compaction, the default value is quantity.
 If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sort-compaction.warn-input-files</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Integer</td>
+            <td>Warn threshold for the number of input files in a sort compact plan. Each input file is embedded in the Flink job graph via the planned DataSplits. Consider compacting in smaller partition batches when this threshold is exceeded.</td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>
