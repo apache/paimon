@@ -1263,9 +1263,7 @@ class RESTCatalogServer:
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
-        import json
         import os
-        import uuid
 
         # Construct table path: {warehouse}/{database}/{table}
         table_path = os.path.join(self.data_path, self.warehouse, identifier.get_database_name(),
@@ -1278,22 +1276,8 @@ class RESTCatalogServer:
 
         # Write snapshot file (snapshot-{id})
         snapshot_file = os.path.join(snapshot_dir, f"snapshot-{snapshot.id}")
-        snapshot_data = {
-            "version": getattr(snapshot, 'version', 3),
-            "id": snapshot.id,
-            "schemaId": getattr(snapshot, 'schema_id', 0),
-            "baseManifestList": getattr(snapshot, 'base_manifest_list', f"manifest-list-{uuid.uuid4()}"),
-            "deltaManifestList": getattr(snapshot, 'delta_manifest_list', f"manifest-list-{uuid.uuid4()}"),
-            "totalRecordCount": getattr(snapshot, 'total_record_count'),
-            "deltaRecordCount": getattr(snapshot, 'delta_record_count'),
-            "commitUser": getattr(snapshot, 'commit_user', 'rest-server'),
-            "commitIdentifier": getattr(snapshot, 'commit_identifier', 1),
-            "commitKind": getattr(snapshot, 'commit_kind', 'APPEND'),
-            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000)
-        }
-
         with open(snapshot_file, 'w') as f:
-            json.dump(snapshot_data, f, indent=2)
+            f.write(JSON.to_json(snapshot))
 
         # Write LATEST file
         latest_file = os.path.join(snapshot_dir, "LATEST")
