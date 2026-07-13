@@ -283,6 +283,28 @@ class FieldListaggAggTest(unittest.TestCase):
 
         self.assertEqual(result, "user1,user2,user3")
 
+    def test_whitespace_delimiter_distinct(self):
+        agg = _make(
+            "listagg",
+            "STRING",
+            CoreOptions(Options({
+                'fields.field0.list-agg-delimiter': '',
+                'fields.field0.distinct': True,
+            }))
+        )
+
+        result = reduce(
+            agg.agg,
+            [
+                "AB",
+                "AB C",
+                "D",
+                "EF",
+                "G ",
+            ],
+        )
+        self.assertEqual(result, "ABCDEFG")
+
     def test_custom_delimiter_empty_strings(self):
         agg = _make(
             "listagg",

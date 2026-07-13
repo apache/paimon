@@ -260,6 +260,7 @@ class FieldListaggAgg(FieldAggregator):
 
         self.delimiter = options.field_listagg_delimiter(field_name)
         self.distinct = options.field_collect_distinct(field_name)
+        self._separator = " " if self.delimiter in (None, "") else self.delimiter
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if input_field is None or is_blank(str(input_field)):
@@ -274,12 +275,12 @@ class FieldListaggAgg(FieldAggregator):
         if not self.distinct:
             return accumulator + self.delimiter + input_field
 
-        accumulator_tokens = accumulator.split(self.delimiter)
+        accumulator_tokens = accumulator.split(self._separator)
         existing_tokens = set(accumulator_tokens)
 
         result = [accumulator]
 
-        for token in input_field.split(self.delimiter):
+        for token in input_field.split(self._separator):
             if is_blank(token) or token in existing_tokens:
                 continue
 
