@@ -34,7 +34,7 @@ public class RestoreFiles {
     private final @Nullable List<DataFileMeta> dataFiles;
     private final @Nullable IndexFileMeta dynamicBucketIndex;
     private final @Nullable List<IndexFileMeta> deleteVectorsIndex;
-    private final @Nullable List<IndexFileMeta> vectorIndexPayloads;
+    private final @Nullable List<IndexFileMeta> sourceIndexPayloads;
 
     public RestoreFiles(
             @Nullable Snapshot snapshot,
@@ -42,13 +42,13 @@ public class RestoreFiles {
             @Nullable List<DataFileMeta> dataFiles,
             @Nullable IndexFileMeta dynamicBucketIndex,
             @Nullable List<IndexFileMeta> deleteVectorsIndex,
-            @Nullable List<IndexFileMeta> vectorIndexPayloads) {
+            @Nullable List<IndexFileMeta> sourceIndexPayloads) {
         this.snapshot = snapshot;
         this.totalBuckets = totalBuckets;
         this.dataFiles = dataFiles;
         this.dynamicBucketIndex = dynamicBucketIndex;
         this.deleteVectorsIndex = deleteVectorsIndex;
-        this.vectorIndexPayloads = vectorIndexPayloads;
+        this.sourceIndexPayloads = sourceIndexPayloads;
     }
 
     @Nullable
@@ -77,8 +77,8 @@ public class RestoreFiles {
     }
 
     @Nullable
-    public List<IndexFileMeta> vectorIndexPayloads() {
-        return vectorIndexPayloads;
+    public List<IndexFileMeta> sourceIndexPayloads() {
+        return sourceIndexPayloads;
     }
 
     public static RestoreFiles empty() {

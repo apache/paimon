@@ -29,7 +29,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -84,7 +84,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final DynamicBucketIndexMaintainer.Factory dbMaintainerFactory;
     @Nullable private final BucketedDvMaintainer.Factory dvMaintainerFactory;
-    @Nullable private final BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory;
+
+    @Nullable
+    private final BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory;
+
     private final int numBuckets;
     private final RowType partitionType;
 
@@ -96,7 +99,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected WriteRestore restore;
     private ExecutorService lazyCompactExecutor;
-    private ExecutorService lazyVectorIndexExecutor;
+    private ExecutorService lazyPrimaryKeyIndexExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     private boolean ignoreNumBucketCheck = false;
@@ -112,7 +115,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
-            @Nullable BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory,
+            @Nullable BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory,
             String tableName,
             CoreOptions options,
             RowType partitionType) {
@@ -121,14 +124,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             indexFileHandler = dbMaintainerFactory.indexFileHandler();
         } else if (dvMaintainerFactory != null) {
             indexFileHandler = dvMaintainerFactory.indexFileHandler();
-        } else if (vectorIndexMaintainerFactory != null) {
-            indexFileHandler = vectorIndexMaintainerFactory.indexFileHandler();
+        } else if (primaryKeyIndexMaintainerFactory != null) {
+            indexFileHandler = primaryKeyIndexMaintainerFactory.indexFileHandler();
         }
         this.snapshotManager = snapshotManager;
         this.restore = new FileSystemWriteRestore(options, snapshotManager, scan, indexFileHandler);
         this.dbMaintainerFactory = dbMaintainerFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
-        this.vectorIndexMaintainerFactory = vectorIndexMaintainerFactory;
+        this.primaryKeyIndexMaintainerFactory = primaryKeyIndexMaintainerFactory;
         this.numBuckets = options.bucket();
         this.partitionType = partitionType;
         this.writers = new HashMap<>();
@@ -249,11 +252,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             .newIndexFiles()
                             .addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
                 }
-                applyVectorIndexCommit(
-                        writerContainer.vectorIndexMaintainer,
-                        newFilesIncrement,
-                        compactIncrement,
-                        waitCompaction);
+                if (writerContainer.primaryKeyIndexMaintainer != null) {
+                    writerContainer.primaryKeyIndexMaintainer.prepareCommit(
+                            newFilesIncrement, compactIncrement, waitCompaction);
+                }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
                     compactDeletionFile
@@ -271,8 +273,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
                 if (committable.isEmpty()) {
                     if (writerCleanChecker.apply(writerContainer)
-                            && (writerContainer.vectorIndexMaintainer == null
-                                    || !writerContainer.vectorIndexMaintainer
+                            && (writerContainer.primaryKeyIndexMaintainer == null
+                                    || !writerContainer.primaryKeyIndexMaintainer
                                             .buildNotCompleted())) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
@@ -289,8 +291,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     commitIdentifier);
                         }
                         writerContainer.writer.close();
-                        if (writerContainer.vectorIndexMaintainer != null) {
-                            writerContainer.vectorIndexMaintainer.close();
+                        if (writerContainer.primaryKeyIndexMaintainer != null) {
+                            writerContainer.primaryKeyIndexMaintainer.close();
                         }
                         bucketIter.remove();
                     }
@@ -305,43 +307,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         return result;
-    }
-
-    private void applyVectorIndexCommit(
-            @Nullable BucketedVectorIndexMaintainer vectorIndexMaintainer,
-            DataIncrement newFilesIncrement,
-            CompactIncrement compactIncrement,
-            boolean waitCompaction)
-            throws Exception {
-        if (vectorIndexMaintainer == null) {
-            return;
-        }
-
-        BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit =
-                vectorIndexMaintainer.prepareCommit(
-                        newFilesIncrement, compactIncrement, waitCompaction);
-        vectorCommit
-                .appendIncrement()
-                .ifPresent(
-                        vectorIncrement -> {
-                            newFilesIncrement
-                                    .newIndexFiles()
-                                    .addAll(vectorIncrement.newIndexFiles());
-                            newFilesIncrement
-                                    .deletedIndexFiles()
-                                    .addAll(vectorIncrement.deletedIndexFiles());
-                        });
-        vectorCommit
-                .compactIncrement()
-                .ifPresent(
-                        vectorIncrement -> {
-                            compactIncrement
-                                    .newIndexFiles()
-                                    .addAll(vectorIncrement.newIndexFiles());
-                            compactIncrement
-                                    .deletedIndexFiles()
-                                    .addAll(vectorIncrement.deletedIndexFiles());
-                        });
     }
 
     // This abstract function returns a whole function (instead of just a boolean value),
@@ -382,8 +347,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
             for (WriterContainer<T> writerContainer : bucketWriters.values()) {
                 writerContainer.writer.close();
-                if (writerContainer.vectorIndexMaintainer != null) {
-                    writerContainer.vectorIndexMaintainer.close();
+                if (writerContainer.primaryKeyIndexMaintainer != null) {
+                    writerContainer.primaryKeyIndexMaintainer.close();
                 }
             }
         }
@@ -391,8 +356,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
         }
-        if (lazyVectorIndexExecutor != null) {
-            lazyVectorIndexExecutor.shutdownNow();
+        if (lazyPrimaryKeyIndexExecutor != null) {
+            lazyPrimaryKeyIndexExecutor.shutdownNow();
         }
         if (compactionMetrics != null) {
             compactionMetrics.close();
@@ -414,11 +379,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 CommitIncrement increment;
                 try {
                     increment = writerContainer.writer.prepareCommit(false);
-                    applyVectorIndexCommit(
-                            writerContainer.vectorIndexMaintainer,
-                            increment.newFilesIncrement(),
-                            increment.compactIncrement(),
-                            true);
+                    if (writerContainer.primaryKeyIndexMaintainer != null) {
+                        writerContainer.primaryKeyIndexMaintainer.prepareCommit(
+                                increment.newFilesIncrement(), increment.compactIncrement(), true);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(
                             "Failed to extract state from writer of partition "
@@ -441,7 +405,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.writer.maxSequenceNumber(),
                                 writerContainer.dynamicBucketMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
-                                writerContainer.vectorIndexMaintainer,
+                                writerContainer.primaryKeyIndexMaintainer,
                                 increment));
             }
         }
@@ -468,8 +432,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             // not ignore them.
                             false);
             notifyNewWriter(writer);
-            if (state.vectorIndexMaintainer != null) {
-                state.vectorIndexMaintainer.withExecutor(vectorIndexExecutor());
+            if (state.primaryKeyIndexMaintainer != null) {
+                state.primaryKeyIndexMaintainer.withExecutor(primaryKeyIndexExecutor());
             }
             WriterContainer<T> writerContainer =
                     new WriterContainer<>(
@@ -477,7 +441,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.totalBuckets,
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
-                            state.vectorIndexMaintainer,
+                            state.primaryKeyIndexMaintainer,
                             state.baseSnapshotId);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
@@ -544,15 +508,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         ? null
                         : dvMaintainerFactory.create(
                                 partition, bucket, restored.deleteVectorsIndex());
-        BucketedVectorIndexMaintainer vectorIndexMaintainer =
-                vectorIndexMaintainerFactory == null
+        BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer =
+                primaryKeyIndexMaintainerFactory == null
                         ? null
-                        : vectorIndexMaintainerFactory.create(
+                        : primaryKeyIndexMaintainerFactory.create(
                                 partition,
                                 bucket,
                                 restored.dataFiles(),
-                                restored.vectorIndexPayloads(),
-                                vectorIndexExecutor());
+                                restored.sourceIndexPayloads(),
+                                primaryKeyIndexExecutor(),
+                                ioManager);
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {
@@ -577,7 +542,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 firstNonNull(restored.totalBuckets(), numBuckets),
                 indexMaintainer,
                 dvMaintainer,
-                vectorIndexMaintainer,
+                primaryKeyIndexMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
     }
 
@@ -640,7 +605,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             bucket,
                             dbMaintainerFactory != null,
                             dvMaintainerFactory != null,
-                            vectorIndexMaintainerFactory != null);
+                            primaryKeyIndexMaintainerFactory != null);
         } catch (RuntimeException e) {
             throw new RuntimeException(
                     String.format(
@@ -673,14 +638,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return lazyCompactExecutor;
     }
 
-    private ExecutorService vectorIndexExecutor() {
-        if (lazyVectorIndexExecutor == null) {
-            lazyVectorIndexExecutor =
+    private ExecutorService primaryKeyIndexExecutor() {
+        if (lazyPrimaryKeyIndexExecutor == null) {
+            lazyPrimaryKeyIndexExecutor =
                     Executors.newSingleThreadExecutor(
                             new ExecutorThreadFactory(
-                                    Thread.currentThread().getName() + "-vector-index"));
+                                    Thread.currentThread().getName() + "-primary-key-index"));
         }
-        return lazyVectorIndexExecutor;
+        return lazyPrimaryKeyIndexExecutor;
     }
 
     @VisibleForTesting
@@ -713,7 +678,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         public final int totalBuckets;
         @Nullable public final DynamicBucketIndexMaintainer dynamicBucketMaintainer;
         @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
-        @Nullable public final BucketedVectorIndexMaintainer vectorIndexMaintainer;
+        @Nullable public final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
 
@@ -722,13 +687,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 int totalBuckets,
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
-                @Nullable BucketedVectorIndexMaintainer vectorIndexMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
-            this.vectorIndexMaintainer = vectorIndexMaintainer;
+            this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;

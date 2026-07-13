@@ -24,6 +24,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -171,18 +172,20 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.deletionVectorsEnabled()) {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
-        BucketedVectorIndexMaintainer.Factory vectorIndexMaintainerFactory = null;
+        BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
         if (options.primaryKeyVectorIndexEnabled()) {
             String vectorColumn = options.primaryKeyVectorIndexColumn();
             DataField vectorField = schema.nameToFieldMap().get(vectorColumn);
-            vectorIndexMaintainerFactory =
-                    new BucketedVectorIndexMaintainer.Factory(
-                                    newIndexFileHandler(),
-                                    newReaderFactoryBuilder(),
-                                    vectorField,
-                                    options.primaryKeyVectorDistanceMetric(vectorColumn),
-                                    options.primaryKeyVectorIndexType(vectorColumn))
-                            .withIndexOptions(options.primaryKeyVectorIndexOptions(vectorColumn));
+            primaryKeyIndexMaintainerFactory =
+                    BucketedPrimaryKeyIndexMaintainer.Factory.ofVector(
+                            new BucketedVectorIndexMaintainer.Factory(
+                                            newIndexFileHandler(),
+                                            newReaderFactoryBuilder(),
+                                            vectorField,
+                                            options.primaryKeyVectorDistanceMetric(vectorColumn),
+                                            options.primaryKeyVectorIndexType(vectorColumn))
+                                    .withIndexOptions(
+                                            options.primaryKeyVectorIndexOptions(vectorColumn)));
         }
         return new KeyValueFileStoreWrite(
                 fileIO,
@@ -202,7 +205,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newScan(),
                 indexFactory,
                 dvMaintainerFactory,
-                vectorIndexMaintainerFactory,
+                primaryKeyIndexMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
                 tableName);
