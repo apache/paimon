@@ -135,6 +135,8 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        // partition listing bypasses plan(): push the deferred filter first
+        ensureFilterPushdown(java.util.Collections.emptySet());
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -206,6 +208,10 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SortValue order = orders.get(0);
+        if (authMaskedFields.contains(order.field().name())) {
+            // the pruning below reads raw statistics; a mask may alter the ordering column
+            return Optional.empty();
+        }
         DataType type = order.field().type();
         if (!minmaxAvailable(type)) {
             return Optional.empty();

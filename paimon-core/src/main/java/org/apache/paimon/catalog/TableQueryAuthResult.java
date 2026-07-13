@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
@@ -45,6 +46,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -96,6 +98,40 @@ public class TableQueryAuthResult implements Serializable {
     public RowType widenReadType(RowType tableType, RowType readType) {
         return appendMissingFields(
                 tableType, readType, requiredAuthFields(readType.getFieldNames()));
+    }
+
+    /**
+     * Drops the conjuncts of {@code predicate} referencing any of {@code fields}; returns null when
+     * nothing remains. Used to keep raw-statistics pushdown off masked columns.
+     */
+    @Nullable
+    public static Predicate excludeFields(Predicate predicate, Set<String> fields) {
+        return filterConjuncts(predicate, fields, true);
+    }
+
+    /**
+     * Keeps only the conjuncts of {@code predicate} referencing any of {@code fields}; returns null
+     * when none does.
+     */
+    @Nullable
+    public static Predicate retainFields(Predicate predicate, Set<String> fields) {
+        return filterConjuncts(predicate, fields, false);
+    }
+
+    @Nullable
+    private static Predicate filterConjuncts(
+            Predicate predicate, Set<String> fields, boolean keepDisjoint) {
+        List<Predicate> kept = new ArrayList<>();
+        for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
+            if (Collections.disjoint(PredicateVisitor.collectFieldNames(conjunct), fields)
+                    == keepDisjoint) {
+                kept.add(conjunct);
+            }
+        }
+        if (kept.isEmpty()) {
+            return null;
+        }
+        return kept.size() == 1 ? kept.get(0) : PredicateBuilder.and(kept);
     }
 
     /** Appends the missing {@code ruleFields} of {@code tableType} to {@code readType}. */

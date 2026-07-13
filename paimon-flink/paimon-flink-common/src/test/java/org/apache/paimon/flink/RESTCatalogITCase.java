@@ -411,6 +411,48 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
+    public void testFilterOnMaskedPartitionColumn() {
+        String maskingTable = "partition_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (p STRING, v STRING) PARTITIONED BY (p)"
+                                + " WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('a', 'va'), ('b', 'vb')",
+                        DATABASE_NAME, maskingTable));
+
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        // Flink consumes bounded partition filters without re-evaluating them, so the
+        // source itself must evaluate the predicate, on the masked value
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT p, v FROM %s.%s WHERE p = 'vb'",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("vb", "vb"));
+        // the raw partition value must not match
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT p, v FROM %s.%s WHERE p = 'a'",
+                                        DATABASE_NAME, maskingTable)))
+                .isEmpty();
+        // filter column not projected
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT v FROM %s.%s WHERE p = 'vb'",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("vb"));
+    }
+
+    @Test
     public void testRowFilter() {
         String filterTable = "row_filter_table";
         batchSql(

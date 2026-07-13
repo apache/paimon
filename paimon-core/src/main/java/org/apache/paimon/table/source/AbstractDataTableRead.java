@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
@@ -33,6 +34,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +49,11 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     private Predicate predicate;
     private final TableSchema schema;
 
+    // Query-auth reads evaluate predicates on masked values; reader-level filtering sees
+    // raw values, so it stays off for auth-enabled tables (as read-level TopN already
+    // does, see ReadBuilderImpl).
+    private final boolean queryAuthEnabled;
+
     // The read type the subclass reads with; differs from readType only when widened for
     // auth, and is fixed once a reader exists (split reads cache their format readers).
     @Nullable private RowType appliedReadType;
@@ -58,13 +65,16 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     public AbstractDataTableRead(@Nullable TableSchema schema) {
         this.schema = schema;
         Set<String> blobViewFields = Collections.emptySet();
+        boolean queryAuthEnabled = false;
         if (schema != null) {
             CoreOptions options = CoreOptions.fromMap(schema.options());
             if (options.blobViewResolveEnabled()) {
                 blobViewFields = options.blobViewField();
             }
+            queryAuthEnabled = options.queryAuthEnabled();
         }
         this.resolvedBlobViewFields = blobViewFields;
+        this.queryAuthEnabled = queryAuthEnabled;
     }
 
     public abstract void applyReadType(RowType readType);
@@ -79,6 +89,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withFilter(Predicate predicate) {
         this.predicate = predicate;
+        if (queryAuthEnabled) {
+            return this;
+        }
         return innerWithFilter(predicate);
     }
 
@@ -158,7 +171,17 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
             throws IOException {
         List<String> readFields = currentReadType().getFieldNames();
-        Set<String> ruleFields = authResult.requiredAuthFields(readFields);
+        // conjuncts on masked columns evaluate here, post-mask (view semantics); their
+        // columns must be read and masked like rule fields
+        Set<String> maskedFilterFields =
+                maskedFilterFields(authResult.extractColumnMasking().keySet());
+        List<String> visibleFields = readFields;
+        if (!maskedFilterFields.isEmpty()) {
+            visibleFields = new ArrayList<>(readFields);
+            visibleFields.addAll(maskedFilterFields);
+        }
+        Set<String> ruleFields = authResult.requiredAuthFields(visibleFields);
+        ruleFields.addAll(maskedFilterFields);
         RowType widened = widenedReadType(authResult, ruleFields);
         if (widened != null && !readerCreated && !widened.equals(appliedReadType)) {
             applyReadType(widened);
@@ -191,7 +214,46 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         }
         RecordReader<InternalRow> reader =
                 authResult.doAuth(readSplit(split), outputType, activeFields);
+        reader = filterMaskedConjuncts(reader, outputType, maskedFilterFields);
         return backProject(reader);
+    }
+
+    /** The columns of the query filter that the current auth rules mask. */
+    private Set<String> maskedFilterFields(Set<String> maskTargets) {
+        if (predicate == null || maskTargets.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> fields = new HashSet<>(PredicateVisitor.collectFieldNames(predicate));
+        fields.retainAll(maskTargets);
+        return fields;
+    }
+
+    /**
+     * Evaluates the filter conjuncts sitting on masked columns, on the masked output. They are
+     * never pushed to the reader or into statistics pruning, and engines do not re-evaluate the
+     * conjuncts they consumed (partition filters), so this is where they take effect.
+     */
+    private RecordReader<InternalRow> filterMaskedConjuncts(
+            RecordReader<InternalRow> reader, RowType outputType, Set<String> maskedFilterFields) {
+        if (maskedFilterFields.isEmpty()) {
+            return reader;
+        }
+        Predicate maskedPart = TableQueryAuthResult.retainFields(predicate, maskedFilterFields);
+        if (maskedPart == null) {
+            return reader;
+        }
+        int[] projection = schema.logicalRowType().getFieldIndices(outputType.getFieldNames());
+        Optional<Predicate> remapped =
+                maskedPart.visit(PredicateProjectionConverter.fromProjection(projection));
+        if (!remapped.isPresent()) {
+            throw new IllegalStateException(
+                    "Filter on masked columns "
+                            + maskedFilterFields
+                            + " cannot be evaluated on read schema "
+                            + outputType.getFieldNames());
+        }
+        Predicate filter = remapped.get();
+        return reader.filter(filter::test);
     }
 
     /**

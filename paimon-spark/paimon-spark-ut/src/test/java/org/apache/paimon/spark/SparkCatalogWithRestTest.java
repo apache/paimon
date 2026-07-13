@@ -400,6 +400,28 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
+    public void testRowFilterDisablesAggregatePushdown() {
+        spark.sql(
+                "CREATE TABLE t_agg_pushdown (id INT) TBLPROPERTIES"
+                        + " ('query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_agg_pushdown VALUES (1), (2), (3)");
+
+        LeafPredicate idFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(1));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_agg_pushdown"),
+                Collections.singletonList(idFilter));
+
+        // statistics-based aggregate pushdown must not bypass the read-time row filter
+        // (today it degrades because auth splits are not DataSplits; this anchors that)
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_agg_pushdown").collectAsList().toString())
+                .isEqualTo("[[2]]");
+    }
+
+    @Test
     public void testRowFilter() {
         spark.sql(
                 "CREATE TABLE t_row_filter (id INT, name STRING, age INT, department STRING) TBLPROPERTIES"

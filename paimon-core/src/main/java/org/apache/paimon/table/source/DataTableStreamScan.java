@@ -106,7 +106,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     @Override
     public DataTableStreamScan withFilter(Predicate predicate) {
         super.withFilter(predicate);
-        snapshotReader.withFilter(predicate);
         return this;
     }
 

@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -68,11 +69,13 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -97,6 +100,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
     // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
     // DataTableBatchScan to disable limit push down; not pushed through withFilter.
     protected boolean authHasNonPartitionFilter;
+    // mask targets of the current auth result, overwritten each plan(); TopN pruning
+    // reads raw statistics, which a mask may invalidate (DataTableBatchScan reads this)
+    protected Set<String> authMaskedFields = Collections.emptySet();
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -113,12 +119,22 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     // the read type last pushed to the snapshot reader; widened for auth when needed
     @Nullable private RowType appliedScanReadType;
+    // the query filter; pushed on first use without the conjuncts on masked columns,
+    // whose raw statistics a mask invalidates
+    @Nullable private Predicate userFilter;
+    private boolean filterPushed = false;
+    private Set<String> pushedMaskedFields = Collections.emptySet();
 
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
         // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
         applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
+        this.authMaskedFields =
+                queryAuthResult == null
+                        ? Collections.emptySet()
+                        : queryAuthResult.extractColumnMasking().keySet();
+        ensureFilterPushdown(authMaskedFields);
         applyAuthReadType(queryAuthResult);
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
@@ -161,7 +177,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        if (!options.queryAuthEnabled()) {
+            // no masks to strip; push now, else chain-table sub-scans read before plan()
+            snapshotReader.withFilter(predicate);
+            return this;
+        }
+        // deferred to plan(), which strips conjuncts on masked columns before stats pruning
+        this.userFilter = predicate;
         return this;
     }
 
@@ -301,6 +323,38 @@ abstract class AbstractDataTableScan implements DataTableScan {
     public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         snapshotReader.withRowRangeIndex(rowRangeIndex);
         return this;
+    }
+
+    /**
+     * Push the query filter once: the full filter marks the read-time filtering (so limit/TopN
+     * pruning stays off), while only the conjuncts free of masked columns are pushed down, since a
+     * mask invalidates their raw statistics. Also called by partition listing, which bypasses
+     * plan(); masks discovered afterwards on a pushed filter column fail closed.
+     */
+    protected final void ensureFilterPushdown(Set<String> maskedFields) {
+        if (userFilter == null) {
+            return;
+        }
+        Set<String> maskedInFilter = new HashSet<>(maskedFields);
+        maskedInFilter.retainAll(PredicateVisitor.collectFieldNames(userFilter));
+        if (!maskedInFilter.isEmpty()) {
+            // masked conjuncts drop rows only at read time, post-mask: keep limit/TopN
+            // split pruning off even when the filter is partition-only
+            authHasNonPartitionFilter = true;
+        }
+        if (!filterPushed) {
+            Predicate effective =
+                    maskedInFilter.isEmpty()
+                            ? userFilter
+                            : TableQueryAuthResult.excludeFields(userFilter, maskedInFilter);
+            snapshotReader.withFilter(userFilter, effective);
+            filterPushed = true;
+            pushedMaskedFields = maskedInFilter;
+        } else if (!pushedMaskedFields.containsAll(maskedInFilter)) {
+            throw new IllegalStateException(
+                    "Query auth rules changed and now mask a pushed-down filter column. "
+                            + "Recreate the scan to apply the new rules.");
+        }
     }
 
     /**
