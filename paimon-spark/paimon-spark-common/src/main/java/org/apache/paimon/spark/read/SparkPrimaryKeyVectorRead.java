@@ -81,11 +81,11 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
                     }
                 };
         List<byte[]> groupResults = mapInSpark(groups, task, groups.size());
-        List<Candidate> candidates = new ArrayList<>();
+        List<SearchResult> searchResults = new ArrayList<>(groupResults.size());
         for (byte[] groupResult : groupResults) {
-            candidates.addAll(deserializeCandidates(groupResult));
+            searchResults.add(deserializeSearchResult(groupResult));
         }
-        return createResult(primaryKeyPlan, candidates);
+        return createResult(primaryKeyPlan, mergeSearchResults(searchResults));
     }
 
     protected int sparkParallelism() {
@@ -121,13 +121,13 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private List<Candidate> deserializeCandidates(byte[] bytes) {
+    private SearchResult deserializeSearchResult(byte[] bytes) {
         try {
             return InstantiationUtil.deserializeObject(
                     bytes, Thread.currentThread().getContextClassLoader());
         } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException("Failed to deserialize primary-key vector candidates.", e);
+            throw new RuntimeException(
+                    "Failed to deserialize primary-key vector search result.", e);
         }
     }
 }

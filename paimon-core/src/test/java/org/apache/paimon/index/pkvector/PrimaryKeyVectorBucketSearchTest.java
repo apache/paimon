@@ -95,7 +95,7 @@ class PrimaryKeyVectorBucketSearchTest {
     }
 
     @Test
-    void testMergesAnnAndExactFallbackWithoutRescanningCoveredFiles() throws Exception {
+    void testSeparatesAnnAndExactFallbackWithoutRescanningCoveredFiles() throws Exception {
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         IndexFileMeta ann = segment("ann", data1);
@@ -120,7 +120,7 @@ class PrimaryKeyVectorBucketSearchTest {
                         org.mockito.ArgumentMatchers.eq(searchOptions)))
                 .thenReturn(Collections.singletonList(new PkVectorSearchResult("data-1", 1, 0.5F)));
 
-        List<PkVectorSearchResult> results =
+        PrimaryKeyVectorBucketSearch.Result results =
                 new PrimaryKeyVectorBucketSearch(
                                 readerFactory,
                                 annSearcher,
@@ -132,16 +132,23 @@ class PrimaryKeyVectorBucketSearchTest {
                                 Arrays.asList(data1, data2),
                                 deletionVectors,
                                 new float[] {0, 0},
+                                2,
                                 2);
 
-        assertThat(results)
+        assertThat(results.indexedCandidates())
+                .extracting(
+                        PkVectorSearchResult::dataFileName,
+                        PkVectorSearchResult::rowPosition,
+                        PkVectorSearchResult::distance)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("data-1", 1L, 0.5F));
+        assertThat(results.exactCandidates())
                 .extracting(
                         PkVectorSearchResult::dataFileName,
                         PkVectorSearchResult::rowPosition,
                         PkVectorSearchResult::distance)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("data-1", 1L, 0.5F),
-                        org.assertj.core.groups.Tuple.tuple("data-2", 0L, 1F));
+                        org.assertj.core.groups.Tuple.tuple("data-2", 0L, 1F),
+                        org.assertj.core.groups.Tuple.tuple("data-2", 1L, 9F));
         verify(readerFactory, never()).create(data1);
     }
 
