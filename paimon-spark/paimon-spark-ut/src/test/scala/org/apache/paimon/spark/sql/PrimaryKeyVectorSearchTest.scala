@@ -44,9 +44,7 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
 
   test("distributed primary-key vector search evaluates buckets in Spark") {
     withTable("T") {
-      createVectorTable(
-        bucket = 2,
-        extraOptions = Seq("global-index.thread-num" -> "1"))
+      createVectorTable(bucket = 2, extraOptions = Seq("global-index.thread-num" -> "1"))
       spark.sql("""
                   |INSERT INTO T VALUES
                   |  (1, array(1.0f, 0.0f)),
@@ -109,9 +107,7 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
 
   test("primary-key vector search merges top k across buckets") {
     withTable("T") {
-      createVectorTable(
-        bucket = 4,
-        extraOptions = Seq("global-index.thread-num" -> "2"))
+      createVectorTable(bucket = 4, extraOptions = Seq("global-index.thread-num" -> "2"))
       spark.sql("""
                   |INSERT INTO T VALUES
                   |  (1, array(1.0f, 0.0f)),
