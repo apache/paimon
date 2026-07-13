@@ -30,7 +30,7 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.Optional;
 
-import static org.apache.paimon.flink.sink.FlinkSink.createCommitUser;
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Builder for {@link CompactorSink}. */
