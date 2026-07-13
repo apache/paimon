@@ -232,7 +232,6 @@ class BucketedSortedIndexMaintainerTest {
                 Arrays.asList(payload("new-1", source, 2), payload("new-2", source, 1));
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch completed = new CountDownLatch(1);
         BucketedSortedIndexMaintainer maintainer =
                 new BucketedSortedIndexMaintainer(
                         7,
@@ -241,7 +240,6 @@ class BucketedSortedIndexMaintainerTest {
                         dataFile -> {
                             started.countDown();
                             release.await();
-                            completed.countDown();
                             return payloads;
                         },
                         Collections.emptyList(),
@@ -256,7 +254,7 @@ class BucketedSortedIndexMaintainerTest {
         assertThat(maintainer.buildNotCompleted()).isTrue();
 
         release.countDown();
-        assertThat(completed.await(5, TimeUnit.SECONDS)).isTrue();
+        executor.submit(() -> {}).get(5, TimeUnit.SECONDS);
         BucketedSortedIndexMaintainer.SortedIndexCommit second =
                 maintainer.prepareCommit(
                         DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), false);
