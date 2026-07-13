@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -68,6 +69,11 @@ public interface SnapshotReader {
     SplitGenerator splitGenerator();
 
     FileStorePathFactory pathFactory();
+
+    @Nullable
+    default IndexFileHandler indexFileHandler() {
+        return null;
+    }
 
     SnapshotReader withSnapshot(long snapshotId);
 
