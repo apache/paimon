@@ -128,6 +128,47 @@ class PkVectorAnnSegmentFileTest {
     }
 
     @Test
+    void testSearchFiltersInactiveSources() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = annFile(fileIO);
+        IndexFileMeta segment =
+                annFile.build(
+                        Arrays.asList(
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("retired", 2),
+                                        new ArrayReader(new float[][] {{0, 0}, {1, 0}})),
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("active", 2),
+                                        new ArrayReader(new float[][] {{2, 0}, {3, 0}}))),
+                        vectorField(),
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann");
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        List<PkVectorSearchResult> candidates;
+        try {
+            candidates =
+                    new PkVectorAnnSegmentSearcher(
+                                    fileIO, annFile, vectorField(), indexOptions(), "l2", executor)
+                            .search(
+                                    segment,
+                                    PkVectorSourceMeta.fromIndexFile(segment),
+                                    new float[] {0, 0},
+                                    3,
+                                    Collections.emptyMap(),
+                                    Collections.singleton("active"),
+                                    Collections.emptyMap());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(candidates)
+                .extracting(PkVectorSearchResult::dataFileName)
+                .containsExactly("active", "active");
+    }
+
+    @Test
     void testRejectsSourcesWithoutRows() {
         LocalFileIO fileIO = LocalFileIO.create();
 

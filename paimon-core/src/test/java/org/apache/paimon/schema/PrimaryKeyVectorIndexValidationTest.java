@@ -234,6 +234,26 @@ class PrimaryKeyVectorIndexValidationTest {
                 .hasMessageContaining("l2, cosine, inner_product");
     }
 
+    @Test
+    void testRejectsInvalidAnnCompactionLevelFanout() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT.key(), "1");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-vector.index.compaction.level-fanout")
+                .hasMessageContaining("greater than 1");
+    }
+
+    @Test
+    void testRejectsInvalidAnnCompactionStaleRatio() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD.key(), "1.1");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-vector.index.compaction.stale-ratio-threshold")
+                .hasMessageContaining("(0, 1]");
+    }
+
     private static Map<String, String> enabledOptions() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");

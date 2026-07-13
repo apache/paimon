@@ -41,9 +41,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -102,6 +104,28 @@ public class PkVectorAnnSegmentSearcher {
             int limit,
             Map<String, DeletionVector> deletionVectors,
             Map<String, String> searchOptions) {
+        Set<String> activeSourceFiles = new HashSet<>();
+        for (PkVectorSourceFile sourceFile : sourceMeta.sourceFiles()) {
+            activeSourceFiles.add(sourceFile.fileName());
+        }
+        return search(
+                segment,
+                sourceMeta,
+                query,
+                limit,
+                deletionVectors,
+                activeSourceFiles,
+                searchOptions);
+    }
+
+    public List<PkVectorSearchResult> search(
+            IndexFileMeta segment,
+            PkVectorSourceMeta sourceMeta,
+            float[] query,
+            int limit,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, String> searchOptions) {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         GlobalIndexMeta globalIndexMeta = segment.globalIndexMeta();
         checkArgument(
@@ -135,7 +159,7 @@ public class PkVectorAnnSegmentSearcher {
         try {
             VectorSearch search = new VectorSearch(query, limit, vectorField.name(), searchOptions);
             RoaringNavigableMap64 liveRows =
-                    liveRowPositions(sourceMeta.sourceFiles(), deletionVectors);
+                    liveRowPositions(sourceMeta.sourceFiles(), activeSourceFiles, deletionVectors);
             if (liveRows != null) {
                 search.withIncludeRowIds(liveRows);
             }
@@ -155,6 +179,11 @@ public class PkVectorAnnSegmentSearcher {
                         ordinal,
                         sourceRowCount);
                 FilePosition filePosition = filePosition(sourceMeta.sourceFiles(), ordinal);
+                checkArgument(
+                        activeSourceFiles.contains(filePosition.dataFileName),
+                        "ANN segment %s returned inactive source %s.",
+                        segment.fileName(),
+                        filePosition.dataFileName);
                 DeletionVector deletionVector = deletionVectors.get(filePosition.dataFileName);
                 checkArgument(
                         deletionVector == null
@@ -178,18 +207,29 @@ public class PkVectorAnnSegmentSearcher {
 
     @Nullable
     private static RoaringNavigableMap64 liveRowPositions(
-            List<PkVectorSourceFile> sourceFiles, Map<String, DeletionVector> deletionVectors) {
-        if (deletionVectors.isEmpty()) {
+            List<PkVectorSourceFile> sourceFiles,
+            Set<String> activeSourceFiles,
+            Map<String, DeletionVector> deletionVectors) {
+        boolean allSourcesActive = true;
+        for (PkVectorSourceFile sourceFile : sourceFiles) {
+            if (!activeSourceFiles.contains(sourceFile.fileName())) {
+                allSourcesActive = false;
+                break;
+            }
+        }
+        if (allSourcesActive && deletionVectors.isEmpty()) {
             return null;
         }
         RoaringNavigableMap64 live = new RoaringNavigableMap64();
         RoaringNavigableMap64 deleted = new RoaringNavigableMap64();
         long fileOffset = 0;
         for (PkVectorSourceFile sourceFile : sourceFiles) {
-            if (sourceFile.rowCount() > 0) {
+            boolean active = activeSourceFiles.contains(sourceFile.fileName());
+            if (active && sourceFile.rowCount() > 0) {
                 live.addRange(new Range(fileOffset, fileOffset + sourceFile.rowCount() - 1));
             }
-            DeletionVector deletionVector = deletionVectors.get(sourceFile.fileName());
+            DeletionVector deletionVector =
+                    active ? deletionVectors.get(sourceFile.fileName()) : null;
             if (deletionVector != null) {
                 final long offset = fileOffset;
                 deletionVector.forEachDeletedPosition(position -> deleted.add(offset + position));
