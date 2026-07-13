@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -81,6 +82,15 @@ class PrimaryKeySortedIndexBatchScanTest {
     }
 
     @Test
+    void testPostponeBucketBatchScanUsesSnapshotScopedSortedIndex() {
+        ScanFixture fixture = fixture(reader(2), true, BucketMode.POSTPONE_BUCKET);
+
+        TableScan.Plan result = fixture.scan.plan();
+
+        assertThat(result.splits()).singleElement().isInstanceOf(IndexedSplit.class);
+    }
+
+    @Test
     void testOrdinaryBatchScanFailsWhenApplyingSortedIndexFails() {
         ScanFixture fixture = fixture(reader(2));
         when(fixture.scan
@@ -105,9 +115,9 @@ class PrimaryKeySortedIndexBatchScanTest {
         assertThat(result.splits()).singleElement().isInstanceOf(DataSplit.class);
     }
 
-    private static TableSchema tableSchema(boolean globalIndexEnabled) {
+    private static TableSchema tableSchema(boolean globalIndexEnabled, int bucket) {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BUCKET.key(), "2");
+        options.put(CoreOptions.BUCKET.key(), Integer.toString(bucket));
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(), "false");
         options.put(CoreOptions.GLOBAL_INDEX_ENABLED.key(), Boolean.toString(globalIndexEnabled));
@@ -129,7 +139,12 @@ class PrimaryKeySortedIndexBatchScanTest {
     }
 
     private static ScanFixture fixture(GlobalIndexReader reader, boolean globalIndexEnabled) {
-        TableSchema schema = tableSchema(globalIndexEnabled);
+        return fixture(reader, globalIndexEnabled, 2);
+    }
+
+    private static ScanFixture fixture(
+            GlobalIndexReader reader, boolean globalIndexEnabled, int bucket) {
+        TableSchema schema = tableSchema(globalIndexEnabled, bucket);
         CoreOptions options = new CoreOptions(schema.options());
         DataFileMeta dataFile = dataFile("data-1", 4);
         DataSplit dataSplit = dataSplit(11, dataFile);
