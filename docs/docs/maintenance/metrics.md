@@ -37,7 +37,7 @@ Paimon has supported built-in metrics to measure operations of **commits**, **sc
 
 ## Metrics List
 
-Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics and compaction metrics.
+Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics, blob fetch metrics and compaction metrics.
 
 ### Scan Metrics
 
@@ -226,6 +226,85 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </tbody>
 </table>
 
+### Blob Fetch Metrics
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>blobFetchTotal</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch outcomes handled during write, including successful fetches, failures, and missing resources written as NULL.</td>
+        </tr>
+        <tr>
+            <td>blobFetchSuccess</td>
+            <td>Counter</td>
+            <td>Total number of blob fetches that completed successfully.</td>
+        </tr>
+        <tr>
+            <td>blobFetchSuccessBytes</td>
+            <td>Counter</td>
+            <td>Total bytes written by successful blob fetches.</td>
+        </tr>
+        <tr>
+            <td>blobFetchNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because a blob resource was missing or failed to fetch.</td>
+        </tr>
+        <tr>
+            <td>blobFetchMissingFileNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because <code>blob-write-null-on-missing-file</code> handled a missing blob resource.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailureNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because <code>blob-write-null-on-fetch-failure</code> handled a non-404 blob fetch failure.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailure</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures that were not written as NULL.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpNotFound</td>
+            <td>Counter</td>
+            <td>Total number of HTTP 404 blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpClientError</td>
+            <td>Counter</td>
+            <td>Total number of non-404 HTTP 4xx blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpServerError</td>
+            <td>Counter</td>
+            <td>Total number of HTTP 5xx blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpOtherError</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures with HTTP status codes outside 4xx and 5xx.</td>
+        </tr>
+        <tr>
+            <td>blobFetchInvalidUri</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures caused by invalid URIs.</td>
+        </tr>
+        <tr>
+            <td>blobFetchOtherError</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures that are not classified as HTTP status or invalid URI failures.</td>
+        </tr>
+    </tbody>
+</table>
+
 ### Compaction Metrics
 
 <table class="table table-bordered">
@@ -374,6 +453,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
             <td>Write Buffer Metrics</td>
             <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
             <td>paimon.table.&lt;table_name&gt;.writeBuffer</td>
+        </tr>
+        <tr>
+            <td>Blob Fetch Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.blobFetch</td>
         </tr>
         <tr>
             <td>Compaction Metrics</td>

@@ -35,6 +35,8 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.BlobFetchMetrics;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -80,6 +82,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final RowType rowType;
 
     private @Nullable BlobFileContext blobContext;
+    private @Nullable BlobFetchMetrics blobFetchMetrics;
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
@@ -121,6 +124,16 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     public BaseAppendFileStoreWrite withBlobConsumer(BlobConsumer blobConsumer) {
         if (blobContext != null) {
             blobContext = blobContext.withBlobConsumer(blobConsumer);
+        }
+        return this;
+    }
+
+    @Override
+    public BaseAppendFileStoreWrite withMetricRegistry(MetricRegistry metricRegistry) {
+        super.withMetricRegistry(metricRegistry);
+        if (blobContext != null) {
+            blobFetchMetrics = new BlobFetchMetrics(metricRegistry, tableName);
+            blobContext = blobContext.withBlobFetchMetricReporter(blobFetchMetrics);
         }
         return this;
     }
@@ -185,6 +198,14 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
         return createStatsFactories(options.statsMode(), options, writeType.getFieldNames());
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (blobFetchMetrics != null) {
+            blobFetchMetrics.close();
+        }
     }
 
     protected abstract CompactManager getCompactManager(
