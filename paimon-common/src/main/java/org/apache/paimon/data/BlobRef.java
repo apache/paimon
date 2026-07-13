@@ -45,8 +45,17 @@ public class BlobRef implements Blob {
 
     @Override
     public byte[] toData() {
-        try {
-            return IOUtils.readFully(newInputStream(), true);
+        try (SeekableInputStream inputStream = newInputStream()) {
+            long length = descriptor.length();
+            if (length >= 0) {
+                if (length > Integer.MAX_VALUE) {
+                    throw new IOException("Blob is too large to materialize as byte[]: " + length);
+                }
+                byte[] data = new byte[(int) length];
+                IOUtils.readFully(inputStream, data);
+                return data;
+            }
+            return IOUtils.readFully(inputStream, false);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

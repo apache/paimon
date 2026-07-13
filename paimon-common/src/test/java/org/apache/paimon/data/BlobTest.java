@@ -18,7 +18,9 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.UriReader;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -78,5 +81,45 @@ public class BlobTest {
         String uri = "http://example.com/file.txt";
         Blob blob = Blob.fromHttp(uri);
         assertThat(blob).isInstanceOf(BlobRef.class);
+    }
+
+    @Test
+    public void testBlobRefReadsKnownLengthDirectly() {
+        byte[] data = new byte[8194];
+        for (int i = 0; i < data.length; i++) {
+            data[i] = (byte) i;
+        }
+        TrackingSeekableInputStream inputStream = new TrackingSeekableInputStream(data);
+        UriReader uriReader = uri -> inputStream;
+        Blob blob = Blob.fromDescriptor(uriReader, new BlobDescriptor("test", 2, data.length - 2));
+
+        assertThat(blob.toData()).isEqualTo(Arrays.copyOfRange(data, 2, data.length));
+        assertThat(inputStream.readCalls).isEqualTo(1);
+        assertThat(inputStream.maxRequestedBytes).isEqualTo(data.length - 2);
+        assertThat(inputStream.closed).isTrue();
+    }
+
+    private static class TrackingSeekableInputStream extends ByteArraySeekableStream {
+
+        private int readCalls;
+        private int maxRequestedBytes;
+        private boolean closed;
+
+        private TrackingSeekableInputStream(byte[] data) {
+            super(data);
+        }
+
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            readCalls++;
+            maxRequestedBytes = Math.max(maxRequestedBytes, length);
+            return super.read(bytes, offset, length);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
     }
 }
