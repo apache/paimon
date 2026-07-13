@@ -26,8 +26,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
-import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
-import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanType;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -43,23 +42,30 @@ import org.apache.parquet.hadoop.ParquetOutputFormat;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 
 /** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat implements SupportsFieldMetadata {
 
-    private final FormatContext formatContext;
+    private static final Set<ShreddingWritePlanType> SUPPORTED_SHREDDING_WRITE_PLANS =
+            Collections.unmodifiableSet(
+                    EnumSet.of(
+                            ShreddingWritePlanType.VARIANT,
+                            ShreddingWritePlanType.MAP_SHARED_SHREDDING));
+
     private final Options options;
     private final int readBatchSize;
 
     public ParquetFileFormat(FormatContext formatContext) {
-        super(IDENTIFIER);
+        super(IDENTIFIER, formatContext.options());
 
-        this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
     }
@@ -99,11 +105,13 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     }
 
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
-        ParquetWriterFactory baseFactory =
-                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
-        return new ShreddingWritePlanWriterFactory(
-                baseFactory, new VariantShreddingWritePlanFactory(type, formatContext.options()));
+    protected FormatWriterFactory createRawWriterFactory(RowType type) {
+        return new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+    }
+
+    @Override
+    protected Set<ShreddingWritePlanType> supportedShreddingWritePlans() {
+        return SUPPORTED_SHREDDING_WRITE_PLANS;
     }
 
     @Override

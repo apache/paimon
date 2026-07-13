@@ -29,7 +29,6 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.CompactIncrement;
@@ -430,9 +429,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private FormatWriterFactory writerFactory() {
-        FormatWriterFactory factory = fileFormat.createWriterFactory(writeSchema);
-        return ShreddingWritePlanWriterFactories.wrapMapSharedShredding(
-                factory, writeSchema, sharedShreddingContext);
+        return sharedShreddingContext == null
+                ? fileFormat.createWriterFactory(writeSchema)
+                : fileFormat.createWriterFactory(writeSchema, sharedShreddingContext);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

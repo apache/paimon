@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.shredding.MapSharedShreddingContext;
 import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.data.shredding.MapShreddingDefine;
@@ -53,6 +54,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for format integration of {@link ShreddingWritePlanWriterFactory}. */
 class ShreddingWritePlanFormatTest {
@@ -60,10 +62,10 @@ class ShreddingWritePlanFormatTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void testParquetWritesMapSharedShreddingMetadataThroughVariantWrapper() throws Exception {
+    void testParquetWritesMapSharedShreddingMetadata() throws Exception {
+        Options options = mapSharedShreddingOptions();
         FileFormat format =
-                new ParquetFileFormat(
-                        new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
 
         Map<String, Map<String, String>> fieldMetadata =
                 writeAndReadFieldMetadata(format, "parquet", "none");
@@ -77,8 +79,9 @@ class ShreddingWritePlanFormatTest {
 
     @Test
     void testOrcWritesMapSharedShreddingMetadata() throws Exception {
+        Options options = mapSharedShreddingOptions();
         FileFormat format =
-                new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+                new OrcFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
 
         Map<String, Map<String, String>> fieldMetadata =
                 writeAndReadFieldMetadata(format, "orc", "none");
@@ -89,6 +92,41 @@ class ShreddingWritePlanFormatTest {
                 .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");
     }
 
+    @Test
+    void testOrcRejectsVariantShreddingWritePlan() {
+        Options options = new Options();
+        options.set(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA, true);
+        FileFormat format =
+                new OrcFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        assertThatThrownBy(() -> format.createWriterFactory(rowType))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("File format 'orc' does not support VARIANT write plans");
+    }
+
+    @Test
+    void testRejectsMultipleActiveWritePlans() {
+        Options options = mapSharedShreddingOptions();
+        options.set(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA, true);
+        FileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
+                        DataTypes.FIELD(1, "v", DataTypes.VARIANT()));
+
+        assertThatThrownBy(
+                        () ->
+                                format.createWriterFactory(
+                                        rowType,
+                                        new MapSharedShreddingContext(
+                                                Collections.singletonMap("tags", 2))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Composing multiple active shredding write plans is not supported.");
+    }
+
     private Map<String, Map<String, String>> writeAndReadFieldMetadata(
             FileFormat format, String extension, String compression) throws IOException {
         FileIO fileIO = LocalFileIO.create();
@@ -96,8 +134,9 @@ class ShreddingWritePlanFormatTest {
         RowType rowType = logicalRowType();
 
         FormatWriterFactory writerFactory =
-                ShreddingWritePlanWriterFactories.wrapMapSharedShredding(
-                        format.createWriterFactory(rowType), rowType, mapSharedShreddingOptions());
+                format.createWriterFactory(
+                        rowType,
+                        new MapSharedShreddingContext(Collections.singletonMap("tags", 2)));
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = writerFactory.create(out, compression);
         writer.addElement(GenericRow.of(1, stringKeyMap("a", 10L, "b", 20L, "c", 30L)));
@@ -115,11 +154,11 @@ class ShreddingWritePlanFormatTest {
                 DataTypes.FIELD(1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
     }
 
-    private static CoreOptions mapSharedShreddingOptions() {
+    private static Options mapSharedShreddingOptions() {
         Options options = new Options();
         options.setString("fields.tags.map.storage-layout", "shared-shredding");
         options.setString("fields.tags.map.shared-shredding.max-columns", "2");
-        return new CoreOptions(options);
+        return options;
     }
 
     private static void assertMapSharedShreddingMetadata(

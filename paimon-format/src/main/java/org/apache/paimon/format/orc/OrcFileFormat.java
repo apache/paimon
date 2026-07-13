@@ -31,6 +31,7 @@ import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.format.shredding.ShreddingWritePlanType;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -52,10 +53,12 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
@@ -67,6 +70,9 @@ public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
 
     public static final String IDENTIFIER = "orc";
 
+    private static final Set<ShreddingWritePlanType> SUPPORTED_SHREDDING_WRITE_PLANS =
+            Collections.singleton(ShreddingWritePlanType.MAP_SHARED_SHREDDING);
+
     private final Properties orcProperties;
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
@@ -77,7 +83,7 @@ public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
     private final boolean legacyTimestampLtzType;
 
     public OrcFileFormat(FormatContext formatContext) {
-        super(IDENTIFIER);
+        super(IDENTIFIER, formatContext.options());
         this.orcProperties = getOrcProperties(formatContext.options(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration(false);
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
@@ -162,7 +168,7 @@ public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
      * @return The factory of the writer
      */
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
+    protected FormatWriterFactory createRawWriterFactory(RowType type) {
         RowType refinedType = (RowType) refineDataType(type);
         TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema(refinedType);
         Vectorizer<InternalRow> vectorizer =
@@ -176,6 +182,11 @@ public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
                 writeBatchSize,
                 writeBatchMemory,
                 legacyTimestampLtzType);
+    }
+
+    @Override
+    protected Set<ShreddingWritePlanType> supportedShreddingWritePlans() {
+        return SUPPORTED_SHREDDING_WRITE_PLANS;
     }
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {
