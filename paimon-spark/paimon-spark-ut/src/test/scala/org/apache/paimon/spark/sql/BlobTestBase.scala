@@ -129,6 +129,26 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test primary-key array blob") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+          "'primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, array(X'48656C6C6F', CAST(NULL AS BINARY), X'5945'))")
+
+      val row =
+        sql("SELECT id, size(pictures), pictures[0], pictures[1], pictures[2] FROM t")
+          .collect()(0)
+      assert(row.getInt(0) == 1)
+      assert(row.getInt(1) == 3)
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(row.isNullAt(3))
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+    }
+  }
+
   test("Blob: array blob writes descriptor elements and reads descriptors") {
     withTable("t") {
       val blobData = new Array[Byte](1024)

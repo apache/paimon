@@ -190,12 +190,11 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testPrimaryKeyArrayBlobStillRequiresDataEvolution() {
+    public void testPrimaryKeyArrayBlobManagedByType() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
-                        new DataField(
-                                1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), "1");
         options.put(CoreOptions.BLOB_FIELD.key(), "payloads");
@@ -203,13 +202,11 @@ class SchemaValidationTest {
         TableSchema schema =
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
 
-        assertThatThrownBy(() -> validateTableSchema(schema))
-                .hasMessage(
-                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     @Test
-    public void testPrimaryKeyBlobRequiresDescriptorFields() {
+    public void testPrimaryKeyBlobManagedByType() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
@@ -220,9 +217,7 @@ class SchemaValidationTest {
         TableSchema schema =
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
 
-        assertThatThrownBy(() -> validateTableSchema(schema))
-                .hasMessage(
-                        "Primary-key BLOB tables require every BLOB field in 'blob-descriptor-field'. Missing fields: [payload].");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     @Test
@@ -266,6 +261,16 @@ class SchemaValidationTest {
                                                 singletonList("id"),
                                                 emptyList())))
                 .hasMessage("Primary-key BLOB tables only support changelog-producer 'none'.");
+
+        Map<String, String> viewOptions = new HashMap<>();
+        viewOptions.put(BUCKET.key(), "1");
+        viewOptions.put(CoreOptions.BLOB_VIEW_FIELD.key(), "payload");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                viewOptions, singletonList("id"), emptyList())))
+                .hasMessage("Primary-key BLOB tables do not support 'blob-view-field'.");
 
         Map<String, String> externalPathOptions = new HashMap<>(options);
         externalPathOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file:///tmp/data");

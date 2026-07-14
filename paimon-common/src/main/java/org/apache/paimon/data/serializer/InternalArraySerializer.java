@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 
 import java.io.IOException;
 import java.lang.reflect.Array;
@@ -62,7 +63,9 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
 
     @Override
     public InternalArray copy(InternalArray from) {
-        if (from instanceof GenericArray) {
+        if (eleType.getTypeRoot() == DataTypeRoot.BLOB) {
+            return copyObjectArray(from);
+        } else if (from instanceof GenericArray) {
             return copyGenericArray((GenericArray) from);
         } else if (from instanceof BinaryArray) {
             return ((BinaryArray) from).copy();
@@ -92,16 +95,19 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
                     throw new RuntimeException("Unknown type: " + eleType);
             }
         } else {
-            Object[] objectArray = array.toObjectArray();
-            Object[] newArray =
-                    (Object[]) Array.newInstance(InternalRow.getDataClass(eleType), array.size());
-            for (int i = 0; i < array.size(); i++) {
-                if (objectArray[i] != null) {
-                    newArray[i] = eleSer.copy(objectArray[i]);
-                }
-            }
-            return new GenericArray(newArray);
+            return copyObjectArray(array);
         }
+    }
+
+    private GenericArray copyObjectArray(InternalArray array) {
+        Object[] newArray =
+                (Object[]) Array.newInstance(InternalRow.getDataClass(eleType), array.size());
+        for (int i = 0; i < array.size(); i++) {
+            if (!array.isNullAt(i)) {
+                newArray[i] = eleSer.copy(elementGetter.getElementOrNull(array, i));
+            }
+        }
+        return new GenericArray(newArray);
     }
 
     @Override

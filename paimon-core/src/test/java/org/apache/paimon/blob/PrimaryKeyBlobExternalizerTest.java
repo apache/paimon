@@ -19,8 +19,11 @@
 package org.apache.paimon.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -35,6 +38,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyBlobExternalizer}. */
 class PrimaryKeyBlobExternalizerTest {
@@ -97,5 +101,79 @@ class PrimaryKeyBlobExternalizerTest {
         externalizer.abort();
 
         assertThat(fileIO.exists(privatePack)).isFalse();
+    }
+
+    @Test
+    void testExternalizeMixedBlobArrayElements() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        pathFactory,
+                        1024L);
+        byte[] expected = "array-element".getBytes(StandardCharsets.UTF_8);
+        Blob external = Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+
+        InternalRow result =
+                externalizer.externalize(
+                        RowKind.INSERT,
+                        GenericRow.of(
+                                1,
+                                new GenericArray(
+                                        new Object[] {Blob.fromData(expected), null, external})));
+        InternalArray blobs = result.getArray(1);
+
+        assertThat(blobs.size()).isEqualTo(3);
+        assertThat(blobs.getBlob(0)).isInstanceOf(BlobRef.class);
+        assertThat(blobs.getBlob(0).toDescriptor().uri())
+                .endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        assertThat(blobs.isNullAt(1)).isTrue();
+        assertThat(blobs.getBlob(2).toDescriptor()).isEqualTo(external.toDescriptor());
+
+        externalizer.prepareCommit();
+        assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testBlobArrayNullEmptyRetractAndPlaceholder() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        pathFactory,
+                        1024L);
+
+        GenericRow nullArray = GenericRow.of(1, null);
+        GenericRow emptyArray = GenericRow.of(2, new GenericArray(new Object[0]));
+        GenericRow nullElement = GenericRow.of(3, new GenericArray(new Object[] {null}));
+        assertThat(externalizer.externalize(RowKind.INSERT, nullArray)).isSameAs(nullArray);
+        assertThat(externalizer.externalize(RowKind.INSERT, emptyArray)).isSameAs(emptyArray);
+        assertThat(externalizer.externalize(RowKind.INSERT, nullElement)).isSameAs(nullElement);
+
+        InternalRow retract =
+                externalizer.externalize(
+                        RowKind.DELETE, GenericRow.of(4, BlobArrayPlaceholder.INSTANCE));
+        assertThat(retract.isNullAt(1)).isTrue();
+
+        assertThatThrownBy(
+                        () ->
+                                externalizer.externalize(
+                                        RowKind.INSERT,
+                                        GenericRow.of(5, BlobArrayPlaceholder.INSTANCE)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("placeholder blob array");
+        assertThat(fileIO.listStatus(bucketPath)).isEmpty();
     }
 }

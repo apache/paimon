@@ -216,7 +216,7 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
-        validatePrimaryKeyBlobConfiguration(schema, options, blobDescriptorFields);
+        validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
 
@@ -1209,9 +1209,7 @@ public class SchemaValidation {
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
-            boolean primaryKeyManagedBlob =
-                    !schema.primaryKeys().isEmpty()
-                            && options.blobDescriptorField().containsAll(blobNames);
+            boolean primaryKeyManagedBlob = !schema.primaryKeys().isEmpty();
             if (!primaryKeyManagedBlob) {
                 checkArgument(
                         options.dataEvolutionEnabled(),
@@ -1307,29 +1305,24 @@ public class SchemaValidation {
     }
 
     private static void validatePrimaryKeyBlobConfiguration(
-            TableSchema schema, CoreOptions options, Set<String> blobDescriptorFields) {
+            TableSchema schema, CoreOptions options) {
         if (schema.primaryKeys().isEmpty()) {
             return;
         }
 
         List<String> blobFields =
                 schema.fields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .filter(field -> isBlobFileField(field.type()))
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (blobFields.isEmpty()) {
             return;
         }
 
-        List<String> missingFields =
-                blobFields.stream()
-                        .filter(field -> !blobDescriptorFields.contains(field))
-                        .collect(Collectors.toList());
         checkArgument(
-                missingFields.isEmpty(),
-                "Primary-key BLOB tables require every BLOB field in '%s'. Missing fields: %s.",
-                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-                missingFields);
+                options.blobViewField().isEmpty(),
+                "Primary-key BLOB tables do not support '%s'.",
+                CoreOptions.BLOB_VIEW_FIELD.key());
 
         List<String> primaryKeyBlobFields =
                 blobFields.stream()

@@ -47,10 +47,9 @@ public class ManagedBlobReferenceFile {
 
     private ManagedBlobReferenceFile() {}
 
-    public static Optional<Reference> fromDescriptorUri(Path dataFile, String descriptorUri) {
+    public static Optional<Reference> fromDescriptorUri(String descriptorUri) {
         Path blobPath = new Path(descriptorUri);
-        if (!blobPath.getName().endsWith(MANAGED_BLOB_SUFFIX)
-                || !dataFile.getParent().equals(blobPath.getParent())) {
+        if (!blobPath.getName().endsWith(MANAGED_BLOB_SUFFIX)) {
             return Optional.empty();
         }
         return Optional.of(new Reference(blobPath.getParent().toString(), blobPath.getName()));

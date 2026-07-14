@@ -21,16 +21,22 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataTypes;
+
+import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** A test for the {@link InternalArraySerializer}. */
 class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
@@ -80,6 +86,17 @@ class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
     protected InternalArray[] getSerializableTestData() {
         InternalArray[] testData = getTestData();
         return Arrays.copyOfRange(testData, 0, testData.length - 1);
+    }
+
+    @Test
+    void testCopyBlobArrayPreservesReferences() {
+        Blob reference = Blob.fromFile(LocalFileIO.create(), "file:/not-read", 3, 5);
+        InternalArray copied =
+                new InternalArraySerializer(DataTypes.BLOB())
+                        .copy(new GenericArray(new Object[] {reference, null}));
+
+        assertThat(copied.getBlob(0)).isSameAs(reference);
+        assertThat(copied.isNullAt(1)).isTrue();
     }
 
     static BinaryArray copyNewOffset(BinaryArray array) {

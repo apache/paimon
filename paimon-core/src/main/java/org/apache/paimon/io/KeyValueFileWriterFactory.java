@@ -38,7 +38,6 @@ import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -57,6 +56,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -214,9 +215,7 @@ public class KeyValueFileWriterFactory {
     }
 
     private boolean managedBlobEnabled() {
-        return !options.blobDescriptorField().isEmpty()
-                && valueType.getFields().stream()
-                        .anyMatch(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB);
+        return valueType.getFields().stream().anyMatch(field -> isBlobFileField(field.type()));
     }
 
     public void deleteFile(DataFileMeta file) {

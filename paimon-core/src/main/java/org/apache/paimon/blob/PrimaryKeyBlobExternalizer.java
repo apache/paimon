@@ -21,13 +21,16 @@ package org.apache.paimon.blob;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.blob.BlobFormatWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
@@ -48,6 +51,7 @@ public class PrimaryKeyBlobExternalizer {
     private final FileIO fileIO;
     private final RowDataToObjectArrayConverter rowConverter;
     private final int[] blobFieldIndexes;
+    private final boolean[] blobArrayFields;
     private final ManagedBlobPackWriter[] packWriters;
     private final List<Path> uncommittedPacks;
 
@@ -62,21 +66,34 @@ public class PrimaryKeyBlobExternalizer {
         this.uncommittedPacks = new ArrayList<>();
 
         List<Integer> indexes = new ArrayList<>();
+        List<Boolean> arrayFields = new ArrayList<>();
         List<ManagedBlobPackWriter> writers = new ArrayList<>();
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             DataField field = valueType.getFields().get(i);
-            if (field.type().getTypeRoot() == DataTypeRoot.BLOB) {
+            boolean blob = field.type().getTypeRoot() == DataTypeRoot.BLOB;
+            boolean blobArray =
+                    field.type().getTypeRoot() == DataTypeRoot.ARRAY
+                            && ((ArrayType) field.type()).getElementType().getTypeRoot()
+                                    == DataTypeRoot.BLOB;
+            if (blob || blobArray) {
                 indexes.add(i);
+                arrayFields.add(blobArray);
                 writers.add(
                         new ManagedBlobPackWriter(
                                 fileIO,
-                                new RowType(Collections.singletonList(field)),
+                                blobArray
+                                        ? RowType.of(((ArrayType) field.type()).getElementType())
+                                        : new RowType(Collections.singletonList(field)),
                                 pathFactory,
                                 targetFileSize,
                                 uncommittedPacks));
             }
         }
         this.blobFieldIndexes = indexes.stream().mapToInt(Integer::intValue).toArray();
+        this.blobArrayFields = new boolean[arrayFields.size()];
+        for (int i = 0; i < arrayFields.size(); i++) {
+            blobArrayFields[i] = arrayFields.get(i);
+        }
         this.packWriters = writers.toArray(new ManagedBlobPackWriter[0]);
     }
 
@@ -97,13 +114,25 @@ public class PrimaryKeyBlobExternalizer {
                     continue;
                 }
 
-                Blob blob = value.getBlob(fieldIndex);
                 if (valueKind.isRetract()) {
                     if (result == null) {
                         result = copy(value);
                     }
                     result.setField(fieldIndex, null);
-                } else if (!(blob instanceof BlobRef)) {
+                } else if (blobArrayFields[i]) {
+                    InternalArray array = value.getArray(fieldIndex);
+                    GenericArray externalized = externalizeArray(array, packWriters[i]);
+                    if (externalized != null) {
+                        if (result == null) {
+                            result = copy(value);
+                        }
+                        result.setField(fieldIndex, externalized);
+                    }
+                } else {
+                    Blob blob = value.getBlob(fieldIndex);
+                    if (blob instanceof BlobRef) {
+                        continue;
+                    }
                     if (result == null) {
                         result = copy(value);
                     }
@@ -122,6 +151,33 @@ public class PrimaryKeyBlobExternalizer {
             throw e;
         }
         return result == null ? value : result;
+    }
+
+    private GenericArray externalizeArray(InternalArray array, ManagedBlobPackWriter packWriter)
+            throws IOException {
+        Object[] elements = null;
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                continue;
+            }
+
+            Blob blob = array.getBlob(i);
+            if (blob instanceof BlobRef) {
+                continue;
+            }
+
+            if (elements == null) {
+                elements = new Object[array.size()];
+                for (int j = 0; j < array.size(); j++) {
+                    elements[j] = array.isNullAt(j) ? null : array.getBlob(j);
+                }
+            }
+            BlobDescriptor descriptor = packWriter.write(blob);
+            elements[i] =
+                    Blob.fromFile(
+                            fileIO, descriptor.uri(), descriptor.offset(), descriptor.length());
+        }
+        return elements == null ? null : new GenericArray(elements);
     }
 
     public void prepareCommit() throws IOException {

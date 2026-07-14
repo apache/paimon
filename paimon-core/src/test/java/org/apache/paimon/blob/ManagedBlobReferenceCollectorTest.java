@@ -20,6 +20,7 @@ package org.apache.paimon.blob;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -61,7 +62,51 @@ class ManagedBlobReferenceCollectorTest {
         assertThat(ManagedBlobReferenceFile.read(fileIO, sidecar))
                 .containsExactly(
                         new ManagedBlobReferenceFile.Reference(
-                                bucketPath.toString(), managedBlob.getName()));
+                                bucketPath.toString(), managedBlob.getName()),
+                        new ManagedBlobReferenceFile.Reference(
+                                externalBlob.getParent().toString(), externalBlob.getName()));
+    }
+
+    @Test
+    void testCollectManagedReferencesFromBlobArray() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        Path otherBucketPath = new Path(tempDir.resolve("bucket-1").toUri());
+        fileIO.mkdirs(bucketPath);
+        Path dataFile = new Path(bucketPath, "data-a.avro");
+        Path first = new Path(bucketPath, "data-b.managed.blob");
+        Path second = new Path(otherBucketPath, "data-c.managed.blob");
+        Path external = new Path(tempDir.resolve("external/data-d.blob").toUri());
+        ManagedBlobReferenceCollector collector =
+                new ManagedBlobReferenceCollector(
+                        fileIO,
+                        dataFile,
+                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())));
+
+        collector.write(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                RowKind.INSERT,
+                                GenericRow.of(
+                                        1,
+                                        new GenericArray(
+                                                new Object[] {
+                                                    Blob.fromFile(fileIO, first.toString()),
+                                                    null,
+                                                    Blob.fromFile(fileIO, external.toString()),
+                                                    Blob.fromFile(fileIO, second.toString())
+                                                }))));
+        collector.close();
+
+        assertThat(
+                        ManagedBlobReferenceFile.read(
+                                fileIO, ManagedBlobReferenceFile.sidecarPath(dataFile)))
+                .containsExactly(
+                        new ManagedBlobReferenceFile.Reference(
+                                bucketPath.toString(), first.getName()),
+                        new ManagedBlobReferenceFile.Reference(
+                                otherBucketPath.toString(), second.getName()));
     }
 
     private KeyValue keyValue(RowKind kind, Blob blob) {

@@ -21,6 +21,7 @@ package org.apache.paimon.blob;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataTypeRoot;
@@ -32,30 +33,37 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Collects exact managed BLOB dependencies from the final rows of one data file. */
 public class ManagedBlobReferenceCollector {
 
     private final FileIO fileIO;
-    private final Path dataFile;
     private final Path sidecar;
     private final int[] blobFieldIndexes;
+    private final boolean[] blobArrayFields;
     private final Set<ManagedBlobReferenceFile.Reference> references;
 
     private boolean closed;
 
     public ManagedBlobReferenceCollector(FileIO fileIO, Path dataFile, RowType valueType) {
         this.fileIO = fileIO;
-        this.dataFile = dataFile;
         this.sidecar = ManagedBlobReferenceFile.sidecarPath(dataFile);
         List<Integer> indexes = new ArrayList<>();
+        List<Boolean> arrayFields = new ArrayList<>();
         for (int i = 0; i < valueType.getFieldCount(); i++) {
-            if (valueType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+            DataTypeRoot typeRoot = valueType.getTypeAt(i).getTypeRoot();
+            if (isBlobFileField(valueType.getTypeAt(i))) {
                 indexes.add(i);
+                arrayFields.add(typeRoot == DataTypeRoot.ARRAY);
             }
         }
         this.blobFieldIndexes = indexes.stream().mapToInt(Integer::intValue).toArray();
+        this.blobArrayFields = new boolean[arrayFields.size()];
+        for (int i = 0; i < arrayFields.size(); i++) {
+            blobArrayFields[i] = arrayFields.get(i);
+        }
         this.references = new HashSet<>();
     }
 
@@ -65,15 +73,27 @@ public class ManagedBlobReferenceCollector {
             return;
         }
 
-        for (int fieldIndex : blobFieldIndexes) {
+        for (int i = 0; i < blobFieldIndexes.length; i++) {
+            int fieldIndex = blobFieldIndexes[i];
             if (keyValue.value().isNullAt(fieldIndex)) {
                 continue;
             }
-            Blob blob = keyValue.value().getBlob(fieldIndex);
-            if (!(blob instanceof BlobRef)) {
-                continue;
+            if (blobArrayFields[i]) {
+                InternalArray array = keyValue.value().getArray(fieldIndex);
+                for (int j = 0; j < array.size(); j++) {
+                    if (!array.isNullAt(j)) {
+                        collect(array.getBlob(j));
+                    }
+                }
+            } else {
+                collect(keyValue.value().getBlob(fieldIndex));
             }
-            ManagedBlobReferenceFile.fromDescriptorUri(dataFile, blob.toDescriptor().uri())
+        }
+    }
+
+    private void collect(Blob blob) {
+        if (blob instanceof BlobRef) {
+            ManagedBlobReferenceFile.fromDescriptorUri(blob.toDescriptor().uri())
                     .ifPresent(references::add);
         }
     }

@@ -148,6 +148,46 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testPrimaryKeyArrayBlobField() throws Exception {
+        batchSql(
+                "CREATE TABLE pk_array_blob_table ("
+                        + "id INT, pictures ARRAY<BYTES>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED) "
+                        + "WITH ('bucket'='1', 'blob-field'='pictures')");
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(
+                                        1,
+                                        new byte[][] {
+                                            new byte[] {72, 101, 108, 108, 111},
+                                            null,
+                                            new byte[] {89, 69}
+                                        })));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_array_blob_source "
+                                        + "(id INT, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+
+        batchSql("INSERT INTO pk_array_blob_table SELECT * FROM pk_array_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures[1], pictures[2], pictures[3] "
+                                        + "FROM pk_array_blob_table"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}));
+    }
+
+    @Test
     public void testArrayBlobFieldWithDescriptorElements() throws Exception {
         byte[] blobData = new byte[1024];
         RANDOM.nextBytes(blobData);

@@ -57,23 +57,23 @@ class ManagedBlobReferenceFileTest {
     }
 
     @Test
-    void testClassifyOnlyAlignedManagedBlobPath() {
+    void testClassifyManagedBlobPathAcrossDirectories() {
         Path dataFile = new Path(tempDir.resolve("bucket-0/data-a.avro").toUri());
         Path managedBlob = new Path(tempDir.resolve("bucket-0/data-b.managed.blob").toUri());
         Path externalManagedBlob =
                 new Path(tempDir.resolve("external/data-c.managed.blob").toUri());
         Path ordinaryBlob = new Path(tempDir.resolve("bucket-0/data-d.blob").toUri());
 
-        assertThat(ManagedBlobReferenceFile.fromDescriptorUri(dataFile, managedBlob.toString()))
+        assertThat(ManagedBlobReferenceFile.fromDescriptorUri(managedBlob.toString()))
                 .contains(
                         new ManagedBlobReferenceFile.Reference(
                                 dataFile.getParent().toString(), managedBlob.getName()));
-        assertThat(
-                        ManagedBlobReferenceFile.fromDescriptorUri(
-                                dataFile, externalManagedBlob.toString()))
-                .isEmpty();
-        assertThat(ManagedBlobReferenceFile.fromDescriptorUri(dataFile, ordinaryBlob.toString()))
-                .isEmpty();
+        assertThat(ManagedBlobReferenceFile.fromDescriptorUri(externalManagedBlob.toString()))
+                .contains(
+                        new ManagedBlobReferenceFile.Reference(
+                                externalManagedBlob.getParent().toString(),
+                                externalManagedBlob.getName()));
+        assertThat(ManagedBlobReferenceFile.fromDescriptorUri(ordinaryBlob.toString())).isEmpty();
         assertThat(ManagedBlobReferenceFile.sidecarPath(dataFile).getName())
                 .isEqualTo("data-a.avro.blobref");
     }

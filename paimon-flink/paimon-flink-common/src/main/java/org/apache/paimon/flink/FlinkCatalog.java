@@ -1098,7 +1098,7 @@ public class FlinkCatalog extends AbstractCatalog {
         List<String> blobFields = CoreOptions.blobField(options);
         Set<String> blobFileFields = new HashSet<>(CoreOptions.blobField(options));
         Set<String> blobInlineFields = blobInlineFields(options);
-        if (!blobFields.isEmpty()) {
+        if (!blobFields.isEmpty() && !schema.getPrimaryKey().isPresent()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"
