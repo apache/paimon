@@ -154,8 +154,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                         return stream;
                     }
                 };
-        GlobalIndexSingleColumnWriter writer =
-                globalIndexer.createSortedWriter(streamingFileWriter);
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
 
         writer.write(str("A"), 0);
         writer.write(str("B"), 1);
@@ -167,7 +166,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
     @Test
     public void testRejectsUnsortedKeys() throws Exception {
-        GlobalIndexSingleColumnWriter writer = globalIndexer.createSortedWriter(fileWriter);
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
         writer.write(str("B"), 0);
 
         assertThatThrownBy(() -> writer.write(str("A"), 1))
@@ -184,7 +183,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 BitmapGlobalIndexOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE,
                 org.apache.paimon.options.MemorySize.ofBytes(1));
         BitmapGlobalIndexer intIndexer = new BitmapGlobalIndexer(intField, options);
-        GlobalIndexSingleColumnWriter writer = intIndexer.createSortedWriter(fileWriter);
+        GlobalIndexSingleColumnWriter writer = intIndexer.createWriter(fileWriter);
         writer.write(-1, 0);
         writer.write(0, 1);
         ResultEntry result = writer.finish().get(0);
@@ -482,7 +481,15 @@ public class LazyFilteredBitmapIndexReaderTest {
 
     private GlobalIndexIOMeta writeData(List<Pair<BinaryString, Long>> data) throws IOException {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
-        for (Pair<BinaryString, Long> pair : data) {
+        List<Pair<BinaryString, Long>> sortedData = new ArrayList<>(data);
+        sortedData.sort(
+                (left, right) -> {
+                    if (left.getKey() == null) {
+                        return right.getKey() == null ? 0 : -1;
+                    }
+                    return right.getKey() == null ? 1 : left.getKey().compareTo(right.getKey());
+                });
+        for (Pair<BinaryString, Long> pair : sortedData) {
             writer.write(pair.getKey(), pair.getValue());
         }
 

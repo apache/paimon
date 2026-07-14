@@ -41,9 +41,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
 
@@ -51,73 +49,10 @@ import static org.apache.paimon.sst.SstFileUtils.crc32c;
 class BitmapGlobalIndexFormat {
 
     private static final int MAGIC = 0x42474958;
-    private static final int SERIALIZED_KEY_ORDER_VERSION = 1;
-    private static final int LOGICAL_KEY_ORDER_VERSION = 2;
+    private static final int VERSION = 1;
     private static final int FOOTER_LENGTH = 48;
 
     private BitmapGlobalIndexFormat() {}
-
-    static void write(
-            PositionOutputStream outputStream,
-            RoaringNavigableMap64 nullRows,
-            RoaringNavigableMap64 nonNullRows,
-            Map<SerializedKey, RoaringNavigableMap64> bitmaps,
-            int dictionaryBlockSize,
-            @Nullable BlockCompressionFactory compressionFactory)
-            throws IOException {
-        Preconditions.checkArgument(
-                dictionaryBlockSize > 0, "Bitmap dictionary block size must be greater than 0.");
-
-        DataOutputStream out = new DataOutputStream(outputStream);
-        BlockInfo nullRowsBlock = writeBitmapBlock(outputStream, out, nullRows);
-        BlockInfo nonNullRowsBlock = writeBitmapBlock(outputStream, out, nonNullRows);
-        DictionaryBlocks dictionaryBlocks =
-                writeDictionaryAndBitmapBlocks(
-                        outputStream, out, bitmaps, dictionaryBlockSize, compressionFactory);
-        BlockInfo indexBlock =
-                writeIndexBlock(outputStream, out, dictionaryBlocks.blocks, compressionFactory);
-
-        writeFooter(
-                out,
-                nullRowsBlock,
-                nonNullRowsBlock,
-                indexBlock,
-                dictionaryBlocks.valueCount,
-                SERIALIZED_KEY_ORDER_VERSION);
-    }
-
-    private static DictionaryBlocks writeDictionaryAndBitmapBlocks(
-            PositionOutputStream outputStream,
-            DataOutputStream out,
-            Map<SerializedKey, RoaringNavigableMap64> bitmaps,
-            int dictionaryBlockSize,
-            @Nullable BlockCompressionFactory compressionFactory)
-            throws IOException {
-        List<Map.Entry<SerializedKey, RoaringNavigableMap64>> entries =
-                new ArrayList<>(bitmaps.entrySet());
-        Collections.sort(entries, (o1, o2) -> o1.getKey().compareTo(o2.getKey()));
-
-        List<DictionaryBlockMeta> dictionaryBlockMetas = new ArrayList<>();
-        DictionaryBlockBuilder current = new DictionaryBlockBuilder();
-        int valueCount = 0;
-        for (Map.Entry<SerializedKey, RoaringNavigableMap64> entry : entries) {
-            BlockInfo bitmapBlock = writeBitmapBlock(outputStream, out, entry.getValue());
-            DictionaryEntry dictionaryEntry = new DictionaryEntry(entry.getKey(), bitmapBlock);
-            if (current.hasEntries()
-                    && current.estimatedSizeAfter(dictionaryEntry) > dictionaryBlockSize) {
-                dictionaryBlockMetas.add(
-                        writeDictionaryBlock(outputStream, out, current, compressionFactory));
-                current = new DictionaryBlockBuilder();
-            }
-            current.add(dictionaryEntry);
-            valueCount++;
-        }
-        if (current.hasEntries()) {
-            dictionaryBlockMetas.add(
-                    writeDictionaryBlock(outputStream, out, current, compressionFactory));
-        }
-        return new DictionaryBlocks(dictionaryBlockMetas, valueCount);
-    }
 
     static class StreamingWriter {
 
@@ -163,13 +98,7 @@ class BitmapGlobalIndexFormat {
             BlockInfo indexBlock =
                     writeIndexBlock(outputStream, out, dictionaryBlockMetas, compressionFactory);
 
-            writeFooter(
-                    out,
-                    nullRowsBlock,
-                    nonNullRowsBlock,
-                    indexBlock,
-                    valueCount,
-                    LOGICAL_KEY_ORDER_VERSION);
+            writeFooter(out, nullRowsBlock, nonNullRowsBlock, indexBlock, valueCount);
         }
 
         private void flushDictionaryBlock() throws IOException {
@@ -188,8 +117,7 @@ class BitmapGlobalIndexFormat {
             BlockInfo nullRowsBlock,
             BlockInfo nonNullRowsBlock,
             BlockInfo indexBlock,
-            int valueCount,
-            int version)
+            int valueCount)
             throws IOException {
         out.writeLong(nullRowsBlock.offset);
         out.writeInt(nullRowsBlock.length);
@@ -198,7 +126,7 @@ class BitmapGlobalIndexFormat {
         out.writeLong(indexBlock.offset);
         out.writeInt(indexBlock.length);
         out.writeInt(valueCount);
-        out.writeInt(version);
+        out.writeInt(VERSION);
         out.writeInt(MAGIC);
         out.flush();
     }
@@ -266,15 +194,13 @@ class BitmapGlobalIndexFormat {
         Preconditions.checkState(
                 magic == MAGIC, "File is not a bitmap global index file (bad footer magic).");
         Preconditions.checkState(
-                version == SERIALIZED_KEY_ORDER_VERSION || version == LOGICAL_KEY_ORDER_VERSION,
-                "Unsupported bitmap global index file version: %s",
-                version);
+                version == VERSION, "Unsupported bitmap global index file version: %s", version);
         Preconditions.checkState(valueCount >= 0, "Invalid bitmap value count.");
-        return new Footer(nullRowsBlock, nonNullRowsBlock, indexBlock, version);
+        return new Footer(nullRowsBlock, nonNullRowsBlock, indexBlock);
     }
 
     private static List<DictionaryBlockMeta> readIndexBlock(
-            SeekableReader reader, BlockInfo indexBlock, int version) throws IOException {
+            SeekableReader reader, BlockInfo indexBlock) throws IOException {
         DataInputStream input =
                 new DataInputStream(
                         new ByteArrayInputStream(readCompressibleBlock(reader, indexBlock)));
@@ -289,9 +215,6 @@ class BitmapGlobalIndexFormat {
             long offset = readVarLenLong(input);
             int length = readVarLenInt(input);
             blocks.add(new DictionaryBlockMeta(new SerializedKey(keyBytes), offset, length));
-        }
-        if (version == SERIALIZED_KEY_ORDER_VERSION) {
-            Collections.sort(blocks, (o1, o2) -> o1.firstKey.compareTo(o2.firstKey));
         }
         return blocks;
     }
@@ -334,9 +257,9 @@ class BitmapGlobalIndexFormat {
     }
 
     static List<DictionaryBlockMeta> readIndexBlockUnchecked(
-            SeekableReader reader, BlockInfo block, int version) {
+            SeekableReader reader, BlockInfo block) {
         try {
-            return readIndexBlock(reader, block, version);
+            return readIndexBlock(reader, block);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read bitmap dictionary block index.", e);
         }
@@ -608,17 +531,6 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    private static class DictionaryBlocks {
-
-        private final List<DictionaryBlockMeta> blocks;
-        private final int valueCount;
-
-        private DictionaryBlocks(List<DictionaryBlockMeta> blocks, int valueCount) {
-            this.blocks = blocks;
-            this.valueCount = valueCount;
-        }
-    }
-
     private static class BlockEncoding {
 
         private final byte[] bytes;
@@ -637,21 +549,11 @@ class BitmapGlobalIndexFormat {
         final BlockInfo nullRowsBlock;
         final BlockInfo nonNullRowsBlock;
         final BlockInfo indexBlock;
-        final int version;
 
-        Footer(
-                BlockInfo nullRowsBlock,
-                BlockInfo nonNullRowsBlock,
-                BlockInfo indexBlock,
-                int version) {
+        Footer(BlockInfo nullRowsBlock, BlockInfo nonNullRowsBlock, BlockInfo indexBlock) {
             this.nullRowsBlock = nullRowsBlock;
             this.nonNullRowsBlock = nonNullRowsBlock;
             this.indexBlock = indexBlock;
-            this.version = version;
-        }
-
-        boolean logicalKeyOrder() {
-            return version == LOGICAL_KEY_ORDER_VERSION;
         }
     }
 }

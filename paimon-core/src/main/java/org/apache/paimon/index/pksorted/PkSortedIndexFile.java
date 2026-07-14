@@ -25,7 +25,6 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFile;
@@ -133,10 +132,7 @@ public class PkSortedIndexFile extends IndexFile {
             GlobalIndexFileWriter fileWriter)
             throws IOException {
         GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, indexOptions);
-        GlobalIndexWriter writer =
-                indexer instanceof BitmapGlobalIndexer
-                        ? ((BitmapGlobalIndexer) indexer).createSortedWriter(fileWriter)
-                        : indexer.createWriter(fileWriter);
+        GlobalIndexWriter writer = indexer.createWriter(fileWriter);
         checkArgument(
                 writer instanceof GlobalIndexSingleColumnWriter,
                 "Index algorithm %s does not create a single-column writer.",
