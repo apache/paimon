@@ -289,6 +289,12 @@ class BlobTest(unittest.TestCase):
     def test_blob_fallback_batch_reader_respects_batch_size(self):
         created_readers = []
 
+        class DescriptorBlobFallbackBatchReader(BlobFallbackBatchReader):
+            def _resolve_selected_blobs(self, values):
+                raise AssertionError(
+                    "Descriptor reads should not materialize BLOB data."
+                )
+
         class FakeBlobReader:
             def __init__(self):
                 self._file_io = None
@@ -322,12 +328,13 @@ class BlobTest(unittest.TestCase):
             first_row_id=10,
             file_path="fake.blob",
         )
-        reader = BlobFallbackBatchReader(
+        reader = DescriptorBlobFallbackBatchReader(
             [(data_file, supplier)],
             "picture",
             pa.large_binary(),
             blob_as_descriptor=True,
             batch_size=2,
+            blob_parallelism=4,
         )
 
         first = reader.read_arrow_batch()
@@ -530,6 +537,86 @@ class BlobTest(unittest.TestCase):
                 self.assertEqual(1, len(created_by_file["third.blob"]))
                 reader.close()
                 self.assertTrue(created_by_file["third.blob"][0].closed)
+
+    def test_blob_fallback_batch_reader_materializes_selected_values_in_parallel(self):
+        class RecordingFileIO:
+            def __init__(self):
+                self.calls = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                descriptors = [blob.to_descriptor() for blob in blobs]
+                self.calls.append((descriptors, parallelism))
+                return [
+                    "{}:{}".format(descriptor.uri, descriptor.offset).encode()
+                    for descriptor in descriptors
+                ]
+
+        class FakeBlobReader:
+            def __init__(self, file_io, file_path, blob_lengths, blob_offsets):
+                self._file_io = file_io
+                self.file_path = file_path
+                self.blob_lengths = blob_lengths
+                self.blob_offsets = blob_offsets
+                self._input_stream = None
+
+            def close(self):
+                pass
+
+        def data_file(name, max_sequence_number):
+            return DataFileMeta(
+                file_name=name,
+                file_size=0,
+                row_count=3,
+                min_key=None,
+                max_key=None,
+                key_stats=None,
+                value_stats=None,
+                min_sequence_number=max_sequence_number,
+                max_sequence_number=max_sequence_number,
+                schema_id=0,
+                level=0,
+                extra_files=[],
+                first_row_id=0,
+                file_path=name,
+            )
+
+        file_io = RecordingFileIO()
+        old_file = data_file("old.blob", 1)
+        new_file = data_file("new.blob", 2)
+        reader = BlobFallbackBatchReader(
+            [
+                (
+                    old_file,
+                    lambda: FakeBlobReader(
+                        file_io, "old.blob", [20, 20, 20], [0, 100, 200]
+                    ),
+                ),
+                (
+                    new_file,
+                    lambda: FakeBlobReader(
+                        file_io, "new.blob", [-2, 20, -2], [-1, 1000, -1]
+                    ),
+                ),
+            ],
+            "picture",
+            pa.large_binary(),
+            batch_size=3,
+            blob_parallelism=4,
+        )
+
+        batch = reader.read_arrow_batch()
+
+        self.assertEqual(
+            [b"old.blob:4", b"new.blob:1004", b"old.blob:204"],
+            batch.column("picture").to_pylist(),
+        )
+        self.assertEqual(1, len(file_io.calls))
+        descriptors, parallelism = file_io.calls[0]
+        self.assertEqual(4, parallelism)
+        self.assertEqual(
+            [("old.blob", 4), ("new.blob", 1004), ("old.blob", 204)],
+            [(descriptor.uri, descriptor.offset) for descriptor in descriptors],
+        )
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
