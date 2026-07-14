@@ -87,3 +87,45 @@ def blob_column_to_file_array(column: pa.Array, io_config_bytes: bytes | None = 
         ],
         names=["url", "io_config", file_range_position_field(), file_range_size_field()],
     )
+
+
+def blob_array_column_to_file_array(
+    column: pa.Array,
+    io_config_bytes: bytes | None = None,
+) -> pa.Array:
+    """Convert a list of serialized BlobDescriptors to a list of File structs."""
+    if not (pa.types.is_list(column.type) or pa.types.is_large_list(column.type)):
+        raise TypeError(f"Expected a list column, but got {column.type}.")
+
+    rows = []
+    for row in column:
+        if row is None or not row.is_valid:
+            rows.append(None)
+            continue
+
+        files = []
+        for raw in row.as_py():
+            if raw is None:
+                files.append(None)
+                continue
+            uri, offset, length = _deserialize_one(raw)
+            files.append({
+                "url": uri,
+                "io_config": io_config_bytes,
+                file_range_position_field(): offset,
+                file_range_size_field(): length,
+            })
+        rows.append(files)
+
+    value_field = pa.field(
+        column.type.value_field.name,
+        FILE_PHYSICAL_TYPE,
+        nullable=column.type.value_field.nullable,
+        metadata=column.type.value_field.metadata,
+    )
+    target_type = (
+        pa.large_list(value_field)
+        if pa.types.is_large_list(column.type)
+        else pa.list_(value_field)
+    )
+    return pa.array(rows, type=target_type)

@@ -27,6 +27,8 @@ import org.apache.spark.sql.catalyst.InternalRow
 class Spark3InternalRowWithBlob(rowType: RowType, blobFields: Set[Int], blobAsDescriptor: Boolean)
   extends Spark3InternalRow(rowType) {
 
+  withBlobAsDescriptor(blobAsDescriptor)
+
   override def getBinary(ordinal: Int): Array[Byte] = {
     if (blobFields.contains(ordinal)) {
       val blob = row.getBlob(ordinal)

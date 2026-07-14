@@ -25,7 +25,12 @@ from pyarrow import RecordBatch
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser, AtomicType
+from pypaimon.schema.data_types import (
+    DataField,
+    PyarrowFieldParser,
+    AtomicType,
+    is_array_blob_type,
+)
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
@@ -59,19 +64,23 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)
-            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
-            # that each open their own stream (one stream isn't thread-safe).
-            if self._blob_as_descriptor or self._blob_parallelism > 1:
-                self._input_stream.close()
-                self._input_stream = None
 
-            # Set up fields and schema
+            # Set up fields and schema before deciding whether the stream can be dropped.
             if len(read_fields) > 1:
                 raise RuntimeError("Blob reader only supports one field.")
             self._fields = read_fields
             full_fields_map = {field.name: field for field in full_fields}
             projected_data_fields = [full_fields_map[name] for name in read_fields]
+            self._data_field = projected_data_fields[0]
+            self._is_array_blob = is_array_blob_type(self._data_field.type)
             self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
+
+            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
+            # that each open their own stream (one stream isn't thread-safe).
+            # ARRAY<BLOB> needs the stream to read the nested element index.
+            if not self._is_array_blob and (self._blob_as_descriptor or self._blob_parallelism > 1):
+                self._input_stream.close()
+                self._input_stream = None
         except Exception:
             self.close()
             raise
@@ -87,7 +96,10 @@ class FormatBlobReader(RecordBatchReader):
             self.returned = True
             batch_iterator = BlobRecordIterator(
                 self._file_io, self.file_path, self.blob_lengths,
-                self.blob_offsets, self._fields[0], self._input_stream
+                self.blob_offsets, self._data_field, self._input_stream,
+                blob_as_descriptor=(
+                    self._blob_as_descriptor or self._blob_parallelism > 1
+                )
             )
             self._blob_iterator = iter(batch_iterator)
         read_size = self._batch_size
@@ -109,20 +121,31 @@ class FormatBlobReader(RecordBatchReader):
                     break
                 blob = blob_row.values[0]
                 for field_name in self._fields:
-                    if blob is None:
-                        pydict_data[field_name].append(None)
-                    elif blob is Blob.PLACE_HOLDER:
-                        raise RuntimeError(
-                            "Blob placeholder is not supported by FormatBlobReader yet."
+                    if self._is_array_blob:
+                        row_index = len(pydict_data[field_name])
+                        pydict_data[field_name].append(
+                            self._array_value_for_arrow(
+                                blob,
+                                field_name,
+                                row_index,
+                                blobs_to_resolve,
+                            )
                         )
-                    elif self._blob_as_descriptor:
-                        pydict_data[field_name].append(blob.to_descriptor().serialize())
-                    elif self._blob_parallelism > 1:
-                        idx = len(pydict_data[field_name])
-                        pydict_data[field_name].append(None)
-                        blobs_to_resolve.append((field_name, idx, blob))
                     else:
-                        pydict_data[field_name].append(blob.to_data())
+                        if blob is None:
+                            pydict_data[field_name].append(None)
+                        elif blob is Blob.PLACE_HOLDER:
+                            raise RuntimeError(
+                                "Blob placeholder is not supported by FormatBlobReader yet."
+                            )
+                        elif self._blob_as_descriptor:
+                            pydict_data[field_name].append(blob.to_descriptor().serialize())
+                        elif self._blob_parallelism > 1:
+                            idx = len(pydict_data[field_name])
+                            pydict_data[field_name].append(None)
+                            blobs_to_resolve.append((field_name, idx, None, blob))
+                        else:
+                            pydict_data[field_name].append(blob.to_data())
 
                 records_in_batch += 1
                 if records_in_batch >= read_size:
@@ -157,10 +180,42 @@ class FormatBlobReader(RecordBatchReader):
                 return None
 
     def _resolve_blobs_concurrent(self, pydict_data, blobs_to_resolve):
-        blobs = [item[2] for item in blobs_to_resolve]
+        blobs = [item[3] for item in blobs_to_resolve]
         results = self._file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
-        for (field_name, idx, _), data in zip(blobs_to_resolve, results):
-            pydict_data[field_name][idx] = data
+        for target, data in zip(blobs_to_resolve, results):
+            field_name, row_index, element_index, _ = target
+            if element_index is None:
+                pydict_data[field_name][row_index] = data
+            else:
+                pydict_data[field_name][row_index][element_index] = data
+
+    def _array_value_for_arrow(
+        self,
+        blob_array,
+        field_name,
+        row_index,
+        blobs_to_resolve,
+    ):
+        if blob_array is None:
+            return None
+        if blob_array is Blob.ARRAY_PLACE_HOLDER:
+            raise RuntimeError(
+                "Blob placeholder is not supported by FormatBlobReader yet."
+            )
+        result = []
+        for element_index, blob in enumerate(blob_array):
+            if blob is None:
+                result.append(None)
+            elif self._blob_as_descriptor:
+                result.append(blob.to_descriptor().serialize())
+            elif self._blob_parallelism > 1:
+                result.append(None)
+                blobs_to_resolve.append(
+                    (field_name, row_index, element_index, blob)
+                )
+            else:
+                result.append(blob.to_data())
+        return result
 
     def close(self):
         self._blob_iterator = None
@@ -229,16 +284,29 @@ class FormatBlobReader(RecordBatchReader):
 class BlobRecordIterator:
     MAGIC_NUMBER_SIZE = 4
     METADATA_OVERHEAD = 16
+    ARRAY_HEADER_SIZE = 9
+    ARRAY_VERSION = 1
+    ARRAY_MAGIC_NUMBER = 1094861634
+    ARRAY_NULL_ELEMENT_LENGTH = -1
+    ARRAY_INDEX_LENGTH_SIZE = 4
+    MIN_ARRAY_PAYLOAD_LENGTH = ARRAY_HEADER_SIZE + ARRAY_INDEX_LENGTH_SIZE
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
 
     def __init__(self, file_io: FileIO, file_path: str, blob_lengths: List[int],
-                 blob_offsets: List[int], field_name: str,
-                 input_stream: Optional[BinaryIO] = None):
+                 blob_offsets: List[int], field,
+                 input_stream: Optional[BinaryIO] = None,
+                 blob_as_descriptor: bool = False):
         self.file_io = file_io
         self.file_path = file_path
         self.input_stream = input_stream
-        self.field_name = field_name
+        if isinstance(field, DataField):
+            self.field = field
+        else:
+            self.field = DataField(0, field, AtomicType("BLOB"))
+        self.field_name = self.field.name
+        self.is_array_blob = is_array_blob_type(self.field.type)
+        self.blob_as_descriptor = blob_as_descriptor
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
         self.current_position = 0
@@ -249,19 +317,22 @@ class BlobRecordIterator:
     def __next__(self) -> GenericRow:
         if self.current_position >= len(self.blob_lengths):
             raise StopIteration
-        fields = [DataField(0, self.field_name, AtomicType("BLOB"))]
+        fields = [self.field]
         length = self.blob_lengths[self.current_position]
         if length == self.NULL_LENGTH:
             self.current_position += 1
             return GenericRow([None], fields, RowKind.INSERT)
         if length == self.PLACE_HOLDER_LENGTH:
             self.current_position += 1
-            return GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT)
+            placeholder = Blob.ARRAY_PLACE_HOLDER if self.is_array_blob else Blob.PLACE_HOLDER
+            return GenericRow([placeholder], fields, RowKind.INSERT)
         # Create blob reference for the current blob
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
         blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
         blob_length = length - self.METADATA_OVERHEAD
-        if self.input_stream is not None:
+        if self.is_array_blob:
+            blob = self._read_blob_array(blob_offset, blob_length)
+        elif self.input_stream is not None and not self.blob_as_descriptor:
             blob = Blob.from_data(self._read_inline_blob(blob_offset, blob_length))
         else:
             blob = Blob.from_file(self.file_io, self.file_path, blob_offset, blob_length)
@@ -278,10 +349,128 @@ class BlobRecordIterator:
             raise IOError("Invalid blob file: cannot read blob data")
         return data
 
+    def _read_blob_array(self, position: int, length: int):
+        if position < 0 or length < self.MIN_ARRAY_PAYLOAD_LENGTH:
+            raise ValueError(
+                f"Invalid ARRAY<BLOB> payload position or length: {position}, {length}"
+            )
+
+        stream = self.input_stream
+        close_stream = False
+        if stream is None:
+            stream = self.file_io.new_input_stream(self.file_path)
+            close_stream = True
+        try:
+            stream.seek(position)
+            header = self._read_fully_from(stream, self.ARRAY_HEADER_SIZE)
+            if len(header) != self.ARRAY_HEADER_SIZE:
+                raise IOError("Invalid ARRAY<BLOB> payload: cannot read header")
+            magic, version, element_count = struct.unpack('<IBI', header)
+            if magic != self.ARRAY_MAGIC_NUMBER:
+                raise ValueError(f"Invalid ARRAY<BLOB> payload magic number: {magic}")
+            if version != self.ARRAY_VERSION:
+                raise ValueError(f"Unsupported ARRAY<BLOB> payload version: {version}")
+            if element_count > 0x7fffffff:
+                raise ValueError(f"Invalid ARRAY<BLOB> element count: {element_count}")
+
+            payload_end = position + length
+            element_data_start = position + self.ARRAY_HEADER_SIZE
+            index_length_position = payload_end - self.ARRAY_INDEX_LENGTH_SIZE
+            stream.seek(index_length_position)
+            index_length_bytes = self._read_fully_from(stream, self.ARRAY_INDEX_LENGTH_SIZE)
+            if len(index_length_bytes) != self.ARRAY_INDEX_LENGTH_SIZE:
+                raise IOError("Invalid ARRAY<BLOB> payload: cannot read index length")
+            index_length = struct.unpack('<I', index_length_bytes)[0]
+            maximum_index_length = length - self.MIN_ARRAY_PAYLOAD_LENGTH
+            if index_length > 0x7fffffff or index_length > maximum_index_length:
+                raise ValueError(
+                    f"Invalid ARRAY<BLOB> element index length: {index_length}"
+                )
+            if element_count > index_length:
+                raise ValueError(
+                    "ARRAY<BLOB> element count exceeds element index length."
+                )
+
+            element_index_start = index_length_position - index_length
+            stream.seek(element_index_start)
+            index_bytes = self._read_fully_from(stream, index_length)
+            if len(index_bytes) != index_length:
+                raise IOError("Invalid ARRAY<BLOB> payload: cannot read element index")
+            self._validate_array_element_index(index_bytes)
+            element_lengths = DeltaVarintCompressor.decompress(index_bytes)
+            if len(element_lengths) != element_count:
+                raise ValueError(
+                    "ARRAY<BLOB> element count does not match element index length."
+                )
+
+            element_data_length = element_index_start - element_data_start
+            total_element_length = 0
+            for element_length in element_lengths:
+                if element_length == self.ARRAY_NULL_ELEMENT_LENGTH:
+                    continue
+                if element_length < 0:
+                    raise ValueError(
+                        f"Invalid ARRAY<BLOB> element length: {element_length}"
+                    )
+                if element_length > element_data_length - total_element_length:
+                    raise ValueError(
+                        "ARRAY<BLOB> element lengths exceed the payload data length."
+                    )
+                total_element_length += element_length
+            if total_element_length != element_data_length:
+                raise ValueError(
+                    "ARRAY<BLOB> element lengths do not match the payload data length."
+                )
+
+            element_data = None
+            if not self.blob_as_descriptor:
+                stream.seek(element_data_start)
+                element_data = self._read_fully_from(stream, element_data_length)
+                if len(element_data) != element_data_length:
+                    raise IOError("Invalid ARRAY<BLOB> payload: cannot read element data")
+
+            blobs = []
+            element_offset = element_data_start
+            data_offset = 0
+            for element_length in element_lengths:
+                if element_length == self.ARRAY_NULL_ELEMENT_LENGTH:
+                    blobs.append(None)
+                    continue
+                if self.blob_as_descriptor:
+                    blobs.append(
+                        Blob.from_file(self.file_io, self.file_path, element_offset, element_length)
+                    )
+                else:
+                    blobs.append(Blob.from_data(
+                        element_data[data_offset:data_offset + element_length]
+                    ))
+                element_offset += element_length
+                data_offset += element_length
+            return blobs
+        finally:
+            if close_stream:
+                stream.close()
+
+    @staticmethod
+    def _validate_array_element_index(index_bytes: bytes) -> None:
+        varint_length = 0
+        for value in index_bytes:
+            varint_length += 1
+            if varint_length > 10:
+                raise ValueError("Invalid ARRAY<BLOB> element index.")
+            if value & 0x80 == 0:
+                varint_length = 0
+        if varint_length != 0:
+            raise ValueError("Invalid ARRAY<BLOB> element index.")
+
     def _read_fully(self, length: int) -> bytes:
+        return self._read_fully_from(self.input_stream, length)
+
+    @staticmethod
+    def _read_fully_from(stream, length: int) -> bytes:
         data = bytearray()
         while len(data) < length:
-            chunk = self.input_stream.read(length - len(data))
+            chunk = stream.read(length - len(data))
             if not chunk:
                 break
             data.extend(chunk)

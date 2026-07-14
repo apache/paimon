@@ -95,6 +95,7 @@ import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFa
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
@@ -1201,19 +1202,19 @@ public class SchemaValidation {
         List<DataField> fields = schema.fields();
         List<String> blobNames =
                 fields.stream()
-                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .filter(field -> isBlobFileField(field.type()))
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
-                    "Data evolution config must enabled for table with BLOB type column.");
+                    "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
             checkArgument(
                     fields.size() > blobNames.size(),
-                    "Table with BLOB type column must have other normal columns.");
+                    "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
-                    "The BLOB type column can not be part of partition keys.");
+                    "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
@@ -1237,7 +1238,7 @@ public class SchemaValidation {
     private static void validateBlobFields(RowType rowType, CoreOptions options) {
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .filter(field -> isBlobFileField(field.type()))
                         .map(DataField::name)
                         .collect(Collectors.toCollection(HashSet::new));
         Set<String> configured =
@@ -1246,7 +1247,7 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field or ARRAY<BLOB> field in table schema.",
                     field,
                     CoreOptions.BLOB_FIELD.key());
         }
@@ -1262,9 +1263,11 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field in table schema. "
+                            + "ARRAY<BLOB> is only supported by '%s'.",
                     field,
-                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                    CoreOptions.BLOB_FIELD.key());
         }
         return configured;
     }
@@ -1280,9 +1283,11 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field in table schema. "
+                            + "ARRAY<BLOB> is only supported by '%s'.",
                     field,
-                    CoreOptions.BLOB_VIEW_FIELD.key());
+                    CoreOptions.BLOB_VIEW_FIELD.key(),
+                    CoreOptions.BLOB_FIELD.key());
             checkArgument(
                     !blobDescriptorFields.contains(field),
                     "Field '%s' in '%s' can not also be in '%s'.",

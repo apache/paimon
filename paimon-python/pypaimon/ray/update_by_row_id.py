@@ -36,6 +36,7 @@ from pypaimon.ray.data_evolution_merge_into import (
 )
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
+from pypaimon.schema.data_types import is_blob_file_field
 
 __all__ = ["update_by_row_id"]
 
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 def _blob_col_names(table: "FileStoreTable") -> set:
     return {f.name for f in table.table_schema.fields
-            if getattr(f.type, "type", None) == "BLOB"}
+            if is_blob_file_field(f)}
 
 
 def update_by_row_id(
