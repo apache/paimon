@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
@@ -102,7 +103,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
                 || table.schema().primaryKeys().isEmpty()
                 || !options().deletionVectorsEnabled()
                 || options().deletionVectorsMergeOnRead()
-                || options().bucket() <= 0
+                || (options().bucket() <= 0 && options().bucket() != BucketMode.POSTPONE_BUCKET)
                 || snapshotPlan.snapshotId() == null
                 || snapshotPlan.splits().isEmpty()) {
             return dataPlan;

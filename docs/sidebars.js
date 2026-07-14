@@ -84,7 +84,7 @@ const sidebars = {
       "primary-key-table/sequence-rowkind",
       "primary-key-table/compaction",
       "primary-key-table/query-performance",
-      "primary-key-table/vector-index",
+      "primary-key-table/global-index",
       "primary-key-table/chain-table",
       "primary-key-table/pk-clustering-override",
       {

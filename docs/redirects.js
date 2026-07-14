@@ -329,6 +329,14 @@ module.exports = [
     "to": "/primary-key-table/query-performance"
   },
   {
+    "from": "/primary-key-table/vector-index.html",
+    "to": "/primary-key-table/global-index"
+  },
+  {
+    "from": "/primary-key-table/vector-index",
+    "to": "/primary-key-table/global-index"
+  },
+  {
     "from": "/primary-key-table/sequence-rowkind.html",
     "to": "/primary-key-table/sequence-rowkind"
   },
