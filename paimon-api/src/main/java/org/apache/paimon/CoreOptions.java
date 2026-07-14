@@ -4333,12 +4333,8 @@ public class CoreOptions implements Serializable {
 
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
-        Options resolved = new Options();
-        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
-            if (entry.getKey().startsWith(algorithmPrefix)) {
-                resolved.setString(entry.getKey(), entry.getValue());
-            }
-        }
+        Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-range");
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);
         if (serialized == null || serialized.trim().isEmpty()) {

@@ -260,6 +260,7 @@ public final class PrimaryKeySortedIndexScan {
                                     if (reader == null) {
                                         reader =
                                                 new SharedGlobalIndexReader(
+                                                        group.get().sourceFiles(),
                                                         () ->
                                                                 readerFactory.create(
                                                                         file,
@@ -293,27 +294,23 @@ public final class PrimaryKeySortedIndexScan {
     }
 
     private static GlobalIndexReader fileLocalReader(
-            FilePlan file, PkSortedIndexGroup group, GlobalIndexReader reader) {
+            FilePlan file, PkSortedIndexGroup group, SharedGlobalIndexReader reader) {
         List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
         PrimaryKeyIndexSourceFile target =
                 new PrimaryKeyIndexSourceFile(
                         file.dataFile().fileName(), file.dataFile().rowCount());
-        long totalRowCount = 0;
-        long from = -1;
-        long to = -1;
-        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
-            long next = Math.addExact(totalRowCount, sourceFile.rowCount());
-            if (sourceFile.equals(target)) {
-                from = totalRowCount;
-                to = next;
+        int sourceIndex = -1;
+        for (int i = 0; i < sourceFiles.size(); i++) {
+            if (sourceFiles.get(i).equals(target)) {
+                sourceIndex = i;
+                break;
             }
-            totalRowCount = next;
         }
         checkArgument(
-                from >= 0,
+                sourceIndex >= 0,
                 "Data file %s is not covered by its sorted-index source group.",
                 file.dataFile().fileName());
-        return new FileLocalGlobalIndexReader(reader, from, to, totalRowCount);
+        return new FileLocalGlobalIndexReader(reader, sourceIndex);
     }
 
     private static void rethrowIfInterrupted(RuntimeException exception) {
@@ -327,13 +324,26 @@ public final class PrimaryKeySortedIndexScan {
 
         private final Supplier<GlobalIndexReader> readerFactory;
         private final Map<QueryKey, CompletableFuture<Optional<GlobalIndexResult>>> results;
+        private final Map<
+                        CompletableFuture<Optional<GlobalIndexResult>>,
+                        CompletableFuture<List<Optional<GlobalIndexResult>>>>
+                localizedResults;
+        private final long[] sourceOffsets;
 
         private GlobalIndexReader reader;
         private RuntimeException readerFailure;
 
-        private SharedGlobalIndexReader(Supplier<GlobalIndexReader> readerFactory) {
+        private SharedGlobalIndexReader(
+                List<PrimaryKeyIndexSourceFile> sourceFiles,
+                Supplier<GlobalIndexReader> readerFactory) {
             this.readerFactory = readerFactory;
             this.results = new ConcurrentHashMap<>();
+            this.localizedResults = new ConcurrentHashMap<>();
+            this.sourceOffsets = new long[sourceFiles.size() + 1];
+            for (int i = 0; i < sourceFiles.size(); i++) {
+                sourceOffsets[i + 1] =
+                        Math.addExact(sourceOffsets[i], sourceFiles.get(i).rowCount());
+            }
         }
 
         @Override
@@ -479,6 +489,50 @@ public final class PrimaryKeySortedIndexScan {
                     });
         }
 
+        private CompletableFuture<Optional<GlobalIndexResult>> localize(
+                CompletableFuture<Optional<GlobalIndexResult>> result, int sourceIndex) {
+            return localizedResults
+                    .computeIfAbsent(result, future -> future.thenApply(this::partitionBySource))
+                    .thenApply(partitions -> partitions.get(sourceIndex));
+        }
+
+        private List<Optional<GlobalIndexResult>> partitionBySource(
+                Optional<GlobalIndexResult> result) {
+            int sourceCount = sourceOffsets.length - 1;
+            if (!result.isPresent()) {
+                return Collections.nCopies(sourceCount, Optional.empty());
+            }
+            if (sourceCount == 1) {
+                return Collections.singletonList(result);
+            }
+
+            List<RoaringNavigableMap64> partitions = new ArrayList<>(sourceCount);
+            for (int i = 0; i < sourceCount; i++) {
+                partitions.add(new RoaringNavigableMap64());
+            }
+
+            long totalRowCount = sourceOffsets[sourceCount];
+            int sourceIndex = 0;
+            for (long position : result.get().results()) {
+                if (position < 0 || position >= totalRowCount) {
+                    for (int i = 0; i < sourceCount; i++) {
+                        partitions.get(i).add(sourceOffsets[i + 1] - sourceOffsets[i]);
+                    }
+                    continue;
+                }
+                while (position >= sourceOffsets[sourceIndex + 1]) {
+                    sourceIndex++;
+                }
+                partitions.get(sourceIndex).add(position - sourceOffsets[sourceIndex]);
+            }
+
+            List<Optional<GlobalIndexResult>> localized = new ArrayList<>(sourceCount);
+            for (RoaringNavigableMap64 partition : partitions) {
+                localized.add(Optional.of(GlobalIndexResult.create(partition)));
+            }
+            return localized;
+        }
+
         private synchronized GlobalIndexReader reader() {
             if (reader != null) {
                 return reader;
@@ -569,126 +623,111 @@ public final class PrimaryKeySortedIndexScan {
     /** Restricts merged source-group ordinals to one source file's local row positions. */
     private static final class FileLocalGlobalIndexReader implements GlobalIndexReader {
 
-        private final GlobalIndexReader wrapped;
-        private final long from;
-        private final long to;
-        private final long totalRowCount;
+        private final SharedGlobalIndexReader wrapped;
+        private final int sourceIndex;
 
-        private FileLocalGlobalIndexReader(
-                GlobalIndexReader wrapped, long from, long to, long totalRowCount) {
+        private FileLocalGlobalIndexReader(SharedGlobalIndexReader wrapped, int sourceIndex) {
             this.wrapped = wrapped;
-            this.from = from;
-            this.to = to;
-            this.totalRowCount = totalRowCount;
+            this.sourceIndex = sourceIndex;
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
-            return wrapped.visitIsNotNull(fieldRef).thenApply(this::toFileLocal);
+            return localize(wrapped.visitIsNotNull(fieldRef));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-            return wrapped.visitIsNull(fieldRef).thenApply(this::toFileLocal);
+            return localize(wrapped.visitIsNull(fieldRef));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitStartsWith(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitStartsWith(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitEndsWith(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitEndsWith(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitContains(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitContains(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitLike(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitLike(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitLessThan(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitLessThan(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitGreaterOrEqual(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitGreaterOrEqual(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitNotEqual(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitNotEqual(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitLessOrEqual(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitLessOrEqual(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitEqual(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitEqual(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
                 FieldRef fieldRef, Object literal) {
-            return wrapped.visitGreaterThan(fieldRef, literal).thenApply(this::toFileLocal);
+            return localize(wrapped.visitGreaterThan(fieldRef, literal));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
                 FieldRef fieldRef, List<Object> literals) {
-            return wrapped.visitIn(fieldRef, literals).thenApply(this::toFileLocal);
+            return localize(wrapped.visitIn(fieldRef, literals));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
                 FieldRef fieldRef, List<Object> literals) {
-            return wrapped.visitNotIn(fieldRef, literals).thenApply(this::toFileLocal);
+            return localize(wrapped.visitNotIn(fieldRef, literals));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
                 FieldRef fieldRef, Object from, Object to) {
-            return wrapped.visitBetween(fieldRef, from, to).thenApply(this::toFileLocal);
+            return localize(wrapped.visitBetween(fieldRef, from, to));
         }
 
         @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
                 FieldRef fieldRef, Object from, Object to) {
-            return wrapped.visitNotBetween(fieldRef, from, to).thenApply(this::toFileLocal);
+            return localize(wrapped.visitNotBetween(fieldRef, from, to));
         }
 
-        private Optional<GlobalIndexResult> toFileLocal(Optional<GlobalIndexResult> result) {
-            if (!result.isPresent() || (from == 0 && to == totalRowCount)) {
-                return result;
-            }
-            RoaringNavigableMap64 positions = new RoaringNavigableMap64();
-            for (long position : result.get().results()) {
-                if (position < 0 || position >= totalRowCount) {
-                    positions.add(to - from);
-                } else if (position >= from && position < to) {
-                    positions.add(position - from);
-                }
-            }
-            return Optional.of(GlobalIndexResult.create(positions));
+        private CompletableFuture<Optional<GlobalIndexResult>> localize(
+                CompletableFuture<Optional<GlobalIndexResult>> result) {
+            return wrapped.localize(result, sourceIndex);
         }
 
         @Override

@@ -50,6 +50,7 @@ import org.mockito.MockedStatic;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -231,12 +232,16 @@ class PrimaryKeySortedIndexScanTest {
         Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
         AtomicInteger readersCreated = new AtomicInteger();
         AtomicInteger queries = new AtomicInteger();
+        CountingRoaringNavigableMap64 groupPositions = new CountingRoaringNavigableMap64();
+        groupPositions.add(1);
+        groupPositions.add(3);
+        groupPositions.add(4);
         GlobalIndexReader reader = mock(GlobalIndexReader.class);
         when(reader.visitEqual(any(), eq(42)))
                 .thenAnswer(
                         ignored -> {
                             queries.incrementAndGet();
-                            return completedResult(1, 3, 4);
+                            return completedResult(groupPositions);
                         });
 
         PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
@@ -254,6 +259,7 @@ class PrimaryKeySortedIndexScanTest {
 
         assertThat(readersCreated).hasValue(1);
         assertThat(queries).hasValue(1);
+        assertThat(groupPositions.iteratedPositions()).isEqualTo(3);
         verify(reader, times(1)).close();
         assertThat(result.splits()).hasSize(2);
         assertThat(result.splits()).allMatch(IndexedSplit.class::isInstance);
@@ -365,7 +371,38 @@ class PrimaryKeySortedIndexScanTest {
         for (long rowPosition : rowPositions) {
             positions.add(rowPosition);
         }
+        return completedResult(positions);
+    }
+
+    private static CompletableFuture<Optional<GlobalIndexResult>> completedResult(
+            RoaringNavigableMap64 positions) {
         return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.create(positions)));
+    }
+
+    private static class CountingRoaringNavigableMap64 extends RoaringNavigableMap64 {
+
+        private final AtomicInteger iteratedPositions = new AtomicInteger();
+
+        @Override
+        public Iterator<Long> iterator() {
+            Iterator<Long> wrapped = super.iterator();
+            return new Iterator<Long>() {
+                @Override
+                public boolean hasNext() {
+                    return wrapped.hasNext();
+                }
+
+                @Override
+                public Long next() {
+                    iteratedPositions.incrementAndGet();
+                    return wrapped.next();
+                }
+            };
+        }
+
+        int iteratedPositions() {
+            return iteratedPositions.get();
+        }
     }
 
     private static DataSplit dataSplit(long snapshotId, int bucket, DataFileMeta... files) {
