@@ -28,6 +28,32 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ESIndexFullTextQueryParserTest {
 
     @Test
+    void acceptsPersistedColumnRoutingHints() {
+        FullTextQuerySpec.Match match =
+                (FullTextQuerySpec.Match)
+                        ESIndexGlobalIndexReader.parseSpec(
+                                "physical_text",
+                                "{\"match\":{\"column\":\"logical_text\",\"terms\":\"paimon\"}}");
+        assertThat(match.field()).isEqualTo("physical_text");
+        assertThat(match.text()).isEqualTo("paimon");
+
+        FullTextQuerySpec.Phrase phrase =
+                (FullTextQuerySpec.Phrase)
+                        ESIndexGlobalIndexReader.parseSpec(
+                                "physical_text",
+                                "{\"match_phrase\":{\"column\":\"logical_text\",\"terms\":\"apache paimon\",\"slop\":1}}");
+        assertThat(phrase.field()).isEqualTo("physical_text");
+        assertThat(phrase.text()).isEqualTo("apache paimon");
+        assertThat(phrase.slop()).isEqualTo(1);
+
+        assertThat(
+                        ESIndexGlobalIndexReader.parseSpec(
+                                "physical_text",
+                                "{\"boolean\":{\"queries\":[[\"Must\",{\"match\":{\"column\":\"logical_text\",\"terms\":\"paimon\"}}],[\"Should\",{\"phrase\":{\"column\":\"logical_text\",\"terms\":\"apache paimon\"}}]]}}"))
+                .isNotNull();
+    }
+
+    @Test
     void parsesCaseInsensitiveBooleanOperatorsAndRejectsTypos() {
         FullTextQuerySpec.Match and =
                 (FullTextQuerySpec.Match)

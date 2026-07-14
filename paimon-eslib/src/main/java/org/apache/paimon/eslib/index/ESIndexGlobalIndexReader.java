@@ -350,6 +350,19 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         return queryExecutor;
     }
 
+    /** Returns the primary vector field's effective metric in Paimon's metric vocabulary. */
+    String primaryVectorMetric() {
+        if (fields.isEmpty()) {
+            return null;
+        }
+        String physicalField = physicalField(fields.get(0).name());
+        FieldIndexConfig config =
+                physicalField == null ? null : indexOptions.getConfig(physicalField);
+        return config != null && config.indexType() == FieldIndexConfig.IndexType.VECTOR
+                ? ESIndexOptions.toPaimonVectorMetric(config.metric())
+                : null;
+    }
+
     int openStreamCount() {
         synchronized (openProviders) {
             return openProviders.size();
@@ -440,7 +453,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                                     result.count,
                                                     DEFAULT_SAMPLE_LIMIT));
                         }
-                        return toScoredResult(result, topK);
+                        return toVectorScoredResult(result, topK, config.metric());
                     } catch (IOException e) {
                         throw new RuntimeException("Vector search failed", e);
                     }
@@ -632,9 +645,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
         if (q.has("match")) {
             JsonNode m = requireObject(q.get("match"), "match query");
+            // Older SQL serialization includes a logical "column" routing hint. Accept it for
+            // compatibility, but keep the already resolved physical field authoritative so column
+            // renames continue to work.
             requireOnlyFields(
                     m,
                     "match query",
+                    "column",
                     "query",
                     "terms",
                     "operator",
@@ -650,7 +667,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     requireObject(
                             q.has("match_phrase") ? q.get("match_phrase") : q.get("phrase"),
                             "phrase query");
-            requireOnlyFields(p, "phrase query", "query", "terms", "slop");
+            requireOnlyFields(p, "phrase query", "column", "query", "terms", "slop");
             int slop = p.has("slop") ? intValue(p.get("slop"), "slop") : 0;
             return new FullTextQuerySpec.Phrase(field, queryText(p), slop);
         } else if (q.has("boost")) {
@@ -965,6 +982,53 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
 
         return Optional.of(ScoredGlobalIndexResult.create(bitmap, scoreMap::get));
+    }
+
+    private Optional<ScoredGlobalIndexResult> toVectorScoredResult(
+            SearchResult result, int limit, String metric) {
+        if (result == null || result.count == 0) {
+            return Optional.empty();
+        }
+
+        int count = Math.min(result.count, limit);
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        Map<Long, Float> scoreMap = new HashMap<>(count);
+        for (int i = 0; i < count; i++) {
+            long id = result.ids[i];
+            bitmap.add(id);
+            scoreMap.put(id, toPaimonVectorScore(result.scores[i], metric));
+        }
+
+        return Optional.of(ScoredGlobalIndexResult.create(bitmap, scoreMap::get));
+    }
+
+    /** Converts Lucene's metric-specific score into Paimon's exact vector-search score. */
+    static float toPaimonVectorScore(float luceneScore, String metric) {
+        if (!Float.isFinite(luceneScore)) {
+            throw new IllegalArgumentException(
+                    "Non-finite Lucene vector score for metric '" + metric + "': " + luceneScore);
+        }
+        String normalized = metric == null ? "l2" : metric.toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "l2":
+            case "euclidean":
+                return luceneScore;
+            case "cosine":
+            case "dot_product":
+            case "dp":
+                return 2.0f * luceneScore - 1.0f;
+            case "inner_product":
+            case "mip":
+            case "maximum_inner_product":
+                if (luceneScore <= 0.0f) {
+                    throw new IllegalArgumentException(
+                            "Lucene maximum-inner-product score must be positive; got: "
+                                    + luceneScore);
+                }
+                return luceneScore < 1.0f ? 1.0f - 1.0f / luceneScore : luceneScore - 1.0f;
+            default:
+                throw new IllegalArgumentException("Unknown ESLib vector metric: " + metric);
+        }
     }
 
     private void checkNotClosed() throws IOException {

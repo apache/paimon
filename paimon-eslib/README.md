@@ -35,6 +35,11 @@ indexed according to their data type and per-field options.
 > `es-index`. The module and its ESLib/Lucene dependencies require Java 11 or newer; the root Maven
 > build intentionally skips `paimon-eslib` when it runs on JDK 8.
 
+`paimon-eslib` is distributed as a thin JAR and does not embed ESLib or Lucene classes. Maven and
+Gradle resolve these dependencies transitively. When installing JARs manually, place `eslib-core`,
+`eslib-simdvec`, and their Lucene 9.12 dependencies in the same runtime classloader as
+`paimon-eslib`.
+
 See the general [Global Index](../docs/docs/multimodal-table/global-index.mdx) documentation for the
 required Data Evolution table properties, coverage/freshness behavior, and shared build options.
 

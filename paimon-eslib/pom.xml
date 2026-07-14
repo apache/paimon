@@ -114,56 +114,11 @@ under the License.
 
     <repositories>
         <repository>
-            <id>eslib-oss</id>
-            <url>https://paimon-es-public-bucket.oss-cn-beijing.aliyuncs.com/maven/</url>
+            <id>eslib-github</id>
+            <url>https://raw.githubusercontent.com/CrownChu/es-paimon-lib-releases/main/repository</url>
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>false</enabled></snapshots>
         </repository>
     </repositories>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>shade-eslib</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <artifactSet>
-                                <includes>
-                                    <include>io.github.paimon.eslib:eslib-core</include>
-                                    <include>io.github.paimon.eslib:eslib-simdvec</include>
-                                    <include>org.apache.lucene:*</include>
-                                </includes>
-                            </artifactSet>
-                            <relocations>
-                                <relocation>
-                                    <pattern>org.apache.lucene</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.lucene912</shadedPattern>
-                                </relocation>
-                            </relocations>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                            </transformers>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>module-info.class</exclude>
-                                        <exclude>META-INF/MANIFEST.MF</exclude>
-                                        <exclude>META-INF/versions/**</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
 </project>
