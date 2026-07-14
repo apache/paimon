@@ -96,11 +96,21 @@ class PrimaryKeySortedIndexBatchScanTest {
                 .hasMessage("corrupt index");
     }
 
-    private static TableSchema tableSchema() {
+    @Test
+    void testDisabledGlobalIndexUsesOrdinaryDataPlan() {
+        ScanFixture fixture = fixture(reader(2), false);
+
+        TableScan.Plan result = fixture.scan.plan();
+
+        assertThat(result.splits()).singleElement().isInstanceOf(DataSplit.class);
+    }
+
+    private static TableSchema tableSchema(boolean globalIndexEnabled) {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "2");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(), "false");
+        options.put(CoreOptions.GLOBAL_INDEX_ENABLED.key(), Boolean.toString(globalIndexEnabled));
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "f7");
         return new TableSchema(
                 5,
@@ -115,7 +125,11 @@ class PrimaryKeySortedIndexBatchScanTest {
     }
 
     private static ScanFixture fixture(GlobalIndexReader reader) {
-        TableSchema schema = tableSchema();
+        return fixture(reader, true);
+    }
+
+    private static ScanFixture fixture(GlobalIndexReader reader, boolean globalIndexEnabled) {
+        TableSchema schema = tableSchema(globalIndexEnabled);
         CoreOptions options = new CoreOptions(schema.options());
         DataFileMeta dataFile = dataFile("data-1", 4);
         DataSplit dataSplit = dataSplit(11, dataFile);

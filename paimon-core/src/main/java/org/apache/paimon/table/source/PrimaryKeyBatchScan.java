@@ -97,6 +97,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
         }
         SnapshotReader.Plan snapshotPlan = (SnapshotReader.Plan) dataPlan;
         if (filter == null
+                || !options().globalIndexEnabled()
                 || !snapshotReader.hasNonPartitionFilter()
                 || table.schema().primaryKeys().isEmpty()
                 || !options().deletionVectorsEnabled()
