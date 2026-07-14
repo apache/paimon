@@ -42,6 +42,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -51,15 +52,20 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -236,39 +242,52 @@ public final class PrimaryKeySortedIndexScan {
             }
         }
 
+        Map<PkSortedIndexGroup, SharedGlobalIndexReader> sharedReaders = new IdentityHashMap<>();
         List<EvaluatedFile> files = new ArrayList<>();
-        for (FilePlan file : plan.files()) {
-            GlobalIndexEvaluator evaluator =
-                    new GlobalIndexEvaluator(
-                            rowType,
-                            fieldId -> {
-                                PrimaryKeyIndexDefinition definition =
-                                        definitionsByField.get(fieldId);
-                                Optional<PkSortedIndexGroup> group = file.group(fieldId);
-                                if (definition == null || !group.isPresent()) {
-                                    return Collections.emptyList();
-                                }
-                                GlobalIndexReader reader =
-                                        readerFactory.create(
-                                                file, definition, group.get().payloads());
-                                return Collections.singletonList(
-                                        fileLocalReader(file, group.get(), reader));
-                            });
-            Optional<GlobalIndexResult> result;
-            try {
-                result = evaluator.evaluate(predicate);
-            } catch (RuntimeException e) {
-                rethrowIfInterrupted(e);
-                LOG.warn(
-                        "Failed to evaluate primary-key sorted index for data file {}; "
-                                + "falling back to a raw scan for this file.",
-                        file.dataFile().fileName(),
-                        e);
-                result = Optional.empty();
-            } finally {
-                evaluator.close();
+        try {
+            for (FilePlan file : plan.files()) {
+                GlobalIndexEvaluator evaluator =
+                        new GlobalIndexEvaluator(
+                                rowType,
+                                fieldId -> {
+                                    PrimaryKeyIndexDefinition definition =
+                                            definitionsByField.get(fieldId);
+                                    Optional<PkSortedIndexGroup> group = file.group(fieldId);
+                                    if (definition == null || !group.isPresent()) {
+                                        return Collections.emptyList();
+                                    }
+                                    SharedGlobalIndexReader reader = sharedReaders.get(group.get());
+                                    if (reader == null) {
+                                        reader =
+                                                new SharedGlobalIndexReader(
+                                                        () ->
+                                                                readerFactory.create(
+                                                                        file,
+                                                                        definition,
+                                                                        group.get().payloads()));
+                                        sharedReaders.put(group.get(), reader);
+                                    }
+                                    return Collections.singletonList(
+                                            fileLocalReader(file, group.get(), reader));
+                                });
+                Optional<GlobalIndexResult> result;
+                try {
+                    result = evaluator.evaluate(predicate);
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    LOG.warn(
+                            "Failed to evaluate primary-key sorted index for data file {}; "
+                                    + "falling back to a raw scan for this file.",
+                            file.dataFile().fileName(),
+                            e);
+                    result = Optional.empty();
+                } finally {
+                    evaluator.close();
+                }
+                files.add(new EvaluatedFile(file, result));
             }
-            files.add(new EvaluatedFile(file, result));
+        } finally {
+            IOUtils.closeAllQuietly(sharedReaders.values());
         }
         return new EvaluatedPlan(plan.snapshotId(), files);
     }
@@ -276,10 +295,6 @@ public final class PrimaryKeySortedIndexScan {
     private static GlobalIndexReader fileLocalReader(
             FilePlan file, PkSortedIndexGroup group, GlobalIndexReader reader) {
         List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
-        if (sourceFiles.size() == 1) {
-            return reader;
-        }
-
         PrimaryKeyIndexSourceFile target =
                 new PrimaryKeyIndexSourceFile(
                         file.dataFile().fileName(), file.dataFile().rowCount());
@@ -304,6 +319,250 @@ public final class PrimaryKeySortedIndexScan {
     private static void rethrowIfInterrupted(RuntimeException exception) {
         if (Thread.currentThread().isInterrupted()) {
             throw exception;
+        }
+    }
+
+    /** Shares one source-group reader and its group-global query results across source files. */
+    private static final class SharedGlobalIndexReader implements GlobalIndexReader {
+
+        private final Supplier<GlobalIndexReader> readerFactory;
+        private final Map<QueryKey, CompletableFuture<Optional<GlobalIndexResult>>> results;
+
+        private GlobalIndexReader reader;
+        private RuntimeException readerFailure;
+
+        private SharedGlobalIndexReader(Supplier<GlobalIndexReader> readerFactory) {
+            this.readerFactory = readerFactory;
+            this.results = new ConcurrentHashMap<>();
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+            return query(
+                    QueryKey.of(QueryOperation.IS_NOT_NULL, fieldRef),
+                    () -> reader().visitIsNotNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+            return query(
+                    QueryKey.of(QueryOperation.IS_NULL, fieldRef),
+                    () -> reader().visitIsNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.STARTS_WITH, fieldRef, literal),
+                    () -> reader().visitStartsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.ENDS_WITH, fieldRef, literal),
+                    () -> reader().visitEndsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.CONTAINS, fieldRef, literal),
+                    () -> reader().visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LIKE, fieldRef, literal),
+                    () -> reader().visitLike(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LESS_THAN, fieldRef, literal),
+                    () -> reader().visitLessThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.GREATER_OR_EQUAL, fieldRef, literal),
+                    () -> reader().visitGreaterOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.NOT_EQUAL, fieldRef, literal),
+                    () -> reader().visitNotEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LESS_OR_EQUAL, fieldRef, literal),
+                    () -> reader().visitLessOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.EQUAL, fieldRef, literal),
+                    () -> reader().visitEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.GREATER_THAN, fieldRef, literal),
+                    () -> reader().visitGreaterThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.IN, fieldRef, literals),
+                    () -> reader().visitIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.NOT_IN, fieldRef, literals),
+                    () -> reader().visitNotIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return query(
+                    QueryKey.of(QueryOperation.BETWEEN, fieldRef, from, to),
+                    () -> reader().visitBetween(fieldRef, from, to));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return query(
+                    QueryKey.of(QueryOperation.NOT_BETWEEN, fieldRef, from, to),
+                    () -> reader().visitNotBetween(fieldRef, from, to));
+        }
+
+        private CompletableFuture<Optional<GlobalIndexResult>> query(
+                QueryKey key,
+                Supplier<CompletableFuture<Optional<GlobalIndexResult>>> querySupplier) {
+            return results.computeIfAbsent(
+                    key,
+                    ignored -> {
+                        try {
+                            return checkNotNull(querySupplier.get());
+                        } catch (RuntimeException e) {
+                            CompletableFuture<Optional<GlobalIndexResult>> failed =
+                                    new CompletableFuture<>();
+                            failed.completeExceptionally(e);
+                            return failed;
+                        }
+                    });
+        }
+
+        private synchronized GlobalIndexReader reader() {
+            if (reader != null) {
+                return reader;
+            }
+            if (readerFailure != null) {
+                throw readerFailure;
+            }
+            try {
+                reader = checkNotNull(readerFactory.get());
+                return reader;
+            } catch (RuntimeException e) {
+                readerFailure = e;
+                throw e;
+            }
+        }
+
+        @Override
+        public synchronized void close() throws IOException {
+            if (reader != null) {
+                GlobalIndexReader readerToClose = reader;
+                reader = null;
+                readerToClose.close();
+            }
+        }
+    }
+
+    private enum QueryOperation {
+        IS_NOT_NULL,
+        IS_NULL,
+        STARTS_WITH,
+        ENDS_WITH,
+        CONTAINS,
+        LIKE,
+        LESS_THAN,
+        GREATER_OR_EQUAL,
+        NOT_EQUAL,
+        LESS_OR_EQUAL,
+        EQUAL,
+        GREATER_THAN,
+        IN,
+        NOT_IN,
+        BETWEEN,
+        NOT_BETWEEN
+    }
+
+    private static final class QueryKey {
+
+        private final QueryOperation operation;
+        private final FieldRef fieldRef;
+        private final List<Object> literals;
+
+        private QueryKey(QueryOperation operation, FieldRef fieldRef, List<Object> literals) {
+            this.operation = operation;
+            this.fieldRef = fieldRef;
+            this.literals = Collections.unmodifiableList(new ArrayList<>(literals));
+        }
+
+        private static QueryKey of(
+                QueryOperation operation, FieldRef fieldRef, Object... literals) {
+            return new QueryKey(operation, fieldRef, Arrays.asList(literals));
+        }
+
+        private static QueryKey ofLiterals(
+                QueryOperation operation, FieldRef fieldRef, List<Object> literals) {
+            return new QueryKey(operation, fieldRef, literals);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof QueryKey)) {
+                return false;
+            }
+            QueryKey queryKey = (QueryKey) o;
+            return operation == queryKey.operation
+                    && Objects.equals(fieldRef, queryKey.fieldRef)
+                    && Objects.equals(literals, queryKey.literals);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(operation, fieldRef, literals);
         }
     }
 
@@ -418,7 +677,7 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         private Optional<GlobalIndexResult> toFileLocal(Optional<GlobalIndexResult> result) {
-            if (!result.isPresent()) {
+            if (!result.isPresent() || (from == 0 && to == totalRowCount)) {
                 return result;
             }
             RoaringNavigableMap64 positions = new RoaringNavigableMap64();
@@ -433,9 +692,7 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         @Override
-        public void close() throws IOException {
-            wrapped.close();
-        }
+        public void close() {}
     }
 
     /** Immutable groups for all source files in one captured snapshot. */
