@@ -38,7 +38,6 @@ import org.apache.paimon.types.DataField;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,7 +52,7 @@ public class PkSortedIndexFile extends IndexFile {
         super(fileIO, pathFactory);
     }
 
-    public List<IndexFileMeta> build(
+    public IndexFileMeta build(
             List<PrimaryKeyIndexSourceFile> sourceFiles,
             DataField indexField,
             String indexType,
@@ -118,7 +117,7 @@ public class PkSortedIndexFile extends IndexFile {
                                     sourceMeta),
                             pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
-            return Collections.singletonList(payload);
+            return payload;
         } finally {
             if (!success) {
                 fileWriter.deleteCreatedFiles();

@@ -38,12 +38,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,10 +58,12 @@ class PkSortedIndexFileTest {
 
     @Test
     void testHasSingleBuildEntryPoint() {
-        assertThat(
-                        Arrays.stream(PkSortedIndexFile.class.getDeclaredMethods())
-                                .filter(method -> method.getName().equals("build")))
-                .hasSize(1);
+        List<Method> buildMethods =
+                Arrays.stream(PkSortedIndexFile.class.getDeclaredMethods())
+                        .filter(method -> method.getName().equals("build"))
+                        .collect(Collectors.toList());
+        assertThat(buildMethods).hasSize(1);
+        assertThat(buildMethods.get(0).getReturnType()).isEqualTo(IndexFileMeta.class);
     }
 
     @Test
@@ -70,7 +74,7 @@ class PkSortedIndexFileTest {
                     new PkSortedIndexFile(LocalFileIO.create(), pathFactory(indexDirectory));
             PrimaryKeyIndexSourceFile source = new PrimaryKeyIndexSourceFile("data-file", 3);
 
-            List<IndexFileMeta> payloads =
+            IndexFileMeta payload =
                     indexFile.build(
                             Collections.singletonList(source),
                             field(),
@@ -82,23 +86,16 @@ class PkSortedIndexFileTest {
                                             new PkSortedIndexFile.Entry(20, 0))
                                     .iterator());
 
-            assertThat(payloads).hasSize(1);
-            assertThat(payloads).extracting(IndexFileMeta::indexType).containsOnly(indexType);
-            assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(3L);
-            assertThat(payloads)
-                    .allSatisfy(
-                            payload -> {
-                                GlobalIndexMeta meta = payload.globalIndexMeta();
-                                assertThat(meta.rowRangeStart()).isZero();
-                                assertThat(meta.rowRangeEnd()).isEqualTo(2);
-                                assertThat(meta.indexFieldId()).isEqualTo(7);
-                                assertThat(meta.indexMeta()).isNotEmpty();
-                                assertThat(
-                                                PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
-                                                        .sourceFile())
-                                        .isEqualTo(source);
-                                assertThat(indexFile.exists(payload)).isTrue();
-                            });
+            assertThat(payload.indexType()).isEqualTo(indexType);
+            assertThat(payload.rowCount()).isEqualTo(3L);
+            GlobalIndexMeta meta = payload.globalIndexMeta();
+            assertThat(meta.rowRangeStart()).isZero();
+            assertThat(meta.rowRangeEnd()).isEqualTo(2);
+            assertThat(meta.indexFieldId()).isEqualTo(7);
+            assertThat(meta.indexMeta()).isNotEmpty();
+            assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile())
+                    .isEqualTo(source);
+            assertThat(indexFile.exists(payload)).isTrue();
         }
     }
 
@@ -111,7 +108,7 @@ class PkSortedIndexFileTest {
                         new PrimaryKeyIndexSourceFile("data-a", 2),
                         new PrimaryKeyIndexSourceFile("data-b", 3));
 
-        List<IndexFileMeta> payloads =
+        IndexFileMeta payload =
                 indexFile.build(
                         sources,
                         field(),
@@ -125,17 +122,11 @@ class PkSortedIndexFileTest {
                                         new PkSortedIndexFile.Entry(40, 2))
                                 .iterator());
 
-        assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(5L);
-        assertThat(payloads)
-                .allSatisfy(
-                        payload -> {
-                            assertThat(payload.globalIndexMeta().rowRangeStart()).isZero();
-                            assertThat(payload.globalIndexMeta().rowRangeEnd()).isEqualTo(4);
-                            assertThat(
-                                            PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
-                                                    .sourceFiles())
-                                    .containsExactlyElementsOf(sources);
-                        });
+        assertThat(payload.rowCount()).isEqualTo(5L);
+        assertThat(payload.globalIndexMeta().rowRangeStart()).isZero();
+        assertThat(payload.globalIndexMeta().rowRangeEnd()).isEqualTo(4);
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFiles())
+                .containsExactlyElementsOf(sources);
     }
 
     @Test

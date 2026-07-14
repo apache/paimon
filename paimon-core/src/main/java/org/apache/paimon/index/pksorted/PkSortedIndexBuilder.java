@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
@@ -38,7 +39,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -82,13 +82,7 @@ public class PkSortedIndexBuilder {
         this.ioManager = ioManager;
     }
 
-    public List<org.apache.paimon.index.IndexFileMeta> build(DataFileMeta dataFile)
-            throws IOException {
-        return build(Collections.singletonList(dataFile));
-    }
-
-    public List<org.apache.paimon.index.IndexFileMeta> build(List<DataFileMeta> dataFiles)
-            throws IOException {
+    public IndexFileMeta build(List<DataFileMeta> dataFiles) throws IOException {
         checkArgument(!dataFiles.isEmpty(), "A sorted index build requires source files.");
         List<DataFileMeta> orderedDataFiles = new ArrayList<>(dataFiles);
         orderedDataFiles.sort(Comparator.comparing(DataFileMeta::fileName));
