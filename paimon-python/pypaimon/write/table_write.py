@@ -56,8 +56,18 @@ class TableWrite:
             partition_bucket_groups[(tuple(partitions[i]), buckets[i])].append(i)
 
         for (partition, bucket), row_indices in partition_bucket_groups.items():
-            indices_array = pa.array(row_indices, type=pa.int64())
-            sub_table = pa.compute.take(data, indices_array)
+            if len(row_indices) == data.num_rows:
+                # Every input row belongs to the same partition/bucket. Passing the
+                # original batch through avoids copying large BLOB values through
+                # Arrow take before the dedicated BLOB writer consumes them.
+                sub_table = data
+            elif row_indices[-1] - row_indices[0] + 1 == len(row_indices):
+                # Contiguous groups can share the original Arrow buffers instead of
+                # gathering their rows into newly allocated buffers with take.
+                sub_table = data.slice(row_indices[0], len(row_indices))
+            else:
+                indices_array = pa.array(row_indices, type=pa.int64())
+                sub_table = pa.compute.take(data, indices_array)
             self.file_store_write.write(partition, bucket, sub_table)
 
     def write_row(self, row):

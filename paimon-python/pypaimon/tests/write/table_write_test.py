@@ -22,6 +22,7 @@ import shutil
 
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
@@ -30,6 +31,7 @@ from parameterized import parameterized
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.write.table_write import TableWrite
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
@@ -88,6 +90,72 @@ class TableWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         return read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits()).sort_by(sort_keys)
+
+    @staticmethod
+    def _mock_table_write(partitions, buckets):
+        table_write = object.__new__(TableWrite)
+        table_write._validate_pyarrow_schema = Mock()
+        table_write.row_key_extractor = Mock()
+        table_write.file_store_write = Mock()
+        table_write.row_key_extractor.extract_partition_bucket_batch.return_value = (
+            partitions, buckets)
+        return table_write
+
+    def test_write_arrow_batch_reuses_full_batch(self):
+        data = pa.RecordBatch.from_pydict({
+            'id': [0, 1],
+            'payload': [b'a', b'b'],
+        })
+        table_write = self._mock_table_write(
+            [('p1',), ('p1',)], [0, 0])
+
+        with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
+            table_write.write_arrow_batch(data)
+
+        take.assert_not_called()
+        written = table_write.file_store_write.write.call_args[0][2]
+        self.assertIs(data, written)
+
+    def test_write_arrow_batch_uses_zero_copy_for_contiguous_groups(self):
+        data = pa.RecordBatch.from_pydict({
+            'id': [0, 1, 2, 3],
+            'payload': [b'a', b'b', b'c', b'd'],
+        })
+        table_write = self._mock_table_write(
+            [('p1',), ('p1',), ('p2',), ('p2',)],
+            [0, 0, 1, 1])
+        with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
+            table_write.write_arrow_batch(data)
+
+        take.assert_not_called()
+        calls = table_write.file_store_write.write.call_args_list
+        self.assertEqual(2, len(calls))
+        self.assertEqual({'id': [0, 1], 'payload': [b'a', b'b']},
+                         calls[0][0][2].to_pydict())
+        self.assertEqual({'id': [2, 3], 'payload': [b'c', b'd']},
+                         calls[1][0][2].to_pydict())
+        self.assertEqual(
+            data.column(1).buffers()[2].address,
+            calls[0][0][2].column(1).buffers()[2].address)
+
+    def test_write_arrow_batch_uses_take_for_non_contiguous_groups(self):
+        data = pa.RecordBatch.from_pydict({
+            'id': [0, 1, 2, 3],
+            'payload': [b'a', b'b', b'c', b'd'],
+        })
+        table_write = self._mock_table_write(
+            [('p1',), ('p2',), ('p1',), ('p2',)],
+            [0, 1, 0, 1])
+
+        with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
+            table_write.write_arrow_batch(data)
+
+        self.assertEqual(2, take.call_count)
+        calls = table_write.file_store_write.write.call_args_list
+        self.assertEqual({'id': [0, 2], 'payload': [b'a', b'c']},
+                         calls[0][0][2].to_pydict())
+        self.assertEqual({'id': [1, 3], 'payload': [b'b', b'd']},
+                         calls[1][0][2].to_pydict())
 
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

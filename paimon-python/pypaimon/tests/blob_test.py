@@ -21,7 +21,9 @@ import shutil
 import struct
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -1598,6 +1600,37 @@ class BlobEndToEndTest(unittest.TestCase):
         writer.add_element(row_with_null)
         self.assertEqual(writer.lengths, [-1])
         self.assertEqual(writer.position, 0)
+
+    @staticmethod
+    def _write_blob_record_with_crc_backend(backend):
+        from pypaimon.write import blob_format_writer
+
+        output = io.BytesIO()
+        payload = b'blob-crc-payload' * 1024
+        with patch.object(blob_format_writer, 'crc_backend', backend):
+            writer = blob_format_writer.BlobFormatWriter(output)
+            writer.add_blob('blob_field', BlobData(payload))
+        return output.getvalue(), payload
+
+    def test_blob_crc_fallback_matches_zlib(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        record, payload = self._write_blob_record_with_crc_backend(zlib)
+        expected_crc = zlib.crc32(
+            struct.pack('<I', BlobFormatWriter.MAGIC_NUMBER))
+        expected_crc = zlib.crc32(payload, expected_crc) & 0xffffffff
+        actual_crc = struct.unpack('<I', record[-4:])[0]
+        self.assertEqual(expected_crc, actual_crc)
+
+    def test_blob_crc_isal_matches_zlib(self):
+        try:
+            from isal import isal_zlib
+        except ImportError:
+            self.skipTest('isal is not available on this platform')
+
+        zlib_record, _ = self._write_blob_record_with_crc_backend(zlib)
+        isal_record, _ = self._write_blob_record_with_crc_backend(isal_zlib)
+        self.assertEqual(zlib_record, isal_record)
 
     def test_null_blob_read(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
