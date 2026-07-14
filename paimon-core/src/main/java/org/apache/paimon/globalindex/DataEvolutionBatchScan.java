@@ -33,8 +33,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.AbstractBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
@@ -65,13 +65,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
 
     private final FileStoreTable table;
-    private final DataTableBatchScan batchScan;
+    private final AbstractBatchTableScan batchScan;
 
     private Predicate filter;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
-    public DataEvolutionBatchScan(FileStoreTable wrapped, DataTableBatchScan batchScan) {
+    public DataEvolutionBatchScan(FileStoreTable wrapped, AbstractBatchTableScan batchScan) {
         this.table = wrapped;
         this.batchScan = batchScan;
     }

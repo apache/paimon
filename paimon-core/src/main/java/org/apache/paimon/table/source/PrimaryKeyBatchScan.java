@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -27,17 +26,10 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,45 +39,43 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
-/** Batch scan wrapper for primary-key indexes. */
-public class PrimaryKeyBatchScan extends ReadOnceTableScan implements DataTableScan {
+/** Batch scan for primary-key tables and indexes. */
+public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyBatchScan.class);
 
     private final FileStoreTable table;
-    private final DataTableBatchScan batchScan;
-
     private final @Nullable PrimaryKeySortedIndexScan.ReaderFactory readerFactory;
 
     @Nullable private Predicate filter;
     @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
 
-    public PrimaryKeyBatchScan(FileStoreTable table, DataTableBatchScan batchScan) {
-        this(table, batchScan, null);
+    public PrimaryKeyBatchScan(
+            FileStoreTable table, SnapshotReader snapshotReader, TableQueryAuth queryAuth) {
+        this(table, snapshotReader, queryAuth, null);
     }
 
     PrimaryKeyBatchScan(
             FileStoreTable table,
-            DataTableBatchScan batchScan,
+            SnapshotReader snapshotReader,
+            TableQueryAuth queryAuth,
             @Nullable PrimaryKeySortedIndexScan.ReaderFactory readerFactory) {
+        super(
+                table.schema(),
+                table.schemaManager(),
+                table.coreOptions(),
+                snapshotReader,
+                queryAuth);
         this.table = table;
-        this.batchScan = batchScan;
         this.readerFactory = readerFactory;
-    }
-
-    @Override
-    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
-        return this;
     }
 
     @Override
     public PrimaryKeyBatchScan withFilter(Predicate predicate) {
         this.filter = predicate;
-        batchScan.withFilter(predicate);
+        super.withFilter(predicate);
         return this;
     }
 
@@ -98,33 +88,30 @@ public class PrimaryKeyBatchScan extends ReadOnceTableScan implements DataTableS
     }
 
     @Override
-    protected Plan innerPlan() {
-        return batchScan.planWithAuth(this::planWithoutAuth);
-    }
-
-    private Plan planWithoutAuth() {
+    @Nullable
+    protected Plan globalIndexPlan() {
         if (globalIndexSplitResult == null) {
-            return applyPrimaryKeySortedIndexes(batchScan.planWithoutAuth());
+            return null;
         }
         if (globalIndexSplitResult.snapshotId() > 0) {
-            batchScan.maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
+            maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
         }
         List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
         return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
     }
 
-    private Plan applyPrimaryKeySortedIndexes(Plan dataPlan) {
+    @Override
+    protected Plan postProcessPlan(Plan dataPlan) {
         if (!(dataPlan instanceof SnapshotReader.Plan)) {
             return dataPlan;
         }
         SnapshotReader.Plan snapshotPlan = (SnapshotReader.Plan) dataPlan;
-        SnapshotReader snapshotReader = batchScan.snapshotReader();
         if (filter == null
                 || !snapshotReader.hasNonPartitionFilter()
                 || table.schema().primaryKeys().isEmpty()
-                || !batchScan.options().deletionVectorsEnabled()
-                || batchScan.options().deletionVectorsMergeOnRead()
-                || batchScan.options().bucket() <= 0
+                || !options().deletionVectorsEnabled()
+                || options().deletionVectorsMergeOnRead()
+                || options().bucket() <= 0
                 || snapshotPlan.snapshotId() == null
                 || snapshotPlan.splits().isEmpty()) {
             return dataPlan;
@@ -181,7 +168,7 @@ public class PrimaryKeyBatchScan extends ReadOnceTableScan implements DataTableS
                                     snapshotReader.snapshotManager().fileIO(),
                                     snapshotReader.pathFactory(),
                                     snapshotSchema.logicalRowType(),
-                                    batchScan.options().toConfiguration())
+                                    options().toConfiguration())
                             : readerFactory;
             PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
                     PrimaryKeySortedIndexScan.evaluate(
@@ -203,99 +190,5 @@ public class PrimaryKeyBatchScan extends ReadOnceTableScan implements DataTableS
                     "Failed to apply primary-key sorted indexes; using the ordinary data plan.", e);
             return dataPlan;
         }
-    }
-
-    @Override
-    public List<PartitionEntry> listPartitionEntries() {
-        return batchScan.listPartitionEntries();
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withReadType(@Nullable RowType readType) {
-        batchScan.withReadType(readType);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withBucket(int bucket) {
-        batchScan.withBucket(bucket);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan dropStats() {
-        batchScan.dropStats();
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withMetricRegistry(MetricRegistry metricsRegistry) {
-        batchScan.withMetricRegistry(metricsRegistry);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withLimit(int limit) {
-        batchScan.withLimit(limit);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withPartitionFilter(Map<String, String> partitionSpec) {
-        batchScan.withPartitionFilter(partitionSpec);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withPartitionFilter(List<BinaryRow> partitions) {
-        batchScan.withPartitionFilter(partitions);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withPartitionsFilter(List<Map<String, String>> partitions) {
-        batchScan.withPartitionsFilter(partitions);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withPartitionFilter(PartitionPredicate partitionPredicate) {
-        batchScan.withPartitionFilter(partitionPredicate);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withPartitionFilter(Predicate predicate) {
-        batchScan.withPartitionFilter(predicate);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withBucketFilter(Filter<Integer> bucketFilter) {
-        batchScan.withBucketFilter(bucketFilter);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withLevelFilter(Filter<Integer> levelFilter) {
-        batchScan.withLevelFilter(levelFilter);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withRowRanges(List<Range> rowRanges) {
-        batchScan.withRowRanges(rowRanges);
-        return this;
-    }
-
-    @Override
-    public PrimaryKeyBatchScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
-        batchScan.withRowRangeIndex(rowRangeIndex);
-        return this;
-    }
-
-    @Override
-    public @Nullable String readProtectionTagName() {
-        return batchScan.readProtectionTagName();
     }
 }

@@ -57,6 +57,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TableScanTest extends ScannerTestBase {
 
     @Test
+    public void testBatchScanTypes() throws Exception {
+        assertThat(table.newScan()).isInstanceOf(PrimaryKeyBatchScan.class);
+
+        createAppendOnlyTable();
+        assertThat(table.newScan()).isInstanceOf(AppendBatchTableScan.class);
+    }
+
+    @Test
     public void testPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);

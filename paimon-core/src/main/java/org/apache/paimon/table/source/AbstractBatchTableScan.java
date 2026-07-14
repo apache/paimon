@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -52,10 +51,10 @@ import java.util.function.Function;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
-/** {@link TableScan} implementation for batch planning. */
-public class DataTableBatchScan extends AbstractDataTableScan {
+/** Base {@link TableScan} implementation for batch planning. */
+public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractBatchTableScan.class);
 
     /** Validates {@link CoreOptions#SCAN_BUCKET} for primary-key fixed-bucket tables. */
     public static void validateScanBucketOption(
@@ -85,13 +84,19 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         CoreOptions options = table.coreOptions();
         SnapshotReader snapshotReader = readerFactory.apply(table);
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        table.schema(),
-                        table.schemaManager(),
-                        options,
-                        snapshotReader,
-                        table.catalogEnvironment().tableQueryAuth(options));
+        TableQueryAuth queryAuth = table.catalogEnvironment().tableQueryAuth(options);
+        AbstractBatchTableScan scan;
+        if (!table.schema().primaryKeys().isEmpty() && snapshotReader.indexFileHandler() != null) {
+            scan = new PrimaryKeyBatchScan(table, snapshotReader, queryAuth);
+        } else {
+            scan =
+                    new AppendBatchTableScan(
+                            table.schema(),
+                            table.schemaManager(),
+                            options,
+                            snapshotReader,
+                            queryAuth);
+        }
         Integer scanBucket = options.scanBucket();
         if (scanBucket != null) {
             validateScanBucketOption(table.schema(), options, scanBucket);
@@ -100,14 +105,10 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         if (options.dataEvolutionEnabled()) {
             return new DataEvolutionBatchScan(table, scan);
         }
-        if (snapshotReader.indexFileHandler() != null
-                && !PrimaryKeyIndexDefinitions.create(table.schema()).definitions().isEmpty()) {
-            return new PrimaryKeyBatchScan(table, scan);
-        }
         return scan;
     }
 
-    public DataTableBatchScan(
+    protected AbstractBatchTableScan(
             TableSchema schema,
             SchemaManager schemaManager,
             CoreOptions options,
@@ -149,30 +150,44 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
-    protected TableScan.Plan planWithoutAuth() {
+    protected final TableScan.Plan planWithoutAuth() {
+        if (!hasNext) {
+            throw new EndOfScanException();
+        }
+        hasNext = false;
+
+        Plan globalIndexPlan = globalIndexPlan();
+        if (globalIndexPlan != null) {
+            return globalIndexPlan;
+        }
+
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
 
-        if (hasNext) {
-            hasNext = false;
-            StartingScanner.Result result;
-            Optional<StartingScanner.Result> pushed = applyPushDownLimit();
-            if (pushed.isPresent()) {
-                result = pushed.get();
-            } else {
-                pushed = applyPushDownTopN();
-                result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
-            }
-
-            if (result instanceof ScannedResult) {
-                maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
-            }
-
-            return DataFilePlan.fromResult(result);
+        StartingScanner.Result result;
+        Optional<StartingScanner.Result> pushed = applyPushDownLimit();
+        if (pushed.isPresent()) {
+            result = pushed.get();
         } else {
-            throw new EndOfScanException();
+            pushed = applyPushDownTopN();
+            result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
         }
+
+        if (result instanceof ScannedResult) {
+            maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
+        }
+
+        return postProcessPlan(DataFilePlan.fromResult(result));
+    }
+
+    @Nullable
+    protected Plan globalIndexPlan() {
+        return null;
+    }
+
+    protected Plan postProcessPlan(Plan plan) {
+        return plan;
     }
 
     @Override
@@ -282,7 +297,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         return readProtectionTagName;
     }
 
-    void maybeCreateReadProtectionTag(long snapshotId) {
+    protected final void maybeCreateReadProtectionTag(long snapshotId) {
         Duration timeRetained = options().scanPlanAutoTagTimeRetained();
         if (timeRetained == null) {
             return;

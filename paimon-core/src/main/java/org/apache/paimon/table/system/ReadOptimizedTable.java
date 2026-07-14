@@ -31,7 +31,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.AbstractBatchTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -136,7 +136,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        return DataTableBatchScan.create(wrapped, this::newSnapshotReader);
+        return AbstractBatchTableScan.create(wrapped, this::newSnapshotReader);
     }
 
     @Override

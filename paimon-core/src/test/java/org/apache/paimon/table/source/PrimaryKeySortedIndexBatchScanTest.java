@@ -128,16 +128,15 @@ class PrimaryKeySortedIndexBatchScanTest {
         SchemaManager schemaManager = mock(SchemaManager.class);
         when(schemaManager.schema(schema.id())).thenReturn(schema);
         Predicate predicate = new PredicateBuilder(schema.logicalRowType()).equal(1, 42);
-        DataTableBatchScan batchScan =
-                new DataTableBatchScan(
-                        schema, schemaManager, options, snapshotReader, mock(TableQueryAuth.class));
         FileStoreTable table = mock(FileStoreTable.class);
         when(table.schema()).thenReturn(schema);
         when(table.schemaManager()).thenReturn(schemaManager);
+        when(table.coreOptions()).thenReturn(options);
         PrimaryKeyBatchScan scan =
                 new PrimaryKeyBatchScan(
                         table,
-                        batchScan,
+                        snapshotReader,
+                        mock(TableQueryAuth.class),
                         (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader);
         scan.withFilter(predicate);
         return new ScanFixture(dataFile, scan);

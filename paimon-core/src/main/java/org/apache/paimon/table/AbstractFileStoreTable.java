@@ -44,7 +44,7 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.WriteSelector;
-import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.AbstractBatchTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -288,7 +288,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public DataTableScan newScan() {
-        return DataTableBatchScan.create(this);
+        return AbstractBatchTableScan.create(this);
     }
 
     @Override
@@ -305,7 +305,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         !tableSchema.primaryKeys().isEmpty());
         Integer scanBucket = coreOptions().scanBucket();
         if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
+            AbstractBatchTableScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
             scan.withBucket(scanBucket);
         }
         return scan;
