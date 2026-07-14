@@ -161,6 +161,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         }
         return new DataTableStreamScan(
                 wrapped.schema(),
+                schemaManager(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),

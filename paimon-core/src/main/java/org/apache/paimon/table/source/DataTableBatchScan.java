@@ -65,7 +65,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private Integer pushDownLimit;
     private TopN topN;
 
-    private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
     @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
 
@@ -75,10 +74,9 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
-        super(schema, options, snapshotReader, queryAuth);
+        super(schema, schemaManager, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             if (options.toConfiguration()
                     .get(CoreOptions.BATCH_SCAN_MODE)
