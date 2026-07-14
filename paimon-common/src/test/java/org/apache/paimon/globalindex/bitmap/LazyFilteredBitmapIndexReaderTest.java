@@ -154,8 +154,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                         return stream;
                     }
                 };
-        GlobalIndexSingleColumnWriter writer =
-                globalIndexer.createSortedWriter(streamingFileWriter);
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
 
         writer.write(str("A"), 0);
         writer.write(str("B"), 1);
@@ -166,7 +165,7 @@ public class LazyFilteredBitmapIndexReaderTest {
     }
 
     @Test
-    public void testClosesSortedWriterAfterWriteFailure() throws Exception {
+    public void testClosesWriterAfterWriteFailure() throws Exception {
         AtomicReference<ByteArrayPositionOutputStream> output = new AtomicReference<>();
         GlobalIndexFileWriter streamingFileWriter =
                 new GlobalIndexFileWriter() {
@@ -182,8 +181,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                         return stream;
                     }
                 };
-        GlobalIndexSingleColumnWriter writer =
-                globalIndexer.createSortedWriter(streamingFileWriter);
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
         writer.write(str("A"), 0);
         writer.write(str("B"), 1);
 
@@ -196,21 +194,13 @@ public class LazyFilteredBitmapIndexReaderTest {
     }
 
     @Test
-    public void testWritesUnsortedKeys() throws Exception {
+    public void testRejectsUnsortedKeys() throws Exception {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
         writer.write(str("B"), 0);
-        writer.write(str("A"), 1);
-        ResultEntry result = writer.finish().get(0);
-        Path filePath = new Path(basePath, result.fileName());
-        GlobalIndexIOMeta meta =
-                new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta());
 
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
-            assertRows(reader.visitEqual(fieldRef, str("A")).join(), 1L);
-            assertRows(reader.visitEqual(fieldRef, str("B")).join(), 0L);
-        }
+        assertThatThrownBy(() -> writer.write(str("A"), 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("monotonically increasing");
     }
 
     @Test
@@ -520,7 +510,15 @@ public class LazyFilteredBitmapIndexReaderTest {
 
     private GlobalIndexIOMeta writeData(List<Pair<BinaryString, Long>> data) throws IOException {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
-        for (Pair<BinaryString, Long> pair : data) {
+        List<Pair<BinaryString, Long>> sortedData = new ArrayList<>(data);
+        sortedData.sort(
+                (left, right) -> {
+                    if (left.getKey() == null) {
+                        return right.getKey() == null ? 0 : -1;
+                    }
+                    return right.getKey() == null ? 1 : left.getKey().compareTo(right.getKey());
+                });
+        for (Pair<BinaryString, Long> pair : sortedData) {
             writer.write(pair.getKey(), pair.getValue());
         }
 

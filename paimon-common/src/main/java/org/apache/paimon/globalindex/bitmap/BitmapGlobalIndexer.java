@@ -22,7 +22,6 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -64,13 +63,6 @@ public class BitmapGlobalIndexer implements GlobalIndexer {
     public BitmapGlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter)
             throws IOException {
         return new BitmapGlobalIndexWriter(
-                fileWriter, keySerializer, dictionaryBlockSize, compressionFactory);
-    }
-
-    /** Creates a streaming bitmap writer for callers which provide sorted input. */
-    public GlobalIndexSingleColumnWriter createSortedWriter(GlobalIndexFileWriter fileWriter)
-            throws IOException {
-        return new SortedBitmapGlobalIndexWriter(
                 fileWriter, keySerializer, dictionaryBlockSize, compressionFactory);
     }
 

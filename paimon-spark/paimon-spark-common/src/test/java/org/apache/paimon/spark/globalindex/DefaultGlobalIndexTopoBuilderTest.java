@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DefaultGlobalIndexTopoBuilder}. */
 public class DefaultGlobalIndexTopoBuilderTest {
+
+    @Test
+    void testBitmapUsesSortedTopologyBuilder() {
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("bitmap"))
+                .isInstanceOf(SortedIndexTopoBuilder.class);
+    }
 
     @Test
     void testRowsPerShardUsesMergedBuildOptions() {

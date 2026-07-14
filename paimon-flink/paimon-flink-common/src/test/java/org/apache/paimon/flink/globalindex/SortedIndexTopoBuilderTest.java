@@ -42,6 +42,13 @@ import static org.mockito.Mockito.when;
 public class SortedIndexTopoBuilderTest {
 
     @Test
+    public void testSupportsBitmapAndBTree() {
+        assertThat(SortedIndexTopoBuilder.supports("bitmap")).isTrue();
+        assertThat(SortedIndexTopoBuilder.supports("btree")).isTrue();
+        assertThat(SortedIndexTopoBuilder.supports("inverted")).isFalse();
+    }
+
+    @Test
     public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
         SortedGlobalIndexBuilder indexBuilder = mock(SortedGlobalIndexBuilder.class);
         when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
