@@ -79,7 +79,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
 
     @Override
     @Nullable
-    protected Plan globalIndexPlan() {
+    protected Plan preProcessPlan() {
         if (globalIndexSplitResult == null) {
             return null;
         }

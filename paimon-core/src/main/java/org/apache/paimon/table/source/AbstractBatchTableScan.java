@@ -113,9 +113,9 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
         hasNext = false;
 
-        Plan globalIndexPlan = globalIndexPlan();
-        if (globalIndexPlan != null) {
-            return globalIndexPlan;
+        Plan preProcessedPlan = preProcessPlan();
+        if (preProcessedPlan != null) {
+            return preProcessedPlan;
         }
 
         if (startingScanner == null) {
@@ -139,7 +139,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     }
 
     @Nullable
-    protected Plan globalIndexPlan() {
+    protected Plan preProcessPlan() {
         return null;
     }
 
