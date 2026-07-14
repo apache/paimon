@@ -58,10 +58,12 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.ParquetFilters;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
@@ -257,6 +259,38 @@ public class ParquetReadWriteTest {
         }
 
         innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @Test
+    void testDecimalDictionaryFilterWithFixedLengthBinary() throws IOException {
+        int precision = 20;
+        int scale = 0;
+        RowType rowType = RowType.of(new DecimalType(precision, scale));
+        Decimal positive = Decimal.fromBigDecimal(new BigDecimal("10000939"), precision, scale);
+        Decimal negative = Decimal.fromBigDecimal(new BigDecimal("-10000939"), precision, scale);
+
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            rows.add(GenericRow.of(i % 2 == 0 ? positive : negative));
+        }
+
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Options writeOptions = new Options();
+        writeOptions.set("parquet.enable.dictionary", "true");
+        writeOptions.setInteger("parquet.block.size", 1024 * 1024);
+        ParquetWriterFactory writerFactory =
+                new ParquetWriterFactory(new RowDataParquetBuilder(rowType, writeOptions));
+        FormatWriter writer =
+                writerFactory.create(new LocalFileIO().newOutputStream(path, false), "snappy");
+        for (InternalRow row : rows) {
+            writer.addElement(row);
+        }
+        writer.close();
+
+        assertThat(filteredRowGroupCount(path, rowType, positive)).isEqualTo(1);
+        assertThat(filteredRowGroupCount(path, rowType, negative)).isEqualTo(1);
+        Decimal missing = Decimal.fromBigDecimal(new BigDecimal("10000940"), precision, scale);
+        assertThat(filteredRowGroupCount(path, rowType, missing)).isZero();
     }
 
     @ParameterizedTest
@@ -799,6 +833,31 @@ public class ParquetReadWriteTest {
 
     private static void assertVector(InternalVector vector, float[] expected) {
         Assertions.assertArrayEquals(expected, vector.toFloatArray());
+    }
+
+    private int filteredRowGroupCount(Path path, RowType rowType, Decimal literal)
+            throws IOException {
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        PredicateBuilder.splitAnd(predicateBuilder.equal(0, literal)));
+        Options readOptions = new Options();
+        readOptions.set("parquet.filter.stats.enabled", "false");
+        readOptions.set("parquet.filter.dictionary.enabled", "true");
+        LocalFileIO fileIO = new LocalFileIO();
+        long fileSize = fileIO.getFileSize(path);
+        ParquetReadOptions parquetReadOptions =
+                ParquetUtil.getParquetReadOptionsBuilder(readOptions)
+                        .withRecordFilter(filter)
+                        .withRange(0, fileSize)
+                        .build();
+        try (ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(fileIO, path, fileSize),
+                        parquetReadOptions,
+                        null)) {
+            return reader.getRowGroups().size();
+        }
     }
 
     private Path createTempParquetFileByPaimon(

@@ -327,8 +327,8 @@ class ParquetFiltersTest {
     @Test
     public void testDecimalBinary() {
         // precision > 18 uses Binary
-        int precision = 38;
-        int scale = 10;
+        int precision = 20;
+        int scale = 0;
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -338,28 +338,46 @@ class ParquetFiltersTest {
                                                 "decimal1",
                                                 new DecimalType(precision, scale)))));
 
-        Decimal value =
-                Decimal.fromBigDecimal(
-                        new BigDecimal("12345678901234567890.1234567890"), precision, scale);
-        Binary expectedBinary = Binary.fromConstantByteArray(value.toUnscaledBytes());
+        Decimal positive = Decimal.fromBigDecimal(new BigDecimal("10000939"), precision, scale);
+        Binary expectedPositive =
+                Binary.fromConstantByteArray(
+                        new byte[] {0, 0, 0, 0, 0, 0, (byte) 0x98, (byte) 0x9A, 0x2B});
+        Decimal negative = Decimal.fromBigDecimal(new BigDecimal("-10000939"), precision, scale);
+        Binary expectedNegative =
+                Binary.fromConstantByteArray(
+                        new byte[] {
+                            (byte) 0xFF,
+                            (byte) 0xFF,
+                            (byte) 0xFF,
+                            (byte) 0xFF,
+                            (byte) 0xFF,
+                            (byte) 0xFF,
+                            0x67,
+                            0x65,
+                            (byte) 0xD5
+                        });
 
         test(builder.isNull(0), "eq(decimal1, null)", true);
         test(builder.isNotNull(0), "noteq(decimal1, null)", true);
         test(
-                builder.equal(0, value),
-                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                builder.equal(0, positive),
+                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
-                builder.notEqual(0, value),
-                FilterApi.notEq(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                builder.notEqual(0, positive),
+                FilterApi.notEq(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
-                builder.lessThan(0, value),
-                FilterApi.lt(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                builder.lessThan(0, positive),
+                FilterApi.lt(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
-                builder.greaterThan(0, value),
-                FilterApi.gt(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                builder.greaterThan(0, positive),
+                FilterApi.gt(FilterApi.binaryColumn("decimal1"), expectedPositive),
+                true);
+        test(
+                builder.equal(0, negative),
+                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedNegative),
                 true);
     }
 

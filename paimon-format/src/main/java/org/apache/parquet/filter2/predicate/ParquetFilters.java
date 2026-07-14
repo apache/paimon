@@ -57,6 +57,7 @@ import org.apache.parquet.filter2.predicate.Operators.FloatColumn;
 import org.apache.parquet.io.api.Binary;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -288,13 +289,13 @@ public class ParquetFilters {
             return Binary.fromReusedByteArray((byte[]) value);
         } else if (value instanceof Decimal) {
             Decimal decimal = (Decimal) value;
-            int precision = decimal.precision();
+            int precision = ((DecimalType) type).getPrecision();
             if (ParquetSchemaConverter.is32BitDecimal(precision)) {
                 return (int) decimal.toUnscaledLong();
             } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
                 return decimal.toUnscaledLong();
             } else {
-                return Binary.fromConstantByteArray(decimal.toUnscaledBytes());
+                return decimalToBinary(decimal, precision);
             }
         } else if (value instanceof Timestamp) {
             Timestamp timestamp = (Timestamp) value;
@@ -311,6 +312,24 @@ public class ParquetFilters {
         }
 
         throw new UnsupportedOperationException();
+    }
+
+    private static Binary decimalToBinary(Decimal decimal, int precision) {
+        int numBytes = ParquetSchemaConverter.computeMinBytesForDecimalPrecision(precision);
+        byte[] unscaledBytes = decimal.toUnscaledBytes();
+        if (unscaledBytes.length == numBytes) {
+            return Binary.fromConstantByteArray(unscaledBytes);
+        }
+
+        byte[] paddedBytes = new byte[numBytes];
+        Arrays.fill(paddedBytes, unscaledBytes[0] < 0 ? (byte) -1 : (byte) 0);
+        System.arraycopy(
+                unscaledBytes,
+                0,
+                paddedBytes,
+                numBytes - unscaledBytes.length,
+                unscaledBytes.length);
+        return Binary.fromConstantByteArray(paddedBytes);
     }
 
     private static class ConvertToColumnTypeVisitor
