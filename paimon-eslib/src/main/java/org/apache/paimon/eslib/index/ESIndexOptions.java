@@ -159,6 +159,26 @@ public class ESIndexOptions {
         return fieldConfigs.get(fieldName);
     }
 
+    /** Maps an ESLib/Lucene vector metric name to Paimon's exact-search metric vocabulary. */
+    static String toPaimonVectorMetric(String metric) {
+        String normalized = metric == null ? "l2" : metric.toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "l2":
+            case "euclidean":
+                return "l2";
+            case "cosine":
+                return "cosine";
+            case "dot_product":
+            case "dp":
+            case "inner_product":
+            case "mip":
+            case "maximum_inner_product":
+                return "inner_product";
+            default:
+                throw new IllegalArgumentException("Unknown ESLib vector metric: " + metric);
+        }
+    }
+
     /** Returns the keyword multi-field sub-field name for {@code fieldName} if one exists. */
     public String keywordSubField(String fieldName) {
         String subField = fieldName + KEYWORD_SUBFIELD_SUFFIX;

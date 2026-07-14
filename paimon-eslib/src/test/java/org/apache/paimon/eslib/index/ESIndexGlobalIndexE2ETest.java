@@ -1636,6 +1636,40 @@ class ESIndexGlobalIndexE2ETest {
                 entry.meta());
     }
 
+    @Test
+    void vectorSearchReturnsPaimonCosineScoreScale(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        List<DataField> fields =
+                List.of(new DataField(0, "embedding", DataTypes.ARRAY(DataTypes.FLOAT())));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("global-index.es-index.fields.embedding.dimension", "2");
+        optionMap.put("global-index.es-index.fields.embedding.metric", "cosine");
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(optionMap));
+
+        java.nio.file.Path archiveDir = tmp.resolve("cosine-scores");
+        Files.createDirectories(archiveDir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(archiveDir), fields, options);
+        writer.write(new float[] {1.0f, 0.0f}, 0L);
+        writer.write(new float[] {0.0f, 1.0f}, 1L);
+        ResultEntry entry = writer.finish().get(0);
+
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+        try {
+            ScoredGlobalIndexResult result =
+                    reader.visitVectorSearch(
+                                    new VectorSearch(new float[] {1.0f, 0.0f}, 2, "embedding"))
+                            .join()
+                            .orElseThrow(AssertionError::new);
+            assertEquals(1.0f, result.scoreGetter().score(0L), 0.000001f);
+            assertEquals(0.0f, result.scoreGetter().score(1L), 0.000001f);
+        } finally {
+            reader.close();
+        }
+    }
+
     /**
      * Verifies the DiskBBQ vector codec write path through {@link ESIndexGlobalIndexWriter}.
      *
