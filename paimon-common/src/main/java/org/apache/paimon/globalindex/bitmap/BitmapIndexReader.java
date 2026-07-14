@@ -45,6 +45,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
     private final SeekableInputStream input;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
+    private final boolean logicalKeyOrder;
     private final LazyField<RoaringNavigableMap64> nullRows;
     private final LazyField<RoaringNavigableMap64> nonNullRows;
     private final LazyField<List<BitmapGlobalIndexFormat.DictionaryBlockMeta>> dictionaryBlocks;
@@ -63,6 +64,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         try {
             BitmapGlobalIndexFormat.Footer footer =
                     BitmapGlobalIndexFormat.readFooter(this, meta.fileSize());
+            this.logicalKeyOrder = footer.logicalKeyOrder();
             this.nullRows =
                     new LazyField<>(
                             () ->
@@ -77,7 +79,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
                     new LazyField<>(
                             () ->
                                     BitmapGlobalIndexFormat.readIndexBlockUnchecked(
-                                            this, footer.indexBlock));
+                                            this, footer.indexBlock, footer.version));
         } catch (IOException | RuntimeException e) {
             IOUtils.closeQuietly(input);
             throw e;
@@ -188,9 +190,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
             return new RoaringNavigableMap64();
         }
 
-        BitmapGlobalIndexFormat.BlockInfo bitmapBlock =
-                findBitmapBlock(
-                        BitmapGlobalIndexFormat.SerializedKey.fromObject(keySerializer, literal));
+        BitmapGlobalIndexFormat.BlockInfo bitmapBlock = findBitmapBlock(literal);
         if (bitmapBlock == null) {
             return new RoaringNavigableMap64();
         }
@@ -212,7 +212,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
                 continue;
             }
 
-            BitmapGlobalIndexFormat.BlockInfo bitmapBlock = findBitmapBlock(key);
+            BitmapGlobalIndexFormat.BlockInfo bitmapBlock = findBitmapBlock(literal);
             if (bitmapBlock != null) {
                 result.or(readBitmap(bitmapBlock));
             }
@@ -346,18 +346,22 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
     private int firstPossibleDictionaryBlock(
             List<BitmapGlobalIndexFormat.DictionaryBlockMeta> blocks,
             BitmapGlobalIndexFormat.SerializedKey key) {
-        int index = findDictionaryBlockIndex(blocks, key);
+        int index = findSerializedDictionaryBlockIndex(blocks, key);
         return Math.max(index, 0);
     }
 
-    private BitmapGlobalIndexFormat.BlockInfo findBitmapBlock(
-            BitmapGlobalIndexFormat.SerializedKey key) {
+    private BitmapGlobalIndexFormat.BlockInfo findBitmapBlock(Object key) {
         List<BitmapGlobalIndexFormat.DictionaryBlockMeta> blocks = dictionaryBlocks.get();
         if (blocks.isEmpty()) {
             return null;
         }
 
-        int index = findDictionaryBlockIndex(blocks, key);
+        BitmapGlobalIndexFormat.SerializedKey serializedKey =
+                BitmapGlobalIndexFormat.SerializedKey.fromObject(keySerializer, key);
+        int index =
+                logicalKeyOrder
+                        ? findLogicalDictionaryBlockIndex(blocks, key)
+                        : findSerializedDictionaryBlockIndex(blocks, serializedKey);
         if (index < 0) {
             return null;
         }
@@ -365,7 +369,12 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         BitmapGlobalIndexFormat.DictionaryBlock dictionaryBlock =
                 dictionaryBlock(blocks.get(index));
         for (BitmapGlobalIndexFormat.DictionaryEntry entry : dictionaryBlock.entries) {
-            int compare = entry.key.compareTo(key);
+            int compare =
+                    logicalKeyOrder
+                            ? comparator.compare(
+                                    keySerializer.deserialize(MemorySlice.wrap(entry.key.bytes())),
+                                    key)
+                            : entry.key.compareTo(serializedKey);
             if (compare == 0) {
                 return entry.bitmapBlock;
             } else if (compare > 0) {
@@ -383,7 +392,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         }
     }
 
-    private int findDictionaryBlockIndex(
+    private int findSerializedDictionaryBlockIndex(
             List<BitmapGlobalIndexFormat.DictionaryBlockMeta> blocks,
             BitmapGlobalIndexFormat.SerializedKey key) {
         int low = 0;
@@ -391,6 +400,24 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         while (low <= high) {
             int mid = (low + high) >>> 1;
             int compare = blocks.get(mid).firstKey.compareTo(key);
+            if (compare <= 0) {
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return high;
+    }
+
+    private int findLogicalDictionaryBlockIndex(
+            List<BitmapGlobalIndexFormat.DictionaryBlockMeta> blocks, Object key) {
+        int low = 0;
+        int high = blocks.size() - 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            Object firstKey =
+                    keySerializer.deserialize(MemorySlice.wrap(blocks.get(mid).firstKey.bytes()));
+            int compare = comparator.compare(firstKey, key);
             if (compare <= 0) {
                 low = mid + 1;
             } else {
