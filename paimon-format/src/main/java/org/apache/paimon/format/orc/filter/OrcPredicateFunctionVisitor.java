@@ -61,6 +61,13 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitIsNaN(FieldRef fieldRef) {
+        // ORC SearchArgument has no isNaN leaf, so skip push-down and let the engine
+        // evaluate the filter (consistent with the Parquet path).
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitStartsWith(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
