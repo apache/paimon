@@ -260,17 +260,20 @@ class PrimaryKeySortedIndexMaintenanceTest {
             assertThat(typePayloads.stream().mapToLong(IndexFileMeta::rowCount).sum())
                     .as("total row count of %s source groups", typePayloads.get(0).indexType())
                     .isEqualTo(rowCount);
-            Map<PrimaryKeyIndexSourceFile, List<IndexFileMeta>> bySource =
+            Map<List<PrimaryKeyIndexSourceFile>, List<IndexFileMeta>> bySources =
                     typePayloads.stream()
                             .collect(
                                     Collectors.groupingBy(
                                             payload ->
                                                     PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
-                                                            .sourceFile()));
-            for (Map.Entry<PrimaryKeyIndexSourceFile, List<IndexFileMeta>> sourceGroup :
-                    bySource.entrySet()) {
+                                                            .sourceFiles()));
+            for (Map.Entry<List<PrimaryKeyIndexSourceFile>, List<IndexFileMeta>> sourceGroup :
+                    bySources.entrySet()) {
                 assertThat(sourceGroup.getValue().stream().mapToLong(IndexFileMeta::rowCount).sum())
-                        .isEqualTo(sourceGroup.getKey().rowCount());
+                        .isEqualTo(
+                                sourceGroup.getKey().stream()
+                                        .mapToLong(PrimaryKeyIndexSourceFile::rowCount)
+                                        .sum());
             }
         }
     }
@@ -278,7 +281,10 @@ class PrimaryKeySortedIndexMaintenanceTest {
     private static Set<String> sourceNames(List<IndexFileMeta> payloads) {
         Set<String> result = new HashSet<>();
         for (IndexFileMeta payload : payloads) {
-            result.add(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile().fileName());
+            for (PrimaryKeyIndexSourceFile source :
+                    PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFiles()) {
+                result.add(source.fileName());
+            }
         }
         return result;
     }
@@ -317,12 +323,6 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
-        options.put(
-                "fields.itemId.pk-btree.index.options",
-                "{\"sorted-index.records-per-range\":\"2\"}");
-        options.put(
-                "fields.comment.pk-bitmap.index.options",
-                "{\"sorted-index.records-per-range\":\"2\"}");
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema schema =

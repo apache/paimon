@@ -2755,20 +2755,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Comma-separated columns indexed by primary-key Bitmap indexes.");
 
-    public static final ConfigOption<Integer> PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT =
-            key("pk-vector.index.compaction.level-fanout")
-                    .intType()
-                    .defaultValue(5)
-                    .withDescription(
-                            "Number of similarly sized ANN segments that triggers a rebuild and the maximum row-count ratio within one size tier.");
-
-    public static final ConfigOption<Double> PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD =
-            key("pk-vector.index.compaction.stale-ratio-threshold")
-                    .doubleType()
-                    .defaultValue(0.2)
-                    .withDescription(
-                            "Ratio of rows belonging to inactive source files that triggers an ANN segment rebuild.");
-
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4301,12 +4287,20 @@ public class CoreOptions implements Serializable {
         return options.getOptional(PK_VECTOR_INDEX_COLUMNS).isPresent();
     }
 
-    public int primaryKeyVectorIndexCompactionLevelFanout() {
-        return options.get(PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT);
+    public int primaryKeyIndexCompactionLevelFanout(String column) {
+        return options.getInteger(primaryKeyIndexCompactionLevelFanoutKey(column), 5);
     }
 
-    public double primaryKeyVectorIndexCompactionStaleRatioThreshold() {
-        return options.get(PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD);
+    public double primaryKeyIndexCompactionStaleRatioThreshold(String column) {
+        return options.getDouble(primaryKeyIndexCompactionStaleRatioThresholdKey(column), 0.2);
+    }
+
+    public static String primaryKeyIndexCompactionLevelFanoutKey(String column) {
+        return "fields." + column + ".pk-index.compaction.level-fanout";
+    }
+
+    public static String primaryKeyIndexCompactionStaleRatioThresholdKey(String column) {
+        return "fields." + column + ".pk-index.compaction.stale-ratio-threshold";
     }
 
     public List<String> primaryKeyVectorIndexColumns() {
@@ -4340,6 +4334,7 @@ public class CoreOptions implements Serializable {
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
         Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-range");
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);
         if (serialized == null || serialized.trim().isEmpty()) {
@@ -4363,9 +4358,7 @@ public class CoreOptions implements Serializable {
                     optionKey);
             checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
             String qualifiedKey =
-                    key.startsWith(algorithmPrefix)
-                                    || key.startsWith("sorted-index.")
-                                    || key.startsWith("fields.")
+                    key.startsWith(algorithmPrefix) || key.startsWith("fields.")
                             ? key
                             : algorithmPrefix + key;
             String previous = resolved.get(qualifiedKey);

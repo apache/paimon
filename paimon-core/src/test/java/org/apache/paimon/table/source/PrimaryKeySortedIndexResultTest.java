@@ -77,7 +77,9 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE);
+                        PrimaryKeyIndexDefinition.Family.BTREE,
+                        5,
+                        0.2);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
@@ -135,7 +137,9 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE);
+                        PrimaryKeyIndexDefinition.Family.BTREE,
+                        5,
+                        0.2);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
@@ -175,7 +179,9 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE);
+                        PrimaryKeyIndexDefinition.Family.BTREE,
+                        5,
+                        0.2);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,

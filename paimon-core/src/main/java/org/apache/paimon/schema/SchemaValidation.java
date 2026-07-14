@@ -896,16 +896,6 @@ public class SchemaValidation {
             return;
         }
 
-        checkArgument(
-                options.primaryKeyVectorIndexCompactionLevelFanout() > 1,
-                "%s must be greater than 1.",
-                CoreOptions.PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT.key());
-        double staleRatio = options.primaryKeyVectorIndexCompactionStaleRatioThreshold();
-        checkArgument(
-                staleRatio > 0 && staleRatio <= 1,
-                "%s must be in (0, 1].",
-                CoreOptions.PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD.key());
-
         List<String> indexColumns = options.primaryKeyVectorIndexColumns();
         checkArgument(
                 new HashSet<>(indexColumns).size() == indexColumns.size(),
@@ -981,6 +971,18 @@ public class SchemaValidation {
         validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
+        for (String column : indexedColumns) {
+            String fanoutKey = CoreOptions.primaryKeyIndexCompactionLevelFanoutKey(column);
+            checkArgument(
+                    options.primaryKeyIndexCompactionLevelFanout(column) > 1,
+                    "%s must be greater than 1.",
+                    fanoutKey);
+            String staleRatioKey =
+                    CoreOptions.primaryKeyIndexCompactionStaleRatioThresholdKey(column);
+            double staleRatio = options.primaryKeyIndexCompactionStaleRatioThreshold(column);
+            checkArgument(
+                    staleRatio > 0 && staleRatio <= 1, "%s must be in (0, 1].", staleRatioKey);
+        }
     }
 
     private static void validateNoDuplicatePrimaryKeyIndexColumns(

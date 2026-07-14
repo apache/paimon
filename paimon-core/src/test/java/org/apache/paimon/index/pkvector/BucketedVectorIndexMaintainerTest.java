@@ -274,7 +274,7 @@ class BucketedVectorIndexMaintainerTest {
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("pk-vector.index.compaction.stale-ratio-threshold", "1.0");
+        options.setString("fields.embedding.pk-index.compaction.stale-ratio-threshold", "1.0");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -371,7 +371,7 @@ class BucketedVectorIndexMaintainerTest {
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("pk-vector.index.compaction.level-fanout", "3");
+        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -444,7 +444,7 @@ class BucketedVectorIndexMaintainerTest {
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("pk-vector.index.compaction.level-fanout", "3");
+        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         List<DataFileMeta> dataFiles = new ArrayList<>();
         List<IndexFileMeta> initialSegments = new ArrayList<>();
         for (int i = 1; i <= 6; i++) {

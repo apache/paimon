@@ -245,20 +245,20 @@ class PrimaryKeyVectorIndexValidationTest {
     @Test
     void testRejectsInvalidAnnCompactionLevelFanout() {
         Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COMPACTION_LEVEL_FANOUT.key(), "1");
+        options.put("fields.embedding.pk-index.compaction.level-fanout", "1");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("pk-vector.index.compaction.level-fanout")
+                .hasMessageContaining("fields.embedding.pk-index.compaction.level-fanout")
                 .hasMessageContaining("greater than 1");
     }
 
     @Test
     void testRejectsInvalidAnnCompactionStaleRatio() {
         Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COMPACTION_STALE_RATIO_THRESHOLD.key(), "1.1");
+        options.put("fields.embedding.pk-index.compaction.stale-ratio-threshold", "1.1");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("pk-vector.index.compaction.stale-ratio-threshold")
+                .hasMessageContaining("fields.embedding.pk-index.compaction.stale-ratio-threshold")
                 .hasMessageContaining("(0, 1]");
     }
 

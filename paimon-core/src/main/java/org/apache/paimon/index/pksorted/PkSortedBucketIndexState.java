@@ -24,10 +24,12 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Immutable sorted-index state for one field and bucket. */
 public final class PkSortedBucketIndexState {
@@ -53,14 +55,15 @@ public final class PkSortedBucketIndexState {
             String indexType,
             List<PrimaryKeyIndexSourceFile> activeSourceFiles,
             List<IndexFileMeta> activePayloads) {
-        Map<String, List<IndexFileMeta>> payloadsBySource = new LinkedHashMap<>();
+        Map<List<PrimaryKeyIndexSourceFile>, List<IndexFileMeta>> payloadsBySources =
+                new LinkedHashMap<>();
         List<IndexFileMeta> rejected = new ArrayList<>();
         for (IndexFileMeta payload : activePayloads) {
             try {
-                PrimaryKeyIndexSourceFile sourceFile =
-                        PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile();
-                payloadsBySource
-                        .computeIfAbsent(sourceFile.fileName(), key -> new ArrayList<>())
+                List<PrimaryKeyIndexSourceFile> sourceFiles =
+                        PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFiles();
+                payloadsBySources
+                        .computeIfAbsent(sourceFiles, key -> new ArrayList<>())
                         .add(payload);
             } catch (RuntimeException ignored) {
                 rejected.add(payload);
@@ -68,26 +71,35 @@ public final class PkSortedBucketIndexState {
         }
 
         List<PkSortedIndexGroup> groups = new ArrayList<>();
+        Set<PrimaryKeyIndexSourceFile> activeSet = new HashSet<>(activeSourceFiles);
+        Set<PrimaryKeyIndexSourceFile> coveredSet = new HashSet<>();
+        for (Map.Entry<List<PrimaryKeyIndexSourceFile>, List<IndexFileMeta>> entry :
+                payloadsBySources.entrySet()) {
+            Optional<PkSortedIndexGroup> group =
+                    PkSortedIndexGroup.create(fieldId, indexType, entry.getKey(), entry.getValue());
+            boolean overlapsActiveSource = false;
+            for (PrimaryKeyIndexSourceFile sourceFile : entry.getKey()) {
+                if (activeSet.contains(sourceFile) && coveredSet.contains(sourceFile)) {
+                    overlapsActiveSource = true;
+                    break;
+                }
+            }
+            if (group.isPresent() && !overlapsActiveSource) {
+                groups.add(group.get());
+                coveredSet.addAll(entry.getKey());
+            } else {
+                rejected.addAll(entry.getValue());
+            }
+        }
+
         List<PrimaryKeyIndexSourceFile> covered = new ArrayList<>();
         List<PrimaryKeyIndexSourceFile> uncovered = new ArrayList<>();
         for (PrimaryKeyIndexSourceFile sourceFile : activeSourceFiles) {
-            List<IndexFileMeta> payloads = payloadsBySource.remove(sourceFile.fileName());
-            if (payloads == null || payloads.isEmpty()) {
-                uncovered.add(sourceFile);
+            if (coveredSet.contains(sourceFile)) {
+                covered.add(sourceFile);
             } else {
-                Optional<PkSortedIndexGroup> group =
-                        PkSortedIndexGroup.create(fieldId, indexType, sourceFile, payloads);
-                if (group.isPresent()) {
-                    groups.add(group.get());
-                    covered.add(sourceFile);
-                } else {
-                    uncovered.add(sourceFile);
-                    rejected.addAll(payloads);
-                }
+                uncovered.add(sourceFile);
             }
-        }
-        for (List<IndexFileMeta> inactivePayloads : payloadsBySource.values()) {
-            rejected.addAll(inactivePayloads);
         }
         return new PkSortedBucketIndexState(groups, covered, uncovered, rejected);
     }

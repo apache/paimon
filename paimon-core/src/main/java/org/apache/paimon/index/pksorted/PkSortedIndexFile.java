@@ -26,8 +26,6 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
-import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
@@ -36,12 +34,11 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,86 +46,83 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builds source-backed BTree or Bitmap payloads for one physical data file. */
+/** Builds source-backed BTree or Bitmap payloads for ordered physical data files. */
 public class PkSortedIndexFile extends IndexFile {
 
     public PkSortedIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
         super(fileIO, pathFactory);
     }
 
-    public List<IndexFileMeta> build(
-            PrimaryKeyIndexSourceFile sourceFile,
+    public IndexFileMeta build(
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
             DataField indexField,
             String indexType,
             Options indexOptions,
             Iterator<Entry> sortedEntries)
             throws IOException {
+        long sourceRowCount = 0;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
+        }
         checkArgument(
-                sourceFile.rowCount() > 0,
-                "A sorted index group must reference at least one source row.");
+                sourceRowCount > 0, "A sorted index group must reference at least one source row.");
 
         TrackingFileWriter fileWriter = new TrackingFileWriter();
+        GlobalIndexSingleColumnWriter writer = null;
         boolean success = false;
         try {
-            long recordsPerRange =
-                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
-            SortedSingleColumnIndexWriter writer =
-                    new SortedSingleColumnIndexWriter(
-                            recordsPerRange,
-                            () -> createWriter(indexType, indexField, indexOptions, fileWriter));
+            writer = createWriter(indexType, indexField, indexOptions, fileWriter);
 
             long writtenRows = 0;
             while (sortedEntries.hasNext()) {
                 Entry entry = sortedEntries.next();
                 checkArgument(
-                        entry.localRowId >= 0 && entry.localRowId < sourceFile.rowCount(),
-                        "Local row id %s is outside source file %s row range [0, %s).",
-                        entry.localRowId,
-                        sourceFile.fileName(),
-                        sourceFile.rowCount());
-                writer.write(entry.value, entry.localRowId);
+                        entry.rowId >= 0 && entry.rowId < sourceRowCount,
+                        "Row id %s is outside sorted index group row range [0, %s).",
+                        entry.rowId,
+                        sourceRowCount);
+                writer.write(entry.value, entry.rowId);
                 writtenRows++;
             }
             checkArgument(
-                    writtenRows == sourceFile.rowCount(),
-                    "Sorted index input row count %s does not match source file %s row count %s.",
+                    writtenRows == sourceRowCount,
+                    "Sorted index input row count %s does not match source row count %s.",
                     writtenRows,
-                    sourceFile.fileName(),
-                    sourceFile.rowCount());
+                    sourceRowCount);
 
-            List<List<ResultEntry>> resultGroups = writer.finish();
-            List<IndexFileMeta> payloads = new ArrayList<>();
-            long payloadRows = 0;
-            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFile).serialize();
-            for (List<ResultEntry> resultGroup : resultGroups) {
-                for (ResultEntry result : resultGroup) {
-                    payloadRows = Math.addExact(payloadRows, result.rowCount());
-                    Path payloadPath = fileWriter.path(result.fileName());
-                    payloads.add(
-                            new IndexFileMeta(
-                                    indexType,
-                                    result.fileName(),
-                                    fileIO.getFileSize(payloadPath),
-                                    result.rowCount(),
-                                    new GlobalIndexMeta(
-                                            0,
-                                            sourceFile.rowCount() - 1,
-                                            indexField.id(),
-                                            null,
-                                            result.meta(),
-                                            sourceMeta),
-                                    pathFactory.isExternalPath() ? payloadPath.toString() : null));
-                }
-            }
+            List<ResultEntry> results = writer.finish();
             checkArgument(
-                    payloadRows == sourceFile.rowCount(),
-                    "Sorted payload row count %s does not match source file %s row count %s.",
-                    payloadRows,
-                    sourceFile.fileName(),
-                    sourceFile.rowCount());
+                    results.size() == 1,
+                    "Sorted index build must produce exactly one payload file, but produced %s.",
+                    results.size());
+            ResultEntry result = results.get(0);
+            checkArgument(
+                    result.rowCount() == sourceRowCount,
+                    "Sorted payload row count %s does not match source row count %s.",
+                    result.rowCount(),
+                    sourceRowCount);
+            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+            Path payloadPath = fileWriter.path(result.fileName());
+            IndexFileMeta payload =
+                    new IndexFileMeta(
+                            indexType,
+                            result.fileName(),
+                            fileIO.getFileSize(payloadPath),
+                            result.rowCount(),
+                            new GlobalIndexMeta(
+                                    0,
+                                    sourceRowCount - 1,
+                                    indexField.id(),
+                                    null,
+                                    result.meta(),
+                                    sourceMeta),
+                            pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
-            return Collections.unmodifiableList(payloads);
+            return payload;
         } finally {
+            if (writer instanceof AutoCloseable) {
+                IOUtils.closeQuietly((AutoCloseable) writer);
+            }
             if (!success) {
                 fileWriter.deleteCreatedFiles();
             }
@@ -150,15 +144,15 @@ public class PkSortedIndexFile extends IndexFile {
         return (GlobalIndexSingleColumnWriter) writer;
     }
 
-    /** One sorted scalar value and its zero-based position in the source data file. */
+    /** One sorted scalar value and its zero-based ordinal in the ordered source group. */
     public static final class Entry {
 
         @Nullable private final Object value;
-        private final long localRowId;
+        private final long rowId;
 
-        public Entry(@Nullable Object value, long localRowId) {
+        public Entry(@Nullable Object value, long rowId) {
             this.value = value;
-            this.localRowId = localRowId;
+            this.rowId = rowId;
         }
 
         @Nullable
@@ -166,8 +160,8 @@ public class PkSortedIndexFile extends IndexFile {
             return value;
         }
 
-        public long localRowId() {
-            return localRowId;
+        public long rowId() {
+            return rowId;
         }
     }
 

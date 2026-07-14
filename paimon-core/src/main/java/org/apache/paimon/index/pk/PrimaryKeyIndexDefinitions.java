@@ -61,7 +61,9 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 BTreeGlobalIndexerFactory.IDENTIFIER,
                                 options.primaryKeyBTreeIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.BTREE));
+                                PrimaryKeyIndexDefinition.Family.BTREE,
+                                options.primaryKeyIndexCompactionLevelFanout(column),
+                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
             } else if (bitmapColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -69,7 +71,9 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 BitmapGlobalIndexerFactory.IDENTIFIER,
                                 options.primaryKeyBitmapIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.BITMAP));
+                                PrimaryKeyIndexDefinition.Family.BITMAP,
+                                options.primaryKeyIndexCompactionLevelFanout(column),
+                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
             } else if (vectorColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -77,7 +81,9 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 options.primaryKeyVectorIndexType(column),
                                 options.primaryKeyVectorIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.VECTOR));
+                                PrimaryKeyIndexDefinition.Family.VECTOR,
+                                options.primaryKeyIndexCompactionLevelFanout(column),
+                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
             }
         }
 

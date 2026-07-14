@@ -16,11 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.pkvector;
+package org.apache.paimon.index.pk;
 
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
-import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.ArrayList;
@@ -30,37 +27,47 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Derives logical ANN compaction levels from immutable segment source metadata. */
-final class PkVectorAnnLevels {
+/** Derives logical compaction levels from immutable primary-key index source metadata. */
+public final class PrimaryKeyIndexLevels<T> {
 
     private final int fanout;
     private final double staleRatioThreshold;
+    private final Function<T, String> identity;
+    private final Function<T, List<PrimaryKeyIndexSourceFile>> sources;
 
-    PkVectorAnnLevels(int fanout, double staleRatioThreshold) {
-        checkArgument(fanout > 1, "ANN level fanout must be greater than one.");
+    public PrimaryKeyIndexLevels(
+            int fanout,
+            double staleRatioThreshold,
+            Function<T, String> identity,
+            Function<T, List<PrimaryKeyIndexSourceFile>> sources) {
+        checkArgument(fanout > 1, "Primary-key index level fanout must be greater than one.");
         checkArgument(
                 staleRatioThreshold > 0 && staleRatioThreshold <= 1,
-                "ANN stale ratio threshold must be in (0, 1].");
+                "Primary-key index stale ratio threshold must be in (0, 1].");
         this.fanout = fanout;
         this.staleRatioThreshold = staleRatioThreshold;
+        this.identity = identity;
+        this.sources = sources;
     }
 
-    Optional<Plan> pick(List<IndexFileMeta> segments, Map<String, DataFileMeta> activeSourceFiles) {
-        IndexFileMeta staleCandidate = null;
+    public Optional<Plan<T>> pick(List<T> units, Map<String, DataFileMeta> activeSourceFiles) {
+        T staleCandidate = null;
         double highestStaleRatio = -1;
-        for (IndexFileMeta segment : segments) {
-            double staleRatio = staleRatio(segment, activeSourceFiles);
+        for (T unit : units) {
+            double staleRatio = staleRatio(unit, activeSourceFiles);
             if (staleRatio >= staleRatioThreshold
                     && (staleRatio > highestStaleRatio
                             || (staleRatio == highestStaleRatio
                                     && (staleCandidate == null
-                                            || segment.fileName()
-                                                            .compareTo(staleCandidate.fileName())
+                                            || identity.apply(unit)
+                                                            .compareTo(
+                                                                    identity.apply(staleCandidate))
                                                     < 0)))) {
-                staleCandidate = segment;
+                staleCandidate = unit;
                 highestStaleRatio = staleRatio;
             }
         }
@@ -69,10 +76,9 @@ final class PkVectorAnnLevels {
                     createPlan(Collections.singletonList(staleCandidate), activeSourceFiles));
         }
 
-        List<IndexFileMeta> candidates = new ArrayList<>(segments);
+        List<T> candidates = new ArrayList<>(units);
         candidates.sort(
-                Comparator.comparingLong(PkVectorAnnLevels::buildRowCount)
-                        .thenComparing(IndexFileMeta::fileName));
+                Comparator.comparingLong(this::buildRowCount).thenComparing(identity::apply));
         for (int start = 0; start + fanout <= candidates.size(); start++) {
             long smallest = buildRowCount(candidates.get(start));
             long largest = buildRowCount(candidates.get(start + fanout - 1));
@@ -86,12 +92,10 @@ final class PkVectorAnnLevels {
         return Optional.empty();
     }
 
-    private static double staleRatio(
-            IndexFileMeta segment, Map<String, DataFileMeta> activeSourceFiles) {
+    private double staleRatio(T unit, Map<String, DataFileMeta> activeSourceFiles) {
         long totalRows = 0;
         long staleRows = 0;
-        for (PrimaryKeyIndexSourceFile source :
-                PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
             totalRows = Math.addExact(totalRows, source.rowCount());
             DataFileMeta active = activeSourceFiles.get(source.fileName());
             if (active == null) {
@@ -99,36 +103,33 @@ final class PkVectorAnnLevels {
             } else {
                 checkArgument(
                         active.rowCount() == source.rowCount(),
-                        "ANN source %s row count does not match active data file.",
+                        "Primary-key index source %s row count does not match active data file.",
                         source.fileName());
             }
         }
         return totalRows == 0 ? 0 : ((double) staleRows) / totalRows;
     }
 
-    private static Plan createPlan(
-            List<IndexFileMeta> inputSegments, Map<String, DataFileMeta> activeSourceFiles) {
+    private Plan<T> createPlan(List<T> inputUnits, Map<String, DataFileMeta> activeSourceFiles) {
         Map<String, DataFileMeta> selectedSources = new TreeMap<>();
-        for (IndexFileMeta segment : inputSegments) {
-            for (PrimaryKeyIndexSourceFile source :
-                    PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
+        for (T unit : inputUnits) {
+            for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
                 DataFileMeta active = activeSourceFiles.get(source.fileName());
                 if (active != null) {
                     checkArgument(
                             active.rowCount() == source.rowCount(),
-                            "ANN source %s row count does not match active data file.",
+                            "Primary-key index source %s row count does not match active data file.",
                             source.fileName());
                     selectedSources.put(active.fileName(), active);
                 }
             }
         }
-        return new Plan(inputSegments, new ArrayList<>(selectedSources.values()));
+        return new Plan<>(inputUnits, new ArrayList<>(selectedSources.values()));
     }
 
-    private static long buildRowCount(IndexFileMeta segment) {
+    private long buildRowCount(T unit) {
         long rowCount = 0;
-        for (PrimaryKeyIndexSourceFile source :
-                PrimaryKeyIndexSourceMeta.fromIndexFile(segment).sourceFiles()) {
+        for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
             rowCount = Math.addExact(rowCount, source.rowCount());
         }
         return rowCount;
@@ -141,22 +142,22 @@ final class PkVectorAnnLevels {
         return value * multiplier;
     }
 
-    /** A deterministic ANN rebuild selection. */
-    static final class Plan {
+    /** A deterministic primary-key index rebuild selection. */
+    public static final class Plan<T> {
 
-        private final List<IndexFileMeta> inputSegments;
+        private final List<T> inputUnits;
         private final List<DataFileMeta> sourceFiles;
 
-        private Plan(List<IndexFileMeta> inputSegments, List<DataFileMeta> sourceFiles) {
-            this.inputSegments = Collections.unmodifiableList(new ArrayList<>(inputSegments));
+        private Plan(List<T> inputUnits, List<DataFileMeta> sourceFiles) {
+            this.inputUnits = Collections.unmodifiableList(new ArrayList<>(inputUnits));
             this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         }
 
-        List<IndexFileMeta> inputSegments() {
-            return inputSegments;
+        public List<T> inputUnits() {
+            return inputUnits;
         }
 
-        List<DataFileMeta> sourceFiles() {
+        public List<DataFileMeta> sourceFiles() {
             return sourceFiles;
         }
     }

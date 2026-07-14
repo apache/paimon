@@ -50,6 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -84,7 +85,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
     }
 
     @Test
-    void testScalarFailureDoesNotSuppressOtherDefinitionsOrVector() throws Exception {
+    void testScalarFailureAbortsOtherDefinitionsAndVector() throws Exception {
         DataFileMeta source = dataFile("data-1", 3);
         IndexFileMeta vectorPayload =
                 new IndexFileMeta("vector", "vector", 1, 3, (GlobalIndexMeta) null, null);
@@ -117,18 +118,24 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         source,
                         dataFile -> {
                             buildOrder.add("bitmap");
-                            return Collections.singletonList(bitmapPayload);
+                            return bitmapPayload;
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.of(vector, Arrays.asList(bitmap, btree));
         CompactIncrement compactIncrement = compactAfter(source);
 
-        maintainer.prepareCommit(DataIncrement.emptyIncrement(), compactIncrement, true);
+        assertThatThrownBy(
+                        () ->
+                                maintainer.prepareCommit(
+                                        DataIncrement.emptyIncrement(), compactIncrement, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("expected BTree failure");
 
-        assertThat(buildOrder).containsExactly("btree", "btree", "btree", "bitmap");
-        assertThat(compactIncrement.newIndexFiles()).containsExactly(vectorPayload, bitmapPayload);
+        assertThat(buildOrder).containsExactly("btree", "btree", "btree");
+        assertThat(compactIncrement.newIndexFiles()).isEmpty();
         assertThat(compactIncrement.deletedIndexFiles()).isEmpty();
         assertThat(maintainer.buildNotCompleted()).isFalse();
+        verify(vectorCommit).abort(any());
     }
 
     @Test
@@ -149,8 +156,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                             firstStarted.countDown();
                             releaseFirst.await();
                             activeBuilds.decrementAndGet();
-                            return Collections.singletonList(
-                                    payload("btree", source, 3, 7, "btree"));
+                            return payload("btree", source, 3, 7, "btree");
                         });
         BucketedSortedIndexMaintainer second =
                 sortedMaintainer(
@@ -161,8 +167,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                             enterBuild(activeBuilds, peakBuilds);
                             secondStarted.countDown();
                             activeBuilds.decrementAndGet();
-                            return Collections.singletonList(
-                                    payload("bitmap", source, 3, 8, "bitmap"));
+                            return payload("bitmap", source, 3, 8, "bitmap");
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.ofSorted(Arrays.asList(second, first));
@@ -188,6 +193,41 @@ class BucketedPrimaryKeyIndexMaintainerTest {
     }
 
     @Test
+    void testNonBlockingCoordinatorStartsCoveredFanoutMaintenance() throws Exception {
+        DataFileMeta sourceA = dataFile("data-a", 3);
+        DataFileMeta sourceB = dataFile("data-b", 3);
+        IndexFileMeta payloadA = payload("index-a", sourceA, 3, 7, "btree");
+        IndexFileMeta payloadB = payload("index-b", sourceB, 3, 7, "btree");
+        IndexFileMeta merged = payload("index-ab", Arrays.asList(sourceA, sourceB), 6, 7, "btree");
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        BucketedSortedIndexMaintainer sorted =
+                new BucketedSortedIndexMaintainer(
+                        7,
+                        "btree",
+                        new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
+                        sourceFiles -> {
+                            started.countDown();
+                            release.await();
+                            return merged;
+                        },
+                        2,
+                        1.0,
+                        Arrays.asList(sourceA, sourceB),
+                        Arrays.asList(payloadA, payloadB),
+                        buildExecutor);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.ofSorted(Collections.singletonList(sorted));
+
+        maintainer.prepareCommit(
+                DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), false);
+        boolean buildStarted = started.await(1, TimeUnit.SECONDS);
+        release.countDown();
+
+        assertThat(buildStarted).isTrue();
+    }
+
+    @Test
     void testBlockingPrepareRollsBackAllDefinitionsAfterInterruption() throws Exception {
         DataFileMeta source = dataFile("data-1", 3);
         AtomicInteger firstBuilds = new AtomicInteger();
@@ -201,8 +241,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         source,
                         dataFile -> {
                             int attempt = firstBuilds.incrementAndGet();
-                            return Collections.singletonList(
-                                    payload("btree-" + attempt, source, 3, 7, "btree"));
+                            return payload("btree-" + attempt, source, 3, 7, "btree");
                         });
         BucketedSortedIndexMaintainer second =
                 sortedMaintainer(
@@ -215,8 +254,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                                 secondStarted.countDown();
                                 blockSecond.await();
                             }
-                            return Collections.singletonList(
-                                    payload("bitmap-" + attempt, source, 3, 8, "bitmap"));
+                            return payload("bitmap-" + attempt, source, 3, 8, "bitmap");
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.ofSorted(Arrays.asList(second, first));
@@ -265,6 +303,8 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                 indexType,
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                 buildFunction,
+                5,
+                0.2,
                 Collections.emptyList(),
                 Collections.emptyList(),
                 buildExecutor);
@@ -293,8 +333,27 @@ class BucketedPrimaryKeyIndexMaintainerTest {
             long payloadRowCount,
             int fieldId,
             String indexType) {
-        PrimaryKeyIndexSourceFile source =
-                new PrimaryKeyIndexSourceFile(sourceFile.fileName(), sourceFile.rowCount());
+        return payload(
+                fileName,
+                Collections.singletonList(sourceFile),
+                payloadRowCount,
+                fieldId,
+                indexType);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName,
+            List<DataFileMeta> sourceFiles,
+            long payloadRowCount,
+            int fieldId,
+            String indexType) {
+        List<PrimaryKeyIndexSourceFile> sources = new ArrayList<>();
+        long rowCount = 0;
+        for (DataFileMeta sourceFile : sourceFiles) {
+            sources.add(
+                    new PrimaryKeyIndexSourceFile(sourceFile.fileName(), sourceFile.rowCount()));
+            rowCount = Math.addExact(rowCount, sourceFile.rowCount());
+        }
         return new IndexFileMeta(
                 indexType,
                 fileName,
@@ -302,11 +361,11 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                 payloadRowCount,
                 new GlobalIndexMeta(
                         0,
-                        source.rowCount() - 1,
+                        rowCount - 1,
                         fieldId,
                         null,
                         new byte[] {1},
-                        new PrimaryKeyIndexSourceMeta(source).serialize()),
+                        new PrimaryKeyIndexSourceMeta(sources).serialize()),
                 null);
     }
 

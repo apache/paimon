@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -40,13 +41,16 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -59,6 +63,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests source-backed BTree and Bitmap planning in file-local row-position space. */
@@ -199,6 +204,74 @@ class PrimaryKeySortedIndexScanTest {
     }
 
     @Test
+    void testReadMergedSourceGroupInFileLocalPositions() throws IOException {
+        DataFileMeta first = dataFile("data-1", 2);
+        DataFileMeta second = dataFile("data-2", 3);
+        DataSplit split = dataSplit(11, 0, true, second, first);
+        PrimaryKeyIndexDefinition definition =
+                definition(
+                        7,
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        PrimaryKeyIndexDefinition.Family.BTREE);
+        IndexFileMeta mergedPayload =
+                payload(
+                        "btree-merged",
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1", 2),
+                                new PrimaryKeyIndexSourceFile("data-2", 3)),
+                        "btree",
+                        7,
+                        5);
+        PrimaryKeySortedIndexScan.Plan plan =
+                PrimaryKeySortedIndexScan.plan(
+                        11,
+                        Collections.singletonList(split),
+                        Collections.singletonList(definition),
+                        Collections.singletonList(payloadEntry(0, mergedPayload)));
+        RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
+        AtomicInteger readersCreated = new AtomicInteger();
+        AtomicInteger queries = new AtomicInteger();
+        CountingRoaringNavigableMap64 groupPositions = new CountingRoaringNavigableMap64();
+        groupPositions.add(1);
+        groupPositions.add(3);
+        groupPositions.add(4);
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitEqual(any(), eq(42)))
+                .thenAnswer(
+                        ignored -> {
+                            queries.incrementAndGet();
+                            return completedResult(groupPositions);
+                        });
+
+        PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                PrimaryKeySortedIndexScan.evaluate(
+                        plan,
+                        rowType,
+                        predicate,
+                        Collections.singletonList(definition),
+                        (ignoredFile, ignoredDefinition, payloads) -> {
+                            readersCreated.incrementAndGet();
+                            assertThat(payloads).containsExactly(mergedPayload);
+                            return reader;
+                        });
+        PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
+
+        assertThat(readersCreated).hasValue(1);
+        assertThat(queries).hasValue(1);
+        assertThat(groupPositions.iteratedPositions()).isEqualTo(3);
+        verify(reader, times(1)).close();
+        assertThat(result.splits()).hasSize(2);
+        assertThat(result.splits()).allMatch(IndexedSplit.class::isInstance);
+        IndexedSplit secondSplit = (IndexedSplit) result.splits().get(0);
+        assertThat(secondSplit.dataSplit().dataFiles()).containsExactly(second);
+        assertThat(secondSplit.rowRanges()).containsExactly(new Range(1, 2));
+        IndexedSplit firstSplit = (IndexedSplit) result.splits().get(1);
+        assertThat(firstSplit.dataSplit().dataFiles()).containsExactly(first);
+        assertThat(firstSplit.rowRanges()).containsExactly(new Range(1, 1));
+    }
+
+    @Test
     void testPerFileBooleanFallbackSemantics() {
         DataSplit split = dataSplit(11, 0, dataFile("data-1", 4));
         PrimaryKeyIndexDefinition definition =
@@ -283,23 +356,61 @@ class PrimaryKeySortedIndexScanTest {
     private static PrimaryKeyIndexDefinition definition(
             int fieldId, String indexType, PrimaryKeyIndexDefinition.Family family) {
         return new PrimaryKeyIndexDefinition(
-                "f" + fieldId, fieldId, indexType, new Options(), family);
+                "f" + fieldId, fieldId, indexType, new Options(), family, 5, 0.2);
     }
 
     private static GlobalIndexReader readerWithPositions(long... rowPositions) {
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitEqual(any(), any())).thenReturn(completedResult(rowPositions));
+        return reader;
+    }
+
+    private static CompletableFuture<Optional<GlobalIndexResult>> completedResult(
+            long... rowPositions) {
         RoaringNavigableMap64 positions = new RoaringNavigableMap64();
         for (long rowPosition : rowPositions) {
             positions.add(rowPosition);
         }
-        GlobalIndexReader reader = mock(GlobalIndexReader.class);
-        when(reader.visitEqual(any(), any()))
-                .thenReturn(
-                        CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.create(positions))));
-        return reader;
+        return completedResult(positions);
+    }
+
+    private static CompletableFuture<Optional<GlobalIndexResult>> completedResult(
+            RoaringNavigableMap64 positions) {
+        return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.create(positions)));
+    }
+
+    private static class CountingRoaringNavigableMap64 extends RoaringNavigableMap64 {
+
+        private final AtomicInteger iteratedPositions = new AtomicInteger();
+
+        @Override
+        public Iterator<Long> iterator() {
+            Iterator<Long> wrapped = super.iterator();
+            return new Iterator<Long>() {
+                @Override
+                public boolean hasNext() {
+                    return wrapped.hasNext();
+                }
+
+                @Override
+                public Long next() {
+                    iteratedPositions.incrementAndGet();
+                    return wrapped.next();
+                }
+            };
+        }
+
+        int iteratedPositions() {
+            return iteratedPositions.get();
+        }
     }
 
     private static DataSplit dataSplit(long snapshotId, int bucket, DataFileMeta... files) {
+        return dataSplit(snapshotId, bucket, false, files);
+    }
+
+    private static DataSplit dataSplit(
+            long snapshotId, int bucket, boolean rawConvertible, DataFileMeta... files) {
         return DataSplit.builder()
                 .withSnapshot(snapshotId)
                 .withPartition(BinaryRow.EMPTY_ROW)
@@ -308,7 +419,7 @@ class PrimaryKeySortedIndexScanTest {
                 .withTotalBuckets(2)
                 .withDataFiles(Arrays.asList(files))
                 .isStreaming(false)
-                .rawConvertible(false)
+                .rawConvertible(rawConvertible)
                 .build();
     }
 
@@ -341,10 +452,26 @@ class PrimaryKeySortedIndexScanTest {
             String indexType,
             int fieldId,
             long payloadRowCount) {
-        byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(
-                                new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount))
-                        .serialize();
+        return payload(
+                fileName,
+                Collections.singletonList(
+                        new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount)),
+                indexType,
+                fieldId,
+                payloadRowCount);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
+            String indexType,
+            int fieldId,
+            long payloadRowCount) {
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+        long sourceRowCount = 0;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
+        }
         return new IndexFileMeta(
                 indexType,
                 fileName,
