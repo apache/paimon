@@ -22,6 +22,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -2446,6 +2447,73 @@ class BlobParallelismTest(unittest.TestCase):
         got = dict(zip(result['id'].to_pylist(), result['img'].to_pylist()))
         for i in range(20):
             self.assertEqual(got[i], self.payloads[i])
+
+    def test_blob_fallback_parallelism_end_to_end(self):
+        t = self.catalog.get_table('default.bp_test')
+
+        row_id_builder = t.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits())
+        row_ids_by_id = dict(zip(
+            row_id_result['id'].to_pylist(),
+            row_id_result['_ROW_ID'].to_pylist(),
+        ))
+
+        updated_payload = os.urandom(512)
+        update_builder = t.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['img'])
+        update_messages = table_update.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids_by_id[1]], type=pa.int64()),
+                'img': pa.array([updated_payload], type=pa.large_binary()),
+            }))
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            file
+            for message in update_messages
+            for file in message.new_files
+            if file.file_name.endswith('.blob')
+        ]
+        self.assertEqual(1, len(update_blob_files))
+        blob_reader = FormatBlobReader(
+            t.file_io,
+            update_blob_files[0].file_path,
+            ['img'],
+            t.fields,
+            None,
+            False,
+        )
+        try:
+            self.assertIn(
+                FormatBlobReader.PLACE_HOLDER_LENGTH,
+                blob_reader.blob_lengths,
+            )
+        finally:
+            blob_reader.close()
+
+        rb = t.new_read_builder().with_projection(['id', 'img'])
+        splits = rb.new_scan().plan().splits()
+        serial = rb.new_read().to_arrow(splits, blob_parallelism=1)
+
+        resolve_calls = []
+        original_resolve = BlobFallbackBatchReader._resolve_selected_blobs
+
+        def tracking_resolve(reader, values):
+            resolve_calls.append(len(values))
+            return original_resolve(reader, values)
+
+        with patch.object(
+            BlobFallbackBatchReader,
+            '_resolve_selected_blobs',
+            tracking_resolve,
+        ):
+            parallel = rb.new_read().to_arrow(splits, blob_parallelism=4)
+
+        self.assertEqual(20, serial.num_rows)
+        self.assertEqual(serial.to_pydict(), parallel.to_pydict())
+        self.assertEqual(updated_payload, parallel['img'][1].as_py())
+        self.assertGreater(len(resolve_calls), 0)
 
 
 class CapBlobParallelismTest(unittest.TestCase):
