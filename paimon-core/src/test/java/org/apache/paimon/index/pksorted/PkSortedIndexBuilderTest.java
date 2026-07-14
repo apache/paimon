@@ -91,7 +91,7 @@ class PkSortedIndexBuilderTest {
                 ioManager.close();
             }
 
-            assertThat(payloads).hasSize(2);
+            assertThat(payloads).hasSize(1);
             assertQuery(fileIO, pathFactory, indexType, options, payloads, false, 20, 0L, 3L);
             assertQuery(fileIO, pathFactory, indexType, options, payloads, true, null, 1L);
         }

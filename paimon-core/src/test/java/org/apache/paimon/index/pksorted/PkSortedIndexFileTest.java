@@ -39,11 +39,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,7 +54,7 @@ class PkSortedIndexFileTest {
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    void testBuildsRotatedBTreeAndBitmapPayloadGroups() throws Exception {
+    void testBuildsSingleBTreeAndBitmapPayloadIgnoringRecordsPerRange() throws Exception {
         for (String indexType : Arrays.asList("btree", "bitmap")) {
             java.nio.file.Path indexDirectory = Files.createDirectory(tempPath.resolve(indexType));
             PkSortedIndexFile indexFile =
@@ -74,9 +73,9 @@ class PkSortedIndexFileTest {
                                             new PkSortedIndexFile.Entry(20, 0))
                                     .iterator());
 
-            assertThat(payloads).hasSize(2);
+            assertThat(payloads).hasSize(1);
             assertThat(payloads).extracting(IndexFileMeta::indexType).containsOnly(indexType);
-            assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(2L, 1L);
+            assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(3L);
             assertThat(payloads)
                     .allSatisfy(
                             payload -> {
@@ -117,7 +116,7 @@ class PkSortedIndexFileTest {
                                         new PkSortedIndexFile.Entry(40, 2))
                                 .iterator());
 
-        assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(2L, 2L, 1L);
+        assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(5L);
         assertThat(payloads)
                 .allSatisfy(
                         payload -> {
@@ -131,9 +130,8 @@ class PkSortedIndexFileTest {
     }
 
     @Test
-    void testFailedSecondPayloadDeletesWholeGroup() throws Exception {
+    void testRejectsMultiplePayloadsAndDeletesWholeGroup() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
-        AtomicInteger writerNumber = new AtomicInteger();
         PkSortedIndexFile indexFile =
                 new PkSortedIndexFile(fileIO, pathFactory(tempPath)) {
                     @Override
@@ -142,35 +140,33 @@ class PkSortedIndexFileTest {
                             DataField indexField,
                             Options indexOptions,
                             GlobalIndexFileWriter fileWriter) {
-                        int currentWriter = writerNumber.incrementAndGet();
                         return new GlobalIndexSingleColumnWriter() {
                             private long rowCount;
 
                             @Override
                             public void write(Object key, long relativeRowId) {
-                                if (currentWriter == 2) {
-                                    throw new RuntimeException("injected second payload failure");
-                                }
                                 rowCount++;
                             }
 
                             @Override
                             public List<ResultEntry> finish() {
-                                String fileName = fileWriter.newFileName("test");
-                                try (PositionOutputStream output =
-                                        fileWriter.newOutputStream(fileName)) {
-                                    output.write(new byte[] {1});
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
+                                List<ResultEntry> results = new ArrayList<>();
+                                for (int i = 0; i < 2; i++) {
+                                    String fileName = fileWriter.newFileName("test");
+                                    try (PositionOutputStream output =
+                                            fileWriter.newOutputStream(fileName)) {
+                                        output.write(new byte[] {1});
+                                    } catch (IOException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                    results.add(
+                                            new ResultEntry(fileName, rowCount, new byte[] {2}));
                                 }
-                                return Collections.singletonList(
-                                        new ResultEntry(fileName, rowCount, new byte[] {2}));
+                                return results;
                             }
                         };
                     }
                 };
-        Options options = options();
-        options.set(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE, 1L);
 
         assertThatThrownBy(
                         () ->
@@ -178,12 +174,12 @@ class PkSortedIndexFileTest {
                                         new PrimaryKeyIndexSourceFile("data-file", 2),
                                         field(),
                                         "btree",
-                                        options,
+                                        options(),
                                         Arrays.asList(
                                                         new PkSortedIndexFile.Entry(10, 0),
                                                         new PkSortedIndexFile.Entry(20, 1))
                                                 .iterator()))
-                .hasMessageContaining("injected second payload failure");
+                .hasMessageContaining("must produce exactly one payload file");
 
         try (Stream<java.nio.file.Path> files = Files.list(tempPath)) {
             assertThat(files).isEmpty();

@@ -26,8 +26,6 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
-import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
@@ -40,7 +38,6 @@ import org.apache.paimon.types.DataField;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -88,12 +85,8 @@ public class PkSortedIndexFile extends IndexFile {
         TrackingFileWriter fileWriter = new TrackingFileWriter();
         boolean success = false;
         try {
-            long recordsPerRange =
-                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
-            SortedSingleColumnIndexWriter writer =
-                    new SortedSingleColumnIndexWriter(
-                            recordsPerRange,
-                            () -> createWriter(indexType, indexField, indexOptions, fileWriter));
+            GlobalIndexSingleColumnWriter writer =
+                    createWriter(indexType, indexField, indexOptions, fileWriter);
 
             long writtenRows = 0;
             while (sortedEntries.hasNext()) {
@@ -112,37 +105,35 @@ public class PkSortedIndexFile extends IndexFile {
                     writtenRows,
                     sourceRowCount);
 
-            List<List<ResultEntry>> resultGroups = writer.finish();
-            List<IndexFileMeta> payloads = new ArrayList<>();
-            long payloadRows = 0;
-            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
-            for (List<ResultEntry> resultGroup : resultGroups) {
-                for (ResultEntry result : resultGroup) {
-                    payloadRows = Math.addExact(payloadRows, result.rowCount());
-                    Path payloadPath = fileWriter.path(result.fileName());
-                    payloads.add(
-                            new IndexFileMeta(
-                                    indexType,
-                                    result.fileName(),
-                                    fileIO.getFileSize(payloadPath),
-                                    result.rowCount(),
-                                    new GlobalIndexMeta(
-                                            0,
-                                            sourceRowCount - 1,
-                                            indexField.id(),
-                                            null,
-                                            result.meta(),
-                                            sourceMeta),
-                                    pathFactory.isExternalPath() ? payloadPath.toString() : null));
-                }
-            }
+            List<ResultEntry> results = writer.finish();
             checkArgument(
-                    payloadRows == sourceRowCount,
+                    results.size() == 1,
+                    "Sorted index build must produce exactly one payload file, but produced %s.",
+                    results.size());
+            ResultEntry result = results.get(0);
+            checkArgument(
+                    result.rowCount() == sourceRowCount,
                     "Sorted payload row count %s does not match source row count %s.",
-                    payloadRows,
+                    result.rowCount(),
                     sourceRowCount);
+            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+            Path payloadPath = fileWriter.path(result.fileName());
+            IndexFileMeta payload =
+                    new IndexFileMeta(
+                            indexType,
+                            result.fileName(),
+                            fileIO.getFileSize(payloadPath),
+                            result.rowCount(),
+                            new GlobalIndexMeta(
+                                    0,
+                                    sourceRowCount - 1,
+                                    indexField.id(),
+                                    null,
+                                    result.meta(),
+                                    sourceMeta),
+                            pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
-            return Collections.unmodifiableList(payloads);
+            return Collections.singletonList(payload);
         } finally {
             if (!success) {
                 fileWriter.deleteCreatedFiles();
