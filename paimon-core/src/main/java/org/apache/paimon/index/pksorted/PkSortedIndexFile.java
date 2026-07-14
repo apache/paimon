@@ -54,21 +54,6 @@ public class PkSortedIndexFile extends IndexFile {
     }
 
     public List<IndexFileMeta> build(
-            PrimaryKeyIndexSourceFile sourceFile,
-            DataField indexField,
-            String indexType,
-            Options indexOptions,
-            Iterator<Entry> sortedEntries)
-            throws IOException {
-        return build(
-                Collections.singletonList(sourceFile),
-                indexField,
-                indexType,
-                indexOptions,
-                sortedEntries);
-    }
-
-    public List<IndexFileMeta> build(
             List<PrimaryKeyIndexSourceFile> sourceFiles,
             DataField indexField,
             String indexType,

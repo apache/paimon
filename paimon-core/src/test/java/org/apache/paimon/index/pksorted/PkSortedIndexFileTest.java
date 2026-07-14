@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -54,6 +55,14 @@ class PkSortedIndexFileTest {
     @TempDir java.nio.file.Path tempPath;
 
     @Test
+    void testHasSingleBuildEntryPoint() {
+        assertThat(
+                        Arrays.stream(PkSortedIndexFile.class.getDeclaredMethods())
+                                .filter(method -> method.getName().equals("build")))
+                .hasSize(1);
+    }
+
+    @Test
     void testBuildsSingleBTreeAndBitmapPayloadIgnoringRecordsPerRange() throws Exception {
         for (String indexType : Arrays.asList("btree", "bitmap")) {
             java.nio.file.Path indexDirectory = Files.createDirectory(tempPath.resolve(indexType));
@@ -63,7 +72,7 @@ class PkSortedIndexFileTest {
 
             List<IndexFileMeta> payloads =
                     indexFile.build(
-                            source,
+                            Collections.singletonList(source),
                             field(),
                             indexType,
                             options(),
@@ -171,7 +180,8 @@ class PkSortedIndexFileTest {
         assertThatThrownBy(
                         () ->
                                 indexFile.build(
-                                        new PrimaryKeyIndexSourceFile("data-file", 2),
+                                        Collections.singletonList(
+                                                new PrimaryKeyIndexSourceFile("data-file", 2)),
                                         field(),
                                         "btree",
                                         options(),
