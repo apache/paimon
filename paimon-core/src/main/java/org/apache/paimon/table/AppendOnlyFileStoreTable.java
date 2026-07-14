@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
@@ -142,7 +143,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
-        return AppendBatchTableScan.create(this, snapshotReaderFactory.create(this));
+        CoreOptions options = coreOptions();
+        AppendBatchTableScan scan =
+                new AppendBatchTableScan(
+                        schema(),
+                        schemaManager(),
+                        options,
+                        snapshotReaderFactory.create(this),
+                        catalogEnvironment.tableQueryAuth(options));
+        return options.dataEvolutionEnabled() ? new DataEvolutionBatchScan(this, scan) : scan;
     }
 
     @Override

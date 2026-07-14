@@ -66,8 +66,9 @@ public final class PrimaryKeySortedIndexScan {
 
     private PrimaryKeySortedIndexScan() {}
 
+    /** Factory to create a sorted-index reader for a source data file. */
     @FunctionalInterface
-    interface ReaderFactory {
+    public interface ReaderFactory {
 
         GlobalIndexReader create(
                 FilePlan file, PrimaryKeyIndexDefinition definition, List<IndexFileMeta> payloads);

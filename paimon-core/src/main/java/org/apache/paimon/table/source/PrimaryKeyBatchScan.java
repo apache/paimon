@@ -47,19 +47,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
     @Nullable private Predicate filter;
     @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
 
-    public static DataTableScan create(FileStoreTable table, SnapshotReader snapshotReader) {
-        return new PrimaryKeyBatchScan(
-                table,
-                snapshotReader,
-                table.catalogEnvironment().tableQueryAuth(table.coreOptions()));
-    }
-
     public PrimaryKeyBatchScan(
-            FileStoreTable table, SnapshotReader snapshotReader, TableQueryAuth queryAuth) {
-        this(table, snapshotReader, queryAuth, null);
-    }
-
-    PrimaryKeyBatchScan(
             FileStoreTable table,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth,

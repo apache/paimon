@@ -60,6 +60,11 @@ public class TableScanTest extends ScannerTestBase {
     public void testBatchScanTypes() throws Exception {
         assertThat(AbstractBatchTableScan.class.getDeclaredMethods())
                 .noneMatch(method -> method.getName().equals("create"));
+        assertThat(AppendBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredConstructors()).hasSize(1);
 
         assertThat(table.newScan()).isInstanceOf(PrimaryKeyBatchScan.class);
 

@@ -159,7 +159,11 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
-        return PrimaryKeyBatchScan.create(this, snapshotReaderFactory.create(this));
+        return new PrimaryKeyBatchScan(
+                this,
+                snapshotReaderFactory.create(this),
+                catalogEnvironment.tableQueryAuth(coreOptions()),
+                null);
     }
 
     @Override
