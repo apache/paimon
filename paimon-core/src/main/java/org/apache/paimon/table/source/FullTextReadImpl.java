@@ -159,26 +159,14 @@ public class FullTextReadImpl implements FullTextRead {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
-        IndexFileMeta firstFile = columnSplits.get(0).fullTextIndexFiles().get(0);
-        String indexType = firstFile.indexType();
-        GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
-        GlobalIndexer globalIndexer;
-        if (firstMeta.extraFieldIds() != null) {
-            globalIndexer =
-                    GlobalIndexerFactoryUtils.load(indexType)
-                            .create(
-                                    firstMeta.getIndexField(table.rowType()),
-                                    firstMeta.getExtraFields(table.rowType()),
-                                    table.coreOptions().toConfiguration());
-        } else {
-            globalIndexer =
-                    GlobalIndexerFactoryUtils.load(indexType)
-                            .create(textColumn, table.coreOptions().toConfiguration());
-        }
-
+        // A column can carry splits from more than one index identity (per-range selection in the
+        // scan when different indexes cover different ranges of the same column), so build the
+        // reader from each split's own file meta rather than reusing the first split's identity.
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                 new ArrayList<>(columnSplits.size());
         for (IndexFullTextSearchSplit split : columnSplits) {
+            GlobalIndexer globalIndexer =
+                    createIndexer(split.fullTextIndexFiles().get(0), textColumn);
             futures.add(
                     eval(
                             globalIndexer,
@@ -188,8 +176,7 @@ public class FullTextReadImpl implements FullTextRead {
                             split.fullTextIndexFiles(),
                             indexFileReader,
                             executor,
-                            GlobalIndexLiveRowFilter.forRange(
-                                    liveRows, split.rowRangeStart(), split.rowRangeEnd())));
+                            includeRowIds(split, liveRows)));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -203,6 +190,39 @@ public class FullTextReadImpl implements FullTextRead {
         }
 
         return result;
+    }
+
+    @Nullable
+    private static RoaringNavigableMap64 includeRowIds(
+            IndexFullTextSearchSplit split, @Nullable RoaringNavigableMap64 liveRows) {
+        RoaringNavigableMap64 include = new RoaringNavigableMap64();
+        for (Range range : split.searchRowRanges()) {
+            include.addRange(range);
+        }
+        if (liveRows != null) {
+            include.and(liveRows);
+        }
+        long physicalRowCount = split.rowRangeEnd() - split.rowRangeStart() + 1;
+        return include.getLongCardinality() == physicalRowCount ? null : include;
+    }
+
+    /**
+     * Builds the {@link GlobalIndexer} for a single split from its own index file meta, so a column
+     * served by several index identities (over different row ranges) reads each split with the
+     * matching field configuration instead of the first split's.
+     */
+    private GlobalIndexer createIndexer(IndexFileMeta file, DataField textColumn) {
+        String indexType = file.indexType();
+        GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
+        if (meta.extraFieldIds() != null) {
+            return GlobalIndexerFactoryUtils.load(indexType)
+                    .create(
+                            meta.getIndexField(table.rowType()),
+                            meta.getExtraFields(table.rowType()),
+                            table.coreOptions().toConfiguration());
+        }
+        return GlobalIndexerFactoryUtils.load(indexType)
+                .create(textColumn, table.coreOptions().toConfiguration());
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(

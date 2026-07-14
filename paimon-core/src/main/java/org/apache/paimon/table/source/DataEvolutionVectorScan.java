@@ -107,7 +107,12 @@ public class DataEvolutionVectorScan implements VectorScan {
             vectorIndexType = configuredVectorIndexType();
         }
 
-        // Group vector index files by (rowRangeStart, rowRangeEnd)
+        // Group vector index files by (rowRangeStart, rowRangeEnd). A file is treated as the vector
+        // index for this search only when the vector column is its PRIMARY field (indexFieldId);
+        // the canonical ES hybrid layout is vector-as-primary with text/scalar columns carried as
+        // extra fields. If the vector column were instead an extra field, no IndexVectorSearchSplit
+        // is produced here and the search falls back to a brute-force RawVectorSearchSplit (correct
+        // results, but the ANN index is bypassed).
         Map<Range, List<IndexFileMeta>> vectorByRange = new HashMap<>();
         List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
@@ -130,7 +135,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                                     f -> {
                                         GlobalIndexMeta globalIndex =
                                                 checkNotNull(f.globalIndexMeta());
-                                        if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
+                                        if (!canServeScalarFilter(globalIndex)) {
                                             return false;
                                         }
                                         return range.hasIntersection(globalIndex.rowRange());
@@ -180,7 +185,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                 .filter(
                         f -> {
                             GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            return !isPrimaryColumn(globalIndex, vectorColumn.id());
+                            return canServeScalarFilter(globalIndex);
                         })
                 .collect(Collectors.toList());
     }
@@ -191,12 +196,21 @@ public class DataEvolutionVectorScan implements VectorScan {
                 .filter(
                         f -> {
                             GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
+                            if (!canServeScalarFilter(globalIndex)) {
                                 return false;
                             }
                             return hasIntersection(rowRanges, globalIndex.rowRange());
                         })
                 .collect(Collectors.toList());
+    }
+
+    private boolean canServeScalarFilter(GlobalIndexMeta meta) {
+        return !isPrimaryColumn(meta, vectorColumn.id()) || hasExtraFields(meta);
+    }
+
+    private static boolean hasExtraFields(GlobalIndexMeta meta) {
+        int[] extraFieldIds = meta.extraFieldIds();
+        return extraFieldIds != null && extraFieldIds.length > 0;
     }
 
     private static boolean hasIntersection(List<Range> ranges, Range range) {
