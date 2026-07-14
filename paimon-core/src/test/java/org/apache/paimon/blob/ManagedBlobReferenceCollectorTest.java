@@ -31,6 +31,8 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManagedBlobReferenceCollector}. */
@@ -48,7 +50,10 @@ class ManagedBlobReferenceCollectorTest {
         Path externalBlob = new Path(tempDir.resolve("external/data-c.managed.blob").toUri());
         ManagedBlobReferenceCollector collector =
                 new ManagedBlobReferenceCollector(
-                        fileIO, dataFile, RowType.of(DataTypes.INT(), DataTypes.BLOB()));
+                        fileIO,
+                        dataFile,
+                        RowType.of(DataTypes.INT(), DataTypes.BLOB()),
+                        Collections.singleton("f1"));
 
         collector.write(keyValue(RowKind.INSERT, Blob.fromFile(fileIO, managedBlob.toString())));
         collector.write(
@@ -81,7 +86,8 @@ class ManagedBlobReferenceCollectorTest {
                 new ManagedBlobReferenceCollector(
                         fileIO,
                         dataFile,
-                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())));
+                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        Collections.singleton("f1"));
 
         collector.write(
                 new KeyValue()
@@ -107,6 +113,43 @@ class ManagedBlobReferenceCollectorTest {
                                 bucketPath.toString(), first.getName()),
                         new ManagedBlobReferenceFile.Reference(
                                 otherBucketPath.toString(), second.getName()));
+    }
+
+    @Test
+    void testCollectsOnlyDeclaredFields() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        Path dataFile = new Path(bucketPath, "data-a.avro");
+        Path managed = new Path(bucketPath, "data-b.managed.blob");
+        Path unmanaged = new Path(bucketPath, "data-c.managed.blob");
+        RowType valueType =
+                RowType.of(
+                        new org.apache.paimon.types.DataType[] {
+                            DataTypes.INT(), DataTypes.BLOB(), DataTypes.BLOB()
+                        },
+                        new String[] {"id", "managed", "unmanaged"});
+        ManagedBlobReferenceCollector collector =
+                new ManagedBlobReferenceCollector(
+                        fileIO, dataFile, valueType, Collections.singleton("managed"));
+
+        collector.write(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                RowKind.INSERT,
+                                GenericRow.of(
+                                        1,
+                                        Blob.fromFile(fileIO, managed.toString()),
+                                        Blob.fromFile(fileIO, unmanaged.toString()))));
+        collector.close();
+
+        assertThat(
+                        ManagedBlobReferenceFile.read(
+                                fileIO, ManagedBlobReferenceFile.sidecarPath(dataFile)))
+                .containsExactly(
+                        new ManagedBlobReferenceFile.Reference(
+                                bucketPath.toString(), managed.getName()));
     }
 
     private KeyValue keyValue(RowKind kind, Blob blob) {

@@ -38,9 +38,9 @@ For general BLOB concepts and read options, see [BLOB Storage](../multimodal-tab
 
 ## Create a Table
 
-Use the existing BLOB declarations to convert binary SQL columns to the BLOB logical type. The primary-key write path
-automatically enables managed storage when the resolved schema contains a top-level `BLOB` or `ARRAY<BLOB>` field; no
-additional managed-storage option is required.
+Use the existing BLOB declarations to define which fields use managed storage. A scalar `BLOB` must be declared with
+`blob-descriptor-field`, while `ARRAY<BLOB>` must be declared with `blob-field`. The write path resolves the managed
+fields from these declarations instead of enabling storage for every field that happens to have a BLOB logical type.
 
 The following example accepts both a scalar value and an ordered array of values:
 
@@ -48,7 +48,7 @@ The following example accepts both a scalar value and an ordered array of values
 CREATE TABLE media (
     id BIGINT,
     name STRING,
-    content BYTES COMMENT '__BLOB_FIELD; media content',
+    content BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; media content',
     attachments ARRAY<BYTES> COMMENT '__BLOB_FIELD; related files',
     PRIMARY KEY (id) NOT ENFORCED
 ) WITH (
@@ -86,7 +86,7 @@ Primary-key managed BLOB storage has the following requirements:
 
 | Item | Requirement |
 |------|-------------|
-| BLOB declaration | Top-level `BLOB` or `ARRAY<BLOB>`; arrays use `blob-field` |
+| BLOB declaration | Scalar `BLOB` uses `blob-descriptor-field`; `ARRAY<BLOB>` uses `blob-field` |
 | Merge engine | `deduplicate` only |
 | Changelog producer | `none` only |
 | Key usage | A BLOB column cannot be a primary, partition, bucket, or sequence key |

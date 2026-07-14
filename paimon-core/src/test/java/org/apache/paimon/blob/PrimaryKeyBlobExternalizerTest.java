@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -55,7 +56,8 @@ class PrimaryKeyBlobExternalizerTest {
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         RowType valueType = RowType.of(DataTypes.INT(), DataTypes.BLOB());
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(fileIO, valueType, pathFactory, 1024L);
+                new PrimaryKeyBlobExternalizer(
+                        fileIO, valueType, Collections.singleton("f1"), pathFactory, 1024L);
         byte[] expected = "managed-blob".getBytes(StandardCharsets.UTF_8);
 
         InternalRow result =
@@ -73,6 +75,33 @@ class PrimaryKeyBlobExternalizerTest {
     }
 
     @Test
+    void testExternalizesOnlyDeclaredFields() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        RowType valueType =
+                RowType.of(
+                        new org.apache.paimon.types.DataType[] {
+                            DataTypes.INT(), DataTypes.BLOB(), DataTypes.BLOB()
+                        },
+                        new String[] {"id", "managed", "unmanaged"});
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO, valueType, Collections.singleton("managed"), pathFactory, 1024L);
+        Blob unmanaged = Blob.fromData(new byte[] {2});
+
+        InternalRow result =
+                externalizer.externalize(
+                        RowKind.INSERT, GenericRow.of(1, Blob.fromData(new byte[] {1}), unmanaged));
+
+        assertThat(result.getBlob(1)).isInstanceOf(BlobRef.class);
+        assertThat(result.getBlob(2)).isSameAs(unmanaged);
+    }
+
+    @Test
     void testRetractSkipsPayloadAndAbortDeletesPrivatePack() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
@@ -82,7 +111,11 @@ class PrimaryKeyBlobExternalizerTest {
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
                 new PrimaryKeyBlobExternalizer(
-                        fileIO, RowType.of(DataTypes.INT(), DataTypes.BLOB()), pathFactory, 1024L);
+                        fileIO,
+                        RowType.of(DataTypes.INT(), DataTypes.BLOB()),
+                        Collections.singleton("f1"),
+                        pathFactory,
+                        1024L);
 
         InternalRow retract =
                 externalizer.externalize(
@@ -115,6 +148,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new PrimaryKeyBlobExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        Collections.singleton("f1"),
                         pathFactory,
                         1024L);
         byte[] expected = "array-element".getBytes(StandardCharsets.UTF_8);
@@ -152,6 +186,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new PrimaryKeyBlobExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        Collections.singleton("f1"),
                         pathFactory,
                         1024L);
 

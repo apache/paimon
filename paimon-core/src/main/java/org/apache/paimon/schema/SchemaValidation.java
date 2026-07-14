@@ -1324,6 +1324,32 @@ public class SchemaValidation {
                 "Primary-key BLOB tables do not support '%s'.",
                 CoreOptions.BLOB_VIEW_FIELD.key());
 
+        List<String> missingDescriptorFields =
+                schema.fields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .filter(field -> !options.blobDescriptorField().contains(field))
+                        .collect(Collectors.toList());
+        checkArgument(
+                missingDescriptorFields.isEmpty(),
+                "Primary-key BLOB tables require every BLOB field in '%s'. Missing fields: %s.",
+                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                missingDescriptorFields);
+
+        Set<String> configuredBlobFields = new HashSet<>(CoreOptions.blobField(options.toMap()));
+        List<String> missingArrayBlobFields =
+                schema.fields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.ARRAY)
+                        .filter(field -> isBlobFileField(field.type()))
+                        .map(DataField::name)
+                        .filter(field -> !configuredBlobFields.contains(field))
+                        .collect(Collectors.toList());
+        checkArgument(
+                missingArrayBlobFields.isEmpty(),
+                "Primary-key ARRAY<BLOB> fields must be declared in '%s'. Missing fields: %s.",
+                CoreOptions.BLOB_FIELD.key(),
+                missingArrayBlobFields);
+
         List<String> primaryKeyBlobFields =
                 blobFields.stream()
                         .filter(schema.primaryKeys()::contains)

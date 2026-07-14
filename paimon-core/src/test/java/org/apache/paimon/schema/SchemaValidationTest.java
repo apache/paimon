@@ -190,7 +190,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testPrimaryKeyArrayBlobManagedByType() {
+    public void testPrimaryKeyArrayBlobField() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
@@ -206,18 +206,38 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testPrimaryKeyBlobManagedByType() {
+    public void testPrimaryKeyArrayBlobRequiresBlobField() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
-                        new DataField(1, "payload", DataTypes.BLOB()));
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), "1");
 
         TableSchema schema =
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
 
-        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage(
+                        "Primary-key ARRAY<BLOB> fields must be declared in 'blob-field'. Missing fields: [payloads].");
+    }
+
+    @Test
+    public void testPrimaryKeyBlobRequiresDescriptorField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage(
+                        "Primary-key BLOB tables require every BLOB field in 'blob-descriptor-field'. Missing fields: [payload].");
     }
 
     @Test

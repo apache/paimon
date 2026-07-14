@@ -47,12 +47,16 @@ public class ManagedBlobReferenceCollector {
 
     private boolean closed;
 
-    public ManagedBlobReferenceCollector(FileIO fileIO, Path dataFile, RowType valueType) {
+    public ManagedBlobReferenceCollector(
+            FileIO fileIO, Path dataFile, RowType valueType, Set<String> managedBlobFields) {
         this.fileIO = fileIO;
         this.sidecar = ManagedBlobReferenceFile.sidecarPath(dataFile);
         List<Integer> indexes = new ArrayList<>();
         List<Boolean> arrayFields = new ArrayList<>();
         for (int i = 0; i < valueType.getFieldCount(); i++) {
+            if (!managedBlobFields.contains(valueType.getFieldNames().get(i))) {
+                continue;
+            }
             DataTypeRoot typeRoot = valueType.getTypeAt(i).getTypeRoot();
             if (isBlobFileField(valueType.getTypeAt(i))) {
                 indexes.add(i);

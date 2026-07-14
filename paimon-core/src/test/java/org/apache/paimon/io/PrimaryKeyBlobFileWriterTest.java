@@ -65,7 +65,8 @@ class PrimaryKeyBlobFileWriterTest {
                 new RowType(
                         java.util.Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
-                                new DataField(1, "payload", DataTypes.BLOB())));
+                                new DataField(1, "payload", DataTypes.BLOB()),
+                                new DataField(2, "unmanaged", DataTypes.BLOB())));
         Function<String, FileStorePathFactory> pathFactories =
                 format ->
                         new FileStorePathFactory(
@@ -99,6 +100,8 @@ class PrimaryKeyBlobFileWriterTest {
         DataFilePathFactory pathFactory = factory.pathFactory(0);
         Path managedBlob =
                 pathFactory.newPathFromExtension(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        Path unmanagedBlob =
+                pathFactory.newPathFromExtension(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 factory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
 
@@ -108,7 +111,10 @@ class PrimaryKeyBlobFileWriterTest {
                                 GenericRow.of(1),
                                 0,
                                 RowKind.INSERT,
-                                GenericRow.of(1, Blob.fromFile(fileIO, managedBlob.toString()))));
+                                GenericRow.of(
+                                        1,
+                                        Blob.fromFile(fileIO, managedBlob.toString()),
+                                        Blob.fromFile(fileIO, unmanagedBlob.toString()))));
         writer.close();
 
         DataFileMeta meta = writer.result().get(0);
@@ -128,7 +134,8 @@ class PrimaryKeyBlobFileWriterTest {
                 factory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         emptyWriter.write(
                 new KeyValue()
-                        .replace(GenericRow.of(2), 1, RowKind.INSERT, GenericRow.of(2, null)));
+                        .replace(
+                                GenericRow.of(2), 1, RowKind.INSERT, GenericRow.of(2, null, null)));
         emptyWriter.close();
 
         DataFileMeta emptyMeta = emptyWriter.result().get(0);

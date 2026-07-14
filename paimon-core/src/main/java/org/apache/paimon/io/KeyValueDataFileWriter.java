@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
@@ -93,7 +94,7 @@ public abstract class KeyValueDataFileWriter
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath,
-            boolean managedBlobReferences) {
+            Set<String> managedBlobFields) {
         super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -110,9 +111,10 @@ public abstract class KeyValueDataFileWriter
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
         this.blobReferenceCollector =
-                managedBlobReferences
-                        ? new ManagedBlobReferenceCollector(fileIO, path, valueType)
-                        : null;
+                managedBlobFields.isEmpty()
+                        ? null
+                        : new ManagedBlobReferenceCollector(
+                                fileIO, path, valueType, managedBlobFields);
     }
 
     @Override

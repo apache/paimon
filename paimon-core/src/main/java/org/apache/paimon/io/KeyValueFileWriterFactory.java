@@ -38,6 +38,7 @@ import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -70,6 +71,7 @@ public class KeyValueFileWriterFactory {
     private final long suggestedFileSize;
     private final CoreOptions options;
     private final FileIndexOptions fileIndexOptions;
+    private final Set<String> managedBlobFields;
     @Nullable private final PrimaryKeyBlobExternalizer blobExternalizer;
 
     private KeyValueFileWriterFactory(
@@ -86,14 +88,16 @@ public class KeyValueFileWriterFactory {
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
         this.fileIndexOptions = options.indexColumnsOptions();
+        this.managedBlobFields = managedBlobFields();
         this.blobExternalizer =
-                managedBlobEnabled()
-                        ? new PrimaryKeyBlobExternalizer(
+                managedBlobFields.isEmpty()
+                        ? null
+                        : new PrimaryKeyBlobExternalizer(
                                 fileIO,
                                 valueType,
+                                managedBlobFields,
                                 formatContext.pathFactory(new WriteFormatKey(0, false)),
-                                options.blobTargetFileSize())
-                        : null;
+                                options.blobTargetFileSize());
     }
 
     public RowType keyType() {
@@ -182,7 +186,8 @@ public class KeyValueFileWriterFactory {
             Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
         // Changelog is sequentially consumed, file index is unnecessary.
         FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
-        boolean managedBlobReferences = !key.isChangelog && managedBlobEnabled();
+        Set<String> dataFileManagedBlobFields =
+                key.isChangelog ? Collections.emptySet() : managedBlobFields;
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -197,7 +202,7 @@ public class KeyValueFileWriterFactory {
                         fileSource,
                         indexOptions,
                         isExternalPath,
-                        managedBlobReferences)
+                        dataFileManagedBlobFields)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.fileWriterContext(key),
@@ -211,11 +216,23 @@ public class KeyValueFileWriterFactory {
                         fileSource,
                         indexOptions,
                         isExternalPath,
-                        managedBlobReferences);
+                        dataFileManagedBlobFields);
     }
 
-    private boolean managedBlobEnabled() {
-        return valueType.getFields().stream().anyMatch(field -> isBlobFileField(field.type()));
+    private Set<String> managedBlobFields() {
+        Set<String> descriptorFields = options.blobDescriptorField();
+        Set<String> blobFileFields =
+                CoreOptions.blobField(options.toMap()).stream().collect(Collectors.toSet());
+        return valueType.getFields().stream()
+                .filter(
+                        field ->
+                                (descriptorFields.contains(field.name())
+                                                && field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                                        || (blobFileFields.contains(field.name())
+                                                && field.type().getTypeRoot() == DataTypeRoot.ARRAY
+                                                && isBlobFileField(field.type())))
+                .map(DataField::name)
+                .collect(Collectors.toSet());
     }
 
     public void deleteFile(DataFileMeta file) {

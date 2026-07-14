@@ -42,6 +42,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -58,6 +59,7 @@ public class PrimaryKeyBlobExternalizer {
     public PrimaryKeyBlobExternalizer(
             FileIO fileIO,
             RowType valueType,
+            Set<String> managedBlobFields,
             DataFilePathFactory pathFactory,
             long targetFileSize) {
         checkArgument(targetFileSize > 0, "Managed BLOB target file size must be positive.");
@@ -70,6 +72,9 @@ public class PrimaryKeyBlobExternalizer {
         List<ManagedBlobPackWriter> writers = new ArrayList<>();
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             DataField field = valueType.getFields().get(i);
+            if (!managedBlobFields.contains(field.name())) {
+                continue;
+            }
             boolean blob = field.type().getTypeRoot() == DataTypeRoot.BLOB;
             boolean blobArray =
                     field.type().getTypeRoot() == DataTypeRoot.ARRAY
