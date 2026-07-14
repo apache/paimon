@@ -1191,6 +1191,11 @@ public class SchemaManager implements Serializable {
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
 
+    /** Restore an existing historical schema without applying current creation-time validation. */
+    public boolean restore(TableSchema schema) throws IOException {
+        return fileIO.tryToWriteAtomic(toSchemaPath(schema.id()), schema.toString());
+    }
+
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
         return fromPath(fileIO, toSchemaPath(id));

@@ -33,6 +33,47 @@ Clone supports cloning tables to Paimon tables.
 Currently, clone supports clone Hive tables in Hive Catalog to Paimon Catalog, supports Parquet, ORC, Avro formats,
 target table will be append table.
 
+## Clone Paimon Full History
+
+Full-history clone physically copies a complete Paimon table to mapped storage paths. It preserves
+all retained schemas, snapshots, tags, branches, long-lived changelogs, data files, extra files, and
+indexes. It does not create or register a table in the target catalog.
+
+Stop writes to the source table for the entire initial run and any retry. The action checks a source
+metadata fingerprint and fails if the retained metadata roots change.
+
+```bash
+<FLINK_HOME>/flink run ./paimon-flink-action-@@VERSION@@.jar \
+clone \
+--clone_from paimon \
+--clone_mode full-history \
+--database default \
+--table source_table \
+--catalog_conf metastore=hive \
+--catalog_conf uri=thrift://localhost:9088 \
+--target_catalog_conf warehouse=dfs://target-cluster/warehouse \
+--path_mapping dfs://source-cluster/warehouse=dfs://target-cluster/warehouse \
+--path_mapping dfs://source-cluster/external-data=dfs://target-cluster/external-data \
+--parallelism 100
+```
+
+Every reachable source path must match one `path_mapping`. The mapped source table root is the
+physical target root. `target_database` and `target_table` are optional logical identifiers and do
+not change that path or register the table.
+
+The target root must initially be absent or empty. A failed clone may be resumed with
+`--clone_if_exists true`; existing same-size files are skipped and conflicting sizes fail. Resume is
+accepted only when the ownership marker matches and `_SUCCESS` is absent. A completed clone cannot
+be resumed.
+
+Mapped external-data and external-index target locations must be dedicated to this clone and must
+not be changed while the initial run or a retry is active. Payload files are published through
+two-phase output so an interrupted transfer does not expose a partial target. Existing-file
+validation compares sizes, not checksums.
+
+Full-history clone does not currently support blob descriptors or blob views, Iceberg compatibility
+metadata, filtered clone, format conversion, or metadata-only clone.
+
 ## Clone Hive Table
 
 ```bash
