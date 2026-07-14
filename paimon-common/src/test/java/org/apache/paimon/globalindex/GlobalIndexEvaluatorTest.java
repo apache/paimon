@@ -32,6 +32,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -44,6 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link GlobalIndexEvaluator}. */
 class GlobalIndexEvaluatorTest {
@@ -652,6 +654,33 @@ class GlobalIndexEvaluatorTest {
         evaluator.close();
     }
 
+    @Test
+    void testUnionReaderClosesRemainingReadersAfterFailure() {
+        AtomicBoolean secondClosed = new AtomicBoolean();
+        GlobalIndexReader failingReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public void close() throws IOException {
+                        throw new IOException("expected close failure");
+                    }
+                };
+        GlobalIndexReader secondReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public void close() {
+                        secondClosed.set(true);
+                    }
+                };
+
+        UnionGlobalIndexReader union =
+                new UnionGlobalIndexReader(Arrays.asList(failingReader, secondReader));
+
+        assertThatThrownBy(union::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("expected close failure");
+        assertThat(secondClosed).isTrue();
+    }
+
     private static void assertBitmapContainsExactly(
             RoaringNavigableMap64 bitmap, long... expected) {
         assertThat(bitmap.getLongCardinality()).isEqualTo(expected.length);
@@ -751,6 +780,6 @@ class GlobalIndexEvaluatorTest {
         }
 
         @Override
-        public void close() {}
+        public void close() throws IOException {}
     }
 }

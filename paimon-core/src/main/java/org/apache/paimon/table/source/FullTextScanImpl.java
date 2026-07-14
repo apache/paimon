@@ -199,30 +199,40 @@ public class FullTextScanImpl implements FullTextScan {
             }
 
             TreeSet<Long> boundaries = new TreeSet<>();
+            Map<Long, List<IndexRangeCandidate>> startingAt = new HashMap<>();
+            Map<Long, List<IndexRangeCandidate>> endingAt = new HashMap<>();
             for (IndexRangeCandidate candidate : candidates) {
                 boundaries.add(candidate.fileRange.from);
+                startingAt
+                        .computeIfAbsent(candidate.fileRange.from, k -> new ArrayList<>())
+                        .add(candidate);
                 if (candidate.fileRange.to != Long.MAX_VALUE) {
-                    boundaries.add(candidate.fileRange.to + 1);
+                    long afterEnd = candidate.fileRange.to + 1;
+                    boundaries.add(afterEnd);
+                    endingAt.computeIfAbsent(afterEnd, k -> new ArrayList<>()).add(candidate);
                 }
             }
 
             List<Long> sortedBoundaries = new ArrayList<>(boundaries);
             Map<IndexRangeCandidate, List<Range>> assigned = new LinkedHashMap<>();
+            TreeSet<IndexRangeCandidate> active =
+                    new TreeSet<>(FullTextScanImpl::compareCandidates);
             for (int i = 0; i < sortedBoundaries.size(); i++) {
                 long from = sortedBoundaries.get(i);
+                List<IndexRangeCandidate> ending = endingAt.get(from);
+                if (ending != null) {
+                    active.removeAll(ending);
+                }
+                List<IndexRangeCandidate> starting = startingAt.get(from);
+                if (starting != null) {
+                    active.addAll(starting);
+                }
                 long to =
                         i + 1 < sortedBoundaries.size()
                                 ? sortedBoundaries.get(i + 1) - 1
                                 : Long.MAX_VALUE;
-                IndexRangeCandidate best = null;
-                for (IndexRangeCandidate candidate : candidates) {
-                    if (candidate.fileRange.from <= from && candidate.fileRange.to >= to) {
-                        if (best == null || betterCandidate(candidate, best)) {
-                            best = candidate;
-                        }
-                    }
-                }
-                if (best != null) {
+                if (!active.isEmpty()) {
+                    IndexRangeCandidate best = active.first();
                     assigned.computeIfAbsent(best, k -> new ArrayList<>()).add(new Range(from, to));
                 }
             }
@@ -257,19 +267,16 @@ public class FullTextScanImpl implements FullTextScan {
         return selections;
     }
 
-    private static boolean betterCandidate(
-            IndexRangeCandidate candidate, IndexRangeCandidate best) {
-        if (candidate.primary != best.primary) {
-            return candidate.primary;
+    private static int compareCandidates(IndexRangeCandidate left, IndexRangeCandidate right) {
+        if (left.primary != right.primary) {
+            return left.primary ? -1 : 1;
         }
-        int result = candidate.identity.key().compareTo(best.identity.key());
+        int result = left.identity.key().compareTo(right.identity.key());
         if (result != 0) {
-            return result < 0;
+            return result;
         }
-        result = Long.compare(candidate.fileRange.from, best.fileRange.from);
-        return result != 0
-                ? result < 0
-                : Long.compare(candidate.fileRange.to, best.fileRange.to) < 0;
+        result = Long.compare(left.fileRange.from, right.fileRange.from);
+        return result != 0 ? result : Long.compare(left.fileRange.to, right.fileRange.to);
     }
 
     private static List<Range> mergeAdjacent(List<Range> ranges) {

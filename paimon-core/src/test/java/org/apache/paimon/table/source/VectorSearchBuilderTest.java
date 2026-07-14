@@ -1199,6 +1199,42 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testScalarExtraFieldComplementsPartialDedicatedIndex() throws Exception {
+        catalog.createTable(
+                identifier("vector_extra_complements_dedicated_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table =
+                getTable(identifier("vector_extra_complements_dedicated_index_table"));
+
+        float[][] vectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}, {0.9f, 0.1f}};
+        writeVectors(table, vectors);
+
+        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+        DataField idField = table.rowType().getField("id");
+        buildAndCommitVectorIndexWithFields(
+                table, vectors, new Range(0, 3), Arrays.asList(vectorField, idField));
+        // The dedicated scalar index covers only the head. The vector index's scalar extra field
+        // must still serve the tail; otherwise GlobalIndexScanner's primary-field preference drops
+        // rows [2, 3] even though coverage planning treats them as indexed.
+        buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(2L);
+        assertThat(readIds(table, result)).containsExactly(2);
+    }
+
+    @Test
     public void testVectorSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

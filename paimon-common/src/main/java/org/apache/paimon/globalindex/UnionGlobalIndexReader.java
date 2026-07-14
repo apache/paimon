@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -183,8 +184,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        for (GlobalIndexReader reader : readers) {
-            reader.close();
+        try {
+            IOUtils.closeAll(readers);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to close union global index readers", e);
         }
     }
 }
