@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFile;
@@ -34,6 +35,7 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -67,10 +69,10 @@ public class PkSortedIndexFile extends IndexFile {
                 sourceRowCount > 0, "A sorted index group must reference at least one source row.");
 
         TrackingFileWriter fileWriter = new TrackingFileWriter();
+        GlobalIndexSingleColumnWriter writer = null;
         boolean success = false;
         try {
-            GlobalIndexSingleColumnWriter writer =
-                    createWriter(indexType, indexField, indexOptions, fileWriter);
+            writer = createWriter(indexType, indexField, indexOptions, fileWriter);
 
             long writtenRows = 0;
             while (sortedEntries.hasNext()) {
@@ -119,6 +121,9 @@ public class PkSortedIndexFile extends IndexFile {
             success = true;
             return payload;
         } finally {
+            if (writer instanceof AutoCloseable) {
+                IOUtils.closeQuietly((AutoCloseable) writer);
+            }
             if (!success) {
                 fileWriter.deleteCreatedFiles();
             }
@@ -132,7 +137,10 @@ public class PkSortedIndexFile extends IndexFile {
             GlobalIndexFileWriter fileWriter)
             throws IOException {
         GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, indexOptions);
-        GlobalIndexWriter writer = indexer.createWriter(fileWriter);
+        GlobalIndexWriter writer =
+                indexer instanceof BitmapGlobalIndexer
+                        ? ((BitmapGlobalIndexer) indexer).createSortedWriter(fileWriter)
+                        : indexer.createWriter(fileWriter);
         checkArgument(
                 writer instanceof GlobalIndexSingleColumnWriter,
                 "Index algorithm %s does not create a single-column writer.",

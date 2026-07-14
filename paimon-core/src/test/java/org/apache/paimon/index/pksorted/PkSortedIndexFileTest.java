@@ -44,6 +44,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -63,6 +64,31 @@ class PkSortedIndexFileTest {
                         .collect(Collectors.toList());
         assertThat(buildMethods).hasSize(1);
         assertThat(buildMethods.get(0).getReturnType()).isEqualTo(IndexFileMeta.class);
+    }
+
+    @Test
+    void testUsesCloseableStreamingBitmapWriter() throws Exception {
+        PkSortedIndexFile indexFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath));
+        GlobalIndexSingleColumnWriter writer =
+                indexFile.createWriter(
+                        "bitmap",
+                        field(),
+                        options(),
+                        new GlobalIndexFileWriter() {
+                            @Override
+                            public String newFileName(String prefix) {
+                                return prefix + ".index";
+                            }
+
+                            @Override
+                            public PositionOutputStream newOutputStream(String fileName) {
+                                throw new AssertionError("Writer must open output lazily.");
+                            }
+                        });
+
+        assertThat(writer).isInstanceOf(AutoCloseable.class);
+        ((AutoCloseable) writer).close();
     }
 
     @Test
@@ -184,6 +210,52 @@ class PkSortedIndexFileTest {
         try (Stream<java.nio.file.Path> files = Files.list(tempPath)) {
             assertThat(files).isEmpty();
         }
+    }
+
+    @Test
+    void testClosesWriterAfterFailedBuild() throws Exception {
+        AtomicBoolean closed = new AtomicBoolean();
+        class CloseableWriter implements GlobalIndexSingleColumnWriter, AutoCloseable {
+
+            @Override
+            public void write(Object key, long relativeRowId) {}
+
+            @Override
+            public List<ResultEntry> finish() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public void close() {
+                closed.set(true);
+            }
+        }
+
+        PkSortedIndexFile indexFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
+                    @Override
+                    protected GlobalIndexSingleColumnWriter createWriter(
+                            String indexType,
+                            DataField indexField,
+                            Options indexOptions,
+                            GlobalIndexFileWriter fileWriter) {
+                        return new CloseableWriter();
+                    }
+                };
+
+        assertThatThrownBy(
+                        () ->
+                                indexFile.build(
+                                        Collections.singletonList(
+                                                new PrimaryKeyIndexSourceFile("data-file", 1)),
+                                        field(),
+                                        "bitmap",
+                                        options(),
+                                        Collections.singletonList(
+                                                        new PkSortedIndexFile.Entry(10, 1))
+                                                .iterator()))
+                .hasMessageContaining("outside sorted index group row range");
+        assertThat(closed).isTrue();
     }
 
     private static DataField field() {

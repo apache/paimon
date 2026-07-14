@@ -154,7 +154,8 @@ public class LazyFilteredBitmapIndexReaderTest {
                         return stream;
                     }
                 };
-        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
+        GlobalIndexSingleColumnWriter writer =
+                globalIndexer.createSortedWriter(streamingFileWriter);
 
         writer.write(str("A"), 0);
         writer.write(str("B"), 1);
@@ -165,13 +166,51 @@ public class LazyFilteredBitmapIndexReaderTest {
     }
 
     @Test
-    public void testRejectsUnsortedKeys() throws Exception {
+    public void testClosesSortedWriterAfterWriteFailure() throws Exception {
+        AtomicReference<ByteArrayPositionOutputStream> output = new AtomicReference<>();
+        GlobalIndexFileWriter streamingFileWriter =
+                new GlobalIndexFileWriter() {
+                    @Override
+                    public String newFileName(String prefix) {
+                        return prefix + ".index";
+                    }
+
+                    @Override
+                    public PositionOutputStream newOutputStream(String fileName) {
+                        ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
+                        output.set(stream);
+                        return stream;
+                    }
+                };
+        GlobalIndexSingleColumnWriter writer =
+                globalIndexer.createSortedWriter(streamingFileWriter);
+        writer.write(str("A"), 0);
+        writer.write(str("B"), 1);
+
+        assertThatThrownBy(() -> writer.write(str("A"), 2))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(writer).isInstanceOf(AutoCloseable.class);
+        ((AutoCloseable) writer).close();
+
+        assertThat(output.get().closed).isTrue();
+    }
+
+    @Test
+    public void testWritesUnsortedKeys() throws Exception {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
         writer.write(str("B"), 0);
+        writer.write(str("A"), 1);
+        ResultEntry result = writer.finish().get(0);
+        Path filePath = new Path(basePath, result.fileName());
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta());
 
-        assertThatThrownBy(() -> writer.write(str("A"), 1))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("monotonically increasing");
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+            assertRows(reader.visitEqual(fieldRef, str("A")).join(), 1L);
+            assertRows(reader.visitEqual(fieldRef, str("B")).join(), 0L);
+        }
     }
 
     @Test
@@ -481,15 +520,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
     private GlobalIndexIOMeta writeData(List<Pair<BinaryString, Long>> data) throws IOException {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
-        List<Pair<BinaryString, Long>> sortedData = new ArrayList<>(data);
-        sortedData.sort(
-                (left, right) -> {
-                    if (left.getKey() == null) {
-                        return right.getKey() == null ? 0 : -1;
-                    }
-                    return right.getKey() == null ? 1 : left.getKey().compareTo(right.getKey());
-                });
-        for (Pair<BinaryString, Long> pair : sortedData) {
+        for (Pair<BinaryString, Long> pair : data) {
             writer.write(pair.getKey(), pair.getValue());
         }
 
@@ -564,6 +595,7 @@ public class LazyFilteredBitmapIndexReaderTest {
     private static class ByteArrayPositionOutputStream extends PositionOutputStream {
 
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private boolean closed;
 
         @Override
         public long getPos() {
@@ -592,6 +624,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         @Override
         public void close() throws IOException {
+            closed = true;
             output.close();
         }
     }
