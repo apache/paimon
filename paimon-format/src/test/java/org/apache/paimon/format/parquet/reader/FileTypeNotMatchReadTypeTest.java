@@ -238,6 +238,84 @@ public class FileTypeNotMatchReadTypeTest {
     }
 
     @Test
+    public void testReadByteFromInt64() throws Exception {
+        String fileName = "test.parquet";
+        String fileWholePath = tempDir + "/" + fileName;
+
+        RowType rowTypeWrite = RowType.of(new DataField(0, "byte_col", DataTypes.BIGINT()));
+        RowType rowTypeRead = RowType.of(new DataField(0, "byte_col", DataTypes.TINYINT()));
+        MessageType messageType = Util.convertToParquetMessageType(rowTypeWrite);
+        ParquetRowDataBuilderForTest parquetRowDataBuilder =
+                new ParquetRowDataBuilderForTest(
+                                new LocalOutputFile(new File(fileWholePath).toPath()),
+                                rowTypeWrite,
+                                messageType)
+                        .enableDictionaryEncoding();
+        ParquetWriter<InternalRow> parquetWriter = parquetRowDataBuilder.build();
+
+        for (int i = 0; i < 100; i++) {
+            parquetWriter.write(GenericRow.of((long) i));
+        }
+        parquetWriter.close();
+
+        ParquetReaderFactory parquetReaderFactory =
+                new ParquetReaderFactory(new Options(), rowTypeRead, 100, null);
+
+        File file = new File(fileWholePath);
+        FileRecordReader<InternalRow> fileRecordReader =
+                parquetReaderFactory.createReader(
+                        new FormatReaderContext(
+                                LocalFileIO.create(),
+                                new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
+                                file.length()));
+
+        FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
+        for (int i = 0; i < 100; i++) {
+            assertThat(batch.next().getByte(0)).isEqualTo((byte) i);
+        }
+        file.delete();
+    }
+
+    @Test
+    public void testReadShortFromInt64() throws Exception {
+        String fileName = "test.parquet";
+        String fileWholePath = tempDir + "/" + fileName;
+
+        RowType rowTypeWrite = RowType.of(new DataField(0, "short_col", DataTypes.BIGINT()));
+        RowType rowTypeRead = RowType.of(new DataField(0, "short_col", DataTypes.SMALLINT()));
+        MessageType messageType = Util.convertToParquetMessageType(rowTypeWrite);
+        ParquetRowDataBuilderForTest parquetRowDataBuilder =
+                new ParquetRowDataBuilderForTest(
+                                new LocalOutputFile(new File(fileWholePath).toPath()),
+                                rowTypeWrite,
+                                messageType)
+                        .enableDictionaryEncoding();
+        ParquetWriter<InternalRow> parquetWriter = parquetRowDataBuilder.build();
+
+        for (int i = 0; i < 100; i++) {
+            parquetWriter.write(GenericRow.of((long) i));
+        }
+        parquetWriter.close();
+
+        ParquetReaderFactory parquetReaderFactory =
+                new ParquetReaderFactory(new Options(), rowTypeRead, 100, null);
+
+        File file = new File(fileWholePath);
+        FileRecordReader<InternalRow> fileRecordReader =
+                parquetReaderFactory.createReader(
+                        new FormatReaderContext(
+                                LocalFileIO.create(),
+                                new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
+                                file.length()));
+
+        FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
+        for (int i = 0; i < 100; i++) {
+            assertThat(batch.next().getShort(0)).isEqualTo((short) i);
+        }
+        file.delete();
+    }
+
+    @Test
     public void testArray() throws Exception {
         String fileName = "test.parquet";
         String fileWholePath = tempDir + "/" + fileName;
