@@ -201,8 +201,9 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     }
 
     private void addBlob(Blob blob) throws IOException {
-        SeekableInputStream in = openBlobInputStream(blob, true);
+        SeekableInputStream in = openBlobInputStream(blob);
         if (in == null) {
+            writeNullElement();
             return;
         }
         long previousPos = out.getPos();
@@ -250,7 +251,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
                 continue;
             }
-            SeekableInputStream in = openBlobInputStream(blob, false);
+            SeekableInputStream in = openBlobInputStream(blob);
             if (in == null) {
                 elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
                 continue;
@@ -294,8 +295,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     }
 
     @Nullable
-    private SeekableInputStream openBlobInputStream(Blob blob, boolean writeNullElement)
-            throws IOException {
+    private SeekableInputStream openBlobInputStream(Blob blob) throws IOException {
         try {
             return blob.newInputStream();
         } catch (IOException | RuntimeException e) {
@@ -306,17 +306,11 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         blobFieldName,
                         e);
                 blobFetchMetricReporter.recordMissingFileNullWritten(true);
-                if (writeNullElement) {
-                    writeNullElement();
-                }
                 return null;
             }
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, blob);
                 blobFetchMetricReporter.recordFetchFailureNullWritten(e);
-                if (writeNullElement) {
-                    writeNullElement();
-                }
                 return null;
             }
             blobFetchMetricReporter.recordFetchFailure(e);
