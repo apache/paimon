@@ -22,13 +22,16 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -41,8 +44,16 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
 
     private DataSplit dataSplit;
     private transient List<IndexFileMeta> payloadFiles;
+    private Map<String, List<Range>> rowRangesByFile;
 
     public BucketVectorSearchSplit(DataSplit dataSplit, List<IndexFileMeta> payloadFiles) {
+        this(dataSplit, payloadFiles, Collections.emptyMap());
+    }
+
+    public BucketVectorSearchSplit(
+            DataSplit dataSplit,
+            List<IndexFileMeta> payloadFiles,
+            Map<String, List<Range>> rowRangesByFile) {
         this.dataSplit = dataSplit;
         for (IndexFileMeta payload : payloadFiles) {
             checkArgument(
@@ -52,6 +63,13 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
                     payload.fileName());
         }
         this.payloadFiles = Collections.unmodifiableList(new ArrayList<>(payloadFiles));
+        Map<String, List<Range>> ranges = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Range>> entry : rowRangesByFile.entrySet()) {
+            ranges.put(
+                    entry.getKey(),
+                    Collections.unmodifiableList(new ArrayList<>(entry.getValue())));
+        }
+        this.rowRangesByFile = Collections.unmodifiableMap(ranges);
     }
 
     public DataSplit dataSplit() {
@@ -60,6 +78,10 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
 
     public List<IndexFileMeta> payloadFiles() {
         return payloadFiles;
+    }
+
+    public Map<String, List<Range>> rowRangesByFile() {
+        return rowRangesByFile;
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -100,11 +122,12 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
         }
         BucketVectorSearchSplit that = (BucketVectorSearchSplit) o;
         return Objects.equals(dataSplit, that.dataSplit)
-                && Objects.equals(payloadFiles, that.payloadFiles);
+                && Objects.equals(payloadFiles, that.payloadFiles)
+                && Objects.equals(rowRangesByFile, that.rowRangesByFile);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(dataSplit, payloadFiles);
+        return Objects.hash(dataSplit, payloadFiles, rowRangesByFile);
     }
 }

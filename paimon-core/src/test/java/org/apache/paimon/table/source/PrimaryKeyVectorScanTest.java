@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -32,11 +31,15 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -78,6 +81,7 @@ class PrimaryKeyVectorScanTest {
 
         SnapshotReader reader = mock(SnapshotReader.class, RETURNS_SELF);
         SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
+        when(snapshotPlan.snapshotId()).thenReturn(11L);
         when(snapshotPlan.splits()).thenReturn(Collections.emptyList());
         when(reader.read()).thenReturn(snapshotPlan);
         when(table.newSnapshotReader()).thenReturn(reader);
@@ -85,9 +89,8 @@ class PrimaryKeyVectorScanTest {
         IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
         when(indexFileHandler.scan(eq(snapshot), any(Filter.class)))
                 .thenReturn(Collections.emptyList());
-        FileStore store = mock(FileStore.class);
-        when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
-        when(table.store()).thenReturn(store);
+        when(reader.indexFileHandler()).thenReturn(indexFileHandler);
+        configureBatchScan(table, reader, snapshot);
 
         new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
 
@@ -106,6 +109,7 @@ class PrimaryKeyVectorScanTest {
 
         SnapshotReader snapshotReader = mock(SnapshotReader.class, RETURNS_SELF);
         SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
+        when(snapshotPlan.snapshotId()).thenReturn(11L);
         when(snapshotPlan.splits())
                 .thenReturn(Collections.singletonList(dataSplit(dataFile("data-1"))));
         when(snapshotReader.read()).thenReturn(snapshotPlan);
@@ -129,9 +133,8 @@ class PrimaryKeyVectorScanTest {
                             }
                             return filtered;
                         });
-        FileStore store = mock(FileStore.class);
-        when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
-        when(table.store()).thenReturn(store);
+        when(snapshotReader.indexFileHandler()).thenReturn(indexFileHandler);
+        configureBatchScan(table, snapshotReader, snapshot);
 
         PrimaryKeyVectorScan.Plan plan = new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
 
@@ -171,7 +174,10 @@ class PrimaryKeyVectorScanTest {
         IndexFileMeta payload = payloadFile();
         BucketVectorSearchSplit split =
                 new BucketVectorSearchSplit(
-                        dataSplit(dataFile("data-1")), Collections.singletonList(payload));
+                        dataSplit(dataFile("data-1")),
+                        Collections.singletonList(payload),
+                        Collections.singletonMap(
+                                "data-1", Collections.singletonList(new Range(1, 1))));
 
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
@@ -241,6 +247,26 @@ class PrimaryKeyVectorScanTest {
         options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
         options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
         return new CoreOptions(options);
+    }
+
+    private static void configureBatchScan(
+            FileStoreTable table, SnapshotReader snapshotReader, Snapshot snapshot) {
+        TableSchema schema = mock(TableSchema.class);
+        when(schema.primaryKeys()).thenReturn(Collections.singletonList("id"));
+        when(table.schema()).thenReturn(schema);
+        when(table.schemaManager()).thenReturn(mock(SchemaManager.class));
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        when(snapshotManager.latestSnapshot()).thenReturn(snapshot);
+        when(snapshotManager.snapshot(snapshot.id())).thenReturn(snapshot);
+        when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
+        when(table.newScan(any(FileStoreTable.SnapshotReaderFactory.class)))
+                .thenAnswer(
+                        invocation -> {
+                            FileStoreTable.SnapshotReaderFactory factory =
+                                    invocation.getArgument(0);
+                            return new PrimaryKeyBatchScan(
+                                    table, factory.create(table), mock(TableQueryAuth.class), null);
+                        });
     }
 
     private static DataFileMeta dataFile(String fileName) {

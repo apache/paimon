@@ -37,6 +37,8 @@ import org.apache.paimon.index.pkvector.PrimaryKeyVectorBucketSearch;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.reader.ScoreRecordReader;
@@ -45,6 +47,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -52,11 +58,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -97,6 +105,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
     private final String metric;
     private final int refineFactor;
     private final int indexedLimit;
+    @Nullable private final Predicate filter;
 
     public PrimaryKeyVectorRead(
             FileStoreTable table,
@@ -104,6 +113,16 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             float[] query,
             int limit,
             Map<String, String> searchOptions) {
+        this(table, vectorField, query, limit, searchOptions, null);
+    }
+
+    public PrimaryKeyVectorRead(
+            FileStoreTable table,
+            DataField vectorField,
+            float[] query,
+            int limit,
+            Map<String, String> searchOptions,
+            @Nullable Predicate filter) {
         checkArgument(
                 vectorField.type() instanceof VectorType, "Vector field must use VECTOR type.");
         checkArgument(
@@ -125,6 +144,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                 VectorSearchRefineOptions.resolve(
                         this.searchOptions, table.options(), vectorField.name(), indexType);
         this.indexedLimit = VectorSearchRefineOptions.searchLimit(limit, refineFactor);
+        this.filter = filter;
     }
 
     private static KeyValueFileStore keyValueStore(FileStoreTable table) {
@@ -243,10 +263,100 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         table.coreOptions().globalIndexSearchMode());
         PrimaryKeyVectorBucketSearch.Result result =
                 bucketSearch.search(
-                        state, activeFiles, deletionVectors, query, indexedLimit, limit);
+                        state,
+                        activeFiles,
+                        deletionVectors,
+                        rowRangesByFile(split),
+                        query,
+                        indexedLimit,
+                        limit);
         return new SearchResult(
                 candidates(dataSplit, result.indexedCandidates()),
                 candidates(dataSplit, result.exactCandidates()));
+    }
+
+    private Map<String, List<Range>> rowRangesByFile(BucketVectorSearchSplit split)
+            throws IOException {
+        Map<String, List<Range>> result = new LinkedHashMap<>(split.rowRangesByFile());
+        if (filter == null) {
+            return result;
+        }
+
+        DataSplit dataSplit = split.dataSplit();
+        for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+            DataFileMeta dataFile = dataSplit.dataFiles().get(i);
+            result.put(
+                    dataFile.fileName(),
+                    residualRowRanges(dataSplit, i, result.get(dataFile.fileName())));
+        }
+        return result;
+    }
+
+    private List<Range> residualRowRanges(
+            DataSplit source, int fileIndex, @Nullable List<Range> candidateRanges)
+            throws IOException {
+        DataFileMeta dataFile = source.dataFiles().get(fileIndex);
+        if (dataFile.rowCount() == 0) {
+            return Collections.emptyList();
+        }
+        if (candidateRanges != null && candidateRanges.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        DataSplit.Builder builder =
+                DataSplit.builder()
+                        .withSnapshot(source.snapshotId())
+                        .withPartition(source.partition())
+                        .withBucket(source.bucket())
+                        .withBucketPath(source.bucketPath())
+                        .withTotalBuckets(source.totalBuckets())
+                        .withDataFiles(Collections.singletonList(dataFile))
+                        .isStreaming(false)
+                        .rawConvertible(false);
+        if (source.deletionFiles().isPresent()) {
+            builder.withDataDeletionFiles(
+                    Collections.singletonList(source.deletionFiles().get().get(fileIndex)));
+        }
+        IndexedSplit allRows =
+                new IndexedSplit(
+                        builder.build(),
+                        candidateRanges == null
+                                ? Collections.singletonList(new Range(0, dataFile.rowCount() - 1))
+                                : candidateRanges,
+                        null);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(filterReadType()).withFilter(filter);
+        RoaringNavigableMap64 positions = new RoaringNavigableMap64();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(allRows)) {
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                checkArgument(
+                        batch instanceof ScoreRecordIterator,
+                        "Residual primary-key vector filter requires physical row positions.");
+                ScoreRecordIterator<InternalRow> positionsBatch =
+                        (ScoreRecordIterator<InternalRow>) batch;
+                try {
+                    while (positionsBatch.next() != null) {
+                        positions.add(positionsBatch.returnedRowId());
+                    }
+                } finally {
+                    positionsBatch.releaseBatch();
+                }
+            }
+        }
+        return positions.toRangeList();
+    }
+
+    private RowType filterReadType() {
+        Set<String> filterFields = PredicateVisitor.collectFieldNames(filter);
+        List<String> readFields = new ArrayList<>();
+        for (String field : table.rowType().getFieldNames()) {
+            if (filterFields.contains(field)) {
+                readFields.add(field);
+            }
+        }
+        return table.rowType().project(readFields);
     }
 
     private static List<Candidate> candidates(
