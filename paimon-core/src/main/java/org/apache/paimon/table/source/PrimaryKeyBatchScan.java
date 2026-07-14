@@ -31,9 +31,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -43,8 +40,6 @@ import java.util.Set;
 
 /** Batch scan for primary-key tables and indexes. */
 public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
-
-    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyBatchScan.class);
 
     private final FileStoreTable table;
     private final @Nullable PrimaryKeySortedIndexScan.ReaderFactory readerFactory;
@@ -132,70 +127,56 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
             dataSplits.add((DataSplit) split);
         }
 
-        try {
-            long snapshotId = snapshotPlan.snapshotId();
-            Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotId);
-            if (snapshot == null) {
-                return dataPlan;
-            }
-            TableSchema snapshotSchema = table.schemaManager().schema(snapshot.schemaId());
-            List<PrimaryKeyIndexDefinition> definitions =
-                    PrimaryKeyIndexDefinitions.create(snapshotSchema).definitions();
-            Set<Integer> scalarFields = new HashSet<>();
-            for (PrimaryKeyIndexDefinition definition : definitions) {
-                if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                        || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
-                    scalarFields.add(definition.fieldId());
-                }
-            }
-            if (scalarFields.isEmpty()) {
-                return dataPlan;
-            }
-
-            IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
-            if (indexFileHandler == null) {
-                return dataPlan;
-            }
-            List<IndexManifestEntry> indexEntries =
-                    indexFileHandler.scan(
-                            snapshot,
-                            entry -> {
-                                GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
-                                return entry.kind() == FileKind.ADD
-                                        && meta != null
-                                        && meta.sourceMeta() != null
-                                        && scalarFields.contains(meta.indexFieldId());
-                            });
-            PrimaryKeySortedIndexScan.Plan indexPlan =
-                    PrimaryKeySortedIndexScan.plan(
-                            snapshotId, dataSplits, definitions, indexEntries);
-            PrimaryKeySortedIndexScan.ReaderFactory factory =
-                    readerFactory == null
-                            ? PrimaryKeySortedIndexScan.readerFactory(
-                                    snapshotReader.snapshotManager().fileIO(),
-                                    snapshotReader.pathFactory(),
-                                    snapshotSchema.logicalRowType(),
-                                    options().toConfiguration())
-                            : readerFactory;
-            PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
-                    PrimaryKeySortedIndexScan.evaluate(
-                            indexPlan,
-                            snapshotSchema.logicalRowType(),
-                            filter,
-                            definitions,
-                            factory);
-            PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
-            return new PlanImpl(
-                    snapshotPlan.watermark(),
-                    snapshotPlan.snapshotId(),
-                    new ArrayList<>(result.splits()));
-        } catch (RuntimeException e) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw e;
-            }
-            LOG.warn(
-                    "Failed to apply primary-key sorted indexes; using the ordinary data plan.", e);
+        long snapshotId = snapshotPlan.snapshotId();
+        Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotId);
+        if (snapshot == null) {
             return dataPlan;
         }
+        TableSchema snapshotSchema = table.schemaManager().schema(snapshot.schemaId());
+        List<PrimaryKeyIndexDefinition> definitions =
+                PrimaryKeyIndexDefinitions.create(snapshotSchema).definitions();
+        Set<Integer> scalarFields = new HashSet<>();
+        for (PrimaryKeyIndexDefinition definition : definitions) {
+            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                scalarFields.add(definition.fieldId());
+            }
+        }
+        if (scalarFields.isEmpty()) {
+            return dataPlan;
+        }
+
+        IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
+        if (indexFileHandler == null) {
+            return dataPlan;
+        }
+        List<IndexManifestEntry> indexEntries =
+                indexFileHandler.scan(
+                        snapshot,
+                        entry -> {
+                            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                            return entry.kind() == FileKind.ADD
+                                    && meta != null
+                                    && meta.sourceMeta() != null
+                                    && scalarFields.contains(meta.indexFieldId());
+                        });
+        PrimaryKeySortedIndexScan.Plan indexPlan =
+                PrimaryKeySortedIndexScan.plan(snapshotId, dataSplits, definitions, indexEntries);
+        PrimaryKeySortedIndexScan.ReaderFactory factory =
+                readerFactory == null
+                        ? PrimaryKeySortedIndexScan.readerFactory(
+                                snapshotReader.snapshotManager().fileIO(),
+                                snapshotReader.pathFactory(),
+                                snapshotSchema.logicalRowType(),
+                                options().toConfiguration())
+                        : readerFactory;
+        PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                PrimaryKeySortedIndexScan.evaluate(
+                        indexPlan, snapshotSchema.logicalRowType(), filter, definitions, factory);
+        PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
+        return new PlanImpl(
+                snapshotPlan.watermark(),
+                snapshotPlan.snapshotId(),
+                new ArrayList<>(result.splits()));
     }
 }

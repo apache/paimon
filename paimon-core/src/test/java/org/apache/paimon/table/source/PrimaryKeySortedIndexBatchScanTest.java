@@ -58,6 +58,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_SELF;
@@ -77,6 +78,22 @@ class PrimaryKeySortedIndexBatchScanTest {
         IndexedSplit indexedSplit = (IndexedSplit) result.splits().get(0);
         assertThat(indexedSplit.dataSplit().dataFiles()).containsExactly(fixture.dataFile);
         assertThat(indexedSplit.rowRanges()).containsExactly(new Range(2, 2));
+    }
+
+    @Test
+    void testOrdinaryBatchScanFailsWhenApplyingSortedIndexFails() {
+        ScanFixture fixture = fixture(reader(2));
+        when(fixture.scan
+                        .snapshotReader
+                        .indexFileHandler()
+                        .scan(
+                                any(Snapshot.class),
+                                org.mockito.ArgumentMatchers.<Filter<IndexManifestEntry>>any()))
+                .thenThrow(new RuntimeException("corrupt index"));
+
+        assertThatThrownBy(fixture.scan::plan)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("corrupt index");
     }
 
     private static TableSchema tableSchema() {
