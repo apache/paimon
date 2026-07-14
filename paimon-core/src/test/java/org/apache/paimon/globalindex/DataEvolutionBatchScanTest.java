@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.source.AbstractBatchTableScan;
+import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.Split;
@@ -60,7 +60,7 @@ public class DataEvolutionBatchScanTest {
         PredicateBuilder builder = new PredicateBuilder(rowTypeWithRowId());
         Predicate predicate = PredicateBuilder.or(builder.equal(2, 1L), builder.greaterThan(0, 5));
 
-        AbstractBatchTableScan batchScan = mock(AbstractBatchTableScan.class);
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
         SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
         new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
 
@@ -74,7 +74,7 @@ public class DataEvolutionBatchScanTest {
         Predicate nonRowIdPredicate = builder.greaterThan(0, 5);
         Predicate predicate = PredicateBuilder.and(builder.equal(2, 1L), nonRowIdPredicate);
 
-        AbstractBatchTableScan batchScan = mock(AbstractBatchTableScan.class);
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
         SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
         new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
 
@@ -91,7 +91,7 @@ public class DataEvolutionBatchScanTest {
         Predicate predicate =
                 PredicateBuilder.and(builder.between(2, 0L, 10L), nonRowIdPredicate, mixedOr);
 
-        AbstractBatchTableScan batchScan = mock(AbstractBatchTableScan.class);
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
         SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
         new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
 
@@ -102,7 +102,7 @@ public class DataEvolutionBatchScanTest {
 
     @Test
     public void testWithShardKeepsDataEvolutionWrapper() {
-        AbstractBatchTableScan batchScan = mock(AbstractBatchTableScan.class);
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
         when(batchScan.withShard(0, 2)).thenReturn(batchScan);
 
         DataEvolutionBatchScan scan = new DataEvolutionBatchScan(null, batchScan);
@@ -217,7 +217,7 @@ public class DataEvolutionBatchScanTest {
                 new DataField(2, ROW_ID.name(), DataTypes.BIGINT()));
     }
 
-    private static SnapshotReader mockSnapshotReader(AbstractBatchTableScan batchScan) {
+    private static SnapshotReader mockSnapshotReader(AppendBatchTableScan batchScan) {
         SnapshotReader snapshotReader = mock(SnapshotReader.class);
         when(batchScan.snapshotReader()).thenReturn(snapshotReader);
         return snapshotReader;
