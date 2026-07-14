@@ -20,8 +20,11 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
@@ -103,5 +106,24 @@ public class HiveTypeUtilsTest {
         TypeInfo timestampWithLocalZoneTypeInfo =
                 HiveTypeUtils.toTypeInfo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         assertThat(timestampWithLocalZoneTypeInfo.getTypeName()).isEqualTo("timestamp");
+    }
+
+    @Test
+    public void testToPaimonTypeTimestampPrecision() {
+        // Hive `timestamp` maps to Paimon TIMESTAMP with the default precision, not the
+        // millisecond precision (3) which silently truncates sub-millisecond values when a
+        // Hive schema is inferred into Paimon (migrate/clone/CREATE via Hive).
+        DataType timestamp = HiveTypeUtils.toPaimonType("timestamp");
+        assertThat(timestamp).isEqualTo(DataTypes.TIMESTAMP());
+        assertThat(((TimestampType) timestamp).getPrecision())
+                .isEqualTo(TimestampType.DEFAULT_PRECISION);
+
+        // Parity: the sibling local-zoned timestamp reverse path returns
+        // DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(), which carries the same default
+        // precision (SparkTypeUtils maps timestamp to precision 6 as well).
+        assertThat(((TimestampType) timestamp).getPrecision())
+                .isEqualTo(LocalZonedTimestampType.DEFAULT_PRECISION);
+        assertThat(((TimestampType) timestamp).getPrecision())
+                .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE().getPrecision());
     }
 }
