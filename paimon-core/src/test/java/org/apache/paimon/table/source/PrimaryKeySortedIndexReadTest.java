@@ -146,4 +146,62 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
         }
         assertThat(historicIds).containsExactlyInAnyOrder(1, 3);
     }
+
+    @Test
+    void testReadAfterIndexCompaction() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("score", DataTypes.INT())
+                        .column("tag", DataTypes.STRING())
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.TARGET_FILE_SIZE.key(), "1 b")
+                        .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                        .option(CoreOptions.primaryKeyIndexCompactionLevelFanoutKey("score"), "2")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        BinaryString tag = BinaryString.fromString("tag");
+        List<InternalRow> firstBatch = new ArrayList<>();
+        List<InternalRow> secondBatch = new ArrayList<>();
+        List<Integer> expectedIds = new ArrayList<>();
+        for (int id = 1; id <= 2_000; id++) {
+            int score = id % 5;
+            (id % 2 == 0 ? secondBatch : firstBatch).add(GenericRow.of(id, score, tag));
+            if (score == 0) {
+                expectedIds.add(id);
+            }
+        }
+        write(table, ioManager, firstBatch.toArray(new InternalRow[0]));
+        write(table, ioManager, secondBatch.toArray(new InternalRow[0]));
+        compact(table, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+
+        Snapshot snapshot = table.store().snapshotManager().latestSnapshot();
+        List<IndexFileMeta> payloads =
+                table.store()
+                        .newIndexFileHandler()
+                        .scanSourceIndexes(snapshot, BinaryRow.EMPTY_ROW, 0);
+        assertThat(payloads)
+                .singleElement()
+                .satisfies(
+                        payload ->
+                                assertThat(
+                                                PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
+                                                        .sourceFiles())
+                                        .hasSize(2));
+
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, 0);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).hasSize(2).allMatch(IndexedSplit.class::isInstance);
+
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactlyInAnyOrderElementsOf(expectedIds);
+    }
 }

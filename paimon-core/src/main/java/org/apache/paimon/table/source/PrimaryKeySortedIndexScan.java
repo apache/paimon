@@ -38,21 +38,27 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
@@ -156,6 +162,8 @@ public final class PrimaryKeySortedIndexScan {
             Pair<BinaryRow, Integer> bucket = bucketEntry.getKey();
             List<IndexFileMeta> bucketPayloads =
                     payloadsByBucket.getOrDefault(bucket, Collections.emptyList());
+            Set<PrimaryKeyIndexSourceFile> activeSourceFiles =
+                    new HashSet<>(bucketEntry.getValue());
             Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource = new LinkedHashMap<>();
             for (PrimaryKeyIndexDefinition definition : scalarDefinitions) {
                 List<IndexFileMeta> definitionPayloads = new ArrayList<>();
@@ -175,11 +183,15 @@ public final class PrimaryKeySortedIndexScan {
                                     bucketEntry.getValue(),
                                     definitionPayloads);
                     for (PkSortedIndexGroup group : state.groups()) {
-                        groupsBySource
-                                .computeIfAbsent(
-                                        group.sourceFile().fileName(),
-                                        ignored -> new LinkedHashMap<>())
-                                .put(definition.fieldId(), group);
+                        for (PrimaryKeyIndexSourceFile sourceFile : group.sourceFiles()) {
+                            if (!activeSourceFiles.contains(sourceFile)) {
+                                continue;
+                            }
+                            groupsBySource
+                                    .computeIfAbsent(
+                                            sourceFile.fileName(), ignored -> new LinkedHashMap<>())
+                                    .put(definition.fieldId(), group);
+                        }
                     }
                 } catch (RuntimeException e) {
                     rethrowIfInterrupted(e);
@@ -236,9 +248,11 @@ public final class PrimaryKeySortedIndexScan {
                                 if (definition == null || !group.isPresent()) {
                                     return Collections.emptyList();
                                 }
-                                return Collections.singletonList(
+                                GlobalIndexReader reader =
                                         readerFactory.create(
-                                                file, definition, group.get().payloads()));
+                                                file, definition, group.get().payloads());
+                                return Collections.singletonList(
+                                        fileLocalReader(file, group.get(), reader));
                             });
             Optional<GlobalIndexResult> result;
             try {
@@ -259,9 +273,168 @@ public final class PrimaryKeySortedIndexScan {
         return new EvaluatedPlan(plan.snapshotId(), files);
     }
 
+    private static GlobalIndexReader fileLocalReader(
+            FilePlan file, PkSortedIndexGroup group, GlobalIndexReader reader) {
+        List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
+        if (sourceFiles.size() == 1) {
+            return reader;
+        }
+
+        PrimaryKeyIndexSourceFile target =
+                new PrimaryKeyIndexSourceFile(
+                        file.dataFile().fileName(), file.dataFile().rowCount());
+        long totalRowCount = 0;
+        long from = -1;
+        long to = -1;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            long next = Math.addExact(totalRowCount, sourceFile.rowCount());
+            if (sourceFile.equals(target)) {
+                from = totalRowCount;
+                to = next;
+            }
+            totalRowCount = next;
+        }
+        checkArgument(
+                from >= 0,
+                "Data file %s is not covered by its sorted-index source group.",
+                file.dataFile().fileName());
+        return new FileLocalGlobalIndexReader(reader, from, to, totalRowCount);
+    }
+
     private static void rethrowIfInterrupted(RuntimeException exception) {
         if (Thread.currentThread().isInterrupted()) {
             throw exception;
+        }
+    }
+
+    /** Restricts merged source-group ordinals to one source file's local row positions. */
+    private static final class FileLocalGlobalIndexReader implements GlobalIndexReader {
+
+        private final GlobalIndexReader wrapped;
+        private final long from;
+        private final long to;
+        private final long totalRowCount;
+
+        private FileLocalGlobalIndexReader(
+                GlobalIndexReader wrapped, long from, long to, long totalRowCount) {
+            this.wrapped = wrapped;
+            this.from = from;
+            this.to = to;
+            this.totalRowCount = totalRowCount;
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+            return wrapped.visitIsNotNull(fieldRef).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+            return wrapped.visitIsNull(fieldRef).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitStartsWith(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitEndsWith(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitContains(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitLike(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitLessThan(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitGreaterOrEqual(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitNotEqual(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitLessOrEqual(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitEqual(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+                FieldRef fieldRef, Object literal) {
+            return wrapped.visitGreaterThan(fieldRef, literal).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return wrapped.visitIn(fieldRef, literals).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return wrapped.visitNotIn(fieldRef, literals).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return wrapped.visitBetween(fieldRef, from, to).thenApply(this::toFileLocal);
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return wrapped.visitNotBetween(fieldRef, from, to).thenApply(this::toFileLocal);
+        }
+
+        private Optional<GlobalIndexResult> toFileLocal(Optional<GlobalIndexResult> result) {
+            if (!result.isPresent()) {
+                return result;
+            }
+            RoaringNavigableMap64 positions = new RoaringNavigableMap64();
+            for (long position : result.get().results()) {
+                if (position < 0 || position >= totalRowCount) {
+                    positions.add(to - from);
+                } else if (position >= from && position < to) {
+                    positions.add(position - from);
+                }
+            }
+            return Optional.of(GlobalIndexResult.create(positions));
+        }
+
+        @Override
+        public void close() throws IOException {
+            wrapped.close();
         }
     }
 

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -40,6 +41,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
@@ -199,6 +201,56 @@ class PrimaryKeySortedIndexScanTest {
     }
 
     @Test
+    void testReadMergedSourceGroupInFileLocalPositions() {
+        DataFileMeta first = dataFile("data-1", 2);
+        DataFileMeta second = dataFile("data-2", 3);
+        DataSplit split = dataSplit(11, 0, true, second, first);
+        PrimaryKeyIndexDefinition definition =
+                definition(
+                        7,
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        PrimaryKeyIndexDefinition.Family.BTREE);
+        IndexFileMeta mergedPayload =
+                payload(
+                        "btree-merged",
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1", 2),
+                                new PrimaryKeyIndexSourceFile("data-2", 3)),
+                        "btree",
+                        7,
+                        5);
+        PrimaryKeySortedIndexScan.Plan plan =
+                PrimaryKeySortedIndexScan.plan(
+                        11,
+                        Collections.singletonList(split),
+                        Collections.singletonList(definition),
+                        Collections.singletonList(payloadEntry(0, mergedPayload)));
+        RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
+
+        PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                PrimaryKeySortedIndexScan.evaluate(
+                        plan,
+                        rowType,
+                        predicate,
+                        Collections.singletonList(definition),
+                        (ignoredFile, ignoredDefinition, payloads) -> {
+                            assertThat(payloads).containsExactly(mergedPayload);
+                            return readerWithPositions(1, 3, 4);
+                        });
+        PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
+
+        assertThat(result.splits()).hasSize(2);
+        assertThat(result.splits()).allMatch(IndexedSplit.class::isInstance);
+        IndexedSplit secondSplit = (IndexedSplit) result.splits().get(0);
+        assertThat(secondSplit.dataSplit().dataFiles()).containsExactly(second);
+        assertThat(secondSplit.rowRanges()).containsExactly(new Range(1, 2));
+        IndexedSplit firstSplit = (IndexedSplit) result.splits().get(1);
+        assertThat(firstSplit.dataSplit().dataFiles()).containsExactly(first);
+        assertThat(firstSplit.rowRanges()).containsExactly(new Range(1, 1));
+    }
+
+    @Test
     void testPerFileBooleanFallbackSemantics() {
         DataSplit split = dataSplit(11, 0, dataFile("data-1", 4));
         PrimaryKeyIndexDefinition definition =
@@ -283,7 +335,7 @@ class PrimaryKeySortedIndexScanTest {
     private static PrimaryKeyIndexDefinition definition(
             int fieldId, String indexType, PrimaryKeyIndexDefinition.Family family) {
         return new PrimaryKeyIndexDefinition(
-                "f" + fieldId, fieldId, indexType, new Options(), family);
+                "f" + fieldId, fieldId, indexType, new Options(), family, 5, 0.2);
     }
 
     private static GlobalIndexReader readerWithPositions(long... rowPositions) {
@@ -300,6 +352,11 @@ class PrimaryKeySortedIndexScanTest {
     }
 
     private static DataSplit dataSplit(long snapshotId, int bucket, DataFileMeta... files) {
+        return dataSplit(snapshotId, bucket, false, files);
+    }
+
+    private static DataSplit dataSplit(
+            long snapshotId, int bucket, boolean rawConvertible, DataFileMeta... files) {
         return DataSplit.builder()
                 .withSnapshot(snapshotId)
                 .withPartition(BinaryRow.EMPTY_ROW)
@@ -308,7 +365,7 @@ class PrimaryKeySortedIndexScanTest {
                 .withTotalBuckets(2)
                 .withDataFiles(Arrays.asList(files))
                 .isStreaming(false)
-                .rawConvertible(false)
+                .rawConvertible(rawConvertible)
                 .build();
     }
 
@@ -341,10 +398,26 @@ class PrimaryKeySortedIndexScanTest {
             String indexType,
             int fieldId,
             long payloadRowCount) {
-        byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(
-                                new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount))
-                        .serialize();
+        return payload(
+                fileName,
+                Collections.singletonList(
+                        new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount)),
+                indexType,
+                fieldId,
+                payloadRowCount);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
+            String indexType,
+            int fieldId,
+            long payloadRowCount) {
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+        long sourceRowCount = 0;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
+        }
         return new IndexFileMeta(
                 indexType,
                 fileName,
