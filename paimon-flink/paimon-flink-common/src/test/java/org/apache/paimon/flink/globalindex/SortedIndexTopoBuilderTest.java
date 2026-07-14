@@ -19,14 +19,20 @@
 package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
+import java.io.Closeable;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -46,6 +52,49 @@ public class SortedIndexTopoBuilderTest {
         assertThat(SortedIndexTopoBuilder.supports("bitmap")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("btree")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("inverted")).isFalse();
+    }
+
+    @Test
+    public void testWriteIndexOperatorClosesActiveWriter() throws Exception {
+        Class<?> operatorClass = null;
+        for (Class<?> candidate : SortedIndexTopoBuilder.class.getDeclaredClasses()) {
+            if (candidate.getSimpleName().equals("WriteIndexOperator")) {
+                operatorClass = candidate;
+                break;
+            }
+        }
+        assertThat(operatorClass).isNotNull();
+        Constructor<?> constructor =
+                operatorClass.getDeclaredConstructor(
+                        List.class,
+                        int.class,
+                        SortedGlobalIndexBuilder.class,
+                        int.class,
+                        int.class,
+                        int.class,
+                        org.apache.paimon.types.DataType.class);
+        constructor.setAccessible(true);
+        Object operator =
+                constructor.newInstance(
+                        Collections.emptyList(),
+                        0,
+                        mock(SortedGlobalIndexBuilder.class),
+                        0,
+                        0,
+                        0,
+                        DataTypes.INT());
+        GlobalIndexSingleColumnWriter activeWriter =
+                mock(
+                        GlobalIndexSingleColumnWriter.class,
+                        org.mockito.Mockito.withSettings().extraInterfaces(Closeable.class));
+        Field currentWriter = operatorClass.getDeclaredField("currentWriter");
+        currentWriter.setAccessible(true);
+        currentWriter.set(operator, activeWriter);
+
+        Method close = operatorClass.getMethod("close");
+        close.invoke(operator);
+
+        verify((Closeable) activeWriter).close();
     }
 
     @Test

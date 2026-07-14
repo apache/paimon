@@ -462,6 +462,20 @@ public class SortedIndexTopoBuilder {
             commitMessages.clear();
         }
 
+        @Override
+        public void close() throws Exception {
+            try {
+                GlobalIndexSingleColumnWriter writer = currentWriter;
+                currentWriter = null;
+                counter = 0;
+                if (writer instanceof AutoCloseable) {
+                    ((AutoCloseable) writer).close();
+                }
+            } finally {
+                super.close();
+            }
+        }
+
         private void flushCurrentWriter() throws IOException {
             if (counter > 0 && currentWriter != null) {
                 commitMessages.add(

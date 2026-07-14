@@ -23,6 +23,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,7 +33,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Rotates single-column index writers after a configured number of logical records. */
-public final class SortedSingleColumnIndexWriter {
+public final class SortedSingleColumnIndexWriter implements Closeable {
 
     private final long recordsPerRange;
     private final Factory factory;
@@ -71,6 +72,23 @@ public final class SortedSingleColumnIndexWriter {
             copy.add(Collections.unmodifiableList(new ArrayList<>(group)));
         }
         return Collections.unmodifiableList(copy);
+    }
+
+    @Override
+    public void close() throws IOException {
+        finished = true;
+        currentRecordCount = 0;
+        GlobalIndexSingleColumnWriter writer = currentWriter;
+        currentWriter = null;
+        if (writer instanceof AutoCloseable) {
+            try {
+                ((AutoCloseable) writer).close();
+            } catch (IOException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IOException("Failed to close the active sorted index writer.", e);
+            }
+        }
     }
 
     private void finishCurrentWriter() {
