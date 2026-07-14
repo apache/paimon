@@ -89,7 +89,16 @@ public final class PrimaryKeyIndexSourceMeta {
             checkArgument(version == VERSION, "Unsupported index source version: %s.", version);
             int sourceFileCount = input.readInt();
             checkArgument(sourceFileCount > 0, "An index must reference source files.");
-            List<PrimaryKeyIndexSourceFile> sourceFiles = new ArrayList<>(sourceFileCount);
+            // Each entry needs at least the two-byte writeUTF length and one long.
+            int maximumSourceFileCount = input.available() / (Short.BYTES + Long.BYTES);
+            checkArgument(
+                    sourceFileCount <= maximumSourceFileCount,
+                    "Failed to deserialize index source metadata: source file count %s "
+                            + "exceeds the maximum %s allowed by the remaining bytes.",
+                    sourceFileCount,
+                    maximumSourceFileCount);
+            List<PrimaryKeyIndexSourceFile> sourceFiles =
+                    new ArrayList<>(Math.min(sourceFileCount, 1024));
             for (int i = 0; i < sourceFileCount; i++) {
                 sourceFiles.add(new PrimaryKeyIndexSourceFile(input.readUTF(), input.readLong()));
             }

@@ -31,6 +31,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,6 +40,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -103,6 +105,9 @@ class PkVectorAnnSegmentFileTest {
         Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
                 new HashMap<>();
         deletionVectors.put("data-2", data2Deletes);
+        Map<String, List<Range>> rowRangesByFile = new HashMap<>();
+        rowRangesByFile.put("data-1", Collections.singletonList(new Range(1, 1)));
+        rowRangesByFile.put("data-2", Collections.singletonList(new Range(1, 1)));
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         List<PkVectorSearchResult> candidates;
@@ -116,6 +121,8 @@ class PkVectorAnnSegmentFileTest {
                                     new float[] {0, 0},
                                     3,
                                     deletionVectors,
+                                    new HashSet<>(Arrays.asList("data-1", "data-2")),
+                                    rowRangesByFile,
                                     Collections.emptyMap());
         } finally {
             executor.shutdownNow();
@@ -125,7 +132,6 @@ class PkVectorAnnSegmentFileTest {
                 .extracting(PkVectorSearchResult::dataFileName, PkVectorSearchResult::rowPosition)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("data-2", 1L),
-                        org.assertj.core.groups.Tuple.tuple("data-1", 0L),
                         org.assertj.core.groups.Tuple.tuple("data-1", 1L));
     }
 

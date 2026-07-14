@@ -20,17 +20,18 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -51,16 +52,27 @@ public class PrimaryKeyVectorScan implements VectorScan {
     private final int vectorFieldId;
     private final String indexType;
     @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Predicate filter;
 
     public PrimaryKeyVectorScan(
             FileStoreTable table,
             int vectorFieldId,
             String indexType,
             @Nullable PartitionPredicate partitionFilter) {
+        this(table, vectorFieldId, indexType, partitionFilter, null);
+    }
+
+    public PrimaryKeyVectorScan(
+            FileStoreTable table,
+            int vectorFieldId,
+            String indexType,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter) {
         this.table = table;
         this.vectorFieldId = vectorFieldId;
         this.indexType = indexType;
         this.partitionFilter = partitionFilter;
+        this.filter = filter;
     }
 
     @Override
@@ -68,22 +80,39 @@ public class PrimaryKeyVectorScan implements VectorScan {
         checkArgument(
                 table.coreOptions().primaryKeyVectorIndexEnabled(),
                 "Primary-key vector search requires a configured primary-key vector index.");
-        @Nullable Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
-        if (snapshot == null) {
+        checkArgument(
+                filter == null
+                        || (table.coreOptions().deletionVectorsEnabled()
+                                && !table.coreOptions().deletionVectorsMergeOnRead()),
+                "Primary-key vector pre-filter requires deletion vectors without merge-on-read.");
+        SnapshotReader snapshotReader = table.newSnapshotReader().keepStats();
+        DataTableScan dataScan = table.newScan(ignored -> snapshotReader);
+        checkArgument(
+                dataScan instanceof PrimaryKeyBatchScan,
+                "Primary-key vector search requires a primary-key batch scan.");
+        PrimaryKeyBatchScan batchScan = (PrimaryKeyBatchScan) dataScan;
+        if (partitionFilter != null) {
+            batchScan.withPartitionFilter(partitionFilter);
+        }
+        if (filter != null) {
+            batchScan.withFilter(filter);
+        }
+        TableScan.Plan tablePlan = batchScan.planWithoutAuth();
+        if (!(tablePlan instanceof SnapshotReader.Plan)) {
+            checkArgument(
+                    tablePlan.splits().isEmpty(),
+                    "Primary-key vector search requires a snapshot plan.");
             return new Plan(0, Collections.emptyList());
         }
-
-        SnapshotReader snapshotReader =
-                table.newSnapshotReader().withSnapshot(snapshot).withMode(ScanMode.ALL).keepStats();
-        if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-            snapshotReader.onlyReadRealBuckets();
+        SnapshotReader.Plan snapshotPlan = (SnapshotReader.Plan) tablePlan;
+        if (snapshotPlan.snapshotId() == null) {
+            return new Plan(0, Collections.emptyList());
         }
-        if (partitionFilter != null) {
-            snapshotReader.withPartitionFilter(partitionFilter);
-        }
-        List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
+        Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotPlan.snapshotId());
+        checkArgument(snapshot != null, "Primary-key vector snapshot does not exist.");
 
-        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
+        checkArgument(indexFileHandler != null, "Primary-key vector index handler is unavailable.");
         List<IndexManifestEntry> vectorIndexEntries =
                 indexFileHandler.scan(
                         snapshot,
@@ -95,12 +124,12 @@ public class PrimaryKeyVectorScan implements VectorScan {
                                                 == vectorFieldId
                                         && (partitionFilter == null
                                                 || partitionFilter.test(entry.partition())));
-        return plan(snapshot.id(), dataSplits, vectorIndexEntries);
+        return plan(snapshot.id(), snapshotPlan.splits(), vectorIndexEntries);
     }
 
     static Plan plan(
             long snapshotId,
-            List<DataSplit> dataSplits,
+            List<? extends Split> dataSplits,
             List<IndexManifestEntry> vectorIndexEntries) {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> payloads = new LinkedHashMap<>();
         for (IndexManifestEntry entry : vectorIndexEntries) {
@@ -118,18 +147,19 @@ public class PrimaryKeyVectorScan implements VectorScan {
         }
 
         Map<Pair<BinaryRow, Integer>, BucketAccumulator> buckets = new LinkedHashMap<>();
-        for (DataSplit split : dataSplits) {
+        for (Split split : dataSplits) {
+            DataSplit dataSplit = unwrapDataSplit(split);
             checkArgument(
-                    split.snapshotId() == snapshotId,
+                    dataSplit.snapshotId() == snapshotId,
                     "Data split snapshot %s does not match vector scan snapshot %s.",
-                    split.snapshotId(),
+                    dataSplit.snapshotId(),
                     snapshotId);
             checkArgument(
-                    !split.isStreaming(), "Primary-key vector search requires a batch split.");
-            Pair<BinaryRow, Integer> key = Pair.of(split.partition(), split.bucket());
+                    !dataSplit.isStreaming(), "Primary-key vector search requires a batch split.");
+            Pair<BinaryRow, Integer> key = Pair.of(dataSplit.partition(), dataSplit.bucket());
             BucketAccumulator accumulator = buckets.get(key);
             if (accumulator == null) {
-                accumulator = new BucketAccumulator(split);
+                accumulator = new BucketAccumulator(dataSplit);
                 buckets.put(key, accumulator);
             }
             accumulator.add(split);
@@ -140,9 +170,21 @@ public class PrimaryKeyVectorScan implements VectorScan {
             result.add(
                     new BucketVectorSearchSplit(
                             entry.getValue().build(),
-                            payloads.getOrDefault(entry.getKey(), Collections.emptyList())));
+                            payloads.getOrDefault(entry.getKey(), Collections.emptyList()),
+                            entry.getValue().rowRangesByFile()));
         }
         return new Plan(snapshotId, result);
+    }
+
+    private static DataSplit unwrapDataSplit(Split split) {
+        if (split instanceof IndexedSplit) {
+            return ((IndexedSplit) split).dataSplit();
+        }
+        checkArgument(
+                split instanceof DataSplit,
+                "Unsupported primary-key vector source split: %s.",
+                split.getClass().getName());
+        return (DataSplit) split;
     }
 
     /** Immutable snapshot vector-search plan. */
@@ -176,6 +218,7 @@ public class PrimaryKeyVectorScan implements VectorScan {
         private final List<DataFileMeta> dataFiles = new ArrayList<>();
         private final List<DeletionFile> deletionFiles = new ArrayList<>();
         private final Set<String> dataFileNames = new HashSet<>();
+        private final Map<String, List<Range>> rowRangesByFile = new LinkedHashMap<>();
         private boolean hasDeletionFile;
 
         private BucketAccumulator(DataSplit split) {
@@ -186,25 +229,37 @@ public class PrimaryKeyVectorScan implements VectorScan {
             this.totalBuckets = split.totalBuckets();
         }
 
-        private void add(DataSplit split) {
+        private void add(Split split) {
+            DataSplit dataSplit;
+            List<Range> rowRanges = null;
+            if (split instanceof IndexedSplit) {
+                IndexedSplit indexedSplit = (IndexedSplit) split;
+                dataSplit = indexedSplit.dataSplit();
+                checkArgument(
+                        dataSplit.dataFiles().size() == 1,
+                        "Primary-key vector pre-filter split must contain one data file.");
+                rowRanges = indexedSplit.rowRanges();
+            } else {
+                dataSplit = unwrapDataSplit(split);
+            }
             checkArgument(
-                    snapshotId == split.snapshotId()
-                            && partition.equals(split.partition())
-                            && bucket == split.bucket()
-                            && bucketPath.equals(split.bucketPath()),
+                    snapshotId == dataSplit.snapshotId()
+                            && partition.equals(dataSplit.partition())
+                            && bucket == dataSplit.bucket()
+                            && bucketPath.equals(dataSplit.bucketPath()),
                     "Cannot combine data splits from different snapshot buckets.");
             checkArgument(
                     totalBuckets == null
-                            ? split.totalBuckets() == null
-                            : totalBuckets.equals(split.totalBuckets()),
+                            ? dataSplit.totalBuckets() == null
+                            : totalBuckets.equals(dataSplit.totalBuckets()),
                     "Bucket split total-bucket metadata is inconsistent.");
 
-            List<DeletionFile> splitDeletions = split.deletionFiles().orElse(null);
+            List<DeletionFile> splitDeletions = dataSplit.deletionFiles().orElse(null);
             checkArgument(
-                    splitDeletions == null || splitDeletions.size() == split.dataFiles().size(),
+                    splitDeletions == null || splitDeletions.size() == dataSplit.dataFiles().size(),
                     "Deletion files must align with data files in a bucket split.");
-            for (int i = 0; i < split.dataFiles().size(); i++) {
-                DataFileMeta file = split.dataFiles().get(i);
+            for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+                DataFileMeta file = dataSplit.dataFiles().get(i);
                 checkArgument(
                         dataFileNames.add(file.fileName()),
                         "Data file %s appears more than once in vector bucket planning.",
@@ -214,6 +269,14 @@ public class PrimaryKeyVectorScan implements VectorScan {
                 deletionFiles.add(deletion);
                 hasDeletionFile |= deletion != null;
             }
+            if (rowRanges != null) {
+                rowRangesByFile.put(
+                        dataSplit.dataFiles().get(0).fileName(), new ArrayList<>(rowRanges));
+            }
+        }
+
+        private Map<String, List<Range>> rowRangesByFile() {
+            return rowRangesByFile;
         }
 
         private DataSplit build() {

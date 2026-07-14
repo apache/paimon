@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorSearchBuilder}. */
@@ -126,14 +125,12 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     @Override
     public VectorScan newVectorScan() {
         if (isPrimaryKeyVectorSearch()) {
-            checkArgument(
-                    filter == null,
-                    "Primary-key vector search does not support non-partition filters.");
             return new PrimaryKeyVectorScan(
                     table,
                     vectorColumn.id(),
                     table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
-                    partitionFilter);
+                    partitionFilter,
+                    filter);
         }
         return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
@@ -142,10 +139,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     public VectorRead newVectorRead() {
         checkNotNull(vector, "vector must be set via withVector()");
         if (isPrimaryKeyVectorSearch()) {
-            checkArgument(
-                    filter == null,
-                    "Primary-key vector search does not support non-partition filters.");
-            return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options);
+            return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options, filter);
         }
         return new DataEvolutionVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);

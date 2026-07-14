@@ -28,6 +28,7 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -206,8 +207,11 @@ class PrimaryKeyVectorBucketSearchTest {
         data1Deletes.delete(0);
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
         deletionVectors.put("data-1", data1Deletes);
+        Map<String, List<Range>> rowRangesByFile = new HashMap<>();
+        rowRangesByFile.put("data-1", Collections.singletonList(new Range(1, 1)));
+        rowRangesByFile.put("data-2", Collections.singletonList(new Range(1, 1)));
 
-        List<PkVectorSearchResult> results =
+        PrimaryKeyVectorBucketSearch.Result results =
                 new PrimaryKeyVectorBucketSearch(
                                 readerFactory,
                                 null,
@@ -219,17 +223,17 @@ class PrimaryKeyVectorBucketSearchTest {
                                         7, "test-vector-ann", Collections.emptyList()),
                                 Arrays.asList(data1, data2),
                                 deletionVectors,
+                                rowRangesByFile,
                                 new float[] {0, 0},
+                                2,
                                 2);
 
-        assertThat(results)
+        assertThat(results.exactCandidates())
                 .extracting(
                         PkVectorSearchResult::dataFileName,
                         PkVectorSearchResult::rowPosition,
                         PkVectorSearchResult::distance)
-                .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("data-2", 0L, 1F),
-                        org.assertj.core.groups.Tuple.tuple("data-1", 1L, 4F));
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("data-1", 1L, 4F));
     }
 
     private static PkVectorDataFileReader reader(float[][] vectors) throws IOException {

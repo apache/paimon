@@ -78,6 +78,18 @@ class PrimaryKeyIndexSourceMetaTest {
     }
 
     @Test
+    void testRejectsSourceCountBeforeAllocation() throws Exception {
+        DataOutputSerializer output = new DataOutputSerializer(8);
+        output.writeInt(1);
+        output.writeInt(Integer.MAX_VALUE);
+
+        assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(output.getCopyOfBuffer()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source file count")
+                .hasMessageContaining("exceeds the maximum");
+    }
+
+    @Test
     void testRejectsTruncatedAndTrailingMetadata() throws Exception {
         DataOutputSerializer truncated = new DataOutputSerializer(64);
         truncated.writeInt(1);

@@ -24,6 +24,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -95,6 +96,25 @@ public class PrimaryKeyVectorBucketSearch {
             int indexedLimit,
             int exactLimit)
             throws IOException {
+        return search(
+                state,
+                activeFiles,
+                deletionVectors,
+                Collections.emptyMap(),
+                query,
+                indexedLimit,
+                exactLimit);
+    }
+
+    public Result search(
+            PkVectorBucketIndexState state,
+            List<DataFileMeta> activeFiles,
+            Map<String, DeletionVector> deletionVectors,
+            Map<String, List<Range>> rowRangesByFile,
+            float[] query,
+            int indexedLimit,
+            int exactLimit)
+            throws IOException {
         checkArgument(indexedLimit > 0, "Vector indexed search limit must be positive.");
         checkArgument(exactLimit > 0, "Vector exact search limit must be positive.");
         Map<String, DataFileMeta> filesByName = new HashMap<>();
@@ -121,15 +141,26 @@ public class PrimaryKeyVectorBucketSearch {
                 covered.add(source.fileName());
             }
             checkArgument(annSearcher != null, "ANN search is not configured.");
-            for (PkVectorSearchResult result :
-                    annSearcher.search(
-                            ann,
-                            sourceMeta,
-                            query,
-                            indexedLimit,
-                            deletionVectors,
-                            activeSourceFiles,
-                            searchOptions)) {
+            List<PkVectorSearchResult> annResults =
+                    rowRangesByFile.isEmpty()
+                            ? annSearcher.search(
+                                    ann,
+                                    sourceMeta,
+                                    query,
+                                    indexedLimit,
+                                    deletionVectors,
+                                    activeSourceFiles,
+                                    searchOptions)
+                            : annSearcher.search(
+                                    ann,
+                                    sourceMeta,
+                                    query,
+                                    indexedLimit,
+                                    deletionVectors,
+                                    activeSourceFiles,
+                                    rowRangesByFile,
+                                    searchOptions);
+            for (PkVectorSearchResult result : annResults) {
                 add(indexedNearest, result, indexedLimit);
             }
         }
@@ -140,7 +171,14 @@ public class PrimaryKeyVectorBucketSearch {
                     continue;
                 }
                 DeletionVector dv = deletionVectors.get(file.fileName());
-                LongPredicate excluded = dv == null ? position -> false : dv::isDeleted;
+                List<Range> rowRanges = rowRangesByFile.get(file.fileName());
+                if (rowRanges != null && rowRanges.isEmpty()) {
+                    continue;
+                }
+                LongPredicate excluded =
+                        position ->
+                                (dv != null && dv.isDeleted(position))
+                                        || (rowRanges != null && !contains(rowRanges, position));
                 try (PkVectorReader reader = vectorReaderFactory.create(file)) {
                     for (PkVectorSearchResult result :
                             PkVectorExactSearcher.search(
@@ -151,6 +189,23 @@ public class PrimaryKeyVectorBucketSearch {
             }
         }
         return new Result(sorted(indexedNearest), sorted(exactNearest));
+    }
+
+    private static boolean contains(List<Range> ranges, long position) {
+        int low = 0;
+        int high = ranges.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            Range range = ranges.get(middle);
+            if (position < range.from) {
+                high = middle - 1;
+            } else if (position > range.to) {
+                low = middle + 1;
+            } else {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<PkVectorSearchResult> sorted(PriorityQueue<PkVectorSearchResult> nearest) {

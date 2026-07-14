@@ -128,6 +128,26 @@ public class PkVectorAnnSegmentSearcher {
             Map<String, DeletionVector> deletionVectors,
             Set<String> activeSourceFiles,
             Map<String, String> searchOptions) {
+        return search(
+                segment,
+                sourceMeta,
+                query,
+                limit,
+                deletionVectors,
+                activeSourceFiles,
+                Collections.emptyMap(),
+                searchOptions);
+    }
+
+    public List<PkVectorSearchResult> search(
+            IndexFileMeta segment,
+            PrimaryKeyIndexSourceMeta sourceMeta,
+            float[] query,
+            int limit,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, List<Range>> rowRangesByFile,
+            Map<String, String> searchOptions) {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         GlobalIndexMeta globalIndexMeta = segment.globalIndexMeta();
         checkArgument(
@@ -161,7 +181,11 @@ public class PkVectorAnnSegmentSearcher {
         try {
             VectorSearch search = new VectorSearch(query, limit, vectorField.name(), searchOptions);
             RoaringNavigableMap64 liveRows =
-                    liveRowPositions(sourceMeta.sourceFiles(), activeSourceFiles, deletionVectors);
+                    liveRowPositions(
+                            sourceMeta.sourceFiles(),
+                            activeSourceFiles,
+                            deletionVectors,
+                            rowRangesByFile);
             if (liveRows != null) {
                 search.withIncludeRowIds(liveRows);
             }
@@ -193,6 +217,11 @@ public class PkVectorAnnSegmentSearcher {
                         "ANN segment %s returned snapshot-deleted row position %s.",
                         segment.fileName(),
                         filePosition.rowPosition);
+                List<Range> rowRanges = rowRangesByFile.get(filePosition.dataFileName);
+                checkArgument(
+                        rowRanges == null || contains(rowRanges, filePosition.rowPosition),
+                        "ANN segment %s returned a row outside the pre-filter.",
+                        segment.fileName());
                 candidates.add(
                         new PkVectorSearchResult(
                                 filePosition.dataFileName,
@@ -211,7 +240,8 @@ public class PkVectorAnnSegmentSearcher {
     private static RoaringNavigableMap64 liveRowPositions(
             List<PrimaryKeyIndexSourceFile> sourceFiles,
             Set<String> activeSourceFiles,
-            Map<String, DeletionVector> deletionVectors) {
+            Map<String, DeletionVector> deletionVectors,
+            Map<String, List<Range>> rowRangesByFile) {
         boolean allSourcesActive = true;
         for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             if (!activeSourceFiles.contains(sourceFile.fileName())) {
@@ -219,7 +249,7 @@ public class PkVectorAnnSegmentSearcher {
                 break;
             }
         }
-        if (allSourcesActive && deletionVectors.isEmpty()) {
+        if (allSourcesActive && deletionVectors.isEmpty() && rowRangesByFile.isEmpty()) {
             return null;
         }
         RoaringNavigableMap64 live = new RoaringNavigableMap64();
@@ -228,7 +258,18 @@ public class PkVectorAnnSegmentSearcher {
         for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             boolean active = activeSourceFiles.contains(sourceFile.fileName());
             if (active && sourceFile.rowCount() > 0) {
-                live.addRange(new Range(fileOffset, fileOffset + sourceFile.rowCount() - 1));
+                List<Range> rowRanges = rowRangesByFile.get(sourceFile.fileName());
+                if (rowRanges == null) {
+                    live.addRange(new Range(fileOffset, fileOffset + sourceFile.rowCount() - 1));
+                } else {
+                    for (Range range : rowRanges) {
+                        checkArgument(
+                                range.from >= 0 && range.to < sourceFile.rowCount(),
+                                "Pre-filter range is outside source file %s.",
+                                sourceFile.fileName());
+                        live.addRange(range.addOffset(fileOffset));
+                    }
+                }
             }
             DeletionVector deletionVector =
                     active ? deletionVectors.get(sourceFile.fileName()) : null;
@@ -240,6 +281,23 @@ public class PkVectorAnnSegmentSearcher {
         }
         live.andNot(deleted);
         return live;
+    }
+
+    private static boolean contains(List<Range> ranges, long position) {
+        int low = 0;
+        int high = ranges.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            Range range = ranges.get(middle);
+            if (position < range.from) {
+                high = middle - 1;
+            } else if (position > range.to) {
+                low = middle + 1;
+            } else {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
