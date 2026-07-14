@@ -1,0 +1,259 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.clone;
+
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.types.DataTypes;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.util.Arrays;
+import java.util.Collections;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/** Test for {@link FullHistoryCloneMarker}. */
+public class FullHistoryCloneMarkerTest {
+
+    @TempDir private java.nio.file.Path tempDir;
+
+    private final FileIO fileIO = LocalFileIO.create();
+
+    @Test
+    public void testPrepareAndResumeMatchingClone() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source").toString());
+        Path targetRoot = new Path(tempDir.resolve("target").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+
+        assertThat(
+                        FullHistoryCloneMarker.prepare(
+                                fileIO,
+                                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                                mapping,
+                                false))
+                .isFalse();
+
+        assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.FILE_NAME))).isTrue();
+        assertThat(
+                        FullHistoryCloneMarker.prepare(
+                                fileIO,
+                                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                                mapping,
+                                true))
+                .isTrue();
+    }
+
+    @Test
+    public void testRejectUnownedOrDifferentClone() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-reject").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-reject").toString());
+        FileStoreTable source = createTable(sourceRoot);
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        fileIO.writeFile(new Path(targetRoot, "unrelated"), "data", false);
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(source, mapping)
+                                                .planStructure(),
+                                        mapping,
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not owned");
+
+        fileIO.delete(targetRoot, true);
+        FullHistoryCloneMarker.prepare(
+                fileIO,
+                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                mapping,
+                false);
+        PathMapping differentMapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                tempDir.resolve("unused-source")
+                                        + "="
+                                        + tempDir.resolve("unused-target")));
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(source, differentMapping)
+                                                .planStructure(),
+                                        differentMapping,
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void testRejectResumeAfterSourceChanges() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-changed").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-changed").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+        FullHistoryCloneMarker.prepare(
+                fileIO,
+                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                mapping,
+                false);
+
+        source.schemaManager().commitChanges(SchemaChange.setOption("changed", "true"));
+        FileStoreTable changedSource = FileStoreTableFactory.create(fileIO, sourceRoot);
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(changedSource, mapping)
+                                                .planStructure(),
+                                        mapping,
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("different full-history clone");
+    }
+
+    @Test
+    public void testMarkSuccessfulClone() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-success").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-success").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+        FullHistoryCloneMarker.prepare(fileIO, plan, mapping, false);
+
+        assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.SUCCESS_FILE_NAME)))
+                .isFalse();
+        FullHistoryCloneMarker.markSuccessful(fileIO, plan, mapping, null, null);
+        assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.SUCCESS_FILE_NAME)))
+                .isTrue();
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(source, mapping)
+                                                .planStructure(),
+                                        mapping,
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("already completed");
+    }
+
+    @Test
+    public void testRejectSuccessMarkerFromDifferentClone() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-corrupt-success").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-corrupt-success").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+        FullHistoryCloneMarker.prepare(
+                fileIO,
+                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                mapping,
+                false);
+        fileIO.writeFile(
+                new Path(targetRoot, FullHistoryCloneMarker.SUCCESS_FILE_NAME),
+                "different clone",
+                false);
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(source, mapping)
+                                                .planStructure(),
+                                        mapping,
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Success marker")
+                .hasMessageContaining("different clone");
+    }
+
+    @Test
+    public void testRejectChangedOwnershipMarkerWhenMarkingSuccessful() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-changed-marker").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-changed-marker").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+        FullHistoryCloneMarker.prepare(fileIO, plan, mapping, false);
+        fileIO.overwriteFileUtf8(
+                new Path(targetRoot, FullHistoryCloneMarker.FILE_NAME), "different clone");
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.markSuccessful(
+                                        fileIO, plan, mapping, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("belongs to a different full-history clone");
+    }
+
+    @Test
+    public void testTargetIdentifierIsPartOfCloneIdentity() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-identifier").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-identifier").toString());
+        PathMapping mapping = mapping(sourceRoot, targetRoot);
+        FileStoreTable source = createTable(sourceRoot);
+        FullHistoryCloneMarker.prepare(
+                fileIO,
+                new FullHistoryClonePlanner(source, mapping).planStructure(),
+                mapping,
+                "target_db",
+                "target_table",
+                false);
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCloneMarker.prepare(
+                                        fileIO,
+                                        new FullHistoryClonePlanner(source, mapping)
+                                                .planStructure(),
+                                        mapping,
+                                        "other_db",
+                                        "target_table",
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("different full-history clone");
+    }
+
+    private FileStoreTable createTable(Path path) throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option("path", path.toString())
+                        .build();
+        SchemaUtils.forceCommit(new SchemaManager(fileIO, path), schema);
+        return FileStoreTableFactory.create(fileIO, path);
+    }
+
+    private static PathMapping mapping(Path source, Path target) {
+        return PathMapping.parse(Collections.singletonList(source + "=" + target));
+    }
+}

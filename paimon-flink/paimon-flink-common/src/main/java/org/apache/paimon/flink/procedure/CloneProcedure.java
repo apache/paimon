@@ -100,6 +100,100 @@ public class CloneProcedure extends ProcedureBase {
             Boolean metaOnly,
             Boolean cloneIfExists)
             throws Exception {
+        return call(
+                procedureContext,
+                database,
+                tableName,
+                sourceCatalogConfigStr,
+                targetDatabase,
+                targetTableName,
+                targetCatalogConfigStr,
+                parallelism,
+                where,
+                includedTablesStr,
+                excludedTablesStr,
+                preferFileFormat,
+                cloneFrom,
+                metaOnly,
+                cloneIfExists,
+                null,
+                null);
+    }
+
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "catalog_conf",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_database",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_table",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_catalog_conf",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
+                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "included_tables",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "excluded_tables",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "prefer_file_format",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_from",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "meta_only",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_if_exists",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_mode",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "path_mapping",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
+            })
+    public String[] call(
+            ProcedureContext procedureContext,
+            String database,
+            String tableName,
+            String sourceCatalogConfigStr,
+            String targetDatabase,
+            String targetTableName,
+            String targetCatalogConfigStr,
+            Integer parallelism,
+            String where,
+            String includedTablesStr,
+            String excludedTablesStr,
+            String preferFileFormat,
+            String cloneFrom,
+            Boolean metaOnly,
+            Boolean cloneIfExists,
+            String cloneMode,
+            String pathMappingStr)
+            throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
 
@@ -114,6 +208,12 @@ public class CloneProcedure extends ProcedureBase {
                 StringUtils.isNullOrWhitespaceOnly(excludedTablesStr)
                         ? null
                         : Arrays.asList(StringUtils.split(excludedTablesStr, ","));
+        List<String> pathMappings =
+                StringUtils.isNullOrWhitespaceOnly(pathMappingStr)
+                        ? null
+                        : Arrays.asList(StringUtils.split(pathMappingStr, ","));
+        String normalizedCloneMode =
+                StringUtils.isNullOrWhitespaceOnly(cloneMode) ? "logical" : cloneMode.trim();
 
         CloneAction action =
                 new CloneAction(
@@ -129,8 +229,12 @@ public class CloneProcedure extends ProcedureBase {
                         excludedTables,
                         preferFileFormat,
                         cloneFrom,
+                        normalizedCloneMode,
+                        pathMappings,
                         metaOnly != null && metaOnly,
-                        cloneIfExists == null || cloneIfExists);
+                        cloneIfExists == null
+                                ? !"full-history".equalsIgnoreCase(normalizedCloneMode)
+                                : cloneIfExists);
         return execute(procedureContext, action, "Clone Job");
     }
 
