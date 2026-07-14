@@ -98,6 +98,57 @@ class PkSortedIndexBuilderTest {
     }
 
     @Test
+    void testBuildsSeveralSourcesInDeterministicOrdinalOrder() throws Exception {
+        DataFileMeta sourceB = dataFile("data-b", 3);
+        DataFileMeta sourceA = dataFile("data-a", 2);
+        List<PrimaryKeyIndexSourceFile> capturedSources = new ArrayList<>();
+        List<PkSortedIndexFile.Entry> capturedEntries = new ArrayList<>();
+        PkSortedIndexFile capturingFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
+                    @Override
+                    public List<IndexFileMeta> build(
+                            List<PrimaryKeyIndexSourceFile> sourceFiles,
+                            DataField indexField,
+                            String indexType,
+                            Options indexOptions,
+                            Iterator<Entry> sortedEntries) {
+                        capturedSources.addAll(sourceFiles);
+                        sortedEntries.forEachRemaining(capturedEntries::add);
+                        return Collections.emptyList();
+                    }
+                };
+
+        IOManager ioManager = IOManager.create(tempPath.resolve("multi-spill").toString());
+        try {
+            new PkSortedIndexBuilder(
+                            dataFile ->
+                                    new ArrayReader(
+                                            dataFile.fileName().equals("data-a")
+                                                    ? Arrays.asList(entry(3, 0), entry(0, 1))
+                                                    : Arrays.asList(
+                                                            entry(1, 0), entry(4, 1), entry(2, 2))),
+                            capturingFile,
+                            field(),
+                            "btree",
+                            options(),
+                            ioManager)
+                    .build(Arrays.asList(sourceB, sourceA));
+        } finally {
+            ioManager.close();
+        }
+
+        assertThat(capturedSources)
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
+                .containsExactly("data-a", "data-b");
+        assertThat(capturedEntries)
+                .extracting(PkSortedIndexFile.Entry::value)
+                .containsExactly(0, 1, 2, 3, 4);
+        assertThat(capturedEntries)
+                .extracting(PkSortedIndexFile.Entry::rowId)
+                .containsExactly(1L, 2L, 4L, 0L, 3L);
+    }
+
+    @Test
     void testForcedSpillSortsRowsAndClosesTaskOwnedIoManager() throws Exception {
         int rowCount = 20_000;
         List<PkSortedDataFileReader.Entry> entries = new ArrayList<>(rowCount);
@@ -111,7 +162,7 @@ class PkSortedIndexBuilderTest {
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
                     @Override
                     public List<IndexFileMeta> build(
-                            PrimaryKeyIndexSourceFile sourceFile,
+                            List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
                             String indexType,
                             Options indexOptions,

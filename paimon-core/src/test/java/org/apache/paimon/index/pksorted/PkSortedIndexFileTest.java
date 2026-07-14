@@ -95,6 +95,42 @@ class PkSortedIndexFileTest {
     }
 
     @Test
+    void testBuildsMultiSourcePayloadsInOneOrdinalDomain() throws Exception {
+        PkSortedIndexFile indexFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath));
+        List<PrimaryKeyIndexSourceFile> sources =
+                Arrays.asList(
+                        new PrimaryKeyIndexSourceFile("data-a", 2),
+                        new PrimaryKeyIndexSourceFile("data-b", 3));
+
+        List<IndexFileMeta> payloads =
+                indexFile.build(
+                        sources,
+                        field(),
+                        "btree",
+                        options(),
+                        Arrays.asList(
+                                        new PkSortedIndexFile.Entry(null, 3),
+                                        new PkSortedIndexFile.Entry(10, 1),
+                                        new PkSortedIndexFile.Entry(20, 4),
+                                        new PkSortedIndexFile.Entry(30, 0),
+                                        new PkSortedIndexFile.Entry(40, 2))
+                                .iterator());
+
+        assertThat(payloads).extracting(IndexFileMeta::rowCount).containsExactly(2L, 2L, 1L);
+        assertThat(payloads)
+                .allSatisfy(
+                        payload -> {
+                            assertThat(payload.globalIndexMeta().rowRangeStart()).isZero();
+                            assertThat(payload.globalIndexMeta().rowRangeEnd()).isEqualTo(4);
+                            assertThat(
+                                            PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
+                                                    .sourceFiles())
+                                    .containsExactlyElementsOf(sources);
+                        });
+    }
+
+    @Test
     void testFailedSecondPayloadDeletesWholeGroup() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         AtomicInteger writerNumber = new AtomicInteger();

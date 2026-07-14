@@ -103,8 +103,8 @@ The vector comment directive converts the SQL `ARRAY<FLOAT>` column to Paimon's 
 | `fields.<column>.pk-vector.index.type` | Yes | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-hnsw-flat`, `ivf-hnsw-sq`, or `lumina`. |
 | `fields.<column>.pk-vector.distance.metric` | No | `l2`, `cosine`, or `inner_product`. The default is `inner_product`. |
 | `fields.<column>.pk-vector.index.options` | No | JSON object containing build options for the selected ANN implementation. Unqualified keys are scoped to that implementation. |
-| `pk-vector.index.compaction.level-fanout` | No | Number of similarly sized ANN segments which triggers a rebuild and maximum row-count ratio within one size tier. Default: `5`. |
-| `pk-vector.index.compaction.stale-ratio-threshold` | No | Ratio of rows from inactive source files which triggers an ANN rebuild. Default: `0.2`. |
+| `fields.<column>.pk-index.compaction.level-fanout` | No | Number of similarly sized index groups which triggers a rebuild and maximum row-count ratio within one size tier. Shared by vector, BTree, and Bitmap primary-key indexes. Default: `5`. |
+| `fields.<column>.pk-index.compaction.stale-ratio-threshold` | No | Ratio of rows from inactive source files which triggers an index rebuild. Shared by vector, BTree, and Bitmap primary-key indexes. Default: `0.2`. |
 
 For algorithm-specific build and search options, see
 [Vector Index](../multimodal-table/global-index/vector).

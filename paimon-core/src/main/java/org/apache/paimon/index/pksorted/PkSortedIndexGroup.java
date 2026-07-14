@@ -30,14 +30,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-/** All rotated payloads that index one physical source data file. */
+/** All rotated payloads that index the same ordered source data files. */
 public final class PkSortedIndexGroup {
 
-    private final PrimaryKeyIndexSourceFile sourceFile;
+    private final List<PrimaryKeyIndexSourceFile> sourceFiles;
     private final List<IndexFileMeta> payloads;
 
-    PkSortedIndexGroup(PrimaryKeyIndexSourceFile sourceFile, List<IndexFileMeta> payloads) {
-        this.sourceFile = sourceFile;
+    PkSortedIndexGroup(List<PrimaryKeyIndexSourceFile> sourceFiles, List<IndexFileMeta> payloads) {
+        this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         this.payloads = Collections.unmodifiableList(new ArrayList<>(payloads));
     }
 
@@ -46,34 +46,84 @@ public final class PkSortedIndexGroup {
             String indexType,
             PrimaryKeyIndexSourceFile sourceFile,
             List<IndexFileMeta> payloads) {
+        return create(fieldId, indexType, Collections.singletonList(sourceFile), payloads);
+    }
+
+    static Optional<PkSortedIndexGroup> create(
+            int fieldId,
+            String indexType,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
+            List<IndexFileMeta> payloads) {
+        long sourceRowCount = 0;
+        Set<String> sourceNames = new HashSet<>();
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            if (!sourceNames.add(sourceFile.fileName())) {
+                return Optional.empty();
+            }
+            try {
+                sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
+            } catch (ArithmeticException e) {
+                return Optional.empty();
+            }
+        }
+        if (sourceFiles.isEmpty()) {
+            return Optional.empty();
+        }
+
         long payloadRowCount = 0;
         Set<String> payloadNames = new HashSet<>();
         for (IndexFileMeta payload : payloads) {
             GlobalIndexMeta meta = payload.globalIndexMeta();
-            PrimaryKeyIndexSourceFile payloadSource =
-                    PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile();
+            List<PrimaryKeyIndexSourceFile> payloadSources =
+                    PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFiles();
             if (!payloadNames.add(payload.fileName())
-                    || !sourceFile.equals(payloadSource)
+                    || !sourceFiles.equals(payloadSources)
                     || !indexType.equals(payload.indexType())
                     || meta == null
                     || meta.indexFieldId() != fieldId
                     || meta.rowRangeStart() != 0
-                    || meta.rowRangeEnd() != sourceFile.rowCount() - 1) {
+                    || meta.rowRangeEnd() != sourceRowCount - 1) {
                 return Optional.empty();
             }
-            payloadRowCount += payload.rowCount();
+            try {
+                payloadRowCount = Math.addExact(payloadRowCount, payload.rowCount());
+            } catch (ArithmeticException e) {
+                return Optional.empty();
+            }
         }
-        if (payloadRowCount != sourceFile.rowCount()) {
+        if (payloadRowCount != sourceRowCount) {
             return Optional.empty();
         }
-        return Optional.of(new PkSortedIndexGroup(sourceFile, payloads));
+        return Optional.of(new PkSortedIndexGroup(sourceFiles, payloads));
     }
 
     public PrimaryKeyIndexSourceFile sourceFile() {
-        return sourceFile;
+        if (sourceFiles.size() != 1) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Expected exactly one source file, but found %s.", sourceFiles.size()));
+        }
+        return sourceFiles.get(0);
+    }
+
+    public List<PrimaryKeyIndexSourceFile> sourceFiles() {
+        return sourceFiles;
     }
 
     public List<IndexFileMeta> payloads() {
         return payloads;
+    }
+
+    public String identity() {
+        List<String> names = new ArrayList<>();
+        for (IndexFileMeta payload : payloads) {
+            names.add(payload.fileName());
+        }
+        Collections.sort(names);
+        StringBuilder identity = new StringBuilder();
+        for (String name : names) {
+            identity.append(name.length()).append(':').append(name);
+        }
+        return identity.toString();
     }
 }

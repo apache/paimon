@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
@@ -63,7 +64,7 @@ public class BucketedVectorIndexMaintainer {
     private final String metric;
     private final String algorithm;
     private final PkVectorDataFileReader.Factory vectorReaderFactory;
-    private final PkVectorAnnLevels annLevels;
+    private final PrimaryKeyIndexLevels<IndexFileMeta> annLevels;
     private ExecutorService executor;
     private final List<IndexFileMeta> annSegments;
     private final Map<String, DataFileMeta> activeSourceFiles;
@@ -89,9 +90,12 @@ public class BucketedVectorIndexMaintainer {
         this.vectorReaderFactory = vectorReaderFactory;
         CoreOptions coreOptions = new CoreOptions(indexOptions);
         this.annLevels =
-                new PkVectorAnnLevels(
-                        coreOptions.primaryKeyVectorIndexCompactionLevelFanout(),
-                        coreOptions.primaryKeyVectorIndexCompactionStaleRatioThreshold());
+                new PrimaryKeyIndexLevels<>(
+                        coreOptions.primaryKeyIndexCompactionLevelFanout(vectorField.name()),
+                        coreOptions.primaryKeyIndexCompactionStaleRatioThreshold(
+                                vectorField.name()),
+                        IndexFileMeta::fileName,
+                        segment -> sourceMeta(segment).sourceFiles());
         this.executor = executor;
 
         List<IndexFileMeta> definitionPayloads = new ArrayList<>();
@@ -163,14 +167,14 @@ public class BucketedVectorIndexMaintainer {
                     if (!uncovered.isEmpty()) {
                         startPendingBuild(uncovered, Collections.<IndexFileMeta>emptyList());
                     } else {
-                        Optional<PkVectorAnnLevels.Plan> plan =
+                        Optional<PrimaryKeyIndexLevels.Plan<IndexFileMeta>> plan =
                                 annLevels.pick(annSegments, activeSourceFiles);
                         if (plan.isPresent()) {
                             if (plan.get().sourceFiles().isEmpty()) {
-                                removeSegments(plan.get().inputSegments(), created, removed);
+                                removeSegments(plan.get().inputUnits(), created, removed);
                                 continue;
                             }
-                            startPendingBuild(plan.get().sourceFiles(), plan.get().inputSegments());
+                            startPendingBuild(plan.get().sourceFiles(), plan.get().inputUnits());
                         }
                     }
                 }

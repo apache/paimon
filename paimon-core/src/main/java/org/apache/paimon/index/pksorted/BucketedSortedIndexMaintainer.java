@@ -19,6 +19,7 @@
 package org.apache.paimon.index.pksorted;
 
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.io.CompactIncrement;
@@ -33,18 +34,14 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -59,6 +56,7 @@ public class BucketedSortedIndexMaintainer {
     private final String indexType;
     private final PkSortedIndexFile indexFile;
     private final BuildFunction buildFunction;
+    private final PrimaryKeyIndexLevels<PkSortedIndexGroup> levels;
     private final Map<String, DataFileMeta> activeSourceFiles = new LinkedHashMap<>();
     private final List<PkSortedIndexGroup> groups = new ArrayList<>();
     private final List<IndexFileMeta> pendingRestoredDeletions = new ArrayList<>();
@@ -73,10 +71,38 @@ public class BucketedSortedIndexMaintainer {
             List<DataFileMeta> restoredDataFiles,
             List<IndexFileMeta> restoredPayloads,
             ExecutorService executor) {
+        this(
+                fieldId,
+                indexType,
+                indexFile,
+                buildFunction,
+                5,
+                0.2,
+                restoredDataFiles,
+                restoredPayloads,
+                executor);
+    }
+
+    public BucketedSortedIndexMaintainer(
+            int fieldId,
+            String indexType,
+            PkSortedIndexFile indexFile,
+            BuildFunction buildFunction,
+            int levelFanout,
+            double staleRatioThreshold,
+            List<DataFileMeta> restoredDataFiles,
+            List<IndexFileMeta> restoredPayloads,
+            ExecutorService executor) {
         this.fieldId = fieldId;
         this.indexType = indexType;
         this.indexFile = indexFile;
         this.buildFunction = buildFunction;
+        this.levels =
+                new PrimaryKeyIndexLevels<>(
+                        levelFanout,
+                        staleRatioThreshold,
+                        PkSortedIndexGroup::identity,
+                        PkSortedIndexGroup::sourceFiles);
         this.executor = executor;
         for (DataFileMeta dataFile : restoredDataFiles) {
             if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
@@ -129,29 +155,29 @@ public class BucketedSortedIndexMaintainer {
 
             List<IndexFileMeta> removed = new ArrayList<>(pendingRestoredDeletions);
             pendingRestoredDeletions.clear();
-            removed.addAll(removeInactiveGroups());
-            Set<String> failedSources = new HashSet<>();
             while (true) {
-                Optional<CompletedBuild> completed =
-                        finishPendingBuild(waitCompaction, failedSources);
+                Optional<CompletedBuild> completed = finishPendingBuild(waitCompaction);
                 if (completed.isPresent()) {
-                    acceptOrDelete(completed.get(), created, failedSources);
+                    acceptOrDelete(completed.get(), created, removed);
                 }
 
                 if (pendingBuild == null && allowBuildStart) {
-                    DataFileMeta uncovered = firstUncoveredSource(failedSources);
+                    DataFileMeta uncovered = firstUncoveredSource();
                     if (uncovered != null) {
-                        PendingBuild next = new PendingBuild(uncovered);
-                        try {
-                            next.start();
-                            pendingBuild = next;
-                        } catch (RejectedExecutionException e) {
-                            failedSources.add(sourceIdentity(uncovered));
-                            LOG.warn(
-                                    "Primary-key {} index build for source file {} was rejected.",
-                                    indexType,
-                                    uncovered.fileName(),
-                                    e);
+                        startBuild(Collections.singletonList(uncovered), Collections.emptyList());
+                    } else {
+                        Optional<PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup>> plan =
+                                levels.pick(groups, activeSourceFiles);
+                        if (plan.isPresent()) {
+                            if (plan.get().sourceFiles().isEmpty()) {
+                                replaceInputGroups(
+                                        plan.get().inputUnits(),
+                                        Optional.empty(),
+                                        created,
+                                        removed);
+                                continue;
+                            }
+                            startBuild(plan.get().sourceFiles(), plan.get().inputUnits());
                         }
                     }
                 }
@@ -240,44 +266,40 @@ public class BucketedSortedIndexMaintainer {
         }
     }
 
-    private List<IndexFileMeta> removeInactiveGroups() {
-        List<IndexFileMeta> removed = new ArrayList<>();
-        Iterator<PkSortedIndexGroup> iterator = groups.iterator();
-        while (iterator.hasNext()) {
-            PkSortedIndexGroup group = iterator.next();
-            DataFileMeta active = activeSourceFiles.get(group.sourceFile().fileName());
-            if (active == null || active.rowCount() != group.sourceFile().rowCount()) {
-                iterator.remove();
-                removed.addAll(group.payloads());
-            }
-        }
-        return removed;
-    }
-
     @Nullable
-    private DataFileMeta firstUncoveredSource(Set<String> failedSources) {
+    private DataFileMeta firstUncoveredSource() {
         List<DataFileMeta> candidates = new ArrayList<>(activeSourceFiles.values());
         candidates.sort(Comparator.comparing(DataFileMeta::fileName));
         for (DataFileMeta candidate : candidates) {
-            if (!isCovered(candidate) && !failedSources.contains(sourceIdentity(candidate))) {
+            if (!isCovered(candidate, Collections.emptyList())) {
                 return candidate;
             }
         }
         return null;
     }
 
-    private boolean isCovered(DataFileMeta candidate) {
+    private boolean isCovered(DataFileMeta candidate, List<PkSortedIndexGroup> excludedGroups) {
         for (PkSortedIndexGroup group : groups) {
-            if (group.sourceFile().fileName().equals(candidate.fileName())
-                    && group.sourceFile().rowCount() == candidate.rowCount()) {
-                return true;
+            if (excludedGroups.contains(group)) {
+                continue;
+            }
+            for (PrimaryKeyIndexSourceFile source : group.sourceFiles()) {
+                if (source.fileName().equals(candidate.fileName())
+                        && source.rowCount() == candidate.rowCount()) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
-    private Optional<CompletedBuild> finishPendingBuild(boolean blocking, Set<String> failedSources)
-            throws InterruptedException {
+    private void startBuild(List<DataFileMeta> sourceFiles, List<PkSortedIndexGroup> inputGroups) {
+        PendingBuild next = new PendingBuild(sourceFiles, inputGroups);
+        next.start();
+        pendingBuild = next;
+    }
+
+    private Optional<CompletedBuild> finishPendingBuild(boolean blocking) throws Exception {
         if (pendingBuild == null || (!blocking && !pendingBuild.isDone())) {
             return Optional.empty();
         }
@@ -285,54 +307,83 @@ public class BucketedSortedIndexMaintainer {
         try {
             List<IndexFileMeta> payloads = completed.get();
             pendingBuild = null;
-            return Optional.of(new CompletedBuild(completed.sourceFile, payloads));
+            return Optional.of(
+                    new CompletedBuild(completed.sourceFiles, completed.inputGroups, payloads));
         } catch (CancellationException e) {
             pendingBuild = null;
-            failedSources.add(sourceIdentity(completed.sourceFile));
-            return Optional.empty();
+            throw e;
         } catch (ExecutionException e) {
             pendingBuild = null;
-            failedSources.add(sourceIdentity(completed.sourceFile));
-            LOG.warn(
-                    "Primary-key {} index build for source file {} failed after {} attempts; "
-                            + "the source remains uncovered.",
-                    indexType,
-                    completed.sourceFile.fileName(),
-                    MAX_BUILD_ATTEMPTS,
-                    e.getCause());
-            return Optional.empty();
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException(cause);
         }
     }
 
     private void acceptOrDelete(
-            CompletedBuild completed, List<IndexFileMeta> created, Set<String> failedSources) {
-        DataFileMeta active = activeSourceFiles.get(completed.sourceFile.fileName());
-        PrimaryKeyIndexSourceFile source =
-                new PrimaryKeyIndexSourceFile(
-                        completed.sourceFile.fileName(), completed.sourceFile.rowCount());
+            CompletedBuild completed, List<IndexFileMeta> created, List<IndexFileMeta> removed) {
+        List<PrimaryKeyIndexSourceFile> sources = new ArrayList<>();
+        boolean sourcesStillActive = true;
+        for (DataFileMeta sourceFile : completed.sourceFiles) {
+            sources.add(
+                    new PrimaryKeyIndexSourceFile(sourceFile.fileName(), sourceFile.rowCount()));
+            DataFileMeta active = activeSourceFiles.get(sourceFile.fileName());
+            if (active == null || active.rowCount() != sourceFile.rowCount()) {
+                sourcesStillActive = false;
+            }
+        }
+        boolean inputsStillPresent = groups.containsAll(completed.inputGroups);
+        boolean outputOverlapsRetainedGroup = false;
+        for (DataFileMeta sourceFile : completed.sourceFiles) {
+            if (isCovered(sourceFile, completed.inputGroups)) {
+                outputOverlapsRetainedGroup = true;
+                break;
+            }
+        }
+        if (!sourcesStillActive || !inputsStillPresent || outputOverlapsRetainedGroup) {
+            deleteGenerated(completed.payloads);
+            return;
+        }
         Optional<PkSortedIndexGroup> group;
         try {
-            group = PkSortedIndexGroup.create(fieldId, indexType, source, completed.payloads);
+            group = PkSortedIndexGroup.create(fieldId, indexType, sources, completed.payloads);
         } catch (RuntimeException e) {
-            failedSources.add(sourceIdentity(completed.sourceFile));
             deleteGenerated(completed.payloads);
-            LOG.warn(
-                    "Primary-key {} index build for source file {} produced invalid metadata.",
-                    indexType,
-                    completed.sourceFile.fileName(),
-                    e);
-            return;
+            throw new IllegalStateException(
+                    "Primary-key " + indexType + " index build produced invalid metadata.", e);
         }
-        if (active == null
-                || active.rowCount() != completed.sourceFile.rowCount()
-                || isCovered(active)
-                || !group.isPresent()) {
+        if (!group.isPresent()) {
             deleteGenerated(completed.payloads);
-            failedSources.add(sourceIdentity(completed.sourceFile));
-            return;
+            throw new IllegalStateException(
+                    "Primary-key " + indexType + " index build produced an incomplete group.");
         }
-        groups.add(group.get());
-        created.addAll(completed.payloads);
+        replaceInputGroups(completed.inputGroups, group, created, removed);
+    }
+
+    private void replaceInputGroups(
+            List<PkSortedIndexGroup> inputGroups,
+            Optional<PkSortedIndexGroup> outputGroup,
+            List<IndexFileMeta> created,
+            List<IndexFileMeta> removed) {
+        for (PkSortedIndexGroup inputGroup : inputGroups) {
+            groups.remove(inputGroup);
+            for (IndexFileMeta payload : inputGroup.payloads()) {
+                if (created.remove(payload)) {
+                    indexFile.delete(payload);
+                } else {
+                    removed.add(payload);
+                }
+            }
+        }
+        if (outputGroup.isPresent()) {
+            groups.add(outputGroup.get());
+            created.addAll(outputGroup.get().payloads());
+        }
     }
 
     private void deleteGenerated(List<IndexFileMeta> payloads) {
@@ -347,6 +398,13 @@ public class BucketedSortedIndexMaintainer {
 
     public synchronized boolean buildNotCompleted() {
         return pendingBuild != null;
+    }
+
+    public synchronized boolean hasPendingMaintenance() {
+        return pendingBuild != null
+                || !pendingRestoredDeletions.isEmpty()
+                || firstUncoveredSource() != null
+                || levels.pick(groups, activeSourceFiles).isPresent();
     }
 
     public int fieldId() {
@@ -389,13 +447,15 @@ public class BucketedSortedIndexMaintainer {
 
     private final class PendingBuild {
 
-        private final DataFileMeta sourceFile;
+        private final List<DataFileMeta> sourceFiles;
+        private final List<PkSortedIndexGroup> inputGroups;
         @Nullable private List<IndexFileMeta> result;
         @Nullable private Future<List<IndexFileMeta>> future;
         private boolean cancelled;
 
-        private PendingBuild(DataFileMeta sourceFile) {
-            this.sourceFile = sourceFile;
+        private PendingBuild(List<DataFileMeta> sourceFiles, List<PkSortedIndexGroup> inputGroups) {
+            this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
+            this.inputGroups = Collections.unmodifiableList(new ArrayList<>(inputGroups));
         }
 
         private void start() {
@@ -417,7 +477,7 @@ public class BucketedSortedIndexMaintainer {
         private List<IndexFileMeta> buildWithRetries() throws Exception {
             for (int attempt = 1; ; attempt++) {
                 try {
-                    return buildFunction.build(sourceFile);
+                    return buildFunction.build(sourceFiles);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new CancellationException();
@@ -463,11 +523,16 @@ public class BucketedSortedIndexMaintainer {
 
     private static final class CompletedBuild {
 
-        private final DataFileMeta sourceFile;
+        private final List<DataFileMeta> sourceFiles;
+        private final List<PkSortedIndexGroup> inputGroups;
         private final List<IndexFileMeta> payloads;
 
-        private CompletedBuild(DataFileMeta sourceFile, List<IndexFileMeta> payloads) {
-            this.sourceFile = sourceFile;
+        private CompletedBuild(
+                List<DataFileMeta> sourceFiles,
+                List<PkSortedIndexGroup> inputGroups,
+                List<IndexFileMeta> payloads) {
+            this.sourceFiles = sourceFiles;
+            this.inputGroups = inputGroups;
             this.payloads = payloads;
         }
     }
@@ -491,15 +556,11 @@ public class BucketedSortedIndexMaintainer {
         return false;
     }
 
-    private static String sourceIdentity(DataFileMeta file) {
-        return file.fileName() + '\0' + file.rowCount();
-    }
-
-    /** Builds all rotated payloads for one physical source file. */
+    /** Builds all rotated payloads for ordered physical source files. */
     @FunctionalInterface
     public interface BuildFunction {
 
-        List<IndexFileMeta> build(DataFileMeta sourceFile) throws Exception;
+        List<IndexFileMeta> build(List<DataFileMeta> sourceFiles) throws Exception;
     }
 
     /** Sorted-index changes for append and compact snapshot routing. */

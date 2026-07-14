@@ -63,6 +63,41 @@ class PrimaryKeyIndexDefinitionsTest {
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::indexType)
                 .containsExactly("btree", "bitmap", "ivf-pq");
+        assertThat(definitions)
+                .extracting(PrimaryKeyIndexDefinition::compactionLevelFanout)
+                .containsOnly(5);
+        assertThat(definitions)
+                .extracting(PrimaryKeyIndexDefinition::compactionStaleRatioThreshold)
+                .containsOnly(0.2);
+    }
+
+    @Test
+    void testResolvesFieldScopedCompactionOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
+        options.put("fields.name.pk-index.compaction.level-fanout", "7");
+        options.put("fields.name.pk-index.compaction.stale-ratio-threshold", "0.4");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.compactionLevelFanout()).isEqualTo(7);
+        assertThat(definition.compactionStaleRatioThreshold()).isEqualTo(0.4);
+    }
+
+    @Test
+    void testLegacyVectorCompactionOptionsAreIgnored() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+        options.put("pk-vector.index.compaction.level-fanout", "9");
+        options.put("pk-vector.index.compaction.stale-ratio-threshold", "0.8");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.compactionLevelFanout()).isEqualTo(5);
+        assertThat(definition.compactionStaleRatioThreshold()).isEqualTo(0.2);
     }
 
     @Test

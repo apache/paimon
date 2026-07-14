@@ -51,6 +51,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
 
     @Nullable private final BucketedVectorIndexMaintainer vectorMaintainer;
     private final List<BucketedSortedIndexMaintainer> sortedMaintainers;
+    private int nextSortedMaintainerIndex;
 
     private BucketedPrimaryKeyIndexMaintainer(
             @Nullable BucketedVectorIndexMaintainer vectorMaintainer,
@@ -144,23 +145,21 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             CompactIncrement compactIncrement,
             List<BucketedSortedIndexMaintainer.SortedIndexCommit> commits)
             throws Exception {
-        BucketedSortedIndexMaintainer active = activeSortedMaintainer();
         for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            commits.add(
-                    maintainer.prepareCommit(
-                            appendIncrement, compactIncrement, false, maintainer == active));
+            commits.add(maintainer.prepareCommit(appendIncrement, compactIncrement, false, false));
         }
         if (activeSortedMaintainer() != null) {
             return;
         }
 
-        for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            if (maintainer == active && !maintainer.state().uncoveredSourceFiles().isEmpty()) {
-                continue;
-            }
-            if (!maintainer.state().uncoveredSourceFiles().isEmpty()) {
+        int count = sortedMaintainers.size();
+        for (int offset = 0; offset < count; offset++) {
+            int index = (nextSortedMaintainerIndex + offset) % count;
+            BucketedSortedIndexMaintainer maintainer = sortedMaintainers.get(index);
+            if (maintainer.hasPendingMaintenance()) {
                 commits.add(
                         maintainer.prepareCommit(appendIncrement, compactIncrement, false, true));
+                nextSortedMaintainerIndex = (index + 1) % count;
                 break;
             }
         }
@@ -312,7 +311,9 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                         readerFactoryBuilder,
                                         field,
                                         definition.indexType(),
-                                        definition.options()));
+                                        definition.options(),
+                                        definition.compactionLevelFanout(),
+                                        definition.compactionStaleRatioThreshold()));
                         break;
                     default:
                         throw new IllegalArgumentException(
@@ -370,16 +371,22 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             private final DataField field;
             private final String indexType;
             private final org.apache.paimon.options.Options options;
+            private final int compactionLevelFanout;
+            private final double compactionStaleRatioThreshold;
 
             private SortedDefinitionFactory(
                     KeyValueFileReaderFactory.Builder readerFactoryBuilder,
                     DataField field,
                     String indexType,
-                    org.apache.paimon.options.Options options) {
+                    org.apache.paimon.options.Options options,
+                    int compactionLevelFanout,
+                    double compactionStaleRatioThreshold) {
                 this.readerFactoryBuilder = readerFactoryBuilder;
                 this.field = field;
                 this.indexType = indexType;
                 this.options = options;
+                this.compactionLevelFanout = compactionLevelFanout;
+                this.compactionStaleRatioThreshold = compactionStaleRatioThreshold;
             }
 
             private BucketedSortedIndexMaintainer create(
@@ -405,6 +412,8 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                         indexType,
                         indexFile,
                         builder::build,
+                        compactionLevelFanout,
+                        compactionStaleRatioThreshold,
                         restoredDataFiles,
                         restoredPayloads,
                         executor);
