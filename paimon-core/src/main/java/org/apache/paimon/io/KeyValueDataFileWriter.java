@@ -20,6 +20,8 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.blob.ManagedBlobReferenceCollector;
+import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RowHelper;
@@ -39,8 +41,10 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
@@ -68,6 +72,7 @@ public abstract class KeyValueDataFileWriter
     private final RowHelper keyKeeper;
     private final FileSource fileSource;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
+    @Nullable private final ManagedBlobReferenceCollector blobReferenceCollector;
 
     private BinaryRow minKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
@@ -87,7 +92,8 @@ public abstract class KeyValueDataFileWriter
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            boolean managedBlobReferences) {
         super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -103,6 +109,10 @@ public abstract class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.blobReferenceCollector =
+                managedBlobReferences
+                        ? new ManagedBlobReferenceCollector(fileIO, path, valueType)
+                        : null;
     }
 
     @Override
@@ -111,6 +121,9 @@ public abstract class KeyValueDataFileWriter
 
         if (dataFileIndexWriter != null) {
             dataFileIndexWriter.write(kv.value());
+        }
+        if (blobReferenceCollector != null) {
+            blobReferenceCollector.write(kv);
         }
 
         keyKeeper.copyInto(kv.key());
@@ -159,6 +172,14 @@ public abstract class KeyValueDataFileWriter
                         : dataFileIndexWriter.result();
 
         String externalPath = isExternalPath ? path.toString() : null;
+        List<String> extraFiles = new ArrayList<>();
+        if (indexResult.independentIndexFile() != null) {
+            extraFiles.add(indexResult.independentIndexFile());
+        }
+        if (blobReferenceCollector != null) {
+            extraFiles.add(blobReferenceCollector.result());
+        }
+
         return DataFileMeta.create(
                 path.getName(),
                 fileSize,
@@ -171,9 +192,7 @@ public abstract class KeyValueDataFileWriter
                 maxSeqNumber,
                 schemaId,
                 level,
-                indexResult.independentIndexFile() == null
-                        ? Collections.emptyList()
-                        : Collections.singletonList(indexResult.independentIndexFile()),
+                extraFiles.isEmpty() ? Collections.emptyList() : extraFiles,
                 deleteRecordCount,
                 indexResult.embeddedIndexBytes(),
                 fileSource,
@@ -187,9 +206,42 @@ public abstract class KeyValueDataFileWriter
 
     @Override
     public void close() throws IOException {
-        if (dataFileIndexWriter != null) {
-            dataFileIndexWriter.close();
+        try {
+            if (dataFileIndexWriter != null) {
+                dataFileIndexWriter.close();
+            }
+            super.close();
+            if (blobReferenceCollector != null) {
+                blobReferenceCollector.close();
+            }
+        } catch (IOException e) {
+            abort();
+            throw e;
         }
-        super.close();
+    }
+
+    @Override
+    public void abort() {
+        if (blobReferenceCollector != null) {
+            blobReferenceCollector.abort();
+        }
+        super.abort();
+    }
+
+    @Override
+    public Optional<FileWriterAbortExecutor> abortExecutor() {
+        Optional<FileWriterAbortExecutor> mainExecutor = super.abortExecutor();
+        if (blobReferenceCollector == null) {
+            return mainExecutor;
+        }
+        Path sidecar = ManagedBlobReferenceFile.sidecarPath(path);
+        return Optional.of(
+                new FileWriterAbortExecutor(fileIO, path) {
+                    @Override
+                    public void abort() {
+                        mainExecutor.ifPresent(FileWriterAbortExecutor::abort);
+                        fileIO.deleteQuietly(sidecar);
+                    }
+                });
     }
 }

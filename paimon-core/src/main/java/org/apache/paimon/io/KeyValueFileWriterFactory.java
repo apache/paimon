@@ -23,7 +23,9 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.KeyValueThinSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.blob.PrimaryKeyBlobExternalizer;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -36,6 +38,8 @@ import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -43,6 +47,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -64,6 +69,7 @@ public class KeyValueFileWriterFactory {
     private final long suggestedFileSize;
     private final CoreOptions options;
     private final FileIndexOptions fileIndexOptions;
+    @Nullable private final PrimaryKeyBlobExternalizer blobExternalizer;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -79,6 +85,14 @@ public class KeyValueFileWriterFactory {
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
         this.fileIndexOptions = options.indexColumnsOptions();
+        this.blobExternalizer =
+                managedBlobEnabled()
+                        ? new PrimaryKeyBlobExternalizer(
+                                fileIO,
+                                valueType,
+                                formatContext.pathFactory(new WriteFormatKey(0, false)),
+                                options.blobTargetFileSize())
+                        : null;
     }
 
     public RowType keyType() {
@@ -87,6 +101,22 @@ public class KeyValueFileWriterFactory {
 
     public RowType valueType() {
         return valueType;
+    }
+
+    public InternalRow externalizeBlob(RowKind valueKind, InternalRow value) throws IOException {
+        return blobExternalizer == null ? value : blobExternalizer.externalize(valueKind, value);
+    }
+
+    public void prepareCommit() throws IOException {
+        if (blobExternalizer != null) {
+            blobExternalizer.prepareCommit();
+        }
+    }
+
+    public void abortManagedBlobWrites() {
+        if (blobExternalizer != null) {
+            blobExternalizer.abort();
+        }
     }
 
     @VisibleForTesting
@@ -151,6 +181,7 @@ public class KeyValueFileWriterFactory {
             Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
         // Changelog is sequentially consumed, file index is unnecessary.
         FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
+        boolean managedBlobReferences = !key.isChangelog && managedBlobEnabled();
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -164,7 +195,8 @@ public class KeyValueFileWriterFactory {
                         options,
                         fileSource,
                         indexOptions,
-                        isExternalPath)
+                        isExternalPath,
+                        managedBlobReferences)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.fileWriterContext(key),
@@ -177,14 +209,22 @@ public class KeyValueFileWriterFactory {
                         options,
                         fileSource,
                         indexOptions,
-                        isExternalPath);
+                        isExternalPath,
+                        managedBlobReferences);
+    }
+
+    private boolean managedBlobEnabled() {
+        return !options.blobDescriptorField().isEmpty()
+                && valueType.getFields().stream()
+                        .anyMatch(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB);
     }
 
     public void deleteFile(DataFileMeta file) {
         // this path factory is only for path generation, so we don't care about the true or false
         // in WriteFormatKey
-        fileIO.deleteQuietly(
-                formatContext.pathFactory(new WriteFormatKey(file.level(), false)).toPath(file));
+        DataFilePathFactory pathFactory =
+                formatContext.pathFactory(new WriteFormatKey(file.level(), false));
+        file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
     }
 
     public FileIO getFileIO() {

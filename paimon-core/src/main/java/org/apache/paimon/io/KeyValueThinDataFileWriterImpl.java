@@ -55,7 +55,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            boolean managedBlobReferences) {
         super(
                 fileIO,
                 context,
@@ -69,7 +70,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions,
-                isExternalPath);
+                isExternalPath,
+                managedBlobReferences);
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             idToIndex.put(valueType.getFields().get(i).id(), i);

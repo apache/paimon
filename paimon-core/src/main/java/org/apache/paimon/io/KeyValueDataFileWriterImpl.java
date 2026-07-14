@@ -47,7 +47,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            boolean managedBlobReferences) {
         super(
                 fileIO,
                 context,
@@ -61,7 +62,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions,
-                isExternalPath);
+                isExternalPath,
+                managedBlobReferences);
     }
 
     @Override

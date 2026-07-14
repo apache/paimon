@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -218,6 +219,10 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     protected void cleanFile(Path path) {
+        if (isManagedBlobPack(path)) {
+            return;
+        }
+
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
@@ -232,6 +237,10 @@ public abstract class OrphanFilesClean implements Serializable {
                 LOG.warn("Failed to check whether {} is directory, skip deleting it.", path, e);
             }
         }
+    }
+
+    protected boolean isManagedBlobPack(Path path) {
+        return path.getName().endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {

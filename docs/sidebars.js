@@ -87,6 +87,7 @@ const sidebars = {
       "primary-key-table/vector-index",
       "primary-key-table/chain-table",
       "primary-key-table/pk-clustering-override",
+      "primary-key-table/blob-storage",
       {
         type: "category",
         "label": "Merge Engine",
