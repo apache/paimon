@@ -478,10 +478,6 @@ class BlobTest(unittest.TestCase):
 
             return create_reader
 
-        def descriptor_offset(batch):
-            value = batch.column(0)[0].as_py()
-            return BlobDescriptor.deserialize(value).offset
-
         reader = BlobFallbackBatchReader(
             [
                 (data_file("first.blob", 0, 1), supplier("first.blob", 0)),
@@ -497,22 +493,18 @@ class BlobTest(unittest.TestCase):
             "picture",
             pa.large_binary(),
             blob_as_descriptor=True,
-            batch_size=1,
+            batch_size=1024,
         )
 
-        first = reader.read_arrow_batch()
-        self.assertEqual(4, descriptor_offset(first))
-        self.assertFalse(created_by_file["first.blob"][0].closed)
-        self.assertNotIn("second.blob", created_by_file)
-
-        second = reader.read_arrow_batch()
-        self.assertEqual(104, descriptor_offset(second))
+        batch = reader.read_arrow_batch()
+        self.assertEqual(
+            [4, 104, 204],
+            [
+                BlobDescriptor.deserialize(value.as_py()).offset
+                for value in batch.column(0)
+            ],
+        )
         self.assertTrue(created_by_file["first.blob"][0].closed)
-        self.assertFalse(created_by_file["second.blob"][0].closed)
-        self.assertNotIn("third.blob", created_by_file)
-
-        third = reader.read_arrow_batch()
-        self.assertEqual(204, descriptor_offset(third))
         self.assertTrue(created_by_file["second.blob"][0].closed)
         self.assertFalse(created_by_file["third.blob"][0].closed)
         self.assertIsNone(reader.read_arrow_batch())

@@ -324,6 +324,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
                         group[row_id] = (blob.to_descriptor().serialize(), False)
                     else:
                         group[row_id] = (blob.to_data(), False)
+            if state.selected_range_index >= len(state.selected_ranges):
+                self._close_state_reader(state)
 
         if not groups:
             return None
