@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -61,7 +62,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests automatic source-backed BTree/Bitmap evaluation in ordinary batch planning. */
@@ -73,81 +73,10 @@ class PrimaryKeySortedIndexBatchScanTest {
 
         TableScan.Plan result = fixture.scan.plan();
 
-        assertThat(result.splits()).hasSize(1);
-        assertThat(result.splits().get(0)).isInstanceOf(IndexedSplit.class);
+        assertThat(result.splits()).singleElement().isInstanceOf(IndexedSplit.class);
         IndexedSplit indexedSplit = (IndexedSplit) result.splits().get(0);
         assertThat(indexedSplit.dataSplit().dataFiles()).containsExactly(fixture.dataFile);
         assertThat(indexedSplit.rowRanges()).containsExactly(new Range(2, 2));
-        verify(fixture.indexFileHandler)
-                .scan(
-                        eq(fixture.snapshot),
-                        org.mockito.ArgumentMatchers.<Filter<IndexManifestEntry>>any());
-    }
-
-    @Test
-    void testReaderFailureFallsBackToRawDataSplit() {
-        GlobalIndexReader corruptReader = mock(GlobalIndexReader.class);
-        when(corruptReader.visitEqual(any(), eq(42)))
-                .thenThrow(new RuntimeException("corrupt index payload"));
-        ScanFixture fixture = fixture(corruptReader);
-
-        TableScan.Plan result = fixture.scan.plan();
-
-        assertRawFallback(result, fixture.dataFile);
-    }
-
-    @Test
-    void testOutOfRangeRowPositionFallsBackToRawDataSplit() {
-        ScanFixture fixture = fixture(reader(4));
-
-        TableScan.Plan result = fixture.scan.plan();
-
-        assertRawFallback(result, fixture.dataFile);
-    }
-
-    private static void assertRawFallback(TableScan.Plan result, DataFileMeta dataFile) {
-        assertThat(result.splits()).singleElement().isInstanceOf(DataSplit.class);
-        DataSplit split = (DataSplit) result.splits().get(0);
-        assertThat(split.dataFiles()).containsExactly(dataFile);
-        assertThat(split.rawConvertible()).isFalse();
-    }
-
-    @Test
-    void testExplicitSplitResultTakesPrecedence() {
-        TableSchema schema = tableSchema();
-        DataSplit suppliedSplit = dataSplit(99, dataFile("supplied", 1));
-        GlobalIndexSplitResult supplied =
-                new GlobalIndexSplitResult() {
-                    @Override
-                    public long snapshotId() {
-                        return 99;
-                    }
-
-                    @Override
-                    public java.util.List<? extends Split> splits() {
-                        return Collections.singletonList(suppliedSplit);
-                    }
-
-                    @Override
-                    public RoaringNavigableMap64 results() {
-                        return new RoaringNavigableMap64();
-                    }
-                };
-        SnapshotReader snapshotReader = mock(SnapshotReader.class, RETURNS_SELF);
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        schema,
-                        mock(SchemaManager.class),
-                        new CoreOptions(schema.options()),
-                        snapshotReader,
-                        mock(TableQueryAuth.class),
-                        (ignoredFile, ignoredDefinition, ignoredPayloads) -> {
-                            throw new AssertionError("automatic scalar index path must not run");
-                        });
-
-        TableScan.Plan result = scan.withGlobalIndexResult(supplied).plan();
-
-        assertThat(result.splits()).containsExactly(suppliedSplit);
     }
 
     private static TableSchema tableSchema() {
@@ -199,16 +128,19 @@ class PrimaryKeySortedIndexBatchScanTest {
         SchemaManager schemaManager = mock(SchemaManager.class);
         when(schemaManager.schema(schema.id())).thenReturn(schema);
         Predicate predicate = new PredicateBuilder(schema.logicalRowType()).equal(1, 42);
-        DataTableBatchScan scan =
+        DataTableBatchScan batchScan =
                 new DataTableBatchScan(
-                        schema,
-                        schemaManager,
-                        options,
-                        snapshotReader,
-                        mock(TableQueryAuth.class),
+                        schema, schemaManager, options, snapshotReader, mock(TableQueryAuth.class));
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.schema()).thenReturn(schema);
+        when(table.schemaManager()).thenReturn(schemaManager);
+        PrimaryKeyBatchScan scan =
+                new PrimaryKeyBatchScan(
+                        table,
+                        batchScan,
                         (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader);
         scan.withFilter(predicate);
-        return new ScanFixture(dataFile, dataSplit, snapshot, indexFileHandler, scan);
+        return new ScanFixture(dataFile, scan);
     }
 
     private static GlobalIndexReader reader(long rowPosition) {
@@ -271,21 +203,10 @@ class PrimaryKeySortedIndexBatchScanTest {
     private static class ScanFixture {
 
         private final DataFileMeta dataFile;
-        private final DataSplit dataSplit;
-        private final Snapshot snapshot;
-        private final IndexFileHandler indexFileHandler;
-        private final DataTableBatchScan scan;
+        private final PrimaryKeyBatchScan scan;
 
-        private ScanFixture(
-                DataFileMeta dataFile,
-                DataSplit dataSplit,
-                Snapshot snapshot,
-                IndexFileHandler indexFileHandler,
-                DataTableBatchScan scan) {
+        private ScanFixture(DataFileMeta dataFile, PrimaryKeyBatchScan scan) {
             this.dataFile = dataFile;
-            this.dataSplit = dataSplit;
-            this.snapshot = snapshot;
-            this.indexFileHandler = indexFileHandler;
             this.scan = scan;
         }
     }

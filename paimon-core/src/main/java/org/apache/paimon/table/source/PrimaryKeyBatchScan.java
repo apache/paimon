@@ -1,0 +1,301 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.table.source;
+
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** Batch scan wrapper for primary-key indexes. */
+public class PrimaryKeyBatchScan extends ReadOnceTableScan implements DataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyBatchScan.class);
+
+    private final FileStoreTable table;
+    private final DataTableBatchScan batchScan;
+
+    private final @Nullable PrimaryKeySortedIndexScan.ReaderFactory readerFactory;
+
+    @Nullable private Predicate filter;
+    @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
+
+    public PrimaryKeyBatchScan(FileStoreTable table, DataTableBatchScan batchScan) {
+        this(table, batchScan, null);
+    }
+
+    PrimaryKeyBatchScan(
+            FileStoreTable table,
+            DataTableBatchScan batchScan,
+            @Nullable PrimaryKeySortedIndexScan.ReaderFactory readerFactory) {
+        this.table = table;
+        this.batchScan = batchScan;
+        this.readerFactory = readerFactory;
+    }
+
+    @Override
+    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withFilter(Predicate predicate) {
+        this.filter = predicate;
+        batchScan.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+        if (globalIndexResult instanceof GlobalIndexSplitResult) {
+            this.globalIndexSplitResult = (GlobalIndexSplitResult) globalIndexResult;
+        }
+        return this;
+    }
+
+    @Override
+    protected Plan innerPlan() {
+        return batchScan.planWithAuth(this::planWithoutAuth);
+    }
+
+    private Plan planWithoutAuth() {
+        if (globalIndexSplitResult == null) {
+            return applyPrimaryKeySortedIndexes(batchScan.planWithoutAuth());
+        }
+        if (globalIndexSplitResult.snapshotId() > 0) {
+            batchScan.maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
+        }
+        List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
+        return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
+    }
+
+    private Plan applyPrimaryKeySortedIndexes(Plan dataPlan) {
+        if (!(dataPlan instanceof SnapshotReader.Plan)) {
+            return dataPlan;
+        }
+        SnapshotReader.Plan snapshotPlan = (SnapshotReader.Plan) dataPlan;
+        SnapshotReader snapshotReader = batchScan.snapshotReader();
+        if (filter == null
+                || !snapshotReader.hasNonPartitionFilter()
+                || table.schema().primaryKeys().isEmpty()
+                || !batchScan.options().deletionVectorsEnabled()
+                || batchScan.options().deletionVectorsMergeOnRead()
+                || batchScan.options().bucket() <= 0
+                || snapshotPlan.snapshotId() == null
+                || snapshotPlan.splits().isEmpty()) {
+            return dataPlan;
+        }
+
+        List<DataSplit> dataSplits = new ArrayList<>();
+        for (Split split : snapshotPlan.splits()) {
+            if (!(split instanceof DataSplit) || ((DataSplit) split).isStreaming()) {
+                return dataPlan;
+            }
+            dataSplits.add((DataSplit) split);
+        }
+
+        try {
+            long snapshotId = snapshotPlan.snapshotId();
+            Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotId);
+            if (snapshot == null) {
+                return dataPlan;
+            }
+            TableSchema snapshotSchema = table.schemaManager().schema(snapshot.schemaId());
+            List<PrimaryKeyIndexDefinition> definitions =
+                    PrimaryKeyIndexDefinitions.create(snapshotSchema).definitions();
+            Set<Integer> scalarFields = new HashSet<>();
+            for (PrimaryKeyIndexDefinition definition : definitions) {
+                if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
+                        || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                    scalarFields.add(definition.fieldId());
+                }
+            }
+            if (scalarFields.isEmpty()) {
+                return dataPlan;
+            }
+
+            IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
+            if (indexFileHandler == null) {
+                return dataPlan;
+            }
+            List<IndexManifestEntry> indexEntries =
+                    indexFileHandler.scan(
+                            snapshot,
+                            entry -> {
+                                GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                                return entry.kind() == FileKind.ADD
+                                        && meta != null
+                                        && meta.sourceMeta() != null
+                                        && scalarFields.contains(meta.indexFieldId());
+                            });
+            PrimaryKeySortedIndexScan.Plan indexPlan =
+                    PrimaryKeySortedIndexScan.plan(
+                            snapshotId, dataSplits, definitions, indexEntries);
+            PrimaryKeySortedIndexScan.ReaderFactory factory =
+                    readerFactory == null
+                            ? PrimaryKeySortedIndexScan.readerFactory(
+                                    snapshotReader.snapshotManager().fileIO(),
+                                    snapshotReader.pathFactory(),
+                                    snapshotSchema.logicalRowType(),
+                                    batchScan.options().toConfiguration())
+                            : readerFactory;
+            PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                    PrimaryKeySortedIndexScan.evaluate(
+                            indexPlan,
+                            snapshotSchema.logicalRowType(),
+                            filter,
+                            definitions,
+                            factory);
+            PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
+            return new PlanImpl(
+                    snapshotPlan.watermark(),
+                    snapshotPlan.snapshotId(),
+                    new ArrayList<>(result.splits()));
+        } catch (RuntimeException e) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw e;
+            }
+            LOG.warn(
+                    "Failed to apply primary-key sorted indexes; using the ordinary data plan.", e);
+            return dataPlan;
+        }
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        return batchScan.listPartitionEntries();
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withReadType(@Nullable RowType readType) {
+        batchScan.withReadType(readType);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withBucket(int bucket) {
+        batchScan.withBucket(bucket);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan dropStats() {
+        batchScan.dropStats();
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withMetricRegistry(MetricRegistry metricsRegistry) {
+        batchScan.withMetricRegistry(metricsRegistry);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withLimit(int limit) {
+        batchScan.withLimit(limit);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withPartitionFilter(Map<String, String> partitionSpec) {
+        batchScan.withPartitionFilter(partitionSpec);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withPartitionFilter(List<BinaryRow> partitions) {
+        batchScan.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        batchScan.withPartitionsFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        batchScan.withPartitionFilter(partitionPredicate);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withPartitionFilter(Predicate predicate) {
+        batchScan.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withBucketFilter(Filter<Integer> bucketFilter) {
+        batchScan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withLevelFilter(Filter<Integer> levelFilter) {
+        batchScan.withLevelFilter(levelFilter);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withRowRanges(List<Range> rowRanges) {
+        batchScan.withRowRanges(rowRanges);
+        return this;
+    }
+
+    @Override
+    public PrimaryKeyBatchScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        batchScan.withRowRangeIndex(rowRangeIndex);
+        return this;
+    }
+
+    @Override
+    public @Nullable String readProtectionTagName() {
+        return batchScan.readProtectionTagName();
+    }
+}

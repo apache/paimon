@@ -72,6 +72,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
@@ -108,10 +109,14 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public final TableScan.Plan plan() {
+        return planWithAuth(this::planWithoutAuth);
+    }
+
+    final TableScan.Plan planWithAuth(Supplier<TableScan.Plan> planner) {
         TableQueryAuthResult queryAuthResult = authQuery();
         // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
         applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
-        Plan plan = planWithoutAuth();
+        Plan plan = planner.get();
         if (queryAuthResult != null) {
             plan = queryAuthResult.convertPlan(plan);
         }

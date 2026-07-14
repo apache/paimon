@@ -27,7 +27,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -45,7 +44,6 @@ import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
-import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.SpecialFields;
@@ -53,6 +51,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -196,29 +195,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        if (wrapped instanceof FallbackReadFileStoreTable) {
-            return ((FallbackReadFileStoreTable) wrapped).newScan(this::newScan);
-        }
-        return newScan(wrapped);
+        return new AuditLogBatchScan(
+                DataTableBatchScan.create(wrapped, this::newScanSnapshotReader));
     }
 
-    private DataTableScan newScan(FileStoreTable table) {
-        CoreOptions options = table.coreOptions();
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        table.schema(),
-                        table.schemaManager(),
-                        options,
-                        newSnapshotReader(table),
-                        table.catalogEnvironment().tableQueryAuth(options));
-        Integer scanBucket = options.scanBucket();
-        if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(table.schema(), options, scanBucket);
-            scan.withBucket(scanBucket);
-        }
-        DataTableScan dataScan =
-                options.dataEvolutionEnabled() ? new DataEvolutionBatchScan(table, scan) : scan;
-        return dataScan;
+    private SnapshotReader newScanSnapshotReader(FileStoreTable table) {
+        return new AuditLogDataReader(table.newSnapshotReader(), false);
     }
 
     @Override
@@ -309,9 +291,15 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     private class AuditLogDataReader implements SnapshotReader {
 
         private final SnapshotReader wrapped;
+        private final boolean convertFilter;
 
         private AuditLogDataReader(SnapshotReader wrapped) {
+            this(wrapped, true);
+        }
+
+        private AuditLogDataReader(SnapshotReader wrapped, boolean convertFilter) {
             this.wrapped = wrapped;
+            this.convertFilter = convertFilter;
         }
 
         @Override
@@ -371,12 +359,20 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         public SnapshotReader withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(wrapped::withFilter);
+            if (convertFilter) {
+                convert(predicate).ifPresent(wrapped::withFilter);
+            } else {
+                wrapped.withFilter(predicate);
+            }
             return this;
         }
 
         @Override
         public SnapshotReader withFilter(Predicate predicate, Predicate pushdownPredicate) {
+            if (!convertFilter) {
+                wrapped.withFilter(predicate, pushdownPredicate);
+                return this;
+            }
             Optional<Predicate> converted = convert(predicate);
             Optional<Predicate> convertedPushdown = convert(pushdownPredicate);
             if (converted.isPresent()) {
@@ -560,6 +556,85 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Iterator<ManifestEntry> readFileIterator() {
             return wrapped.readFileIterator();
+        }
+    }
+
+    private class AuditLogBatchScan implements DataTableScan {
+
+        private final DataTableScan batchScan;
+
+        private AuditLogBatchScan(DataTableScan batchScan) {
+            this.batchScan = batchScan;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            convert(predicate).ifPresent(batchScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
+            batchScan.withMetricRegistry(metricsRegistry);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLimit(int limit) {
+            batchScan.withLimit(limit);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+            batchScan.withPartitionFilter(partitionSpec);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
+            batchScan.withPartitionFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            batchScan.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+            batchScan.withPartitionFilter(partitionPredicate);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+            batchScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            batchScan.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        @Override
+        public Plan plan() {
+            return batchScan.plan();
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            return batchScan.listPartitionEntries();
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            return this;
         }
     }
 

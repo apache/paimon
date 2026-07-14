@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -289,22 +288,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public DataTableScan newScan() {
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        tableSchema,
-                        schemaManager(),
-                        coreOptions(),
-                        newSnapshotReader(),
-                        catalogEnvironment.tableQueryAuth(coreOptions()));
-        Integer scanBucket = coreOptions().scanBucket();
-        if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
-            scan.withBucket(scanBucket);
-        }
-        if (coreOptions().dataEvolutionEnabled()) {
-            return new DataEvolutionBatchScan(this, scan);
-        }
-        return scan;
+        return DataTableBatchScan.create(this);
     }
 
     @Override

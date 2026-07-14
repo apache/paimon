@@ -19,14 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.index.GlobalIndexMeta;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -34,6 +28,8 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -49,11 +45,10 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.Set;
+import java.util.function.Function;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
@@ -76,11 +71,41 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
-    @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
-    @Nullable private Predicate filter;
 
-    @Nullable
-    private final PrimaryKeySortedIndexScan.ReaderFactory primaryKeySortedIndexReaderFactory;
+    public static DataTableScan create(FileStoreTable table) {
+        return create(table, FileStoreTable::newSnapshotReader);
+    }
+
+    public static DataTableScan create(
+            FileStoreTable table, Function<FileStoreTable, SnapshotReader> readerFactory) {
+        if (table instanceof FallbackReadFileStoreTable) {
+            return ((FallbackReadFileStoreTable) table)
+                    .newScan(wrapped -> create(wrapped, readerFactory));
+        }
+
+        CoreOptions options = table.coreOptions();
+        SnapshotReader snapshotReader = readerFactory.apply(table);
+        DataTableBatchScan scan =
+                new DataTableBatchScan(
+                        table.schema(),
+                        table.schemaManager(),
+                        options,
+                        snapshotReader,
+                        table.catalogEnvironment().tableQueryAuth(options));
+        Integer scanBucket = options.scanBucket();
+        if (scanBucket != null) {
+            validateScanBucketOption(table.schema(), options, scanBucket);
+            scan.withBucket(scanBucket);
+        }
+        if (options.dataEvolutionEnabled()) {
+            return new DataEvolutionBatchScan(table, scan);
+        }
+        if (snapshotReader.indexFileHandler() != null
+                && !PrimaryKeyIndexDefinitions.create(table.schema()).definitions().isEmpty()) {
+            return new PrimaryKeyBatchScan(table, scan);
+        }
+        return scan;
+    }
 
     public DataTableBatchScan(
             TableSchema schema,
@@ -88,21 +113,10 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
-        this(schema, schemaManager, options, snapshotReader, queryAuth, null);
-    }
-
-    DataTableBatchScan(
-            TableSchema schema,
-            SchemaManager schemaManager,
-            CoreOptions options,
-            SnapshotReader snapshotReader,
-            TableQueryAuth queryAuth,
-            @Nullable PrimaryKeySortedIndexScan.ReaderFactory primaryKeySortedIndexReaderFactory) {
         super(schema, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
         this.schemaManager = schemaManager;
-        this.primaryKeySortedIndexReaderFactory = primaryKeySortedIndexReaderFactory;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             if (options.toConfiguration()
                     .get(CoreOptions.BATCH_SCAN_MODE)
@@ -117,7 +131,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        this.filter = predicate;
         super.withFilter(predicate);
         return this;
     }
@@ -137,17 +150,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     protected TableScan.Plan planWithoutAuth() {
-        if (globalIndexSplitResult != null) {
-            if (!hasNext) {
-                throw new EndOfScanException();
-            }
-            hasNext = false;
-            if (globalIndexSplitResult.snapshotId() > 0) {
-                maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
-            }
-            List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
-            return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
-        }
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -167,107 +169,10 @@ public class DataTableBatchScan extends AbstractDataTableScan {
                 maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
             }
 
-            TableScan.Plan dataPlan = DataFilePlan.fromResult(result);
-            if (result instanceof ScannedResult) {
-                return applyPrimaryKeySortedIndexes(((ScannedResult) result).plan());
-            }
-            return dataPlan;
+            return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();
         }
-    }
-
-    private TableScan.Plan applyPrimaryKeySortedIndexes(SnapshotReader.Plan dataPlan) {
-        if (filter == null
-                || !snapshotReader.hasNonPartitionFilter()
-                || schema.primaryKeys().isEmpty()
-                || !options().deletionVectorsEnabled()
-                || options().deletionVectorsMergeOnRead()
-                || options().bucket() <= 0
-                || dataPlan.snapshotId() == null
-                || dataPlan.splits().isEmpty()) {
-            return dataPlan;
-        }
-
-        List<DataSplit> dataSplits = new ArrayList<>();
-        for (Split split : dataPlan.splits()) {
-            if (!(split instanceof DataSplit) || ((DataSplit) split).isStreaming()) {
-                return dataPlan;
-            }
-            dataSplits.add((DataSplit) split);
-        }
-
-        try {
-            long snapshotId = dataPlan.snapshotId();
-            Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotId);
-            if (snapshot == null) {
-                return dataPlan;
-            }
-            TableSchema snapshotSchema = schemaManager.schema(snapshot.schemaId());
-            List<PrimaryKeyIndexDefinition> definitions =
-                    PrimaryKeyIndexDefinitions.create(snapshotSchema).definitions();
-            Set<Integer> scalarFields = new HashSet<>();
-            for (PrimaryKeyIndexDefinition definition : definitions) {
-                if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                        || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
-                    scalarFields.add(definition.fieldId());
-                }
-            }
-            if (scalarFields.isEmpty()) {
-                return dataPlan;
-            }
-
-            IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
-            if (indexFileHandler == null) {
-                return dataPlan;
-            }
-            List<IndexManifestEntry> indexEntries =
-                    indexFileHandler.scan(
-                            snapshot,
-                            entry -> {
-                                GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
-                                return entry.kind() == FileKind.ADD
-                                        && meta != null
-                                        && meta.sourceMeta() != null
-                                        && scalarFields.contains(meta.indexFieldId());
-                            });
-            PrimaryKeySortedIndexScan.Plan indexPlan =
-                    PrimaryKeySortedIndexScan.plan(
-                            snapshotId, dataSplits, definitions, indexEntries);
-            PrimaryKeySortedIndexScan.ReaderFactory readerFactory =
-                    primaryKeySortedIndexReaderFactory == null
-                            ? PrimaryKeySortedIndexScan.readerFactory(
-                                    snapshotReader.snapshotManager().fileIO(),
-                                    snapshotReader.pathFactory(),
-                                    snapshotSchema.logicalRowType(),
-                                    options().toConfiguration())
-                            : primaryKeySortedIndexReaderFactory;
-            PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
-                    PrimaryKeySortedIndexScan.evaluate(
-                            indexPlan,
-                            snapshotSchema.logicalRowType(),
-                            filter,
-                            definitions,
-                            readerFactory);
-            PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
-            return new PlanImpl(
-                    dataPlan.watermark(), dataPlan.snapshotId(), new ArrayList<>(result.splits()));
-        } catch (RuntimeException e) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw e;
-            }
-            LOG.warn(
-                    "Failed to apply primary-key sorted indexes; using the ordinary data plan.", e);
-            return dataPlan;
-        }
-    }
-
-    @Override
-    public DataTableBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
-        if (globalIndexResult instanceof GlobalIndexSplitResult) {
-            this.globalIndexSplitResult = (GlobalIndexSplitResult) globalIndexResult;
-        }
-        return this;
     }
 
     @Override
@@ -377,7 +282,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         return readProtectionTagName;
     }
 
-    private void maybeCreateReadProtectionTag(long snapshotId) {
+    void maybeCreateReadProtectionTag(long snapshotId) {
         Duration timeRetained = options().scanPlanAutoTagTimeRetained();
         if (timeRetained == null) {
             return;
