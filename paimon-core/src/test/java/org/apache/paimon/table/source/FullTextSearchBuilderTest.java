@@ -32,6 +32,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
@@ -653,6 +654,74 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchAssignsOverlappingRangesOnlyOnce() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"needle zero", "other", "needle two", "needle three"};
+        writeDocuments(table, documents);
+
+        // The dedicated index covers [0, 2], while an index carrying content as an extra field
+        // covers [2, 3]. Row 2 is in both physical files, but must be assigned only to the
+        // dedicated index. The second file is still read with its physical [2, 3] offset and an
+        // include mask for its assigned tail [3, 3].
+        buildAndCommitIndexRange(
+                table,
+                new String[] {documents[0], documents[1], documents[2]},
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
+                0);
+        buildAndCommitIndexRange(
+                table,
+                new String[] {documents[2], documents[3]},
+                Arrays.asList(
+                        table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)),
+                2);
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("needle"))
+                        .withLimit(10);
+        List<IndexFullTextSearchSplit> indexSplits = new ArrayList<>();
+        for (FullTextSearchSplit split : searchBuilder.newFullTextScan().scan().splits()) {
+            indexSplits.add((IndexFullTextSearchSplit) split);
+        }
+
+        assertThat(indexSplits).hasSize(2);
+        assertThat(indexSplits.get(0).rowRangeStart()).isEqualTo(0);
+        assertThat(indexSplits.get(0).rowRangeEnd()).isEqualTo(2);
+        assertThat(indexSplits.get(0).searchRowRanges()).containsExactly(new Range(0, 2));
+        assertThat(indexSplits.get(1).rowRangeStart()).isEqualTo(2);
+        assertThat(indexSplits.get(1).rowRangeEnd()).isEqualTo(3);
+        assertThat(indexSplits.get(1).searchRowRanges()).containsExactly(new Range(3, 3));
+
+        assertThat(readIds(table, searchBuilder.executeLocal())).containsExactlyInAnyOrder(0, 2, 3);
+    }
+
+    @Test
+    public void testFullTextIndexIdentityPreservesExtraFieldOrder() {
+        IndexFileMeta titleThenBody =
+                new IndexFileMeta(
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        "title-body",
+                        1,
+                        2,
+                        new GlobalIndexMeta(0, 1, 0, new int[] {1, 2}, null),
+                        null);
+        IndexFileMeta bodyThenTitle =
+                new IndexFileMeta(
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        "body-title",
+                        1,
+                        2,
+                        new GlobalIndexMeta(0, 1, 0, new int[] {2, 1}, null),
+                        null);
+
+        // The reader's projected row layout follows this order, so these are different index
+        // definitions even though they contain the same field-id set.
+        assertThat(FullTextScanImpl.sameIndexIdentity(titleThenBody, bodyThenTitle)).isFalse();
+    }
+
+    @Test
     public void testFullTextSearchSkipsIndexNotCoveringTextColumn() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -707,6 +776,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(deserialized.columnName()).isEqualTo(original.columnName());
         assertThat(deserialized.rowRangeStart()).isEqualTo(original.rowRangeStart());
         assertThat(deserialized.rowRangeEnd()).isEqualTo(original.rowRangeEnd());
+        assertThat(deserialized.searchRowRanges()).isEqualTo(original.searchRowRanges());
         assertThat(deserialized.fullTextIndexFiles()).hasSize(original.fullTextIndexFiles().size());
         for (int i = 0; i < original.fullTextIndexFiles().size(); i++) {
             assertThat(deserialized.fullTextIndexFiles().get(i).fileName())

@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
@@ -38,10 +39,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -103,50 +106,16 @@ public class FullTextScanImpl implements FullTextScan {
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
 
-        // A searched text column can be covered by more than one full-text-capable global index
-        // (e.g. a dedicated full-text index whose primary field is the column, and a vector index
-        // that carries the column as an extra field). These are different index definitions and
-        // must not be merged into one reader input. Pick one index definition per (column, range),
-        // preferring the one where the column is the primary indexFieldId (dedicated full-text)
-        // over an extra-field match, so every split carries files from a single index identity.
-        // Choosing per range (not per whole column) keeps a range that only one index covers from
-        // being dropped when a different index wins the other ranges of the same column.
-        Map<String, Map<Range, IndexIdentity>> chosenByColumnAndRange =
-                chooseIndexPerColumnAndRange(allIndexFiles, textColumnIds, idToColumn);
-
-        // Group full-text index files by column and row range. A multi-column index serves a text
-        // column through either its primary indexFieldId or its extraFieldIds, and one file may
-        // cover more than one searched text column.
-        Map<String, Map<Range, List<IndexFileMeta>>> byColumnAndRange = new HashMap<>();
-        for (IndexFileMeta indexFile : allIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            IndexIdentity identity = IndexIdentity.of(indexFile);
-            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
-                String columnName = checkNotNull(idToColumn.get(columnId));
-                Map<Range, IndexIdentity> chosenForColumn = chosenByColumnAndRange.get(columnName);
-                if (chosenForColumn == null || !identity.equals(chosenForColumn.get(range))) {
-                    // This (column, range) is served by a different (preferred) index definition.
-                    continue;
-                }
-                byColumnAndRange
-                        .computeIfAbsent(columnName, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new ArrayList<>())
-                        .add(indexFile);
-            }
-        }
-
         List<FullTextSearchSplit> splits = new ArrayList<>();
-        for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> columnEntry :
-                byColumnAndRange.entrySet()) {
-            String columnName = columnEntry.getKey();
-            for (Map.Entry<Range, List<IndexFileMeta>> rangeEntry :
-                    columnEntry.getValue().entrySet()) {
-                Range range = rangeEntry.getKey();
-                splits.add(
-                        new IndexFullTextSearchSplit(
-                                columnName, range.from, range.to, rangeEntry.getValue()));
-            }
+        for (IndexRangeSelection selection :
+                chooseIndexRanges(allIndexFiles, textColumnIds, idToColumn)) {
+            splits.add(
+                    new IndexFullTextSearchSplit(
+                            selection.columnName,
+                            selection.fileRange.from,
+                            selection.fileRange.to,
+                            selection.files,
+                            selection.searchRanges));
         }
 
         if (!allIndexFiles.isEmpty()) {
@@ -184,23 +153,23 @@ public class FullTextScanImpl implements FullTextScan {
     }
 
     /**
-     * Chooses exactly one index definition to serve each searched (text column, row range). When
-     * more than one index covers the same column over the same range, the dedicated full-text index
-     * (the column is its primary {@code indexFieldId}) is preferred over an extra-field match; ties
-     * are broken deterministically by index identity so the choice is stable across planning runs.
+     * Chooses one index definition for every disjoint row interval of each searched text column. A
+     * dedicated index (the text column is its primary field) wins over an index that only carries
+     * the column as an extra field; remaining ties are resolved deterministically by index identity
+     * and physical file range.
      *
-     * <p>Selection is per range rather than per whole column on purpose: a range covered only by a
-     * non-preferred index (e.g. a range indexed solely by a vector index that carries the column as
-     * an extra field) must still be emitted as a searchable split. Otherwise it is skipped here yet
-     * the raw-coverage fallback (computed from all index files) still treats it as indexed, so the
-     * rows in that range would never be searched.
+     * <p>Index files may cover overlapping but non-identical ranges. Exact-range grouping would
+     * keep all such files and search the overlap more than once. This method splits their coverage
+     * at every range boundary, assigns each resulting interval once, and records the assigned
+     * sub-ranges separately from the physical file range. Readers still need the physical range to
+     * translate file-local row ids correctly.
      */
-    private static Map<String, Map<Range, IndexIdentity>> chooseIndexPerColumnAndRange(
+    private static List<IndexRangeSelection> chooseIndexRanges(
             List<IndexFileMeta> allIndexFiles,
             Set<Integer> textColumnIds,
             Map<Integer, String> idToColumn) {
-        // (columnName, range) -> candidate identity -> whether the column is that index's primary
-        Map<String, Map<Range, Map<IndexIdentity, Boolean>>> candidates = new HashMap<>();
+        // column -> physical range -> index identity -> candidate files
+        Map<String, Map<Range, Map<IndexIdentity, IndexRangeCandidate>>> grouped = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             IndexIdentity identity = IndexIdentity.of(indexFile);
@@ -208,40 +177,121 @@ public class FullTextScanImpl implements FullTextScan {
             for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
                 String columnName = checkNotNull(idToColumn.get(columnId));
                 boolean primary = meta.indexFieldId() == columnId;
-                candidates
-                        .computeIfAbsent(columnName, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new HashMap<>())
-                        .merge(identity, primary, (a, b) -> a || b);
+                IndexRangeCandidate candidate =
+                        grouped.computeIfAbsent(columnName, k -> new HashMap<>())
+                                .computeIfAbsent(range, k -> new HashMap<>())
+                                .computeIfAbsent(
+                                        identity,
+                                        k ->
+                                                new IndexRangeCandidate(
+                                                        columnName, range, identity, primary));
+                candidate.files.add(indexFile);
             }
         }
 
-        Map<String, Map<Range, IndexIdentity>> chosen = new HashMap<>();
-        for (Map.Entry<String, Map<Range, Map<IndexIdentity, Boolean>>> columnEntry :
-                candidates.entrySet()) {
-            String columnName = columnEntry.getKey();
-            for (Map.Entry<Range, Map<IndexIdentity, Boolean>> rangeEntry :
-                    columnEntry.getValue().entrySet()) {
-                IndexIdentity best = null;
-                boolean bestPrimary = false;
-                for (Map.Entry<IndexIdentity, Boolean> candidate :
-                        rangeEntry.getValue().entrySet()) {
-                    IndexIdentity identity = candidate.getKey();
-                    boolean primary = candidate.getValue();
-                    boolean better =
-                            best == null
-                                    || (primary && !bestPrimary)
-                                    || (primary == bestPrimary
-                                            && identity.key().compareTo(best.key()) < 0);
-                    if (better) {
-                        best = identity;
-                        bestPrimary = primary;
+        List<IndexRangeSelection> selections = new ArrayList<>();
+        for (Map.Entry<String, Map<Range, Map<IndexIdentity, IndexRangeCandidate>>> columnEntry :
+                grouped.entrySet()) {
+            List<IndexRangeCandidate> candidates = new ArrayList<>();
+            for (Map<IndexIdentity, IndexRangeCandidate> byIdentity :
+                    columnEntry.getValue().values()) {
+                candidates.addAll(byIdentity.values());
+            }
+
+            TreeSet<Long> boundaries = new TreeSet<>();
+            for (IndexRangeCandidate candidate : candidates) {
+                boundaries.add(candidate.fileRange.from);
+                if (candidate.fileRange.to != Long.MAX_VALUE) {
+                    boundaries.add(candidate.fileRange.to + 1);
+                }
+            }
+
+            List<Long> sortedBoundaries = new ArrayList<>(boundaries);
+            Map<IndexRangeCandidate, List<Range>> assigned = new LinkedHashMap<>();
+            for (int i = 0; i < sortedBoundaries.size(); i++) {
+                long from = sortedBoundaries.get(i);
+                long to =
+                        i + 1 < sortedBoundaries.size()
+                                ? sortedBoundaries.get(i + 1) - 1
+                                : Long.MAX_VALUE;
+                IndexRangeCandidate best = null;
+                for (IndexRangeCandidate candidate : candidates) {
+                    if (candidate.fileRange.from <= from && candidate.fileRange.to >= to) {
+                        if (best == null || betterCandidate(candidate, best)) {
+                            best = candidate;
+                        }
                     }
                 }
-                chosen.computeIfAbsent(columnName, k -> new HashMap<>())
-                        .put(rangeEntry.getKey(), best);
+                if (best != null) {
+                    assigned.computeIfAbsent(best, k -> new ArrayList<>()).add(new Range(from, to));
+                }
+            }
+
+            for (Map.Entry<IndexRangeCandidate, List<Range>> entry : assigned.entrySet()) {
+                IndexRangeCandidate candidate = entry.getKey();
+                selections.add(
+                        new IndexRangeSelection(
+                                candidate.columnName,
+                                candidate.fileRange,
+                                candidate.identity,
+                                candidate.files,
+                                mergeAdjacent(entry.getValue())));
             }
         }
-        return chosen;
+
+        selections.sort(
+                (left, right) -> {
+                    int result = left.columnName.compareTo(right.columnName);
+                    if (result != 0) {
+                        return result;
+                    }
+                    result = Long.compare(left.fileRange.from, right.fileRange.from);
+                    if (result != 0) {
+                        return result;
+                    }
+                    result = Long.compare(left.fileRange.to, right.fileRange.to);
+                    return result != 0
+                            ? result
+                            : left.identity.key().compareTo(right.identity.key());
+                });
+        return selections;
+    }
+
+    private static boolean betterCandidate(
+            IndexRangeCandidate candidate, IndexRangeCandidate best) {
+        if (candidate.primary != best.primary) {
+            return candidate.primary;
+        }
+        int result = candidate.identity.key().compareTo(best.identity.key());
+        if (result != 0) {
+            return result < 0;
+        }
+        result = Long.compare(candidate.fileRange.from, best.fileRange.from);
+        return result != 0
+                ? result < 0
+                : Long.compare(candidate.fileRange.to, best.fileRange.to) < 0;
+    }
+
+    private static List<Range> mergeAdjacent(List<Range> ranges) {
+        List<Range> merged = new ArrayList<>();
+        for (Range next : ranges) {
+            if (merged.isEmpty()) {
+                merged.add(next);
+                continue;
+            }
+            Range current = merged.get(merged.size() - 1);
+            if (current.to != Long.MAX_VALUE && current.to + 1 == next.from) {
+                merged.set(merged.size() - 1, new Range(current.from, next.to));
+            } else {
+                merged.add(next);
+            }
+        }
+        return merged;
+    }
+
+    @VisibleForTesting
+    static boolean sameIndexIdentity(IndexFileMeta left, IndexFileMeta right) {
+        return IndexIdentity.of(left).equals(IndexIdentity.of(right));
     }
 
     /**
@@ -260,14 +310,12 @@ public class FullTextScanImpl implements FullTextScan {
         static IndexIdentity of(IndexFileMeta indexFile) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             int[] extra = meta.extraFieldIds();
-            int[] sortedExtra = extra == null ? new int[0] : extra.clone();
-            Arrays.sort(sortedExtra);
             return new IndexIdentity(
                     indexFile.indexType()
                             + '|'
                             + meta.indexFieldId()
                             + '|'
-                            + Arrays.toString(sortedExtra));
+                            + Arrays.toString(extra == null ? new int[0] : extra));
         }
 
         String key() {
@@ -282,6 +330,43 @@ public class FullTextScanImpl implements FullTextScan {
         @Override
         public int hashCode() {
             return key.hashCode();
+        }
+    }
+
+    private static final class IndexRangeCandidate {
+        private final String columnName;
+        private final Range fileRange;
+        private final IndexIdentity identity;
+        private final boolean primary;
+        private final List<IndexFileMeta> files = new ArrayList<>();
+
+        private IndexRangeCandidate(
+                String columnName, Range fileRange, IndexIdentity identity, boolean primary) {
+            this.columnName = columnName;
+            this.fileRange = fileRange;
+            this.identity = identity;
+            this.primary = primary;
+        }
+    }
+
+    private static final class IndexRangeSelection {
+        private final String columnName;
+        private final Range fileRange;
+        private final IndexIdentity identity;
+        private final List<IndexFileMeta> files;
+        private final List<Range> searchRanges;
+
+        private IndexRangeSelection(
+                String columnName,
+                Range fileRange,
+                IndexIdentity identity,
+                List<IndexFileMeta> files,
+                List<Range> searchRanges) {
+            this.columnName = columnName;
+            this.fileRange = fileRange;
+            this.identity = identity;
+            this.files = files;
+            this.searchRanges = searchRanges;
         }
     }
 

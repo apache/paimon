@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -1178,12 +1179,23 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(rawVectorSearchSplits(plan.splits())).isEmpty();
 
         IndexVectorSearchSplit split = indexVectorSearchSplits(plan.splits()).get(0);
-        assertThat(split.vectorIndexFiles()).hasSize(1);
+        assertThat(split.vectorIndexFiles()).hasSize(2);
         assertThat(split.scalarIndexFiles()).containsExactlyElementsOf(split.vectorIndexFiles());
 
-        IndexFileMeta indexFile = split.vectorIndexFiles().get(0);
-        assertThat(indexFile.globalIndexMeta().indexFieldId()).isEqualTo(vectorField.id());
-        assertThat(indexFile.globalIndexMeta().extraFieldIds()).containsExactly(idField.id());
+        for (IndexFileMeta indexFile : split.vectorIndexFiles()) {
+            assertThat(indexFile.globalIndexMeta().indexFieldId()).isEqualTo(vectorField.id());
+            assertThat(indexFile.globalIndexMeta().extraFieldIds()).containsExactly(idField.id());
+        }
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .executeLocal();
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(readIds(table, result)).containsExactly(1);
     }
 
     @Test
@@ -1756,17 +1768,36 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
-        GlobalIndexSingleColumnWriter writer =
-                (GlobalIndexSingleColumnWriter)
-                        GlobalIndexBuilderUtils.createIndexWriter(
-                                table,
-                                TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
-                                options);
-        for (int i = 0; i < vectors.length; i++) {
-            writer.write(vectors[i], i);
+        List<ResultEntry> entries;
+        if (indexFields.size() > 1 && indexFields.get(0).id() == vectorField.id()) {
+            GlobalIndexMultiColumnWriter writer =
+                    (GlobalIndexMultiColumnWriter)
+                            GlobalIndexBuilderUtils.createIndexWriter(
+                                    table,
+                                    TestVectorGlobalIndexerFactory.IDENTIFIER,
+                                    vectorField,
+                                    indexFields.subList(1, indexFields.size()),
+                                    options);
+            for (int i = 0; i < vectors.length; i++) {
+                writer.write(
+                        i, GenericRow.of(new GenericArray(vectors[i]), (int) (rowRange.from + i)));
+            }
+            entries = writer.finish();
+        } else {
+            // This path is used by the malformed-metadata test where the vector is deliberately
+            // not the primary field. The scan rejects it before constructing a reader.
+            GlobalIndexSingleColumnWriter writer =
+                    (GlobalIndexSingleColumnWriter)
+                            GlobalIndexBuilderUtils.createIndexWriter(
+                                    table,
+                                    TestVectorGlobalIndexerFactory.IDENTIFIER,
+                                    vectorField,
+                                    options);
+            for (int i = 0; i < vectors.length; i++) {
+                writer.write(vectors[i], i);
+            }
+            entries = writer.finish();
         }
-        List<ResultEntry> entries = writer.finish();
 
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(

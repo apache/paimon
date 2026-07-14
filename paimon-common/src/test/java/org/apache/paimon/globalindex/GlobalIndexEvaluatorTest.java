@@ -40,6 +40,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -608,15 +609,17 @@ class GlobalIndexEvaluatorTest {
     void testRedundantIsNotNullStillPrunedWithNullRejectingSibling() {
         executor = Executors.newFixedThreadPool(2);
         RowType rowType = rowType();
+        AtomicBoolean isNotNullVisited = new AtomicBoolean();
 
         // "a = 42 AND a IS NOT NULL": a = 42 is null-rejecting, so IS NOT NULL is redundant and
-        // pruned. If it were NOT pruned, the AND would intersect equal()'s {1,2,3} with
-        // visitIsNotNull()'s empty (unsupported here) and collapse to empty.
+        // pruned. An unsupported Optional.empty() child is ignored by AND evaluation, so the
+        // result alone cannot prove pruning; record whether the visitor is invoked.
         GlobalIndexReader equalOnlyReader =
                 new StubGlobalIndexReader(resultOf(1, 2, 3)) {
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(
                             FieldRef fieldRef) {
+                        isNotNullVisited.set(true);
                         // Simulate a reader that cannot serve IS NOT NULL.
                         return CompletableFuture.completedFuture(Optional.empty());
                     }
@@ -633,6 +636,7 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
+        assertThat(isNotNullVisited).isFalse();
         evaluator.close();
     }
 

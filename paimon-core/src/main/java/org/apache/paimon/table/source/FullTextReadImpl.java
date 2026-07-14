@@ -176,8 +176,7 @@ public class FullTextReadImpl implements FullTextRead {
                             split.fullTextIndexFiles(),
                             indexFileReader,
                             executor,
-                            GlobalIndexLiveRowFilter.forRange(
-                                    liveRows, split.rowRangeStart(), split.rowRangeEnd())));
+                            includeRowIds(split, liveRows)));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -191,6 +190,20 @@ public class FullTextReadImpl implements FullTextRead {
         }
 
         return result;
+    }
+
+    @Nullable
+    private static RoaringNavigableMap64 includeRowIds(
+            IndexFullTextSearchSplit split, @Nullable RoaringNavigableMap64 liveRows) {
+        RoaringNavigableMap64 include = new RoaringNavigableMap64();
+        for (Range range : split.searchRowRanges()) {
+            include.addRange(range);
+        }
+        if (liveRows != null) {
+            include.and(liveRows);
+        }
+        long physicalRowCount = split.rowRangeEnd() - split.rowRangeStart() + 1;
+        return include.getLongCardinality() == physicalRowCount ? null : include;
     }
 
     /**
