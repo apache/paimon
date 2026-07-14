@@ -56,9 +56,6 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                 .option(CoreOptions.BUCKET.key(), "1")
                 .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
                 .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
-                .option(
-                        "fields.score.pk-btree.index.options",
-                        "{\"sorted-index.records-per-range\":\"2\"}")
                 .build();
     }
 

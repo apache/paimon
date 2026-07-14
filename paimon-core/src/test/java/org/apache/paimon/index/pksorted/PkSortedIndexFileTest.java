@@ -24,7 +24,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -67,7 +66,7 @@ class PkSortedIndexFileTest {
     }
 
     @Test
-    void testBuildsSingleBTreeAndBitmapPayloadIgnoringRecordsPerRange() throws Exception {
+    void testBuildsSingleBTreeAndBitmapPayload() throws Exception {
         for (String indexType : Arrays.asList("btree", "bitmap")) {
             java.nio.file.Path indexDirectory = Files.createDirectory(tempPath.resolve(indexType));
             PkSortedIndexFile indexFile =
@@ -192,9 +191,7 @@ class PkSortedIndexFileTest {
     }
 
     private static Options options() {
-        Options options = new Options();
-        options.set(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE, 2L);
-        return options;
+        return new Options();
     }
 
     private static IndexPathFactory pathFactory(java.nio.file.Path directory) {

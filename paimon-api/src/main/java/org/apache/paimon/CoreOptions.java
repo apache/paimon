@@ -4333,7 +4333,12 @@ public class CoreOptions implements Serializable {
 
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
-        Options resolved = new Options(toConfiguration().toMap());
+        Options resolved = new Options();
+        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
+            if (entry.getKey().startsWith(algorithmPrefix)) {
+                resolved.setString(entry.getKey(), entry.getValue());
+            }
+        }
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);
         if (serialized == null || serialized.trim().isEmpty()) {
@@ -4357,9 +4362,7 @@ public class CoreOptions implements Serializable {
                     optionKey);
             checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
             String qualifiedKey =
-                    key.startsWith(algorithmPrefix)
-                                    || key.startsWith("sorted-index.")
-                                    || key.startsWith("fields.")
+                    key.startsWith(algorithmPrefix) || key.startsWith("fields.")
                             ? key
                             : algorithmPrefix + key;
             String previous = resolved.get(qualifiedKey);

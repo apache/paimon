@@ -52,27 +52,22 @@ class PrimaryKeySortedIndexOptionsTest {
     @Test
     void testResolvesBTreeIndexOptions() {
         Map<String, String> values = new HashMap<>();
-        values.put(
-                "fields.name.pk-btree.index.options",
-                "{\"block-size\":\"4 kb\",\"sorted-index.records-per-range\":\"10\"}");
+        values.put("sorted-index.records-per-range", "10");
+        values.put("fields.name.pk-btree.index.options", "{\"block-size\":\"4 kb\"}");
 
         Options options = new CoreOptions(values).primaryKeyBTreeIndexOptions("name");
 
         assertThat(options.get("btree-index.block-size")).isEqualTo("4 kb");
-        assertThat(options.get("sorted-index.records-per-range")).isEqualTo("10");
+        assertThat(options.get("sorted-index.records-per-range")).isNull();
     }
 
     @Test
     void testResolvesBitmapIndexOptions() {
         Map<String, String> values = new HashMap<>();
-        values.put(
-                "fields.status.pk-bitmap.index.options",
-                "{\"dictionary-block-size\":\"8 kb\","
-                        + "\"sorted-index.records-per-range\":\"20\"}");
+        values.put("fields.status.pk-bitmap.index.options", "{\"dictionary-block-size\":\"8 kb\"}");
 
         Options options = new CoreOptions(values).primaryKeyBitmapIndexOptions("status");
 
         assertThat(options.get("bitmap-index.dictionary-block-size")).isEqualTo("8 kb");
-        assertThat(options.get("sorted-index.records-per-range")).isEqualTo("20");
     }
 }

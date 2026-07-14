@@ -30,7 +30,6 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -259,9 +258,7 @@ class PkSortedIndexBuilderTest {
     }
 
     private static Options options() {
-        Options options = new Options();
-        options.set(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE, 2L);
-        return options;
+        return new Options();
     }
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {

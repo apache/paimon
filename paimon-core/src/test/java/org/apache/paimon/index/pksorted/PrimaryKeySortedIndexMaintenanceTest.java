@@ -323,12 +323,6 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
-        options.put(
-                "fields.itemId.pk-btree.index.options",
-                "{\"sorted-index.records-per-range\":\"2\"}");
-        options.put(
-                "fields.comment.pk-bitmap.index.options",
-                "{\"sorted-index.records-per-range\":\"2\"}");
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema schema =
