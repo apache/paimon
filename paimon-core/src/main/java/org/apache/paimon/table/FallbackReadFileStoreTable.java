@@ -212,10 +212,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
-        return newScan(FileStoreTable::newScan);
+        return newFallbackScan(FileStoreTable::newScan);
     }
 
-    public DataTableScan newScan(Function<FileStoreTable, DataTableScan> scanCreator) {
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return newFallbackScan(table -> table.newScan(snapshotReaderFactory));
+    }
+
+    public DataTableScan newFallbackScan(Function<FileStoreTable, DataTableScan> scanCreator) {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;

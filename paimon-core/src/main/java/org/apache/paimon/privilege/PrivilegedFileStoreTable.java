@@ -229,6 +229,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        privilegeChecker.assertCanSelect(identifier);
+        return wrapped.newScan(snapshotReaderFactory);
+    }
+
+    @Override
     public StreamDataTableScan newStreamScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newStreamScan();

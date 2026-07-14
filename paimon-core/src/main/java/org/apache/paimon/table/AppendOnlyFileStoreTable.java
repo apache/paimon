@@ -137,7 +137,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
-        return AppendBatchTableScan.create(this);
+        return newScan(FileStoreTable::newSnapshotReader);
+    }
+
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return AppendBatchTableScan.create(this, snapshotReaderFactory.create(this));
     }
 
     @Override

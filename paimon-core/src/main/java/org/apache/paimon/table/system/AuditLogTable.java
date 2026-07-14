@@ -48,7 +48,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -195,8 +194,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        return new AuditLogBatchScan(
-                AppendBatchTableScan.create(wrapped, this::newScanSnapshotReader));
+        return new AuditLogBatchScan(wrapped.newScan(this::newScanSnapshotReader));
     }
 
     private SnapshotReader newScanSnapshotReader(FileStoreTable table) {
