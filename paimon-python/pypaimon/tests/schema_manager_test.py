@@ -23,7 +23,10 @@ from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.options import Options
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 
 
 class TestSchemaManagerBranch(unittest.TestCase):
@@ -83,6 +86,63 @@ class TestSchemaManagerBranch(unittest.TestCase):
         schema_manager = SchemaManager(self.file_io, self.table_path, branch_name)
         expected_path = f"{self.table_path}/branch/branch-{branch_name}"
         self.assertEqual(schema_manager.branch_path, expected_path)
+
+
+class TestBlobPartitionValidation(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.file_io = FileIO.get(self.temp_dir, Options({}))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(blob_type):
+        return Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT")),
+                DataField(1, "payload", blob_type),
+            ],
+            partition_keys=["payload"],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+
+    def test_create_table_rejects_blob_partition_key(self):
+        blob_types = [
+            AtomicType("BLOB"),
+            ArrayType(True, AtomicType("BLOB")),
+        ]
+        for index, blob_type in enumerate(blob_types):
+            with self.subTest(blob_type=blob_type):
+                manager = SchemaManager(
+                    self.file_io,
+                    f"{self.temp_dir}/test_db.db/create_{index}",
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "can not be part of partition keys",
+                ):
+                    manager.create_table(self._schema(blob_type))
+
+    def test_commit_rejects_array_blob_partition_key(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/commit",
+        )
+        table_schema = TableSchema.from_schema(
+            0,
+            self._schema(ArrayType(True, AtomicType("BLOB"))),
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "can not be part of partition keys",
+        ):
+            manager.commit(table_schema)
 
 
 if __name__ == '__main__':

@@ -71,6 +71,43 @@ def _to_url(path):
     return str(path) if path else path
 
 
+class RowUtilsTest(unittest.TestCase):
+
+    def test_blob_validation_only_scans_blob_fields(self):
+        from pypaimon.write.row_utils import value_for_arrow
+
+        class TrackingList(list):
+            def __init__(self, values):
+                super().__init__(values)
+                self.iterations = 0
+
+            def __iter__(self):
+                self.iterations += 1
+                return super().__iter__()
+
+        normal_values = TrackingList([1, 2, 3])
+        normal_field = DataField(
+            0,
+            "values",
+            ArrayType(True, AtomicType("INT")),
+        )
+        self.assertIs(
+            value_for_arrow(normal_values, normal_field),
+            normal_values,
+        )
+        self.assertEqual(normal_values.iterations, 0)
+
+        blob_values = TrackingList([BlobData(b"payload")])
+        blob_field = DataField(
+            1,
+            "payloads",
+            ArrayType(True, AtomicType("BLOB")),
+        )
+        with self.assertRaisesRegex(ValueError, "Blob values cannot be converted"):
+            value_for_arrow(blob_values, blob_field)
+        self.assertEqual(blob_values.iterations, 1)
+
+
 class BlobTest(unittest.TestCase):
     def setUp(self):
         """Set up test environment with temporary file."""
@@ -1748,6 +1785,129 @@ class BlobEndToEndTest(unittest.TestCase):
             [b"last"],
         ])
         reader.close()
+
+    def test_array_blob_parallelism_uses_concurrent_resolver(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "array_blob_parallel.blob")
+        fields = [DataField(
+            0,
+            "blob_array",
+            ArrayType(True, AtomicType("BLOB")),
+        )]
+        with open(blob_file_path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [[BlobData(b"a"), None, BlobData(b"bc")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.add_element(GenericRow(
+                [[BlobData(b"def")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.close()
+
+        calls = []
+        range_reads = []
+        original_read = file_io.read_blobs_concurrent
+        original_range_read = file_io.read_file_range
+
+        def read_blobs_concurrent(blobs, parallelism):
+            calls.append((list(blobs), parallelism))
+            return original_read(blobs, parallelism)
+
+        def read_file_range(path, offset, length):
+            range_reads.append((path, offset, length))
+            return original_range_read(path, offset, length)
+
+        file_io.read_blobs_concurrent = read_blobs_concurrent
+        file_io.read_file_range = read_file_range
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            blob_parallelism=4,
+        )
+
+        batch = reader.read_arrow_batch()
+
+        self.assertEqual(
+            batch.column(0).to_pylist(),
+            [[b"a", None, b"bc"], [b"def"]],
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0][0]), 3)
+        self.assertEqual(calls[0][1], 4)
+        self.assertEqual(len(range_reads), 1)
+        reader.close()
+
+    def test_array_blob_serial_read_uses_single_payload_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "array_blob_serial.blob")
+        fields = [DataField(
+            0,
+            "blob_array",
+            ArrayType(True, AtomicType("BLOB")),
+        )]
+        with open(blob_file_path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [[BlobData(b"a"), BlobData(b"bc"), BlobData(b"def")]],
+                fields,
+                RowKind.INSERT,
+            ))
+            writer.close()
+
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_array"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        blob_lengths = list(reader.blob_lengths)
+        blob_offsets = list(reader.blob_offsets)
+        reader.close()
+
+        class TrackingStream:
+            def __init__(self, path):
+                self.stream = open(path, 'rb')
+                self.read_sizes = []
+
+            def seek(self, position, whence=0):
+                return self.stream.seek(position, whence)
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                return self.stream.read(size)
+
+            def close(self):
+                self.stream.close()
+
+        stream = TrackingStream(blob_file_path)
+        iterator = BlobRecordIterator(
+            file_io,
+            blob_file_path,
+            blob_lengths,
+            blob_offsets,
+            fields[0],
+            stream,
+        )
+
+        blobs = next(iterator).values[0]
+
+        self.assertEqual([blob.to_data() for blob in blobs], [b"a", b"bc", b"def"])
+        self.assertEqual(stream.read_sizes[-1], 6)
+        stream.close()
 
     def test_file_io_write_array_blob(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))

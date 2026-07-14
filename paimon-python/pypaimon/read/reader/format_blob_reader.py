@@ -97,7 +97,9 @@ class FormatBlobReader(RecordBatchReader):
             batch_iterator = BlobRecordIterator(
                 self._file_io, self.file_path, self.blob_lengths,
                 self.blob_offsets, self._data_field, self._input_stream,
-                blob_as_descriptor=self._blob_as_descriptor
+                blob_as_descriptor=(
+                    self._blob_as_descriptor or self._blob_parallelism > 1
+                )
             )
             self._blob_iterator = iter(batch_iterator)
         read_size = self._batch_size
@@ -120,7 +122,15 @@ class FormatBlobReader(RecordBatchReader):
                 blob = blob_row.values[0]
                 for field_name in self._fields:
                     if self._is_array_blob:
-                        pydict_data[field_name].append(self._array_value_for_arrow(blob))
+                        row_index = len(pydict_data[field_name])
+                        pydict_data[field_name].append(
+                            self._array_value_for_arrow(
+                                blob,
+                                field_name,
+                                row_index,
+                                blobs_to_resolve,
+                            )
+                        )
                     else:
                         if blob is None:
                             pydict_data[field_name].append(None)
@@ -133,7 +143,7 @@ class FormatBlobReader(RecordBatchReader):
                         elif self._blob_parallelism > 1:
                             idx = len(pydict_data[field_name])
                             pydict_data[field_name].append(None)
-                            blobs_to_resolve.append((field_name, idx, blob))
+                            blobs_to_resolve.append((field_name, idx, None, blob))
                         else:
                             pydict_data[field_name].append(blob.to_data())
 
@@ -170,12 +180,22 @@ class FormatBlobReader(RecordBatchReader):
                 return None
 
     def _resolve_blobs_concurrent(self, pydict_data, blobs_to_resolve):
-        blobs = [item[2] for item in blobs_to_resolve]
+        blobs = [item[3] for item in blobs_to_resolve]
         results = self._file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
-        for (field_name, idx, _), data in zip(blobs_to_resolve, results):
-            pydict_data[field_name][idx] = data
+        for target, data in zip(blobs_to_resolve, results):
+            field_name, row_index, element_index, _ = target
+            if element_index is None:
+                pydict_data[field_name][row_index] = data
+            else:
+                pydict_data[field_name][row_index][element_index] = data
 
-    def _array_value_for_arrow(self, blob_array):
+    def _array_value_for_arrow(
+        self,
+        blob_array,
+        field_name,
+        row_index,
+        blobs_to_resolve,
+    ):
         if blob_array is None:
             return None
         if blob_array is Blob.ARRAY_PLACE_HOLDER:
@@ -183,11 +203,16 @@ class FormatBlobReader(RecordBatchReader):
                 "Blob placeholder is not supported by FormatBlobReader yet."
             )
         result = []
-        for blob in blob_array:
+        for element_index, blob in enumerate(blob_array):
             if blob is None:
                 result.append(None)
             elif self._blob_as_descriptor:
                 result.append(blob.to_descriptor().serialize())
+            elif self._blob_parallelism > 1:
+                result.append(None)
+                blobs_to_resolve.append(
+                    (field_name, row_index, element_index, blob)
+                )
             else:
                 result.append(blob.to_data())
         return result
@@ -397,8 +422,16 @@ class BlobRecordIterator:
                     "ARRAY<BLOB> element lengths do not match the payload data length."
                 )
 
+            element_data = None
+            if not self.blob_as_descriptor:
+                stream.seek(element_data_start)
+                element_data = self._read_fully_from(stream, element_data_length)
+                if len(element_data) != element_data_length:
+                    raise IOError("Invalid ARRAY<BLOB> payload: cannot read element data")
+
             blobs = []
             element_offset = element_data_start
+            data_offset = 0
             for element_length in element_lengths:
                 if element_length == self.ARRAY_NULL_ELEMENT_LENGTH:
                     blobs.append(None)
@@ -408,12 +441,11 @@ class BlobRecordIterator:
                         Blob.from_file(self.file_io, self.file_path, element_offset, element_length)
                     )
                 else:
-                    stream.seek(element_offset)
-                    data = self._read_fully_from(stream, element_length)
-                    if len(data) != element_length:
-                        raise IOError("Invalid ARRAY<BLOB> payload: cannot read element data")
-                    blobs.append(Blob.from_data(data))
+                    blobs.append(Blob.from_data(
+                        element_data[data_offset:data_offset + element_length]
+                    ))
                 element_offset += element_length
+                data_offset += element_length
             return blobs
         finally:
             if close_stream:

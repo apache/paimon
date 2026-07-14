@@ -25,10 +25,6 @@ from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.vector import Vector
 
 
-def is_blob_field(field: DataField) -> bool:
-    return is_blob_file_field(field)
-
-
 def row_to_named_values(
         row: InternalRow, table_fields: List[DataField]) -> Dict[str, Any]:
     if hasattr(row, 'fields') and getattr(row, 'fields') is not None:
@@ -65,10 +61,13 @@ def require_columns(
         )
 
 
-def value_for_arrow(value: Any) -> Any:
+def value_for_arrow(value: Any, field: DataField) -> Any:
     if isinstance(value, Vector):
         return value.to_list()
-    if _contains_blob_value(value):
+    if isinstance(value, Blob) or (
+        is_blob_file_field(field)
+        and _contains_blob_value(value)
+    ):
         raise ValueError(
             "Blob values cannot be converted to Arrow without materializing "
             "the stream. Use a Row-aware blob write path."
@@ -81,12 +80,6 @@ def _contains_blob_value(value: Any) -> bool:
         return True
     if isinstance(value, (list, tuple)):
         return any(_contains_blob_value(item) for item in value)
-    if isinstance(value, dict):
-        return any(
-            _contains_blob_value(item)
-            for pair in value.items()
-            for item in pair
-        )
     return False
 
 
@@ -98,7 +91,7 @@ def row_values_to_arrow_table(
     selected_fields = [field_by_name[name] for name in column_names]
     schema = PyarrowFieldParser.from_paimon_schema(selected_fields)
     data = {
-        name: [value_for_arrow(values_by_name[name])]
+        name: [value_for_arrow(values_by_name[name], field_by_name[name])]
         for name in column_names
     }
     return pa.Table.from_pydict(data, schema=schema)

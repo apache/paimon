@@ -258,7 +258,7 @@ class TableUpdateByRowId:
             arrays.append(
                 pa.array(
                     [
-                        value_for_arrow(values_by_name[col_name])
+                        value_for_arrow(values_by_name[col_name], table_field)
                         for _, values_by_name in row_entries
                     ],
                     type=arrow_field.type,

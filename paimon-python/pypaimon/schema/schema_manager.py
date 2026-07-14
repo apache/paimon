@@ -348,7 +348,12 @@ def _assert_not_renaming_blob_column(
             )
 
 
-def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: List[str]):
+def _validate_blob_fields(
+    fields: List[DataField],
+    options: dict,
+    primary_keys: List[str],
+    partition_keys: List[str],
+):
     """Validate blob field configurations in the schema."""
     if options is None:
         options = {}
@@ -418,6 +423,11 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
 
         if primary_keys:
             raise ValueError("BLOB or ARRAY<BLOB> type is not supported with primary key.")
+
+        if blob_field_names.intersection(partition_keys):
+            raise ValueError(
+                "The BLOB or ARRAY<BLOB> type column can not be part of partition keys."
+            )
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
@@ -583,14 +593,24 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
-            _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
+            _validate_blob_fields(
+                schema.fields,
+                schema.options,
+                schema.primary_keys,
+                schema.partition_keys,
+            )
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
-        _validate_blob_fields(new_schema.fields, new_schema.options, new_schema.primary_keys)
+        _validate_blob_fields(
+            new_schema.fields,
+            new_schema.options,
+            new_schema.primary_keys,
+            new_schema.partition_keys,
+        )
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))

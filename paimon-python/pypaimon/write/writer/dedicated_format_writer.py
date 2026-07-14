@@ -37,7 +37,6 @@ from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
-    value_for_arrow,
 )
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -308,7 +307,7 @@ class DedicatedFormatWriter(DataWriter):
                 return value.view_struct.serialize()
             return value
 
-        return value_for_arrow(value)
+        return value
 
     def prepare_commit(self) -> List[DataFileMeta]:
         # Close any remaining data
