@@ -80,7 +80,7 @@ public class COSNFileIO extends HadoopCompliantFileIO {
                         key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
                     }
                     hadoopOptions.set(key, value);
-                    LOG.warn(
+                    LOG.debug(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
                             hadoopOptions.get(key));

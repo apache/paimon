@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -139,14 +141,34 @@ public abstract class AbstractFlinkTableFactory
 
     Table buildPaimonTable(DynamicTableFactory.Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
+        // matches Flink's schema (asserted below); also lets the preflight treat a
+        // dynamic option that restates a normalized/default value as a no-op
+        Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
+
+        // FormatCatalogTable.getOptions() drops 'type'; restore the format table's
+        // effective type so a no-op 'type'='format-table' isn't seen as a change
+        Map<String, String> originOptions = origin.getOptions();
+        if (origin instanceof FormatCatalogTable) {
+            originOptions = new HashMap<>(originOptions);
+            originOptions.putIfAbsent(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+        }
+        Map<String, String> preflightOptions = originOptions;
 
         Map<String, String> dynamicOptions = getDynamicConfigOptions(context);
         dynamicOptions.forEach(
                 (key, newValue) -> {
-                    String oldValue = origin.getOptions().get(key);
-                    if (!Objects.equals(oldValue, newValue)) {
+                    String oldValue = preflightOptions.get(key);
+                    boolean unchanged =
+                            Objects.equals(oldValue, newValue)
+                                    || SchemaManager.isUnchangedNormalizedKey(
+                                            key,
+                                            oldValue,
+                                            newValue,
+                                            schema.primaryKeys(),
+                                            schema.partitionKeys());
+                    if (!unchanged) {
                         SchemaManager.checkAlterTableOption(
-                                origin.getOptions(), key, oldValue, newValue);
+                                preflightOptions, key, oldValue, newValue);
                     }
                 });
         Map<String, String> newOptions = new HashMap<>();
@@ -184,8 +206,6 @@ public abstract class AbstractFlinkTableFactory
             table.fileIO().setRuntimeContext(runtimeContext);
         }
         // notice that the Paimon table schema must be the same with the Flink's
-        Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
-
         RowType rowType = toLogicalType(schema.rowType());
         List<String> partitionKeys = schema.partitionKeys();
         List<String> primaryKeys = schema.primaryKeys();

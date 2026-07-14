@@ -28,11 +28,13 @@ import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
 import org.apache.paimon.table.source.splitread.IncrementalDiffReadProvider;
 import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.PrimaryKeyIndexedSplitReadProvider;
 import org.apache.paimon.table.source.splitread.PrimaryKeyTableRawFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
@@ -67,6 +69,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         super(schema);
         this.readProviders =
                 Arrays.asList(
+                        new PrimaryKeyIndexedSplitReadProvider(batchRawReadSupplier, this::config),
                         new PrimaryKeyTableRawFileSplitReadProvider(
                                 batchRawReadSupplier, this::config),
                         new MergeFileSplitReadProvider(mergeReadSupplier, this::config),
@@ -93,9 +96,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         }
         if (topN != null) {
             read = read.withTopN(topN);
-        }
-        if (limit != null) {
-            read = read.withLimit(limit);
         }
         read.withFilter(predicate).withIOManager(ioManager);
     }
@@ -129,9 +129,18 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public InnerTableRead withLimit(int limit) {
-        initialized().forEach(r -> r.withLimit(limit));
         this.limit = limit;
         return this;
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
+        return LimitRecordReader.limit(super.createReader(splits), limit);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        return LimitRecordReader.limit(super.createReader(split), limit);
     }
 
     @Override

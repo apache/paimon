@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.metadata;
 
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -31,6 +32,7 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
@@ -286,6 +288,26 @@ class IcebergDataFieldTest {
         assertThat(mapType.key()).isEqualTo("string");
         assertThat(mapType.value()).isEqualTo("int");
         assertThat(mapType.valueRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Test multiset type conversion")
+    void testMultisetTypeConversion() {
+        DataField multisetField =
+                new DataField(
+                        1,
+                        "multiset",
+                        new MultisetType(false, new VarCharType(false, VarCharType.MAX_LENGTH)));
+        IcebergDataField icebergMultiset = new IcebergDataField(multisetField);
+
+        assertThat(icebergMultiset.type()).isInstanceOf(IcebergMapType.class);
+        IcebergMapType mapType = (IcebergMapType) icebergMultiset.type();
+        assertThat(mapType.type()).isEqualTo("map");
+        assertThat(mapType.key()).isEqualTo("string");
+        assertThat(mapType.value()).isEqualTo("int");
+        assertThat(mapType.valueRequired()).isTrue();
+        assertThat(mapType.keyId()).isEqualTo(SpecialFields.getMapKeyFieldId(1, 1));
+        assertThat(mapType.valueId()).isEqualTo(SpecialFields.getMapValueFieldId(1, 1));
     }
 
     @Test

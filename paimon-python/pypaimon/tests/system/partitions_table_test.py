@@ -21,11 +21,17 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.schema.data_types import DataField
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.system.partitions_table import PartitionsTable
 
 
@@ -86,7 +92,7 @@ class PartitionsTableTest(unittest.TestCase):
             ("last_update_time", True), ("created_at", True),
             ("created_by", True), ("updated_by", True),
             ("options", True), ("total_buckets", False),
-            ("done", False),
+            ("done", False), ("deleted_record_count", True),
         ]
         self.assertEqual([n for n, _ in expected],
                          [f.name for f in row_type.fields])
@@ -122,10 +128,69 @@ class PartitionsTableTest(unittest.TestCase):
         # FileSystem catalog does not maintain a "done" flag.
         for done in arrow_table.column("done").to_pylist():
             self.assertFalse(done)
+        for count in arrow_table.column("deleted_record_count").to_pylist():
+            self.assertEqual(0, count)
         # Catalog-managed fields are not surfaced by the filesystem path.
         for field in ("created_by", "updated_by", "options", "created_at"):
             for value in arrow_table.column(field).to_pylist():
                 self.assertIsNone(value)
+
+    def test_aggregates_deleted_record_count(self):
+        self._create_partitioned_table()
+        self._write_two_partitions()
+
+        table = self.catalog.get_table("db.t$partitions")
+        partition_fields = table.base_table.partition_keys_fields
+        entries = [
+            IndexManifestEntry(
+                kind=0,
+                partition=GenericRow(["2024-01-01"], partition_fields),
+                bucket=0,
+                index_file=IndexFileMeta(
+                    IndexManifestFile.DELETION_VECTORS_INDEX,
+                    "dv-1",
+                    1,
+                    2,
+                    dv_ranges={
+                        "file-1": DeletionVectorMeta("file-1", 0, 1, 1),
+                        "file-2": DeletionVectorMeta("file-2", 1, 1, 2),
+                    },
+                ),
+            ),
+            IndexManifestEntry(
+                kind=0,
+                partition=GenericRow(["2024-01-02"], partition_fields),
+                bucket=0,
+                index_file=IndexFileMeta(
+                    IndexManifestFile.DELETION_VECTORS_INDEX,
+                    "dv-2",
+                    1,
+                    1,
+                    dv_ranges={
+                        "legacy-file": DeletionVectorMeta(
+                            "legacy-file", 0, 1, None),
+                    },
+                ),
+            ),
+        ]
+
+        with patch.object(
+            table.base_table.options,
+            "deletion_vectors_enabled",
+            return_value=True,
+        ), patch(
+            "pypaimon.table.system.partitions_table.IndexFileHandler.scan",
+            return_value=entries,
+        ):
+            arrow_table = _read(table)
+
+        partitions = arrow_table.column("partition").to_pylist()
+        deleted_counts = dict(zip(
+            partitions,
+            arrow_table.column("deleted_record_count").to_pylist(),
+        ))
+        self.assertEqual(3, deleted_counts["dt=2024-01-01"])
+        self.assertIsNone(deleted_counts["dt=2024-01-02"])
 
 
 if __name__ == "__main__":

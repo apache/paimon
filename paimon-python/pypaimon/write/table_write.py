@@ -120,31 +120,26 @@ class TableWrite:
             hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
                 and ``"off"`` write append-only HASH_FIXED tables directly
                 and reject HASH_FIXED primary-key tables. ``"map_groups"``
-                preserves the legacy small-file optimization and its single
-                group memory bound for HASH_FIXED primary-key tables.
+                writes each HASH_FIXED primary-key group in one task and
+                preserves the legacy single-group memory bound.
             static_partition: Optional partition spec to overwrite. When set,
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        from pypaimon.ray.shuffle import maybe_apply_repartition
-        from pypaimon.write.ray_datasink import PaimonDatasink
-
-        dataset = maybe_apply_repartition(
-            dataset, self.table, hash_fixed_precluster)
+        from pypaimon.write.ray_datasink import write_paimon_dataset
 
         overwrite_partition = self.static_partition
         if static_partition is not None:
             overwrite_partition = static_partition
 
-        datasink = PaimonDatasink(
+        write_paimon_dataset(
+            dataset,
             self.table,
             overwrite=overwrite,
             static_partition=overwrite_partition,
-        )
-        dataset.write_datasink(
-            datasink,
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
+            hash_fixed_precluster=hash_fixed_precluster,
         )
 
     def close(self):

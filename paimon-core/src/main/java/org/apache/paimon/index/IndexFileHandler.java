@@ -25,6 +25,8 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.pksorted.PkSortedIndexFile;
+import org.apache.paimon.index.pkvector.PkVectorAnnSegmentFile;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestEntrySerializer;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -84,6 +86,14 @@ public class IndexFileHandler {
                 fileIO, pathFactories.get(partition, bucket), dvTargetFileSize, dvBitmap64);
     }
 
+    public PkVectorAnnSegmentFile pkVectorAnnSegment(BinaryRow partition, int bucket) {
+        return new PkVectorAnnSegmentFile(fileIO, pathFactories.get(partition, bucket));
+    }
+
+    public PkSortedIndexFile pkSortedIndex(BinaryRow partition, int bucket) {
+        return new PkSortedIndexFile(fileIO, pathFactories.get(partition, bucket));
+    }
+
     public Optional<IndexFileMeta> scanHashIndex(
             Snapshot snapshot, BinaryRow partition, int bucket) {
         List<IndexFileMeta> result = scan(snapshot, HASH_INDEX, partition, bucket);
@@ -136,6 +146,23 @@ public class IndexFileHandler {
             if (file.bucket() == bucket) {
                 result.add(file.indexFile());
             }
+        }
+        return result;
+    }
+
+    public List<IndexFileMeta> scanSourceIndexes(
+            Snapshot snapshot, BinaryRow partition, int bucket) {
+        List<IndexFileMeta> result = new ArrayList<>();
+        for (IndexManifestEntry entry :
+                scan(
+                        snapshot,
+                        candidate ->
+                                candidate.partition().equals(partition)
+                                        && candidate.bucket() == bucket
+                                        && candidate.indexFile().globalIndexMeta() != null
+                                        && candidate.indexFile().globalIndexMeta().sourceMeta()
+                                                != null)) {
+            result.add(entry.indexFile());
         }
         return result;
     }

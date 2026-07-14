@@ -56,8 +56,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SparkVectorReadImpl}. */
-public class SparkVectorReadImplTest {
+/** Tests for {@link SparkDataEvolutionVectorRead}. */
+public class SparkDataEvolutionVectorReadTest {
 
     @Test
     public void testRawSearchUsesSparkPath() {
@@ -116,7 +116,7 @@ public class SparkVectorReadImplTest {
         return splits;
     }
 
-    private static class TestingSparkVectorRead extends SparkVectorReadImpl {
+    private static class TestingSparkVectorRead extends SparkDataEvolutionVectorRead {
 
         private boolean rawSparkPathUsed;
 
@@ -158,7 +158,7 @@ public class SparkVectorReadImplTest {
         }
     }
 
-    private static class DistributedRefineSparkVectorRead extends SparkVectorReadImpl {
+    private static class DistributedRefineSparkVectorRead extends SparkDataEvolutionVectorRead {
 
         private int sparkParallelism;
         private List<Long> rawSearchCandidateRows = Collections.emptyList();
@@ -228,7 +228,7 @@ public class SparkVectorReadImplTest {
         }
     }
 
-    private static class RecordingSparkVectorRead extends SparkVectorReadImpl {
+    private static class RecordingSparkVectorRead extends SparkDataEvolutionVectorRead {
 
         private final AtomicInteger nextTask = new AtomicInteger();
         private final List<Range> rawSearchRanges =

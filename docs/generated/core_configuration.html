@@ -1200,10 +1200,40 @@ This config option does not affect the default filesystem metastore.</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>pk-bitmap.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns indexed by primary-key Bitmap indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-btree.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns indexed by primary-key BTree indexes.</td>
+        </tr>
+        <tr>
             <td><h5>pk-clustering-override</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. The first release supports exactly one column.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.compaction.level-fanout</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>Number of similarly sized ANN segments that triggers a rebuild and the maximum row-count ratio within one size tier.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-vector.index.compaction.stale-ratio-threshold</h5></td>
+            <td style="word-wrap: break-word;">0.2</td>
+            <td>Double</td>
+            <td>Ratio of rows belonging to inactive source files that triggers an ANN segment rebuild.</td>
         </tr>
         <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>

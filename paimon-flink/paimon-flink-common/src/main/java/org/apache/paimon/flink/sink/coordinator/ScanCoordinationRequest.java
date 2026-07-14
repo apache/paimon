@@ -29,16 +29,19 @@ public class ScanCoordinationRequest implements CoordinationRequest {
     private final int bucket;
     private final boolean scanDynamicBucketIndex;
     private final boolean scanDeleteVectorsIndex;
+    private final boolean scanVectorIndexPayloads;
 
     public ScanCoordinationRequest(
             byte[] partition,
             int bucket,
             boolean scanDynamicBucketIndex,
-            boolean scanDeleteVectorsIndex) {
+            boolean scanDeleteVectorsIndex,
+            boolean scanVectorIndexPayloads) {
         this.partition = partition;
         this.bucket = bucket;
         this.scanDynamicBucketIndex = scanDynamicBucketIndex;
         this.scanDeleteVectorsIndex = scanDeleteVectorsIndex;
+        this.scanVectorIndexPayloads = scanVectorIndexPayloads;
     }
 
     public byte[] partition() {
@@ -55,5 +58,9 @@ public class ScanCoordinationRequest implements CoordinationRequest {
 
     public boolean scanDeleteVectorsIndex() {
         return scanDeleteVectorsIndex;
+    }
+
+    public boolean scanVectorIndexPayloads() {
+        return scanVectorIndexPayloads;
     }
 }

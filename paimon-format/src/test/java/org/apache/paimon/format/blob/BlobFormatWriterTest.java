@@ -21,6 +21,7 @@ package org.apache.paimon.format.blob;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -241,6 +242,114 @@ public class BlobFormatWriterTest {
         }
     }
 
+    @Test
+    public void testBlobFetchMetricReporterForSuccessAndNullWritten(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        false,
+                        true,
+                        metricReporter);
+
+        writer.addElement(GenericRow.of(Blob.fromData("image".getBytes())));
+        writer.addElement(
+                GenericRow.of(
+                        new BlobRef(
+                                failingHttpReader(500),
+                                new BlobDescriptor("https://example.com/error.jpg", 0, -1))));
+        writer.close();
+
+        assertThat(metricReporter.success).isEqualTo(1);
+        assertThat(metricReporter.successBytes).isEqualTo(5);
+        assertThat(metricReporter.fetchFailureNullWritten).isEqualTo(1);
+        assertThat(metricReporter.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testBlobFetchMetricReporterForUnhandledFailure(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        false,
+                        false,
+                        metricReporter);
+
+        assertThatThrownBy(
+                        () ->
+                                writer.addElement(
+                                        GenericRow.of(
+                                                new BlobRef(
+                                                        failingHttpReader(500),
+                                                        new BlobDescriptor(
+                                                                "https://example.com/error.jpg",
+                                                                0,
+                                                                -1)))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("HTTP error code: 500");
+        assertThat(metricReporter.failure).isEqualTo(1);
+        assertThat(metricReporter.fetchFailureNullWritten).isEqualTo(0);
+    }
+
+    @Test
+    public void testBlobFetchMetricReporterForPreCheckedMissingFile(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        UriReaderFactory uriReaderFactory =
+                new UriReaderFactory(CatalogContext.create(new Options()));
+        byte[] descriptorBytes =
+                new BlobDescriptor("https://example.com/missing.jpg", 0, -1).serialize();
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        true,
+                        false,
+                        metricReporter);
+
+        writer.addElement(new DescriptorBytesRow(descriptorBytes, uriReaderFactory, true));
+        writer.close();
+
+        assertThat(metricReporter.missingFileNullWritten).isEqualTo(1);
+        assertThat(metricReporter.httpNotFound).isEqualTo(1);
+    }
+
+    @Test
+    public void testBlobFetchMetricReporterIgnoresUserNull(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        true,
+                        false,
+                        metricReporter);
+
+        writer.addElement(GenericRow.of((Object) null));
+        writer.close();
+
+        assertThat(metricReporter.missingFileNullWritten).isEqualTo(0);
+        assertThat(metricReporter.httpNotFound).isEqualTo(0);
+    }
+
     private static void assertBlobPayload(Blob blob, byte[] expected) throws Exception {
         try (SeekableInputStream blobIn = blob.newInputStream()) {
             byte[] actual = new byte[expected.length];
@@ -261,10 +370,17 @@ public class BlobFormatWriterTest {
     private static final class DescriptorBytesRow implements InternalRow {
         private final byte[] descriptorBytes;
         private final UriReaderFactory uriReaderFactory;
+        private final boolean nullAt;
 
         private DescriptorBytesRow(byte[] descriptorBytes, UriReaderFactory uriReaderFactory) {
+            this(descriptorBytes, uriReaderFactory, false);
+        }
+
+        private DescriptorBytesRow(
+                byte[] descriptorBytes, UriReaderFactory uriReaderFactory, boolean nullAt) {
             this.descriptorBytes = descriptorBytes;
             this.uriReaderFactory = uriReaderFactory;
+            this.nullAt = nullAt;
         }
 
         @Override
@@ -282,7 +398,7 @@ public class BlobFormatWriterTest {
 
         @Override
         public boolean isNullAt(int pos) {
-            return false;
+            return nullAt;
         }
 
         @Override
@@ -346,7 +462,7 @@ public class BlobFormatWriterTest {
 
         @Override
         public byte[] getBinary(int pos) {
-            throw unsupported();
+            return descriptorBytes;
         }
 
         @Override
@@ -372,6 +488,40 @@ public class BlobFormatWriterTest {
         @Override
         public InternalRow getRow(int pos, int numFields) {
             throw unsupported();
+        }
+    }
+
+    private static final class TestingBlobFetchMetricReporter implements BlobFetchMetricReporter {
+
+        private int success;
+        private long successBytes;
+        private int missingFileNullWritten;
+        private int httpNotFound;
+        private int fetchFailureNullWritten;
+        private int failure;
+
+        @Override
+        public void recordSuccess(long bytes) {
+            success++;
+            successBytes += bytes;
+        }
+
+        @Override
+        public void recordMissingFileNullWritten(boolean httpNotFound) {
+            missingFileNullWritten++;
+            if (httpNotFound) {
+                this.httpNotFound++;
+            }
+        }
+
+        @Override
+        public void recordFetchFailureNullWritten(Throwable throwable) {
+            fetchFailureNullWritten++;
+        }
+
+        @Override
+        public void recordFetchFailure(Throwable throwable) {
+            failure++;
         }
     }
 }

@@ -40,14 +40,14 @@ import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
-/** Implementation for {@link VectorRead}. */
-public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
+/** Data-evolution implementation for {@link VectorRead}. */
+public class DataEvolutionVectorRead extends AbstractVectorRead implements VectorRead {
 
     private static final long serialVersionUID = 1L;
 
     protected final float[] vector;
 
-    public VectorReadImpl(
+    public DataEvolutionVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,

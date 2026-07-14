@@ -28,9 +28,9 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DataEvolutionVectorRead;
 import org.apache.paimon.table.source.IndexVectorSearchSplit;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
-import org.apache.paimon.table.source.VectorReadImpl;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -51,14 +51,14 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
 /**
- * Spark-aware {@link VectorReadImpl} that distributes grouped vector index evaluation across the
- * Spark cluster instead of evaluating them with the local thread pool.
+ * Spark-aware {@link DataEvolutionVectorRead} that distributes grouped vector index evaluation
+ * across the Spark cluster instead of evaluating them with the local thread pool.
  */
-public class SparkVectorReadImpl extends VectorReadImpl {
+public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
     private static final long serialVersionUID = 1L;
 
-    public SparkVectorReadImpl(
+    public SparkDataEvolutionVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,

@@ -19,6 +19,7 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.EmptyStatsExtractor;
 import org.apache.paimon.format.FileFormat;
@@ -52,6 +53,7 @@ public class BlobFileFormat extends FileFormat {
     private final boolean blobAsDescriptor;
     private boolean writeNullOnMissingFile;
     private boolean writeNullOnFetchFailure;
+    private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     @Nullable public BlobConsumer writeConsumer;
 
@@ -78,6 +80,10 @@ public class BlobFileFormat extends FileFormat {
 
     public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
         this.writeConsumer = writeConsumer;
+    }
+
+    public void setBlobFetchMetricReporter(BlobFetchMetricReporter blobFetchMetricReporter) {
+        this.blobFetchMetricReporter = blobFetchMetricReporter;
     }
 
     @Override
@@ -119,7 +125,12 @@ public class BlobFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
             return new BlobFormatWriter(
-                    out, writeConsumer, type, writeNullOnMissingFile, writeNullOnFetchFailure);
+                    out,
+                    writeConsumer,
+                    type,
+                    writeNullOnMissingFile,
+                    writeNullOnFetchFailure,
+                    blobFetchMetricReporter);
         }
     }
 

@@ -241,6 +241,7 @@ public class IndexManifestFileHandler {
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
                     if (addedMeta == null
+                            || (retainedMeta.sourceMeta() != null && addedMeta.sourceMeta() != null)
                             || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
                             || (Arrays.equals(
                                             retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
