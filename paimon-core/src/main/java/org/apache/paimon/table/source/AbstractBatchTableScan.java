@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -27,8 +26,6 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.FallbackReadFileStoreTable;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -47,7 +44,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.function.Function;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
@@ -55,12 +51,6 @@ import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractBatchTableScan.class);
-
-    /** Validates {@link CoreOptions#SCAN_BUCKET} for primary-key fixed-bucket tables. */
-    public static void validateScanBucketOption(
-            TableSchema schema, CoreOptions coreOptions, int bucket) {
-        AbstractDataTableScan.validateScanBucketOption(schema, coreOptions, bucket);
-    }
 
     private StartingScanner startingScanner;
     private boolean hasNext;
@@ -70,43 +60,6 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
-
-    public static DataTableScan create(FileStoreTable table) {
-        return create(table, FileStoreTable::newSnapshotReader);
-    }
-
-    public static DataTableScan create(
-            FileStoreTable table, Function<FileStoreTable, SnapshotReader> readerFactory) {
-        if (table instanceof FallbackReadFileStoreTable) {
-            return ((FallbackReadFileStoreTable) table)
-                    .newScan(wrapped -> create(wrapped, readerFactory));
-        }
-
-        CoreOptions options = table.coreOptions();
-        SnapshotReader snapshotReader = readerFactory.apply(table);
-        TableQueryAuth queryAuth = table.catalogEnvironment().tableQueryAuth(options);
-        AbstractBatchTableScan scan;
-        if (!table.schema().primaryKeys().isEmpty() && snapshotReader.indexFileHandler() != null) {
-            scan = new PrimaryKeyBatchScan(table, snapshotReader, queryAuth);
-        } else {
-            scan =
-                    new AppendBatchTableScan(
-                            table.schema(),
-                            table.schemaManager(),
-                            options,
-                            snapshotReader,
-                            queryAuth);
-        }
-        Integer scanBucket = options.scanBucket();
-        if (scanBucket != null) {
-            validateScanBucketOption(table.schema(), options, scanBucket);
-            scan.withBucket(scanBucket);
-        }
-        if (options.dataEvolutionEnabled()) {
-            return new DataEvolutionBatchScan(table, scan);
-        }
-        return scan;
-    }
 
     protected AbstractBatchTableScan(
             TableSchema schema,
@@ -127,6 +80,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             snapshotReader.onlyReadRealBuckets();
+        }
+        Integer scanBucket = options.scanBucket();
+        if (scanBucket != null) {
+            snapshotReader.withBucket(scanBucket);
         }
     }
 

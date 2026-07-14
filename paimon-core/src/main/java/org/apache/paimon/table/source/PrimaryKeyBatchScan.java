@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
 /** Batch scan for primary-key tables and indexes. */
 public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
@@ -51,6 +53,23 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
 
     @Nullable private Predicate filter;
     @Nullable private GlobalIndexSplitResult globalIndexSplitResult;
+
+    public static DataTableScan create(FileStoreTable table) {
+        return create(table, FileStoreTable::newSnapshotReader);
+    }
+
+    public static DataTableScan create(
+            FileStoreTable table, Function<FileStoreTable, SnapshotReader> readerFactory) {
+        if (table instanceof FallbackReadFileStoreTable) {
+            return ((FallbackReadFileStoreTable) table)
+                    .newScan(wrapped -> create(wrapped, readerFactory));
+        }
+
+        return new PrimaryKeyBatchScan(
+                table,
+                readerFactory.apply(table),
+                table.catalogEnvironment().tableQueryAuth(table.coreOptions()));
+    }
 
     public PrimaryKeyBatchScan(
             FileStoreTable table, SnapshotReader snapshotReader, TableQueryAuth queryAuth) {

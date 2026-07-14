@@ -40,7 +40,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CoreOptions#SCAN_BUCKET}. */
 public class ScanBucketTest {
@@ -59,43 +58,33 @@ public class ScanBucketTest {
     }
 
     @Test
-    public void testScanBucketOptionRejectsOutOfRangeBucketId() throws Exception {
+    public void testScanBucketOptionAllowsOutOfRangeBucketId() throws Exception {
         FileStoreTable table = createTableWithScanBucket("4", true, "5");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Bucket id 5 must be less than table bucket number 4");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     @Test
-    public void testScanBucketOptionRejectsDynamicBucketTable() throws Exception {
+    public void testScanBucketOptionAllowsDynamicBucketTable() throws Exception {
         FileStoreTable table = createTableWithScanBucket("-1", true, "0");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("fixed-bucket tables");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     @Test
-    public void testScanBucketOptionRejectsPostponeBucketTable() throws Exception {
+    public void testScanBucketOptionAllowsPostponeBucketTable() throws Exception {
         FileStoreTable table = createTableWithScanBucket("-2", true, "0");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("fixed-bucket tables");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     @Test
-    public void testScanBucketOptionRejectsBucketUnawareTable() throws Exception {
+    public void testScanBucketOptionAllowsBucketUnawareTable() throws Exception {
         FileStoreTable table = createBucketUnawareTableWithScanBucket("0");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("primary key tables");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     @Test
-    public void testScanBucketOptionRejectsTableWithoutPrimaryKey() throws Exception {
+    public void testScanBucketOptionAllowsTableWithoutPrimaryKey() throws Exception {
         FileStoreTable table = createAppendOnlyTableWithScanBucket("4", "0");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("primary key tables");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     @Test
@@ -136,11 +125,9 @@ public class ScanBucketTest {
     }
 
     @Test
-    public void testScanBucketOptionRejectsDirectTableScanForDynamicBucketTable() throws Exception {
+    public void testScanBucketOptionAllowsDirectTableScanForDynamicBucketTable() throws Exception {
         FileStoreTable table = createTableWithScanBucket("-1", true, "0");
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("fixed-bucket tables");
+        assertThat(table.newScan().plan().splits()).isEmpty();
     }
 
     private static List<Integer> extractBuckets(List<Split> splits) {

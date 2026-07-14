@@ -58,6 +58,9 @@ public class TableScanTest extends ScannerTestBase {
 
     @Test
     public void testBatchScanTypes() throws Exception {
+        assertThat(AbstractBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+
         assertThat(table.newScan()).isInstanceOf(PrimaryKeyBatchScan.class);
 
         createAppendOnlyTable();

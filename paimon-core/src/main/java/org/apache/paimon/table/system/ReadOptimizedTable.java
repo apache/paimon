@@ -31,10 +31,11 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.AbstractBatchTableScan;
+import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.PrimaryKeyBatchScan;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
@@ -136,7 +137,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        return AbstractBatchTableScan.create(wrapped, this::newSnapshotReader);
+        if (wrapped.schema().primaryKeys().isEmpty()) {
+            return AppendBatchTableScan.create(wrapped, this::newSnapshotReader);
+        } else {
+            return PrimaryKeyBatchScan.create(wrapped, this::newSnapshotReader);
+        }
     }
 
     @Override

@@ -19,12 +19,42 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+
+import java.util.function.Function;
 
 /** Batch scan for append tables. */
 public class AppendBatchTableScan extends AbstractBatchTableScan {
+
+    public static DataTableScan create(FileStoreTable table) {
+        return create(table, FileStoreTable::newSnapshotReader);
+    }
+
+    public static DataTableScan create(
+            FileStoreTable table, Function<FileStoreTable, SnapshotReader> readerFactory) {
+        if (table instanceof FallbackReadFileStoreTable) {
+            return ((FallbackReadFileStoreTable) table)
+                    .newScan(wrapped -> create(wrapped, readerFactory));
+        }
+
+        CoreOptions options = table.coreOptions();
+        AppendBatchTableScan scan =
+                new AppendBatchTableScan(
+                        table.schema(),
+                        table.schemaManager(),
+                        options,
+                        readerFactory.apply(table),
+                        table.catalogEnvironment().tableQueryAuth(options));
+        if (options.dataEvolutionEnabled()) {
+            return new DataEvolutionBatchScan(table, scan);
+        }
+        return scan;
+    }
 
     public AppendBatchTableScan(
             TableSchema schema,

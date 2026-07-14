@@ -30,10 +30,12 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.AppendTableRead;
 import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.DataEvolutionTableRead;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
@@ -131,6 +133,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                         catalogEnvironment.catalogContext(),
                         () -> new AppendTableRead(providerFactories, schema()))
                 : new AppendTableRead(providerFactories, schema());
+    }
+
+    @Override
+    public DataTableScan newScan() {
+        return AppendBatchTableScan.create(this);
     }
 
     @Override
