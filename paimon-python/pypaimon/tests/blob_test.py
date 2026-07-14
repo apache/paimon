@@ -438,8 +438,6 @@ class BlobTest(unittest.TestCase):
         self.assertTrue(created_by_file["new.blob"][0].closed)
 
     def test_blob_fallback_batch_reader_closes_exhausted_readers(self):
-        created_by_file = {}
-
         class FakeBlobReader:
             def __init__(self, file_path, offset):
                 self._file_io = None
@@ -478,42 +476,60 @@ class BlobTest(unittest.TestCase):
 
             return create_reader
 
-        reader = BlobFallbackBatchReader(
-            [
-                (data_file("first.blob", 0, 1), supplier("first.blob", 0)),
-                (
-                    data_file("second.blob", 10, 2),
-                    supplier("second.blob", 100),
-                ),
-                (
-                    data_file("third.blob", 20, 3),
-                    supplier("third.blob", 200),
-                ),
-            ],
-            "picture",
-            pa.large_binary(),
-            blob_as_descriptor=True,
-            batch_size=1024,
-        )
-
-        batch = reader.read_arrow_batch()
-        self.assertEqual(
-            [4, 104, 204],
-            [
+        def descriptor_offsets(batch):
+            return [
                 BlobDescriptor.deserialize(value.as_py()).offset
                 for value in batch.column(0)
-            ],
-        )
-        self.assertTrue(created_by_file["first.blob"][0].closed)
-        self.assertTrue(created_by_file["second.blob"][0].closed)
-        self.assertFalse(created_by_file["third.blob"][0].closed)
-        self.assertIsNone(reader.read_arrow_batch())
+            ]
 
-        self.assertEqual(1, len(created_by_file["first.blob"]))
-        self.assertEqual(1, len(created_by_file["second.blob"]))
-        self.assertEqual(1, len(created_by_file["third.blob"]))
-        reader.close()
-        self.assertTrue(created_by_file["third.blob"][0].closed)
+        for batch_size in [1, 1024]:
+            with self.subTest(batch_size=batch_size):
+                created_by_file = {}
+                reader = BlobFallbackBatchReader(
+                    [
+                        (data_file("first.blob", 0, 1), supplier("first.blob", 0)),
+                        (
+                            data_file("second.blob", 10, 2),
+                            supplier("second.blob", 100),
+                        ),
+                        (
+                            data_file("third.blob", 20, 3),
+                            supplier("third.blob", 200),
+                        ),
+                    ],
+                    "picture",
+                    pa.large_binary(),
+                    blob_as_descriptor=True,
+                    batch_size=batch_size,
+                )
+
+                if batch_size == 1:
+                    first = reader.read_arrow_batch()
+                    self.assertEqual([4], descriptor_offsets(first))
+                    self.assertFalse(created_by_file["first.blob"][0].closed)
+
+                    second = reader.read_arrow_batch()
+                    self.assertEqual([104], descriptor_offsets(second))
+                    self.assertTrue(created_by_file["first.blob"][0].closed)
+                    self.assertFalse(created_by_file["second.blob"][0].closed)
+
+                    third = reader.read_arrow_batch()
+                    self.assertEqual([204], descriptor_offsets(third))
+                    self.assertTrue(created_by_file["second.blob"][0].closed)
+                    self.assertFalse(created_by_file["third.blob"][0].closed)
+                else:
+                    batch = reader.read_arrow_batch()
+                    self.assertEqual([4, 104, 204], descriptor_offsets(batch))
+                    self.assertTrue(created_by_file["first.blob"][0].closed)
+                    self.assertTrue(created_by_file["second.blob"][0].closed)
+                    self.assertFalse(created_by_file["third.blob"][0].closed)
+
+                self.assertIsNone(reader.read_arrow_batch())
+                self.assertEqual(1, len(created_by_file["first.blob"]))
+                self.assertEqual(1, len(created_by_file["second.blob"]))
+                self.assertEqual(1, len(created_by_file["third.blob"]))
+                reader.close()
+                self.assertTrue(created_by_file["third.blob"][0].closed)
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
