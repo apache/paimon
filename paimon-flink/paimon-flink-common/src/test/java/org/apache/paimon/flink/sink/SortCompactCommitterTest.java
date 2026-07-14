@@ -68,10 +68,17 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 /** Test for {@link SortCompactCommitter}. */
 public class SortCompactCommitterTest {
@@ -481,6 +488,125 @@ public class SortCompactCommitterTest {
                     .isZero();
             assertThat(CountingCommitListener.NOTIFY_COUNT.get()).isEqualTo(2);
         }
+    }
+
+    @Test
+    public void testCommitFailureAbortsWrittenMessages() throws Exception {
+        TestAppendFileStore store = createAppendStore(new HashMap<>());
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+
+        DataFileMeta sorted = newFile("sorted-0.orc", 0, 0, 100, 100);
+        CommitMessageImpl written =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        table.coreOptions().bucket(),
+                        new DataIncrement(
+                                Collections.singletonList(sorted),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        CompactIncrement.emptyIncrement());
+        ManifestCommittable manifestCommittable = new ManifestCommittable(1L, 10L);
+        manifestCommittable.addFileCommittable(written);
+
+        AtomicInteger abortCount = new AtomicInteger(0);
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits) {
+                    @Override
+                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
+                        abortCount.incrementAndGet();
+                    }
+                };
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            TableCommitImpl spiedCommit = spy(commit);
+            doThrow(new RuntimeException("commit failed"))
+                    .when(spiedCommit)
+                    .commitMultiple(anyList(), eq(false));
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            spiedCommit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            rewriter);
+            assertThatThrownBy(
+                            () -> committer.commit(Collections.singletonList(manifestCommittable)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("commit failed");
+        }
+        assertThat(abortCount).hasValue(1);
+    }
+
+    @Test
+    public void testCommitFailureAfterSnapshotDoesNotAbortWrittenMessages() throws Exception {
+        TestAppendFileStore store = createAppendStore(new HashMap<>());
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("data-0.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+
+        DataFileMeta sorted = newFile("sorted-0.orc", 0, 0, 100, 100);
+        CommitMessageImpl written =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("sorted-0.orc"));
+        ManifestCommittable manifestCommittable = new ManifestCommittable(1L, 10L);
+        manifestCommittable.addFileCommittable(written);
+
+        AtomicBoolean aborted = new AtomicBoolean(false);
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits) {
+                    @Override
+                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
+                        aborted.set(true);
+                        super.abortWrittenMessages(writtenMessages);
+                    }
+                };
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            TableCommitImpl spiedCommit = spy(commit);
+            doAnswer(
+                            invocation -> {
+                                invocation.callRealMethod();
+                                throw new RuntimeException("failed after snapshot");
+                            })
+                    .when(spiedCommit)
+                    .commitMultiple(anyList(), eq(false));
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            spiedCommit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            rewriter);
+            assertThatThrownBy(
+                            () -> committer.commit(Collections.singletonList(manifestCommittable)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("failed after snapshot");
+        }
+
+        assertThat(aborted).isFalse();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
     }
 
     /** A test {@link CommitListener} that counts notifications. */

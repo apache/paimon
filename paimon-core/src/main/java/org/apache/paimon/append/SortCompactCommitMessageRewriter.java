@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -48,6 +49,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /**
  * Rewrites the {@link CommitMessage}s produced by a sort compact write into compact commit
@@ -128,10 +131,7 @@ public class SortCompactCommitMessageRewriter {
             planMetadata.copyInto(baseDeletionVectorEntries);
         } else {
             SortCompactPlanMetadata.captureInto(
-                    table,
-                    baseSnapshotId,
-                    partitions,
-                    baseDeletionVectorEntries);
+                    table, baseSnapshotId, partitions, baseDeletionVectorEntries);
         }
     }
 
@@ -149,6 +149,8 @@ public class SortCompactCommitMessageRewriter {
      */
     public List<CommitMessage> rewrite(List<CommitMessage> writtenMessages) {
         validateWriteOnlyMessages(writtenMessages);
+        Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries =
+                scanLatestDeletionVectorEntries();
 
         // group written messages by (partition, bucket)
         Map<BinaryRow, Map<Integer, List<CommitMessageImpl>>> grouped = new HashMap<>();
@@ -172,7 +174,7 @@ public class SortCompactCommitMessageRewriter {
                         group = writtenGroup;
                     }
                 }
-                result.add(rewriteGroup(partition, bucket, group));
+                result.add(rewriteGroup(partition, bucket, group, latestDeletionVectorEntries));
             }
             if (writtenInPartition != null && writtenInPartition.isEmpty()) {
                 grouped.remove(partition);
@@ -184,7 +186,12 @@ public class SortCompactCommitMessageRewriter {
             BinaryRow partition = partitionEntry.getKey();
             for (Map.Entry<Integer, List<CommitMessageImpl>> bucketEntry :
                     partitionEntry.getValue().entrySet()) {
-                result.add(rewriteGroup(partition, bucketEntry.getKey(), bucketEntry.getValue()));
+                result.add(
+                        rewriteGroup(
+                                partition,
+                                bucketEntry.getKey(),
+                                bucketEntry.getValue(),
+                                latestDeletionVectorEntries));
             }
         }
         return result;
@@ -235,7 +242,10 @@ public class SortCompactCommitMessageRewriter {
     }
 
     private CommitMessage rewriteGroup(
-            BinaryRow partition, int bucket, List<CommitMessageImpl> group) {
+            BinaryRow partition,
+            int bucket,
+            List<CommitMessageImpl> group,
+            Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries) {
         List<DataFileMeta> compactBefore = compactBefore(partition, bucket);
 
         // merge all newly written sorted files of this (partition, bucket) as compact output
@@ -265,8 +275,8 @@ public class SortCompactCommitMessageRewriter {
                     BaseAppendDeleteFileMaintainer.forUnawareAppend(
                             table.store().newIndexFileHandler(),
                             partition,
-                            baseDeletionVectorEntries.getOrDefault(
-                                    partition, Collections.emptyList()));
+                            deletionVectorEntriesForRewrite(
+                                    partition, latestDeletionVectorEntries));
             for (DataFileMeta oldFile : compactBefore) {
                 dvMaintainer.notifyRemovedDeletionVector(oldFile.fileName());
             }
@@ -288,6 +298,41 @@ public class SortCompactCommitMessageRewriter {
                         deletedIndexFiles);
         return new CommitMessageImpl(
                 partition, bucket, totalBuckets, DataIncrement.emptyIncrement(), compactIncrement);
+    }
+
+    private Map<BinaryRow, List<IndexManifestEntry>> scanLatestDeletionVectorEntries() {
+        Map<BinaryRow, List<IndexManifestEntry>> latestEntries = new HashMap<>();
+        Snapshot latest = tryLatestSnapshot();
+        if (latest != null) {
+            IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+            for (IndexManifestEntry entry : indexFileHandler.scan(latest, DELETION_VECTORS_INDEX)) {
+                latestEntries.computeIfAbsent(entry.partition(), k -> new ArrayList<>()).add(entry);
+            }
+        }
+        return latestEntries;
+    }
+
+    private List<IndexManifestEntry> deletionVectorEntriesForRewrite(
+            BinaryRow partition,
+            Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries) {
+        List<IndexManifestEntry> entries = new ArrayList<>();
+        entries.addAll(baseDeletionVectorEntries.getOrDefault(partition, Collections.emptyList()));
+        entries.addAll(
+                latestDeletionVectorEntries.getOrDefault(partition, Collections.emptyList()));
+        return entries;
+    }
+
+    @Nullable
+    private Snapshot tryLatestSnapshot() {
+        Long latestId = table.snapshotManager().latestSnapshotId();
+        if (latestId == null) {
+            return null;
+        }
+        try {
+            return table.snapshotManager().tryGetSnapshot(latestId);
+        } catch (FileNotFoundException e) {
+            return null;
+        }
     }
 
     private List<DataFileMeta> toCompactAfter(List<DataFileMeta> newFiles) {

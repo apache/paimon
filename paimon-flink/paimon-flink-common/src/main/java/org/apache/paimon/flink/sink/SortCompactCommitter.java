@@ -25,6 +25,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -65,8 +66,19 @@ public class SortCompactCommitter extends StoreCommitter {
 
     @Override
     public void commit(List<ManifestCommittable> committables)
-            throws java.io.IOException, InterruptedException {
-        super.commit(rewriteAll(committables));
+            throws IOException, InterruptedException {
+        List<CommitMessage> writtenMessages = collectWrittenMessages(committables);
+        List<ManifestCommittable> rewritten = rewriteAll(committables);
+        long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
+        try {
+            super.commit(rewritten);
+        } catch (IOException | InterruptedException e) {
+            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            throw e;
+        } catch (RuntimeException e) {
+            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            throw e;
+        }
     }
 
     @Override
@@ -97,7 +109,15 @@ public class SortCompactCommitter extends StoreCommitter {
         }
 
         List<ManifestCommittable> rewritten = rewriteAll(retryCommittables);
-        int committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
+        List<CommitMessage> writtenMessages = collectWrittenMessages(retryCommittables);
+        long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
+        int committed;
+        try {
+            committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
+        } catch (RuntimeException e) {
+            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            throw e;
+        }
         calcNumBytesAndRecordsOut(rewritten);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
         return committed;
@@ -111,7 +131,15 @@ public class SortCompactCommitter extends StoreCommitter {
         if (rewritten.isEmpty()) {
             return 0;
         }
-        int committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
+        long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
+        int committed;
+        try {
+            committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
+        } catch (RuntimeException e) {
+            maybeAbortAfterFailedCommit(
+                    Collections.emptyList(), rewritten, snapshotIdBeforeCommit, e);
+            throw e;
+        }
         calcNumBytesAndRecordsOut(rewritten);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
         return committed;
@@ -162,5 +190,42 @@ public class SortCompactCommitter extends StoreCommitter {
         List<CommitMessage> compactMessages = rewriter.rewrite(allWrittenMessages);
         return Collections.singletonList(
                 new ManifestCommittable(identifier, watermark, compactMessages, properties));
+    }
+
+    private static List<CommitMessage> collectWrittenMessages(
+            List<ManifestCommittable> committables) {
+        List<CommitMessage> writtenMessages = new ArrayList<>();
+        for (ManifestCommittable committable : committables) {
+            writtenMessages.addAll(committable.fileCommittables());
+        }
+        return writtenMessages;
+    }
+
+    private static List<CommitMessage> compactMessagesFrom(
+            List<ManifestCommittable> rewrittenCommittables) {
+        return collectWrittenMessages(rewrittenCommittables);
+    }
+
+    private void maybeAbortAfterFailedCommit(
+            List<CommitMessage> writtenMessages,
+            List<ManifestCommittable> rewrittenCommittables,
+            long snapshotIdBeforeCommit,
+            Exception cause) {
+        if (writtenMessages.isEmpty()) {
+            return;
+        }
+        if (rewriter.isBatchCompactCommitSucceeded(
+                snapshotIdBeforeCommit, compactMessagesFrom(rewrittenCommittables))) {
+            return;
+        }
+        abortWrittenQuietly(writtenMessages, cause);
+    }
+
+    private void abortWrittenQuietly(List<CommitMessage> writtenMessages, Exception cause) {
+        try {
+            rewriter.abortWrittenMessages(writtenMessages);
+        } catch (Exception abortException) {
+            cause.addSuppressed(abortException);
+        }
     }
 }

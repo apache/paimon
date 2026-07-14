@@ -272,24 +272,20 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     // ----------------------- Sort Compact -----------------------
 
     @Test
-    public void testDynamicBucketSortCompact() throws Exception {
+    public void testSortCompactForAppendTable() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         sql(
                 "CREATE TABLE T ("
-                        + " f0 BIGINT PRIMARY KEY NOT ENFORCED,"
+                        + " f0 BIGINT,"
                         + " f1 BIGINT,"
                         + " f2 BIGINT,"
                         + " f3 BIGINT,"
                         + " f4 STRING"
                         + ") WITH ("
                         + " 'write-only' = 'true',"
-                        + " 'dynamic-bucket.target-row-num' = '100',"
+                        + " 'bucket' = '-1',"
                         + " 'zorder.var-length-contribution' = '14'"
                         + ")");
-        boolean overwriteUpgrade = random.nextBoolean();
-        if (!overwriteUpgrade) {
-            sql("ALTER TABLE T SET ('overwrite-upgrade' = 'false')");
-        }
         FileStoreTable table = paimonTable("T");
 
         int commitTimes = 20;

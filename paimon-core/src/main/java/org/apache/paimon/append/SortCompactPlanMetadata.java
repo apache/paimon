@@ -67,8 +67,7 @@ public final class SortCompactPlanMetadata implements Serializable {
         }
 
         Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries = new HashMap<>();
-        captureInto(
-                table, baseSnapshotId, partitions, baseDeletionVectorEntries);
+        captureInto(table, baseSnapshotId, partitions, baseDeletionVectorEntries);
         return fromCapturedMap(baseDeletionVectorEntries);
     }
 
