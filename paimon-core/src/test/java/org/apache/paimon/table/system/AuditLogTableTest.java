@@ -19,13 +19,18 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -34,6 +39,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 
@@ -59,10 +66,56 @@ public class AuditLogTableTest extends TableTestBase {
     }
 
     @Test
-    public void testSnapshotReaderExposesIndexFileHandler() throws Exception {
+    public void testSnapshotReaderDisablesIndexFileHandler() throws Exception {
         AuditLogTable auditLogTable = createAuditLogTable("audit_table_index_handler", false);
 
-        assertThat(auditLogTable.newSnapshotReader().indexFileHandler()).isNotNull();
+        assertThat(auditLogTable.newSnapshotReader().indexFileHandler()).isNull();
+    }
+
+    @Test
+    public void testReadAuditLogWithPrimaryKeySortedIndex() throws Exception {
+        String tableName = "audit_table_with_sorted_index";
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
+        FileIO fileIO = LocalFileIO.create();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, tablePath),
+                        Schema.newBuilder()
+                                .column("pk", DataTypes.INT())
+                                .column("score", DataTypes.INT())
+                                .primaryKey("pk")
+                                .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                                .option(CoreOptions.BUCKET.key(), "1")
+                                .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                                .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                                .build());
+        FileStoreTable dataTable = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+        write(dataTable, ioManager, GenericRow.of(1, 10));
+        write(dataTable, ioManager, GenericRow.of(2, 20));
+        compact(dataTable, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        Snapshot snapshot = dataTable.snapshotManager().latestSnapshot();
+        assertThat(
+                        dataTable
+                                .store()
+                                .newIndexFileHandler()
+                                .scanSourceIndexes(snapshot, BinaryRow.EMPTY_ROW, 0))
+                .isNotEmpty();
+
+        AuditLogTable auditLogTable =
+                (AuditLogTable)
+                        catalog.getTable(
+                                identifier(
+                                        tableName
+                                                + SYSTEM_TABLE_SPLITTER
+                                                + AuditLogTable.AUDIT_LOG));
+        PredicateBuilder predicateBuilder = new PredicateBuilder(auditLogTable.rowType());
+        ReadBuilder readBuilder =
+                auditLogTable.newReadBuilder().withFilter(predicateBuilder.equal(2, 10));
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).isNotEmpty().noneMatch(IndexedSplit.class::isInstance);
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(ignored -> {});
+        }
     }
 
     @Test
