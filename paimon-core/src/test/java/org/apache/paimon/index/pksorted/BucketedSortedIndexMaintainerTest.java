@@ -56,6 +56,11 @@ class BucketedSortedIndexMaintainerTest {
     @TempDir java.nio.file.Path tempPath;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
+    @Test
+    void testHasSingleConstructor() {
+        assertThat(BucketedSortedIndexMaintainer.class.getDeclaredConstructors()).hasSize(1);
+    }
+
     @AfterEach
     void shutdownExecutor() {
         executor.shutdownNow();
@@ -78,6 +83,8 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sourceFiles).containsExactly(newSource);
                             return newPayload;
                         },
+                        5,
+                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);
@@ -295,6 +302,8 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         indexFile,
                         sourceFiles -> replacementPayload,
+                        5,
+                        0.2,
                         Collections.singletonList(source),
                         invalidPayloads,
                         executor);
@@ -317,6 +326,8 @@ class BucketedSortedIndexMaintainerTest {
                         sourceFiles -> {
                             throw new AssertionError("Covered source must not be rebuilt.");
                         },
+                        5,
+                        0.2,
                         Collections.singletonList(source),
                         Collections.singletonList(replacementPayload),
                         executor);
@@ -349,6 +360,8 @@ class BucketedSortedIndexMaintainerTest {
                             attempts.incrementAndGet();
                             throw new IllegalStateException("expected build failure");
                         },
+                        5,
+                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);
@@ -387,6 +400,8 @@ class BucketedSortedIndexMaintainerTest {
                             }
                             return payload;
                         },
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -418,6 +433,8 @@ class BucketedSortedIndexMaintainerTest {
                             release.await();
                             return payload;
                         },
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -467,6 +484,8 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sourceFile).isEqualTo(activeSource);
                             return activePayload;
                         },
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -557,6 +576,8 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                         sourceFiles -> payload("new", source, 3),
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         rejectedExecutor);
@@ -585,6 +606,8 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         indexFile,
                         sourceFiles -> malformed,
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -627,6 +650,8 @@ class BucketedSortedIndexMaintainerTest {
                             }
                             return generated;
                         },
+                        5,
+                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -664,6 +689,8 @@ class BucketedSortedIndexMaintainerTest {
                                 throw e;
                             }
                         },
+                        5,
+                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);

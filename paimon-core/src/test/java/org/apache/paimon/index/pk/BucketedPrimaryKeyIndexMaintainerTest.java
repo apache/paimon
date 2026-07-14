@@ -118,7 +118,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         source,
                         dataFile -> {
                             buildOrder.add("bitmap");
-                            return Collections.singletonList(bitmapPayload);
+                            return bitmapPayload;
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.of(vector, Arrays.asList(bitmap, btree));
@@ -156,8 +156,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                             firstStarted.countDown();
                             releaseFirst.await();
                             activeBuilds.decrementAndGet();
-                            return Collections.singletonList(
-                                    payload("btree", source, 3, 7, "btree"));
+                            return payload("btree", source, 3, 7, "btree");
                         });
         BucketedSortedIndexMaintainer second =
                 sortedMaintainer(
@@ -168,8 +167,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                             enterBuild(activeBuilds, peakBuilds);
                             secondStarted.countDown();
                             activeBuilds.decrementAndGet();
-                            return Collections.singletonList(
-                                    payload("bitmap", source, 3, 8, "bitmap"));
+                            return payload("bitmap", source, 3, 8, "bitmap");
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.ofSorted(Arrays.asList(second, first));
@@ -211,7 +209,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         sourceFiles -> {
                             started.countDown();
                             release.await();
-                            return Collections.singletonList(merged);
+                            return merged;
                         },
                         2,
                         1.0,
@@ -243,8 +241,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         source,
                         dataFile -> {
                             int attempt = firstBuilds.incrementAndGet();
-                            return Collections.singletonList(
-                                    payload("btree-" + attempt, source, 3, 7, "btree"));
+                            return payload("btree-" + attempt, source, 3, 7, "btree");
                         });
         BucketedSortedIndexMaintainer second =
                 sortedMaintainer(
@@ -257,8 +254,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                                 secondStarted.countDown();
                                 blockSecond.await();
                             }
-                            return Collections.singletonList(
-                                    payload("bitmap-" + attempt, source, 3, 8, "bitmap"));
+                            return payload("bitmap-" + attempt, source, 3, 8, "bitmap");
                         });
         BucketedPrimaryKeyIndexMaintainer maintainer =
                 BucketedPrimaryKeyIndexMaintainer.ofSorted(Arrays.asList(second, first));
@@ -307,6 +303,8 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                 indexType,
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                 buildFunction,
+                5,
+                0.2,
                 Collections.emptyList(),
                 Collections.emptyList(),
                 buildExecutor);

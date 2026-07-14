@@ -68,26 +68,6 @@ public class BucketedSortedIndexMaintainer {
             String indexType,
             PkSortedIndexFile indexFile,
             BuildFunction buildFunction,
-            List<DataFileMeta> restoredDataFiles,
-            List<IndexFileMeta> restoredPayloads,
-            ExecutorService executor) {
-        this(
-                fieldId,
-                indexType,
-                indexFile,
-                buildFunction,
-                5,
-                0.2,
-                restoredDataFiles,
-                restoredPayloads,
-                executor);
-    }
-
-    public BucketedSortedIndexMaintainer(
-            int fieldId,
-            String indexType,
-            PkSortedIndexFile indexFile,
-            BuildFunction buildFunction,
             int levelFanout,
             double staleRatioThreshold,
             List<DataFileMeta> restoredDataFiles,
