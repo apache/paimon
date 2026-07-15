@@ -200,6 +200,11 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
                 table.newFullTextSearchBuilder()
                         .withQuery(route.fieldName(), route.fullTextQuery())
                         .withLimit(route.limit());
+        if (fullTextSearchBuilder.newFullTextScan() instanceof PrimaryKeyFullTextScan) {
+            throw new UnsupportedOperationException(
+                    "Hybrid search does not support primary-key full-text indexes because their "
+                            + "results use physical file positions instead of global row ids.");
+        }
         if (partitionFilter != null) {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
         }
