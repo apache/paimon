@@ -37,6 +37,9 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
@@ -253,6 +256,8 @@ class PrimaryKeyVectorScanTest {
             FileStoreTable table, SnapshotReader snapshotReader, Snapshot snapshot) {
         TableSchema schema = mock(TableSchema.class);
         when(schema.primaryKeys()).thenReturn(Collections.singletonList("id"));
+        when(schema.logicalRowType())
+                .thenReturn(RowType.of(new DataField(1, "id", DataTypes.INT().notNull())));
         when(table.schema()).thenReturn(schema);
         when(table.schemaManager()).thenReturn(mock(SchemaManager.class));
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
