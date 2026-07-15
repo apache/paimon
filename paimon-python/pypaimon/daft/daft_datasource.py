@@ -652,7 +652,7 @@ class PaimonDataSource(DataSource):
         can_use_native_reader = (
             self._is_parquet
             and not self._has_blob_columns
-            and (not self._table.is_primary_key_table or raw_convertible)
+            and raw_convertible
             and not has_deletion_vectors
             and not has_auth
         )
@@ -667,8 +667,10 @@ class PaimonDataSource(DataSource):
             reason = "query auth active"
         elif has_deletion_vectors:
             reason = "deletion vectors present"
-        else:
+        elif self._table.is_primary_key_table:
             reason = "LSM merge required"
+        else:
+            reason = "data-evolution merge required"
         return _ReaderRouting(READER_MODE_PYPAIMON_FALLBACK, reason)
 
     @staticmethod
