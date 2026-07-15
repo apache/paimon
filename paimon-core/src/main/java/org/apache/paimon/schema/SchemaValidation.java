@@ -358,6 +358,7 @@ public class SchemaValidation {
         validatePrimaryKeyIndexColumns(options);
         validatePrimaryKeySortedIndexes(schema, options);
         validatePrimaryKeyVectorIndex(schema, options);
+        validatePrimaryKeyFullTextIndex(schema, options);
 
         validateMergeFunctionFactory(schema);
 
@@ -957,22 +958,79 @@ public class SchemaValidation {
                 options.primaryKeyVectorDistanceMetric(indexColumn));
     }
 
+    private static void validatePrimaryKeyFullTextIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyFullTextIndexEnabled()) {
+            return;
+        }
+
+        List<String> indexColumns = options.primaryKeyFullTextIndexColumns();
+        checkArgument(
+                indexColumns.size() == 1,
+                "%s must contain exactly one column in the first release, but is %s.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "%s must contain a non-empty column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key full-text index requires a primary-key table.");
+        checkArgument(
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
+                "Primary-key full-text index requires deletion-vectors.enabled = true.");
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
+        checkArgument(
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key full-text index requires fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key full-text index does not support pk-clustering-override.");
+        checkArgument(
+                schema.nameToFieldMap().containsKey(indexColumn),
+                "%s entry '%s' must reference an existing column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumn);
+        DataTypeRoot typeRoot = schema.nameToFieldMap().get(indexColumn).type().getTypeRoot();
+        checkArgument(
+                typeRoot == DataTypeRoot.CHAR || typeRoot == DataTypeRoot.VARCHAR,
+                "%s entry '%s' must reference a CHAR/VARCHAR/STRING column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumn);
+        options.primaryKeyFullTextIndexOptions(indexColumn);
+    }
+
     private static void validatePrimaryKeyIndexColumns(CoreOptions options) {
         List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
         List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
         validateNoDuplicatePrimaryKeyIndexColumns(
                 vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
                 btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
                 bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
 
         Set<String> indexedColumns = new HashSet<>();
         validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
-        for (String column : indexedColumns) {
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
+
+        Set<String> compactedIndexColumns = new HashSet<>();
+        compactedIndexColumns.addAll(vectorColumns);
+        compactedIndexColumns.addAll(btreeColumns);
+        compactedIndexColumns.addAll(bitmapColumns);
+        compactedIndexColumns.addAll(fullTextColumns);
+        for (String column : compactedIndexColumns) {
             String fanoutKey = CoreOptions.primaryKeyIndexCompactionLevelFanoutKey(column);
             checkArgument(
                     options.primaryKeyIndexCompactionLevelFanout(column) > 1,

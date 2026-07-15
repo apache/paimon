@@ -27,7 +27,8 @@ public class PrimaryKeyIndexDefinition {
     public enum Family {
         VECTOR,
         BTREE,
-        BITMAP
+        BITMAP,
+        FULL_TEXT
     }
 
     private final String column;

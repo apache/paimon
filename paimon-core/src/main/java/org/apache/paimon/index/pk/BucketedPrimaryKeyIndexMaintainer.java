@@ -23,6 +23,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pkfulltext.BucketedFullTextIndexMaintainer;
+import org.apache.paimon.index.pkfulltext.PkFullTextDataFileReader;
+import org.apache.paimon.index.pkfulltext.PkFullTextIndexBuilder;
+import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.index.pksorted.BucketedSortedIndexMaintainer;
 import org.apache.paimon.index.pksorted.PkSortedDataFileReader;
 import org.apache.paimon.index.pksorted.PkSortedIndexBuilder;
@@ -50,13 +54,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public final class BucketedPrimaryKeyIndexMaintainer {
 
     @Nullable private final BucketedVectorIndexMaintainer vectorMaintainer;
+    @Nullable private final BucketedFullTextIndexMaintainer fullTextMaintainer;
     private final List<BucketedSortedIndexMaintainer> sortedMaintainers;
     private int nextSortedMaintainerIndex;
 
     private BucketedPrimaryKeyIndexMaintainer(
             @Nullable BucketedVectorIndexMaintainer vectorMaintainer,
+            @Nullable BucketedFullTextIndexMaintainer fullTextMaintainer,
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
         this.vectorMaintainer = vectorMaintainer;
+        this.fullTextMaintainer = fullTextMaintainer;
         List<BucketedSortedIndexMaintainer> sorted = new ArrayList<>(sortedMaintainers);
         sorted.sort(Comparator.comparingInt(BucketedSortedIndexMaintainer::fieldId));
         this.sortedMaintainers = Collections.unmodifiableList(sorted);
@@ -64,18 +71,33 @@ public final class BucketedPrimaryKeyIndexMaintainer {
 
     public static BucketedPrimaryKeyIndexMaintainer ofVector(
             BucketedVectorIndexMaintainer vectorMaintainer) {
-        return new BucketedPrimaryKeyIndexMaintainer(vectorMaintainer, Collections.emptyList());
+        return new BucketedPrimaryKeyIndexMaintainer(
+                vectorMaintainer, null, Collections.emptyList());
+    }
+
+    public static BucketedPrimaryKeyIndexMaintainer ofFullText(
+            BucketedFullTextIndexMaintainer fullTextMaintainer) {
+        return new BucketedPrimaryKeyIndexMaintainer(
+                null, fullTextMaintainer, Collections.emptyList());
     }
 
     public static BucketedPrimaryKeyIndexMaintainer of(
             BucketedVectorIndexMaintainer vectorMaintainer,
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
-        return new BucketedPrimaryKeyIndexMaintainer(vectorMaintainer, sortedMaintainers);
+        return new BucketedPrimaryKeyIndexMaintainer(vectorMaintainer, null, sortedMaintainers);
+    }
+
+    public static BucketedPrimaryKeyIndexMaintainer of(
+            @Nullable BucketedVectorIndexMaintainer vectorMaintainer,
+            @Nullable BucketedFullTextIndexMaintainer fullTextMaintainer,
+            List<BucketedSortedIndexMaintainer> sortedMaintainers) {
+        return new BucketedPrimaryKeyIndexMaintainer(
+                vectorMaintainer, fullTextMaintainer, sortedMaintainers);
     }
 
     public static BucketedPrimaryKeyIndexMaintainer ofSorted(
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
-        return new BucketedPrimaryKeyIndexMaintainer(null, sortedMaintainers);
+        return new BucketedPrimaryKeyIndexMaintainer(null, null, sortedMaintainers);
     }
 
     public synchronized void prepareCommit(
@@ -84,11 +106,17 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             boolean waitCompaction)
             throws Exception {
         BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit = null;
+        BucketedFullTextIndexMaintainer.FullTextIndexCommit fullTextCommit = null;
         List<BucketedSortedIndexMaintainer.SortedIndexCommit> sortedCommits = new ArrayList<>();
         try {
             if (vectorMaintainer != null) {
                 vectorCommit =
                         vectorMaintainer.prepareCommit(
+                                appendIncrement, compactIncrement, waitCompaction);
+            }
+            if (fullTextMaintainer != null) {
+                fullTextCommit =
+                        fullTextMaintainer.prepareCommit(
                                 appendIncrement, compactIncrement, waitCompaction);
             }
 
@@ -101,12 +129,18 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             if (vectorCommit != null) {
                 mergeVectorCommit(appendIncrement, compactIncrement, vectorCommit);
             }
+            if (fullTextCommit != null) {
+                mergeFullTextCommit(appendIncrement, compactIncrement, fullTextCommit);
+            }
             for (BucketedSortedIndexMaintainer.SortedIndexCommit sortedCommit : sortedCommits) {
                 mergeSortedCommit(appendIncrement, compactIncrement, sortedCommit);
             }
         } catch (Throwable failure) {
             for (int i = sortedCommits.size() - 1; i >= 0; i--) {
                 sortedCommits.get(i).abort(failure);
+            }
+            if (fullTextCommit != null) {
+                fullTextCommit.abort(failure);
             }
             if (vectorCommit != null) {
                 vectorCommit.abort(failure);
@@ -219,6 +253,28 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                         increment.deletedIndexFiles()));
     }
 
+    private static void mergeFullTextCommit(
+            DataIncrement appendIncrement,
+            CompactIncrement compactIncrement,
+            BucketedFullTextIndexMaintainer.FullTextIndexCommit commit) {
+        commit.appendIncrement()
+                .ifPresent(
+                        increment ->
+                                applyIndexIncrement(
+                                        appendIncrement.newIndexFiles(),
+                                        appendIncrement.deletedIndexFiles(),
+                                        increment.newIndexFiles(),
+                                        increment.deletedIndexFiles()));
+        commit.compactIncrement()
+                .ifPresent(
+                        increment ->
+                                applyIndexIncrement(
+                                        compactIncrement.newIndexFiles(),
+                                        compactIncrement.deletedIndexFiles(),
+                                        increment.newIndexFiles(),
+                                        increment.deletedIndexFiles()));
+    }
+
     private static void applyIndexIncrement(
             List<IndexFileMeta> targetNew,
             List<IndexFileMeta> targetDeleted,
@@ -232,12 +288,18 @@ public final class BucketedPrimaryKeyIndexMaintainer {
         if (vectorMaintainer != null && vectorMaintainer.buildNotCompleted()) {
             return true;
         }
+        if (fullTextMaintainer != null && fullTextMaintainer.buildNotCompleted()) {
+            return true;
+        }
         return activeSortedMaintainer() != null;
     }
 
     public void withExecutor(ExecutorService executor) {
         if (vectorMaintainer != null) {
             vectorMaintainer.withExecutor(executor);
+        }
+        if (fullTextMaintainer != null) {
+            fullTextMaintainer.withExecutor(executor);
         }
         for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
             maintainer.withExecutor(executor);
@@ -247,6 +309,9 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     public void close() {
         if (vectorMaintainer != null) {
             vectorMaintainer.close();
+        }
+        if (fullTextMaintainer != null) {
+            fullTextMaintainer.close();
         }
         for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
             maintainer.close();
@@ -258,20 +323,23 @@ public final class BucketedPrimaryKeyIndexMaintainer {
 
         private final IndexFileHandler handler;
         @Nullable private final BucketedVectorIndexMaintainer.Factory vectorFactory;
+        @Nullable private final FullTextDefinitionFactory fullTextFactory;
         private final List<SortedDefinitionFactory> sortedFactories;
 
         private Factory(
                 IndexFileHandler handler,
                 @Nullable BucketedVectorIndexMaintainer.Factory vectorFactory,
+                @Nullable FullTextDefinitionFactory fullTextFactory,
                 List<SortedDefinitionFactory> sortedFactories) {
             this.handler = handler;
             this.vectorFactory = vectorFactory;
+            this.fullTextFactory = fullTextFactory;
             this.sortedFactories = Collections.unmodifiableList(new ArrayList<>(sortedFactories));
         }
 
         public static Factory ofVector(BucketedVectorIndexMaintainer.Factory vectorFactory) {
             return new Factory(
-                    vectorFactory.indexFileHandler(), vectorFactory, Collections.emptyList());
+                    vectorFactory.indexFileHandler(), vectorFactory, null, Collections.emptyList());
         }
 
         public static Factory create(
@@ -281,6 +349,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             CoreOptions coreOptions = new CoreOptions(schema.options());
             Map<String, DataField> fields = schema.nameToFieldMap();
             BucketedVectorIndexMaintainer.Factory vectorFactory = null;
+            FullTextDefinitionFactory fullTextFactory = null;
             List<SortedDefinitionFactory> sortedFactories = new ArrayList<>();
             for (PrimaryKeyIndexDefinition definition :
                     PrimaryKeyIndexDefinitions.create(schema).definitions()) {
@@ -315,15 +384,27 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                         definition.compactionLevelFanout(),
                                         definition.compactionStaleRatioThreshold()));
                         break;
+                    case FULL_TEXT:
+                        checkArgument(
+                                fullTextFactory == null,
+                                "Only one primary-key full-text index is supported.");
+                        fullTextFactory =
+                                new FullTextDefinitionFactory(
+                                        readerFactoryBuilder,
+                                        field,
+                                        definition.options(),
+                                        definition.compactionLevelFanout(),
+                                        definition.compactionStaleRatioThreshold());
+                        break;
                     default:
                         throw new IllegalArgumentException(
                                 "Unsupported primary-key index family " + definition.family());
                 }
             }
             checkArgument(
-                    vectorFactory != null || !sortedFactories.isEmpty(),
+                    vectorFactory != null || fullTextFactory != null || !sortedFactories.isEmpty(),
                     "No primary-key index definition is configured.");
-            return new Factory(handler, vectorFactory, sortedFactories);
+            return new Factory(handler, vectorFactory, fullTextFactory, sortedFactories);
         }
 
         public IndexFileHandler indexFileHandler() {
@@ -355,6 +436,11 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                             ? null
                             : vectorFactory.create(
                                     partition, bucket, dataFiles, payloads, executor);
+            BucketedFullTextIndexMaintainer fullText =
+                    fullTextFactory == null
+                            ? null
+                            : fullTextFactory.create(
+                                    handler, partition, bucket, dataFiles, payloads, executor);
             List<BucketedSortedIndexMaintainer> sorted = new ArrayList<>();
             for (SortedDefinitionFactory factory : sortedFactories) {
                 sorted.add(
@@ -362,7 +448,55 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                 handler, partition, bucket, dataFiles, payloads, executor,
                                 ioManager));
             }
-            return new BucketedPrimaryKeyIndexMaintainer(vector, sorted);
+            return new BucketedPrimaryKeyIndexMaintainer(vector, fullText, sorted);
+        }
+
+        private static final class FullTextDefinitionFactory {
+
+            private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
+            private final DataField field;
+            private final org.apache.paimon.options.Options options;
+            private final int compactionLevelFanout;
+            private final double compactionStaleRatioThreshold;
+
+            private FullTextDefinitionFactory(
+                    KeyValueFileReaderFactory.Builder readerFactoryBuilder,
+                    DataField field,
+                    org.apache.paimon.options.Options options,
+                    int compactionLevelFanout,
+                    double compactionStaleRatioThreshold) {
+                this.readerFactoryBuilder = readerFactoryBuilder;
+                this.field = field;
+                this.options = options;
+                this.compactionLevelFanout = compactionLevelFanout;
+                this.compactionStaleRatioThreshold = compactionStaleRatioThreshold;
+            }
+
+            private BucketedFullTextIndexMaintainer create(
+                    IndexFileHandler handler,
+                    BinaryRow partition,
+                    int bucket,
+                    List<DataFileMeta> restoredDataFiles,
+                    List<IndexFileMeta> restoredPayloads,
+                    ExecutorService executor) {
+                PkFullTextIndexFile indexFile = handler.pkFullTextIndex(partition, bucket);
+                PkFullTextIndexBuilder builder =
+                        new PkFullTextIndexBuilder(
+                                indexFile,
+                                new PkFullTextDataFileReader.Factory(
+                                        readerFactoryBuilder, partition, bucket, field),
+                                field,
+                                options);
+                return new BucketedFullTextIndexMaintainer(
+                        field.id(),
+                        indexFile,
+                        builder,
+                        compactionLevelFanout,
+                        compactionStaleRatioThreshold,
+                        restoredDataFiles,
+                        restoredPayloads,
+                        executor);
+            }
         }
 
         private static final class SortedDefinitionFactory {
