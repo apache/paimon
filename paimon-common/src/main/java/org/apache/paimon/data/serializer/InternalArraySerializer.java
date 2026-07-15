@@ -63,12 +63,12 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
 
     @Override
     public InternalArray copy(InternalArray from) {
-        if (eleType.getTypeRoot() == DataTypeRoot.BLOB) {
-            return copyObjectArray(from);
-        } else if (from instanceof GenericArray) {
+        if (from instanceof GenericArray) {
             return copyGenericArray((GenericArray) from);
         } else if (from instanceof BinaryArray) {
             return ((BinaryArray) from).copy();
+        } else if (eleType.getTypeRoot() == DataTypeRoot.BLOB) {
+            return copyObjectArray(from);
         } else {
             return toBinaryArray(from).copy();
         }
@@ -95,7 +95,15 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
                     throw new RuntimeException("Unknown type: " + eleType);
             }
         } else {
-            return copyObjectArray(array);
+            Object[] objectArray = array.toObjectArray();
+            Object[] newArray =
+                    (Object[]) Array.newInstance(InternalRow.getDataClass(eleType), array.size());
+            for (int i = 0; i < array.size(); i++) {
+                if (objectArray[i] != null) {
+                    newArray[i] = eleSer.copy(objectArray[i]);
+                }
+            }
+            return new GenericArray(newArray);
         }
     }
 
