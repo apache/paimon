@@ -18,19 +18,28 @@
 
 package org.apache.paimon.index.pk;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pkfulltext.BucketedFullTextIndexMaintainer;
+import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.index.pksorted.BucketedSortedIndexMaintainer;
 import org.apache.paimon.index.pksorted.PkSortedIndexFile;
 import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +48,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -51,6 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -82,6 +94,111 @@ class BucketedPrimaryKeyIndexMaintainerTest {
 
         verify(vector).withExecutor(executor);
         verify(vector).close();
+    }
+
+    @Test
+    void testDelegatesFullTextLifecycleAndMergesCommit() throws Exception {
+        IndexFileMeta payload =
+                new IndexFileMeta("full-text", "payload", 1, 1, (GlobalIndexMeta) null, null);
+        BucketedFullTextIndexMaintainer fullText = mock(BucketedFullTextIndexMaintainer.class);
+        BucketedFullTextIndexMaintainer.FullTextIndexCommit commit =
+                mock(BucketedFullTextIndexMaintainer.FullTextIndexCommit.class);
+        BucketedFullTextIndexMaintainer.FullTextIndexIncrement increment =
+                mock(BucketedFullTextIndexMaintainer.FullTextIndexIncrement.class);
+        when(fullText.prepareCommit(any(), any(), eq(true))).thenReturn(commit);
+        when(commit.appendIncrement()).thenReturn(Optional.empty());
+        when(commit.compactIncrement()).thenReturn(Optional.of(increment));
+        when(increment.newIndexFiles()).thenReturn(Collections.singletonList(payload));
+        when(increment.deletedIndexFiles()).thenReturn(Collections.emptyList());
+        when(fullText.buildNotCompleted()).thenReturn(true);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.ofFullText(fullText);
+        CompactIncrement compactIncrement = CompactIncrement.emptyIncrement();
+
+        maintainer.prepareCommit(DataIncrement.emptyIncrement(), compactIncrement, true);
+
+        assertThat(compactIncrement.newIndexFiles()).containsExactly(payload);
+        assertThat(maintainer.buildNotCompleted()).isTrue();
+        maintainer.withExecutor(buildExecutor);
+        maintainer.close();
+        verify(fullText).withExecutor(buildExecutor);
+        verify(fullText).close();
+    }
+
+    @Test
+    void testFactoryCreatesConfiguredFullTextMaintainer() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        options.put("fields.content.pk-index.compaction.level-fanout", "2");
+        options.put("fields.content.pk-index.compaction.stale-ratio-threshold", "1.0");
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "content", DataTypes.STRING())),
+                        0,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        when(handler.pkFullTextIndex(any(), eq(0))).thenReturn(mock(PkFullTextIndexFile.class));
+        KeyValueFileReaderFactory.Builder readerBuilder =
+                mock(KeyValueFileReaderFactory.Builder.class, RETURNS_SELF);
+        DataFileMeta first = dataFile("data-1", 1);
+        DataFileMeta second = dataFile("data-2", 1);
+        String fingerprint =
+                PrimaryKeyIndexDefinitions.create(schema)
+                        .definitions()
+                        .get(0)
+                        .definitionFingerprint();
+
+        BucketedPrimaryKeyIndexMaintainer.Factory factory =
+                BucketedPrimaryKeyIndexMaintainer.Factory.create(handler, readerBuilder, schema);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                factory.create(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Arrays.asList(first, second),
+                        Arrays.asList(
+                                fullTextPayload("payload-1", first, fingerprint),
+                                fullTextPayload("payload-2", second, fingerprint)),
+                        buildExecutor);
+
+        assertThat(factory.indexFileHandler()).isSameAs(handler);
+        assertThat(maintainer.buildNotCompleted()).isFalse();
+        assertThat(maintainer.hasPendingMaintenance()).isTrue();
+    }
+
+    @Test
+    void testLaterDefinitionFailureAbortsPreparedFullTextCommit() throws Exception {
+        DataFileMeta source = dataFile("data-1", 3);
+        BucketedFullTextIndexMaintainer fullText = mock(BucketedFullTextIndexMaintainer.class);
+        BucketedFullTextIndexMaintainer.FullTextIndexCommit fullTextCommit =
+                mock(BucketedFullTextIndexMaintainer.FullTextIndexCommit.class);
+        when(fullText.prepareCommit(any(), any(), eq(true))).thenReturn(fullTextCommit);
+        when(fullTextCommit.appendIncrement()).thenReturn(Optional.empty());
+        when(fullTextCommit.compactIncrement()).thenReturn(Optional.empty());
+        BucketedSortedIndexMaintainer failing =
+                sortedMaintainer(
+                        8,
+                        "bitmap",
+                        source,
+                        dataFile -> {
+                            throw new IllegalStateException("expected sorted failure");
+                        });
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.of(
+                        null, fullText, Collections.singletonList(failing));
+
+        assertThatThrownBy(
+                        () ->
+                                maintainer.prepareCommit(
+                                        DataIncrement.emptyIncrement(), compactAfter(source), true))
+                .hasMessage("expected sorted failure");
+
+        verify(fullTextCommit).abort(any());
     }
 
     @Test
@@ -366,6 +483,27 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         null,
                         new byte[] {1},
                         new PrimaryKeyIndexSourceMeta(sources).serialize()),
+                null);
+    }
+
+    private static IndexFileMeta fullTextPayload(
+            String fileName, DataFileMeta sourceFile, String fingerprint) {
+        PrimaryKeyIndexSourceMeta sourceMeta =
+                new PrimaryKeyIndexSourceMeta(
+                        new PrimaryKeyIndexSourceFile(sourceFile.fileName(), sourceFile.rowCount()),
+                        fingerprint);
+        return new IndexFileMeta(
+                "full-text",
+                fileName,
+                1,
+                sourceFile.rowCount(),
+                new GlobalIndexMeta(
+                        0,
+                        sourceFile.rowCount() - 1,
+                        1,
+                        null,
+                        new byte[] {1},
+                        sourceMeta.serialize()),
                 null);
     }
 

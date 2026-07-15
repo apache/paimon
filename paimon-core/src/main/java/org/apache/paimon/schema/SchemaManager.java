@@ -997,7 +997,8 @@ public class SchemaManager implements Serializable {
         CoreOptions options = new CoreOptions(schema.options());
         if (options.primaryKeyVectorIndexColumns().contains(fieldName)
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
-                || options.primaryKeyBitmapIndexColumns().contains(fieldName)) {
+                || options.primaryKeyBitmapIndexColumns().contains(fieldName)
+                || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot %s primary-key index column: [%s]", operation, fieldName));

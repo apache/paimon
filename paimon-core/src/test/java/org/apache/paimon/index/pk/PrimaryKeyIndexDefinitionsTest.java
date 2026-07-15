@@ -86,6 +86,75 @@ class PrimaryKeyIndexDefinitionsTest {
     }
 
     @Test
+    void testCreatesFullTextDefinitionWithoutIndexType() {
+        Map<String, String> options = new HashMap<>();
+        options.put("pk-full-text.index.columns", "name");
+
+        List<PrimaryKeyIndexDefinition> definitions =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions();
+
+        assertThat(definitions).hasSize(1);
+        assertThat(definitions.get(0).column()).isEqualTo("name");
+        assertThat(definitions.get(0).indexType()).isEqualTo("full-text");
+        assertThat(definitions.get(0).family().name()).isEqualTo("FULL_TEXT");
+    }
+
+    @Test
+    void testResolvesFullTextIndexOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("pk-full-text.index.columns", "name");
+        options.put(
+                "fields.name.pk-full-text.index.options",
+                "{\"full-text.tokenizer\":\"jieba\",\"ngram.min-gram\":\"2\"}");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.options().get("full-text.tokenizer")).isEqualTo("jieba");
+        assertThat(definition.options().get("full-text.ngram.min-gram")).isEqualTo("2");
+        assertThat(definition.options().toMap())
+                .doesNotContainKey("pk-full-text.index.columns")
+                .doesNotContainKey("fields.name.pk-full-text.index.options");
+    }
+
+    @Test
+    void testFullTextDefinitionFingerprintIsStableAndOptionSensitive() {
+        Map<String, String> left = new HashMap<>();
+        left.put("pk-full-text.index.columns", "name");
+        left.put(
+                "fields.name.pk-full-text.index.options",
+                "{\"full-text.tokenizer\":\"ngram\",\"ngram.min-gram\":\"2\"}");
+        Map<String, String> reordered = new HashMap<>();
+        reordered.put("pk-full-text.index.columns", "name");
+        reordered.put(
+                "fields.name.pk-full-text.index.options",
+                "{\"ngram.min-gram\":\"2\",\"full-text.tokenizer\":\"ngram\"}");
+        Map<String, String> changed = new HashMap<>(left);
+        changed.put(
+                "fields.name.pk-full-text.index.options",
+                "{\"full-text.tokenizer\":\"ngram\",\"ngram.min-gram\":\"3\"}");
+
+        String fingerprint =
+                PrimaryKeyIndexDefinitions.create(schema(left))
+                        .definitions()
+                        .get(0)
+                        .definitionFingerprint();
+        String reorderedFingerprint =
+                PrimaryKeyIndexDefinitions.create(schema(reordered))
+                        .definitions()
+                        .get(0)
+                        .definitionFingerprint();
+        String changedFingerprint =
+                PrimaryKeyIndexDefinitions.create(schema(changed))
+                        .definitions()
+                        .get(0)
+                        .definitionFingerprint();
+
+        assertThat(fingerprint).hasSize(64).isEqualTo(reorderedFingerprint);
+        assertThat(changedFingerprint).isNotEqualTo(fingerprint);
+    }
+
+    @Test
     void testLegacyVectorCompactionOptionsAreIgnored() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
