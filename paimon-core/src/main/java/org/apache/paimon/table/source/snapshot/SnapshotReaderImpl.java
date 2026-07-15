@@ -178,6 +178,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public IndexFileHandler indexFileHandler() {
+        return indexFileHandler;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
         scan.withSnapshot(snapshotId);
         return this;

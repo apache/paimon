@@ -30,6 +30,9 @@ explicitly selected. These tests cover:
     from the sink-visible schema.
   * explicit ``map_groups`` mode can produce one file per
     (partition, bucket) on the small test dataset.
+  * primary-key group writers remain single-writer when Ray splits the
+    UDF output or writer task options prevent downstream operator fusion.
+  * grouped primary-key writes preserve overwrite and empty-overwrite behavior.
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
   * non-HASH_FIXED append-only tables pass through unchanged.
@@ -363,6 +366,104 @@ class RayShuffleTest(unittest.TestCase):
         files = self._count_data_files('test_one_file_per_bucket')
         # 4 buckets × 1 file each.
         self.assertEqual(len(files), 4)
+
+    def test_primary_key_group_writer_does_not_depend_on_fusion(self):
+        """Output block splitting must not create independent bucket writers."""
+        from ray.data import DataContext
+
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.string()),
+        ])
+        table_name = 'test_pk_group_writer_no_fusion'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id'], options={'bucket': '1'},
+        )
+        rows = pa.Table.from_pydict({
+            'id': [1] * 800,
+            'value': [f'{i:04d}-' + 'x' * 4091 for i in range(800)],
+        }, schema=pa_schema)
+
+        context = DataContext.get_current()
+        previous_target = context.target_max_block_size
+        context.target_max_block_size = 64 * 1024
+        try:
+            write_paimon(
+                ray.data.from_arrow(rows),
+                identifier,
+                self.catalog_options,
+                concurrency=4,
+                ray_remote_args={'num_cpus': 0.5},
+                hash_fixed_precluster='map_groups',
+            )
+        finally:
+            context.target_max_block_size = previous_target
+
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        data_files = [
+            data_file
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for data_file in split.files
+        ]
+        self.assertEqual(len(data_files), 1)
+        self.assertEqual(
+            (data_files[0].min_sequence_number,
+             data_files[0].max_sequence_number),
+            (1, 801),
+        )
+
+        result = self._read_table(identifier)
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result.iloc[0]['value'].startswith('0799-'))
+
+    def test_primary_key_group_writer_overwrite(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.string()),
+        ])
+        identifier = self._make_table(
+            'test_pk_group_writer_overwrite', pa_schema,
+            primary_keys=['id'], options={'bucket': '1'},
+        )
+
+        initial = pa.Table.from_pydict(
+            {'id': [1, 2], 'value': ['a', 'b']}, schema=pa_schema,
+        )
+        write_paimon(
+            ray.data.from_arrow(initial), identifier, self.catalog_options,
+            hash_fixed_precluster='map_groups',
+        )
+
+        replacement = pa.Table.from_pydict(
+            {'id': [3], 'value': ['c']}, schema=pa_schema,
+        )
+        write_paimon(
+            ray.data.from_arrow(replacement),
+            identifier,
+            self.catalog_options,
+            overwrite=True,
+            concurrency=2,
+            ray_remote_args={'num_cpus': 0.5},
+            hash_fixed_precluster='map_groups',
+        )
+        self.assertEqual(set(self._read_table(identifier)['id']), {3})
+
+        empty = pa.Table.from_batches([], schema=pa_schema)
+        write_paimon(
+            ray.data.from_arrow(empty),
+            identifier,
+            self.catalog_options,
+            overwrite=True,
+            concurrency=2,
+            ray_remote_args={'num_cpus': 0.5},
+            hash_fixed_precluster='map_groups',
+        )
+        self.assertEqual(len(self._read_table(identifier)), 0)
 
     def test_fixed_bucket_with_colliding_column_name(self):
         """A table that has a column named ``__paimon_bucket__`` must

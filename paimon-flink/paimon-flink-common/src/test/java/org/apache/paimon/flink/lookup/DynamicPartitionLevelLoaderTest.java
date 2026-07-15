@@ -199,6 +199,22 @@ public class DynamicPartitionLevelLoaderTest {
         commit.close();
     }
 
+    @Test
+    public void testScanPartitionsOnNonPartitionedTable() throws Exception {
+        table =
+                createFileStoreTable(
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
+
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(FlinkConnectorOptions.SCAN_PARTITIONS.key(), "max_pt()");
+        table = table.copy(customOptions);
+
+        assertThatCode(() -> PartitionLoader.of(table))
+                .hasMessage(
+                        FlinkConnectorOptions.SCAN_PARTITIONS.key()
+                                + " is not supported for non-partitioned table.");
+    }
+
     private FileStoreTable createFileStoreTable(
             List<String> partitionKeys, List<String> primaryKeys, Map<String, String> customOptions)
             throws Exception {

@@ -28,7 +28,7 @@ import org.apache.paimon.plugin.PluginLoader;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A {@link PluginLoader} to load oss. */
+/** A {@link PluginLoader} to load s3. */
 public class S3Loader implements FileIOLoader {
 
     private static final long serialVersionUID = 1L;

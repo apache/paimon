@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -64,6 +65,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -80,6 +82,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -3364,5 +3367,231 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testReadWithLimitOnEmptyPlan() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).isEmpty();
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(10).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(0);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPath() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write multiple times to create overlapping level-0 files in the same bucket.
+        int numRecords = 100;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        // Verify that withLimit takes effect through the table read path.
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathMultiSplit() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 4));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int numRecords = 50;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits().size()).isGreaterThan(1);
+
+        int limit = 10;
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathWithNonPrimaryKeyFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int numRecords = 100;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        int limit = 10;
+        Predicate nonPrimaryKeyFilter = new PredicateBuilder(ROW_TYPE).isNotNull(2);
+        TableScan.Plan plan = table.newScan().withFilter(nonPrimaryKeyFilter).plan();
+        assertThat(plan.splits()).hasSize(1);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(nonPrimaryKeyFilter)
+                        .withLimit(limit)
+                        .createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathWithQueryAuthFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 90);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        List<Split> authSplits = wrapWithAuth(plan.splits(), authResult);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(authSplits);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughSingleSplitCreateReaderWithQueryAuthFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 50);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        Split authSplit = wrapWithAuth(plan.splits(), authResult).get(0);
+
+        RecordReader<InternalRow> reader = table.newRead().withLimit(limit).createReader(authSplit);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughSingleSplitCreateReaderWithNonPrimaryKeyFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate nonPrimaryKeyFilter = new PredicateBuilder(ROW_TYPE).isNotNull(2);
+        TableScan.Plan plan = table.newScan().withFilter(nonPrimaryKeyFilter).plan();
+        assertThat(plan.splits()).hasSize(1);
+        Split split = plan.splits().get(0);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(nonPrimaryKeyFilter)
+                        .withLimit(limit)
+                        .createReader(split);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathMultiSplitWithQueryAuthFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 4));
+        writeOverlappingL0Records(table, 50);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 40);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits().size()).isGreaterThan(1);
+        List<Split> authSplits = wrapWithAuth(plan.splits(), authResult);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(authSplits);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    private void writeOverlappingL0Records(FileStoreTable table, int numRecords) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+    }
+
+    private TableQueryAuthResult authResultWithFilter(Predicate predicate) {
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(predicate)), null);
+    }
+
+    private List<Split> wrapWithAuth(List<Split> splits, TableQueryAuthResult authResult) {
+        return splits.stream()
+                .map(split -> new QueryAuthSplit(split, authResult))
+                .collect(Collectors.toList());
     }
 }

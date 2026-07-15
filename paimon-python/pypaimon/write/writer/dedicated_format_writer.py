@@ -25,14 +25,18 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser,
+    VectorType,
+    is_blob_file_field,
+    is_blob_type,
+)
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
-    value_for_arrow,
 )
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -75,6 +79,16 @@ class DedicatedFormatWriter(DataWriter):
             raise ValueError(
                 "Fields in 'blob-descriptor-field' must be blob fields in schema. "
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
+            )
+        inline_array_blob_fields = [
+            field.name
+            for field in self.table.table_schema.fields
+            if field.name in self.blob_inline_fields and not is_blob_type(field.type)
+        ]
+        if inline_array_blob_fields:
+            raise ValueError(
+                "ARRAY<BLOB> is only supported by 'blob-field'. "
+                f"Invalid inline blob fields: {sorted(inline_array_blob_fields)}"
             )
 
         # Blob fields that should still be written to `.blob` files.
@@ -162,12 +176,11 @@ class DedicatedFormatWriter(DataWriter):
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
-        blob_columns = []
-        for field in self.table.table_schema.fields:
-            type_str = str(field.type).lower()
-            if 'blob' in type_str:
-                blob_columns.append(field.name)
-
+        blob_columns = [
+            field.name
+            for field in self.table.table_schema.fields
+            if is_blob_file_field(field)
+        ]
         if len(blob_columns) == 0:
             raise ValueError("No blob field found in table schema.")
         return blob_columns
@@ -294,7 +307,7 @@ class DedicatedFormatWriter(DataWriter):
                 return value.view_struct.serialize()
             return value
 
-        return value_for_arrow(value)
+        return value
 
     def prepare_commit(self) -> List[DataFileMeta]:
         # Close any remaining data
@@ -332,19 +345,39 @@ class DedicatedFormatWriter(DataWriter):
         self.committed_files.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
-            pa.RecordBatch, Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
+            Optional[pa.RecordBatch], Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
         """Split data into normal, blob, and vector parts based on column names."""
-        normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
+        normal_data = (
+            self._project_columns(data, self.normal_column_names)
+            if self.normal_column_names else None
+        )
         blob_data_map = {
-            blob_column: data.select([blob_column]) for blob_column in self.blob_file_column_names
+            blob_column: self._project_columns(data, [blob_column])
+            for blob_column in self.blob_file_column_names
         }
         vector_data = (
-            pa.RecordBatch.from_arrays(
-                [data.column(name) for name in self.vector_write_columns],
-                names=self.vector_write_columns,
-            ) if self.vector_write_columns else None
+            self._project_columns(data, self.vector_write_columns)
+            if self.vector_write_columns else None
         )
         return normal_data, blob_data_map, vector_data
+
+    @staticmethod
+    def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
+        indices = [data.schema.get_field_index(name) for name in column_names]
+        missing_columns = [
+            name for name, index in zip(column_names, indices) if index < 0
+        ]
+        if missing_columns:
+            raise KeyError(f"Columns not found in record batch: {missing_columns}")
+
+        projected_schema = pa.schema(
+            [data.schema.field(index) for index in indices],
+            metadata=data.schema.metadata,
+        )
+        return pa.RecordBatch.from_arrays(
+            [data.column(index) for index in indices],
+            schema=projected_schema,
+        )
 
     def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
         if not self.blob_inline_fields:

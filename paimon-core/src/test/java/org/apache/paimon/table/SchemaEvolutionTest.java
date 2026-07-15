@@ -318,7 +318,8 @@ public class SchemaEvolutionTest {
                                                         "__BLOB_FIELD",
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+                .hasMessageContaining(
+                        "must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type");
 
         // nested column rejected.
         assertThatThrownBy(

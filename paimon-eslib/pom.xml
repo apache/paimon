@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
+        <version>2.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>paimon-eslib</artifactId>
+    <name>Paimon : ESLib Index</name>
+
+    <properties>
+        <!-- eslib-api / eslib-core are compiled for Java 11 (Lucene 9.12); compile this module
+             at Java 11 instead of the project default (1.8) so their class files are readable. -->
+        <target.java.version>11</target.java.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ESLib dependencies. eslib-core bundles the api + api.model classes (eslib-api was merged
+             into eslib-core), so no separate eslib-api artifact is needed. -->
+        <dependency>
+            <groupId>io.github.paimon.eslib</groupId>
+            <artifactId>eslib-core</artifactId>
+            <version>1.0.6</version>
+            <classifier>lucene9</classifier>
+            <!-- Paimon supplies its own ArchiveDataProvider over FileIO; the standalone
+                 OSSRangeIndexInput and Aliyun SDK are not used in this module. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>com.aliyun.oss</groupId>
+                    <artifactId>aliyun-sdk-oss</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.github.paimon.eslib</groupId>
+            <artifactId>eslib-simdvec</artifactId>
+            <version>1.0.6</version>
+        </dependency>
+        <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
+             not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm
+             support lands. -->
+
+        <!-- Lucene (same version as eslib) -->
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-core</artifactId>
+            <version>9.12.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analysis-common</artifactId>
+            <version>9.12.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Provides TestLoggerExtension, auto-registered via the JUnit extension SPI that the
+             paimon-common test-jar declares; without it surefire fails to load the extension. -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-test-utils</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>eslib-github</id>
+            <url>https://raw.githubusercontent.com/CrownChu/es-paimon-lib-releases/main/repository</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
+
+</project>

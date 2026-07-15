@@ -29,6 +29,8 @@ import org.apache.spark.unsafe.types.VariantVal
 class Spark4InternalRowWithBlob(rowType: RowType, blobFields: Set[Int], blobAsDescriptor: Boolean)
   extends Spark4InternalRow(rowType) {
 
+  withBlobAsDescriptor(blobAsDescriptor)
+
   override def getBinary(ordinal: Int): Array[Byte] = {
     if (blobFields.contains(ordinal)) {
       val blob = row.getBlob(ordinal)

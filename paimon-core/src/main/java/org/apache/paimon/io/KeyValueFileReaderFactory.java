@@ -309,6 +309,12 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             return build(partition, bucket, dvFactory, true, Collections.emptyList());
         }
 
+        /** Builds a reader which preserves every physical row position. */
+        public KeyValueFileReaderFactory buildWithoutDeletionVector(
+                BinaryRow partition, int bucket) {
+            return build(partition, bucket, ignored -> Optional.empty());
+        }
+
         public KeyValueFileReaderFactory build(
                 BinaryRow partition,
                 int bucket,

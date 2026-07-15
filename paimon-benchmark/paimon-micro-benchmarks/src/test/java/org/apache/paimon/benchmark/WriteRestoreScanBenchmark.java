@@ -400,6 +400,7 @@ public class WriteRestoreScanBenchmark extends TableBenchmark {
                                                     entry.partition(),
                                                     entry.bucket(),
                                                     false,
+                                                    false,
                                                     false)));
         }
         for (Future<?> f : futures) {

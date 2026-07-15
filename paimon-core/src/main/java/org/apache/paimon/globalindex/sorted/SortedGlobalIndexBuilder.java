@@ -244,33 +244,21 @@ public class SortedGlobalIndexBuilder implements Serializable {
 
     public List<CommitMessage> buildForSinglePartition(
             Range rowRange, BinaryRow partition, Iterator<InternalRow> data) throws IOException {
-        long counter = 0;
-        GlobalIndexSingleColumnWriter currentWriter = null;
-        List<CommitMessage> commitMessages = new ArrayList<>();
         FieldGetter indexFieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
-
-        while (data.hasNext()) {
-            InternalRow row = data.next();
-
-            if (currentWriter != null && counter >= recordsPerRange) {
-                commitMessages.add(flushIndex(rowRange, currentWriter.finish(), partition));
-                currentWriter = null;
-                counter = 0;
+        try (SortedSingleColumnIndexWriter writer =
+                new SortedSingleColumnIndexWriter(recordsPerRange, this::createWriter)) {
+            while (data.hasNext()) {
+                InternalRow row = data.next();
+                long localRowId = row.getLong(1) - rowRange.from;
+                writer.write(indexFieldGetter.getFieldOrNull(row), localRowId);
             }
 
-            counter++;
-            if (currentWriter == null) {
-                currentWriter = createWriter();
+            List<CommitMessage> commitMessages = new ArrayList<>();
+            for (List<ResultEntry> resultEntries : writer.finish()) {
+                commitMessages.add(flushIndex(rowRange, resultEntries, partition));
             }
-
-            long localRowId = row.getLong(1) - rowRange.from;
-            currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            return commitMessages;
         }
-
-        if (counter > 0) {
-            commitMessages.add(flushIndex(rowRange, currentWriter.finish(), partition));
-        }
-        return commitMessages;
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {

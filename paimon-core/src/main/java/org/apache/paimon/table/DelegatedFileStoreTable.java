@@ -316,6 +316,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return wrapped.newScan(snapshotReaderFactory);
+    }
+
+    @Override
     public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }

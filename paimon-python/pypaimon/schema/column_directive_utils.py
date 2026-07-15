@@ -149,13 +149,41 @@ def _convert_type(directive: ParsedDirective, field_name: str, source_type: Data
             )
         return VectorType(source_type.nullable, source_type.element, directive.vector_dim)
     else:
+        if isinstance(source_type, ArrayType):
+            if directive.option_key != CoreOptions.BLOB_FIELD.key():
+                raise ValueError(
+                    f"ARRAY<BLOB> is only supported by '{CoreOptions.BLOB_FIELD.key()}'."
+                )
+            element_type = getattr(source_type.element, 'type', None) \
+                if isinstance(source_type.element, AtomicType) else None
+            if not _is_blob_source_type(element_type):
+                raise ValueError(
+                    f"Column {field_name} declared with a BLOB directive must be of "
+                    f"BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> "
+                    f"type, but was {source_type}."
+                )
+            return ArrayType(
+                source_type.nullable,
+                AtomicType('BLOB', source_type.element.nullable),
+            )
         type_name = getattr(source_type, 'type', None) if isinstance(source_type, AtomicType) else None
-        if type_name not in ('VARBINARY', 'BINARY', 'BYTES', 'BLOB'):
+        if not _is_blob_source_type(type_name):
             raise ValueError(
                 f"Column {field_name} declared with a BLOB directive "
-                f"must be of BYTES, BINARY or BLOB type, but was {source_type}."
+                f"must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> "
+                f"or ARRAY<BLOB> type, but was {source_type}."
             )
         return AtomicType('BLOB', source_type.nullable)
+
+
+def _is_blob_source_type(type_name: Optional[str]) -> bool:
+    if type_name is None:
+        return False
+    return (
+        type_name in ('BYTES', 'BLOB')
+        or type_name.startswith('BINARY')
+        or type_name.startswith('VARBINARY')
+    )
 
 
 def _modify_field_options(option_key: str, field_name: str, options: Dict[str, str]):

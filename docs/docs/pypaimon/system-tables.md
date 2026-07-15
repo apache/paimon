@@ -178,6 +178,7 @@ Aggregated partition statistics for the latest snapshot.
 | `options`             | STRING                | Filesystem path returns `NULL` |
 | `total_buckets`       | INT NOT NULL          |                                |
 | `done`                | BOOLEAN NOT NULL      | Filesystem path returns `False`|
+| `deleted_record_count` | BIGINT               | Records marked deleted by deletion vectors; `0` when none exist and `NULL` when legacy metadata lacks cardinality |
 
 ### `$tags`
 

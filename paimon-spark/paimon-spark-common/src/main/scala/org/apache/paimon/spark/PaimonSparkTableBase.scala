@@ -133,10 +133,25 @@ abstract class PaimonSparkTableBase(val table: Table)
       _metadataColumns.append(PaimonMetadataColumn.SEARCH_SCORE)
     }
 
+    // For tables on the delta-based row-level path these two columns form the delta row ID, and
+    // Spark rejects nullable row ID columns. Keep them nullable everywhere else: V1 commands
+    // project them through outer joins where the target side can be null (e.g. the not-matched
+    // rows of MERGE INTO).
+    val (filePathColumn, rowIndexColumn) =
+      if (
+        this.isInstanceOf[SparkTable] &&
+        SparkTable.supportsV2DeltaOps(this.asInstanceOf[SparkTable])
+      ) {
+        (
+          PaimonMetadataColumn.FILE_PATH.copy(nullable = false),
+          PaimonMetadataColumn.ROW_INDEX.copy(nullable = false))
+      } else {
+        (PaimonMetadataColumn.FILE_PATH, PaimonMetadataColumn.ROW_INDEX)
+      }
     _metadataColumns.appendAll(
       Seq(
-        PaimonMetadataColumn.FILE_PATH,
-        PaimonMetadataColumn.ROW_INDEX,
+        filePathColumn,
+        rowIndexColumn,
         PaimonMetadataColumn.PARTITION(partitionType),
         PaimonMetadataColumn.BUCKET
       ))

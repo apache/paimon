@@ -29,7 +29,7 @@ under the License.
 
 ## Overview
 
-The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects.
+The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects. A field can also use `ARRAY<BLOB>` to store an ordered collection of blobs, including null arrays and null elements.
 
 The Blob Storage is based on Data Evolution mode.
 
@@ -76,6 +76,7 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
 
 1. **Default blob storage** (`__BLOB_FIELD`)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
+   This mode supports both `BLOB` and `ARRAY<BLOB>` fields.
 
 2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
    Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
@@ -84,6 +85,8 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
 This allows one table to mix different storage modes for different BLOB columns.
+`ARRAY<BLOB>` is supported only by `__BLOB_FIELD`; descriptor-only and blob-view
+comment directives accept scalar BLOB fields only.
 
 ## Table Options
 
@@ -180,7 +183,8 @@ The recommended way to create a blob table in SQL is to use the **comment direct
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES COMMENT '__BLOB_FIELD; product image'
+    image BYTES COMMENT '__BLOB_FIELD; product image',
+    gallery ARRAY<BYTES> COMMENT '__BLOB_FIELD; product gallery'
 ) WITH (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
@@ -206,7 +210,8 @@ CREATE TABLE media_table (
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BINARY COMMENT '__BLOB_FIELD; product image'
+    image BINARY COMMENT '__BLOB_FIELD; product image',
+    gallery ARRAY<BINARY> COMMENT '__BLOB_FIELD; product gallery'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
@@ -218,11 +223,13 @@ CREATE TABLE image_table (
 <TabItem value="java" label="Java API">
 
 ```java
-// Java API uses BlobType directly, with comment directive for auto option registration
+// Comment directives convert binary source types and register the blob fields.
 Schema schema = Schema.newBuilder()
         .column("id", DataTypes.INT())
         .column("name", DataTypes.STRING())
         .column("image", DataTypes.BYTES(), "__BLOB_FIELD; product image")
+        .column("gallery", DataTypes.ARRAY(DataTypes.BYTES()),
+                "__BLOB_FIELD; product gallery")
         .option("row-tracking.enabled", "true")
         .option("data-evolution.enabled", "true")
         .build();
@@ -236,11 +243,12 @@ Schema schema = Schema.newBuilder()
 import pyarrow as pa
 from pypaimon import Schema
 
-# pa.large_binary() is automatically recognized as BLOB type
+# pa.large_binary() and list_(large_binary()) are recognized as blob types.
 pa_schema = pa.schema([
     ('id', pa.int32()),
     ('name', pa.string()),
     ('image', pa.large_binary()),
+    ('gallery', pa.list_(pa.large_binary())),
 ])
 
 schema = Schema.from_pyarrow_schema(
@@ -256,13 +264,13 @@ schema = Schema.from_pyarrow_schema(
 
 </Tabs>
 
-The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts the `BYTES`/`BINARY` type to `BLOB`, registers the field in the corresponding option, and stores the text after `;` as the column's real comment.
+The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB` and `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, registers the field in the corresponding option, and stores the text after `;` as the column's real comment.
 
 Supported directives:
 
 | Directive | Storage mode | Option |
 |-----------|-------------|--------|
-| `__BLOB_FIELD` | Raw bytes in `.blob` files | `blob-field` |
+| `__BLOB_FIELD` | Raw scalar or array elements in `.blob` files | `blob-field` |
 | `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
 | `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
 
@@ -330,10 +338,10 @@ catalog.alter_table(
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
-INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A');
+INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A', NULL);
 
 INSERT INTO image_table
-SELECT id, name, content FROM source_table;
+SELECT id, name, content, CAST(NULL AS ARRAY<BYTES>) FROM source_table;
 ```
 
 </TabItem>
@@ -341,7 +349,7 @@ SELECT id, name, content FROM source_table;
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
-INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A');
+INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A', NULL);
 ```
 
 </TabItem>
@@ -352,7 +360,8 @@ INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A');
 GenericRow row = GenericRow.of(
         1,
         BinaryString.fromString("sample"),
-        new BlobData(imageBytes)
+        new BlobData(imageBytes),
+        null
 );
 write.write(row);
 ```
@@ -366,8 +375,54 @@ data = pa.table({
     'id': pa.array([1], type=pa.int32()),
     'name': pa.array(['sample']),
     'image': pa.array([b'\x89PNG\r\n\x1a\n'], type=pa.large_binary()),
+    'gallery': pa.array([None], type=pa.list_(pa.large_binary())),
 })
 writer.write_arrow(data)
+```
+
+</TabItem>
+
+</Tabs>
+
+For an `ARRAY<BLOB>` field, write an array of binary values. The array itself and
+individual elements may be null when the corresponding array and element types are
+nullable:
+
+<Tabs groupId="array-blob-insert">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+INSERT INTO image_table
+VALUES (1, 'sample', X'89504E470D0A1A0A', ARRAY[X'01', NULL, X'02']);
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+INSERT INTO image_table
+VALUES (1, 'sample', X'89504E470D0A1A0A', array(X'01', NULL, X'02'));
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+GenericArray gallery = new GenericArray(new Object[] {
+        new BlobData(firstImageBytes), null, new BlobData(secondImageBytes)
+});
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+gallery_type = pa.list_(pa.large_binary())
+gallery = pa.array([[first_image, None, second_image]], type=gallery_type)
 ```
 
 </TabItem>
@@ -550,6 +605,7 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 3. **No Statistics**: Statistics collection is not supported for blob columns.
 4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
+6. **Array Storage Mode**: `ARRAY<BLOB>` is supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
 
 ## Best Practices
 

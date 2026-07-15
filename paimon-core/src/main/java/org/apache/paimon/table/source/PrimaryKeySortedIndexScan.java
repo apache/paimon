@@ -1,0 +1,827 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.table.source;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
+import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pksorted.PkSortedBucketIndexState;
+import org.apache.paimon.index.pksorted.PkSortedIndexGroup;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.IndexFilePathFactories;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
+
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
+/** Plans source-backed scalar index groups in file-local row-position space. */
+public final class PrimaryKeySortedIndexScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeySortedIndexScan.class);
+
+    private PrimaryKeySortedIndexScan() {}
+
+    /** Factory to create a sorted-index reader for a source data file. */
+    @FunctionalInterface
+    public interface ReaderFactory {
+
+        GlobalIndexReader create(
+                FilePlan file, PrimaryKeyIndexDefinition definition, List<IndexFileMeta> payloads);
+    }
+
+    static ReaderFactory readerFactory(
+            FileIO fileIO, FileStorePathFactory pathFactory, RowType rowType, Options options) {
+        IndexFilePathFactories pathFactories = new IndexFilePathFactories(pathFactory);
+        ExecutorService executor =
+                GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+        GlobalIndexFileReader fileReader = meta -> fileIO.newInputStream(meta.filePath());
+        return (file, definition, payloads) -> {
+            IndexPathFactory indexPathFactory =
+                    pathFactories.get(file.sourceSplit().partition(), file.sourceSplit().bucket());
+            List<GlobalIndexIOMeta> ioMetas = new ArrayList<>(payloads.size());
+            for (IndexFileMeta payload : payloads) {
+                GlobalIndexMeta meta = checkNotNull(payload.globalIndexMeta());
+                ioMetas.add(
+                        new GlobalIndexIOMeta(
+                                indexPathFactory.toPath(payload),
+                                payload.fileSize(),
+                                meta.indexMeta()));
+            }
+            GlobalIndexer indexer =
+                    GlobalIndexer.create(
+                            definition.indexType(),
+                            rowType.getField(definition.fieldId()),
+                            definition.options());
+            return indexer.createReader(fileReader, ioMetas, executor);
+        };
+    }
+
+    static Plan plan(
+            long snapshotId,
+            List<DataSplit> dataSplits,
+            List<PrimaryKeyIndexDefinition> definitions,
+            List<IndexManifestEntry> indexEntries) {
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> payloadsByBucket = new LinkedHashMap<>();
+        for (IndexManifestEntry entry : indexEntries) {
+            IndexFileMeta payload = entry.indexFile();
+            GlobalIndexMeta meta = payload.globalIndexMeta();
+            if (entry.kind() != FileKind.ADD || meta == null || meta.sourceMeta() == null) {
+                continue;
+            }
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            payloadsByBucket.computeIfAbsent(bucket, ignored -> new ArrayList<>()).add(payload);
+        }
+
+        List<PrimaryKeyIndexDefinition> scalarDefinitions = new ArrayList<>();
+        for (PrimaryKeyIndexDefinition definition : definitions) {
+            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                scalarDefinitions.add(definition);
+            }
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<PrimaryKeyIndexSourceFile>> sourcesByBucket =
+                new LinkedHashMap<>();
+        for (DataSplit split : dataSplits) {
+            checkArgument(
+                    split.snapshotId() == snapshotId,
+                    "Data split snapshot %s does not match sorted-index scan snapshot %s.",
+                    split.snapshotId(),
+                    snapshotId);
+            checkArgument(
+                    !split.isStreaming(), "Primary-key sorted-index scan requires batch splits.");
+            List<DeletionFile> deletions = split.deletionFiles().orElse(null);
+            checkArgument(
+                    deletions == null || deletions.size() == split.dataFiles().size(),
+                    "Deletion files must align with data files in a sorted-index split.");
+            List<PrimaryKeyIndexSourceFile> sources =
+                    sourcesByBucket.computeIfAbsent(
+                            Pair.of(split.partition(), split.bucket()),
+                            ignored -> new ArrayList<>());
+            for (DataFileMeta dataFile : split.dataFiles()) {
+                sources.add(
+                        new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
+            }
+        }
+
+        Map<Pair<BinaryRow, Integer>, Map<String, Map<Integer, PkSortedIndexGroup>>>
+                groupsByBucket = new LinkedHashMap<>();
+        for (Map.Entry<Pair<BinaryRow, Integer>, List<PrimaryKeyIndexSourceFile>> bucketEntry :
+                sourcesByBucket.entrySet()) {
+            Pair<BinaryRow, Integer> bucket = bucketEntry.getKey();
+            List<IndexFileMeta> bucketPayloads =
+                    payloadsByBucket.getOrDefault(bucket, Collections.emptyList());
+            Set<PrimaryKeyIndexSourceFile> activeSourceFiles =
+                    new HashSet<>(bucketEntry.getValue());
+            Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource = new LinkedHashMap<>();
+            for (PrimaryKeyIndexDefinition definition : scalarDefinitions) {
+                List<IndexFileMeta> definitionPayloads = new ArrayList<>();
+                for (IndexFileMeta payload : bucketPayloads) {
+                    GlobalIndexMeta meta = payload.globalIndexMeta();
+                    if (meta != null
+                            && definition.indexType().equals(payload.indexType())
+                            && definition.fieldId() == meta.indexFieldId()) {
+                        definitionPayloads.add(payload);
+                    }
+                }
+                try {
+                    PkSortedBucketIndexState state =
+                            PkSortedBucketIndexState.fromActivePayloads(
+                                    definition.fieldId(),
+                                    definition.indexType(),
+                                    bucketEntry.getValue(),
+                                    definitionPayloads);
+                    for (PkSortedIndexGroup group : state.groups()) {
+                        for (PrimaryKeyIndexSourceFile sourceFile : group.sourceFiles()) {
+                            if (!activeSourceFiles.contains(sourceFile)) {
+                                continue;
+                            }
+                            groupsBySource
+                                    .computeIfAbsent(
+                                            sourceFile.fileName(), ignored -> new LinkedHashMap<>())
+                                    .put(definition.fieldId(), group);
+                        }
+                    }
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    LOG.warn(
+                            "Failed to plan primary-key sorted index for partition {}, bucket {} "
+                                    + "and field {}; falling back to a raw scan for this field.",
+                            bucket.getKey(),
+                            bucket.getValue(),
+                            definition.fieldId(),
+                            e);
+                }
+            }
+            groupsByBucket.put(bucket, groupsBySource);
+        }
+
+        List<FilePlan> files = new ArrayList<>();
+        for (DataSplit split : dataSplits) {
+            Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource =
+                    groupsByBucket.getOrDefault(
+                            Pair.of(split.partition(), split.bucket()), Collections.emptyMap());
+            for (int fileIndex = 0; fileIndex < split.dataFiles().size(); fileIndex++) {
+                DataFileMeta dataFile = split.dataFiles().get(fileIndex);
+                Map<Integer, PkSortedIndexGroup> groups =
+                        groupsBySource.getOrDefault(dataFile.fileName(), Collections.emptyMap());
+                files.add(new FilePlan(split, fileIndex, groups));
+            }
+        }
+        return new Plan(snapshotId, files);
+    }
+
+    static EvaluatedPlan evaluate(
+            Plan plan,
+            RowType rowType,
+            Predicate predicate,
+            List<PrimaryKeyIndexDefinition> definitions,
+            ReaderFactory readerFactory) {
+        Map<Integer, PrimaryKeyIndexDefinition> definitionsByField = new LinkedHashMap<>();
+        for (PrimaryKeyIndexDefinition definition : definitions) {
+            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                definitionsByField.put(definition.fieldId(), definition);
+            }
+        }
+
+        Map<PkSortedIndexGroup, SharedGlobalIndexReader> sharedReaders = new IdentityHashMap<>();
+        List<EvaluatedFile> files = new ArrayList<>();
+        try {
+            for (FilePlan file : plan.files()) {
+                GlobalIndexEvaluator evaluator =
+                        new GlobalIndexEvaluator(
+                                rowType,
+                                fieldId -> {
+                                    PrimaryKeyIndexDefinition definition =
+                                            definitionsByField.get(fieldId);
+                                    Optional<PkSortedIndexGroup> group = file.group(fieldId);
+                                    if (definition == null || !group.isPresent()) {
+                                        return Collections.emptyList();
+                                    }
+                                    SharedGlobalIndexReader reader = sharedReaders.get(group.get());
+                                    if (reader == null) {
+                                        reader =
+                                                new SharedGlobalIndexReader(
+                                                        group.get().sourceFiles(),
+                                                        () ->
+                                                                readerFactory.create(
+                                                                        file,
+                                                                        definition,
+                                                                        group.get().payloads()));
+                                        sharedReaders.put(group.get(), reader);
+                                    }
+                                    return Collections.singletonList(
+                                            fileLocalReader(file, group.get(), reader));
+                                });
+                Optional<GlobalIndexResult> result;
+                try {
+                    result = evaluator.evaluate(predicate);
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    LOG.warn(
+                            "Failed to evaluate primary-key sorted index for data file {}; "
+                                    + "falling back to a raw scan for this file.",
+                            file.dataFile().fileName(),
+                            e);
+                    result = Optional.empty();
+                } finally {
+                    evaluator.close();
+                }
+                files.add(new EvaluatedFile(file, result));
+            }
+        } finally {
+            IOUtils.closeAllQuietly(sharedReaders.values());
+        }
+        return new EvaluatedPlan(plan.snapshotId(), files);
+    }
+
+    private static GlobalIndexReader fileLocalReader(
+            FilePlan file, PkSortedIndexGroup group, SharedGlobalIndexReader reader) {
+        List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
+        PrimaryKeyIndexSourceFile target =
+                new PrimaryKeyIndexSourceFile(
+                        file.dataFile().fileName(), file.dataFile().rowCount());
+        int sourceIndex = -1;
+        for (int i = 0; i < sourceFiles.size(); i++) {
+            if (sourceFiles.get(i).equals(target)) {
+                sourceIndex = i;
+                break;
+            }
+        }
+        checkArgument(
+                sourceIndex >= 0,
+                "Data file %s is not covered by its sorted-index source group.",
+                file.dataFile().fileName());
+        return new FileLocalGlobalIndexReader(reader, sourceIndex);
+    }
+
+    private static void rethrowIfInterrupted(RuntimeException exception) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw exception;
+        }
+    }
+
+    /** Shares one source-group reader and its group-global query results across source files. */
+    private static final class SharedGlobalIndexReader implements GlobalIndexReader {
+
+        private final Supplier<GlobalIndexReader> readerFactory;
+        private final Map<QueryKey, CompletableFuture<Optional<GlobalIndexResult>>> results;
+        private final Map<
+                        CompletableFuture<Optional<GlobalIndexResult>>,
+                        CompletableFuture<List<Optional<GlobalIndexResult>>>>
+                localizedResults;
+        private final long[] sourceOffsets;
+
+        private GlobalIndexReader reader;
+        private RuntimeException readerFailure;
+
+        private SharedGlobalIndexReader(
+                List<PrimaryKeyIndexSourceFile> sourceFiles,
+                Supplier<GlobalIndexReader> readerFactory) {
+            this.readerFactory = readerFactory;
+            this.results = new ConcurrentHashMap<>();
+            this.localizedResults = new ConcurrentHashMap<>();
+            this.sourceOffsets = new long[sourceFiles.size() + 1];
+            for (int i = 0; i < sourceFiles.size(); i++) {
+                sourceOffsets[i + 1] =
+                        Math.addExact(sourceOffsets[i], sourceFiles.get(i).rowCount());
+            }
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+            return query(
+                    QueryKey.of(QueryOperation.IS_NOT_NULL, fieldRef),
+                    () -> reader().visitIsNotNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+            return query(
+                    QueryKey.of(QueryOperation.IS_NULL, fieldRef),
+                    () -> reader().visitIsNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.STARTS_WITH, fieldRef, literal),
+                    () -> reader().visitStartsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.ENDS_WITH, fieldRef, literal),
+                    () -> reader().visitEndsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.CONTAINS, fieldRef, literal),
+                    () -> reader().visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LIKE, fieldRef, literal),
+                    () -> reader().visitLike(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LESS_THAN, fieldRef, literal),
+                    () -> reader().visitLessThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.GREATER_OR_EQUAL, fieldRef, literal),
+                    () -> reader().visitGreaterOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.NOT_EQUAL, fieldRef, literal),
+                    () -> reader().visitNotEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.LESS_OR_EQUAL, fieldRef, literal),
+                    () -> reader().visitLessOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.EQUAL, fieldRef, literal),
+                    () -> reader().visitEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.GREATER_THAN, fieldRef, literal),
+                    () -> reader().visitGreaterThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.IN, fieldRef, literals),
+                    () -> reader().visitIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.NOT_IN, fieldRef, literals),
+                    () -> reader().visitNotIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return query(
+                    QueryKey.of(QueryOperation.BETWEEN, fieldRef, from, to),
+                    () -> reader().visitBetween(fieldRef, from, to));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return query(
+                    QueryKey.of(QueryOperation.NOT_BETWEEN, fieldRef, from, to),
+                    () -> reader().visitNotBetween(fieldRef, from, to));
+        }
+
+        private CompletableFuture<Optional<GlobalIndexResult>> query(
+                QueryKey key,
+                Supplier<CompletableFuture<Optional<GlobalIndexResult>>> querySupplier) {
+            return results.computeIfAbsent(
+                    key,
+                    ignored -> {
+                        try {
+                            return checkNotNull(querySupplier.get());
+                        } catch (RuntimeException e) {
+                            CompletableFuture<Optional<GlobalIndexResult>> failed =
+                                    new CompletableFuture<>();
+                            failed.completeExceptionally(e);
+                            return failed;
+                        }
+                    });
+        }
+
+        private CompletableFuture<Optional<GlobalIndexResult>> localize(
+                CompletableFuture<Optional<GlobalIndexResult>> result, int sourceIndex) {
+            return localizedResults
+                    .computeIfAbsent(result, future -> future.thenApply(this::partitionBySource))
+                    .thenApply(partitions -> partitions.get(sourceIndex));
+        }
+
+        private List<Optional<GlobalIndexResult>> partitionBySource(
+                Optional<GlobalIndexResult> result) {
+            int sourceCount = sourceOffsets.length - 1;
+            if (!result.isPresent()) {
+                return Collections.nCopies(sourceCount, Optional.empty());
+            }
+            if (sourceCount == 1) {
+                return Collections.singletonList(result);
+            }
+
+            List<RoaringNavigableMap64> partitions = new ArrayList<>(sourceCount);
+            for (int i = 0; i < sourceCount; i++) {
+                partitions.add(new RoaringNavigableMap64());
+            }
+
+            long totalRowCount = sourceOffsets[sourceCount];
+            int sourceIndex = 0;
+            for (long position : result.get().results()) {
+                if (position < 0 || position >= totalRowCount) {
+                    for (int i = 0; i < sourceCount; i++) {
+                        partitions.get(i).add(sourceOffsets[i + 1] - sourceOffsets[i]);
+                    }
+                    continue;
+                }
+                while (position >= sourceOffsets[sourceIndex + 1]) {
+                    sourceIndex++;
+                }
+                partitions.get(sourceIndex).add(position - sourceOffsets[sourceIndex]);
+            }
+
+            List<Optional<GlobalIndexResult>> localized = new ArrayList<>(sourceCount);
+            for (RoaringNavigableMap64 partition : partitions) {
+                localized.add(Optional.of(GlobalIndexResult.create(partition)));
+            }
+            return localized;
+        }
+
+        private synchronized GlobalIndexReader reader() {
+            if (reader != null) {
+                return reader;
+            }
+            if (readerFailure != null) {
+                throw readerFailure;
+            }
+            try {
+                reader = checkNotNull(readerFactory.get());
+                return reader;
+            } catch (RuntimeException e) {
+                readerFailure = e;
+                throw e;
+            }
+        }
+
+        @Override
+        public synchronized void close() throws IOException {
+            if (reader != null) {
+                GlobalIndexReader readerToClose = reader;
+                reader = null;
+                readerToClose.close();
+            }
+        }
+    }
+
+    private enum QueryOperation {
+        IS_NOT_NULL,
+        IS_NULL,
+        STARTS_WITH,
+        ENDS_WITH,
+        CONTAINS,
+        LIKE,
+        LESS_THAN,
+        GREATER_OR_EQUAL,
+        NOT_EQUAL,
+        LESS_OR_EQUAL,
+        EQUAL,
+        GREATER_THAN,
+        IN,
+        NOT_IN,
+        BETWEEN,
+        NOT_BETWEEN
+    }
+
+    private static final class QueryKey {
+
+        private final QueryOperation operation;
+        private final FieldRef fieldRef;
+        private final List<Object> literals;
+
+        private QueryKey(QueryOperation operation, FieldRef fieldRef, List<Object> literals) {
+            this.operation = operation;
+            this.fieldRef = fieldRef;
+            this.literals = Collections.unmodifiableList(new ArrayList<>(literals));
+        }
+
+        private static QueryKey of(
+                QueryOperation operation, FieldRef fieldRef, Object... literals) {
+            return new QueryKey(operation, fieldRef, Arrays.asList(literals));
+        }
+
+        private static QueryKey ofLiterals(
+                QueryOperation operation, FieldRef fieldRef, List<Object> literals) {
+            return new QueryKey(operation, fieldRef, literals);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof QueryKey)) {
+                return false;
+            }
+            QueryKey queryKey = (QueryKey) o;
+            return operation == queryKey.operation
+                    && Objects.equals(fieldRef, queryKey.fieldRef)
+                    && Objects.equals(literals, queryKey.literals);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(operation, fieldRef, literals);
+        }
+    }
+
+    /** Restricts merged source-group ordinals to one source file's local row positions. */
+    private static final class FileLocalGlobalIndexReader implements GlobalIndexReader {
+
+        private final SharedGlobalIndexReader wrapped;
+        private final int sourceIndex;
+
+        private FileLocalGlobalIndexReader(SharedGlobalIndexReader wrapped, int sourceIndex) {
+            this.wrapped = wrapped;
+            this.sourceIndex = sourceIndex;
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+            return localize(wrapped.visitIsNotNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+            return localize(wrapped.visitIsNull(fieldRef));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitStartsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitEndsWith(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitLike(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitLessThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitGreaterOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitNotEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitLessOrEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitEqual(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitGreaterThan(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitNotIn(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return localize(wrapped.visitBetween(fieldRef, from, to));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+                FieldRef fieldRef, Object from, Object to) {
+            return localize(wrapped.visitNotBetween(fieldRef, from, to));
+        }
+
+        private CompletableFuture<Optional<GlobalIndexResult>> localize(
+                CompletableFuture<Optional<GlobalIndexResult>> result) {
+            return wrapped.localize(result, sourceIndex);
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    /** Immutable groups for all source files in one captured snapshot. */
+    public static final class Plan {
+
+        private final long snapshotId;
+        private final List<FilePlan> files;
+
+        private Plan(long snapshotId, List<FilePlan> files) {
+            this.snapshotId = snapshotId;
+            this.files = Collections.unmodifiableList(new ArrayList<>(files));
+        }
+
+        public long snapshotId() {
+            return snapshotId;
+        }
+
+        public List<FilePlan> files() {
+            return files;
+        }
+    }
+
+    /** One active data file and its complete field-local payload groups. */
+    public static final class FilePlan {
+
+        private final DataSplit sourceSplit;
+        private final int fileIndex;
+        private final Map<Integer, PkSortedIndexGroup> groups;
+
+        private FilePlan(
+                DataSplit sourceSplit, int fileIndex, Map<Integer, PkSortedIndexGroup> groups) {
+            this.sourceSplit = sourceSplit;
+            this.fileIndex = fileIndex;
+            this.groups = Collections.unmodifiableMap(new LinkedHashMap<>(groups));
+        }
+
+        public DataFileMeta dataFile() {
+            return sourceSplit.dataFiles().get(fileIndex);
+        }
+
+        public Optional<PkSortedIndexGroup> group(int fieldId) {
+            return Optional.ofNullable(groups.get(fieldId));
+        }
+
+        DataSplit sourceSplit() {
+            return sourceSplit;
+        }
+
+        int fileIndex() {
+            return fileIndex;
+        }
+    }
+
+    /** Predicate results for all source files in one captured snapshot. */
+    public static final class EvaluatedPlan {
+
+        private final long snapshotId;
+        private final List<EvaluatedFile> files;
+
+        private EvaluatedPlan(long snapshotId, List<EvaluatedFile> files) {
+            this.snapshotId = snapshotId;
+            this.files = Collections.unmodifiableList(new ArrayList<>(files));
+        }
+
+        public long snapshotId() {
+            return snapshotId;
+        }
+
+        public List<EvaluatedFile> files() {
+            return files;
+        }
+    }
+
+    /** Optional file-local index result; empty means that the file requires a raw scan. */
+    public static final class EvaluatedFile {
+
+        private final FilePlan file;
+        private final Optional<GlobalIndexResult> result;
+
+        private EvaluatedFile(FilePlan file, Optional<GlobalIndexResult> result) {
+            this.file = file;
+            this.result = result;
+        }
+
+        public FilePlan file() {
+            return file;
+        }
+
+        public Optional<GlobalIndexResult> result() {
+            return result;
+        }
+    }
+}

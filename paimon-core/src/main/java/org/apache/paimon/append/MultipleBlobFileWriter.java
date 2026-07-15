@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.blob.BlobFileFormat;
@@ -65,7 +66,8 @@ public class MultipleBlobFileWriter implements Closeable {
             @Nullable BlobConsumer blobConsumer,
             Set<String> blobInlineFields,
             boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure) {
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter) {
         RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
@@ -73,6 +75,7 @@ public class MultipleBlobFileWriter implements Closeable {
             blobFileFormat.setWriteConsumer(blobConsumer);
             blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
             blobFileFormat.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
+            blobFileFormat.setBlobFetchMetricReporter(blobFetchMetricReporter);
             blobWriters.add(
                     new BlobProjectedFileWriter(
                             () ->

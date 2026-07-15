@@ -22,12 +22,14 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -1618,6 +1620,71 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 assertThat(descriptor.length()).isGreaterThan(0);
             }
         }
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = LookupCacheMode.class,
+            names = {"FULL", "MEMORY"})
+    public void testLookupArrayBlobAsDescriptorOnNormalBlobTable(LookupCacheMode mode)
+            throws Exception {
+        sql(
+                "CREATE TABLE ARRAY_BLOB_DIM (id INT, name STRING, pictures ARRAY<BYTES>) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', "
+                        + "'blob-field'='pictures', "
+                        + "'lookup.blob-as-descriptor'='true', "
+                        + "'lookup.cache'='%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(
+                                        1,
+                                        "cat",
+                                        new byte[][] {
+                                            new byte[] {72, 101, 108, 108, 111},
+                                            new byte[] {89, 69}
+                                        }),
+                                Row.of(
+                                        2,
+                                        "dog",
+                                        new byte[][] {new byte[] {87, 111, 114, 108, 100}})));
+        sql(
+                "CREATE TEMPORARY TABLE ARRAY_BLOB_SOURCE "
+                        + "(id INT, name STRING, pictures ARRAY<BYTES>) WITH ("
+                        + "'connector'='values', 'bounded'='true', 'data-id'='%s')",
+                dataId);
+        sql("INSERT INTO ARRAY_BLOB_DIM SELECT * FROM ARRAY_BLOB_SOURCE");
+
+        String query =
+                "SELECT T.i, D.name, D.pictures[1], D.pictures[2] FROM T "
+                        + "LEFT JOIN ARRAY_BLOB_DIM for system_time as of T.proctime AS D "
+                        + "ON T.i = D.id";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result).hasSize(3);
+
+        Row first = result.stream().filter(row -> row.getField(0).equals(1)).findFirst().get();
+        assertThat(first.getField(1)).isEqualTo("cat");
+        assertThat(BlobDescriptor.deserialize((byte[]) first.getField(2)).length()).isEqualTo(5);
+        assertThat(BlobDescriptor.deserialize((byte[]) first.getField(3)).length()).isEqualTo(2);
+
+        Row second = result.stream().filter(row -> row.getField(0).equals(2)).findFirst().get();
+        assertThat(second.getField(1)).isEqualTo("dog");
+        assertThat(BlobDescriptor.deserialize((byte[]) second.getField(2)).length()).isEqualTo(5);
+        assertThat(second.getField(3)).isNull();
+
+        Row missing = result.stream().filter(row -> row.getField(0).equals(3)).findFirst().get();
+        assertThat(missing.getField(1)).isNull();
+        assertThat(missing.getField(2)).isNull();
+        assertThat(missing.getField(3)).isNull();
 
         iterator.close();
     }

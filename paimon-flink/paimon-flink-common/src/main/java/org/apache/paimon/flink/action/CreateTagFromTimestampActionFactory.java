@@ -65,7 +65,7 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
                         + "--table <table_name> \\\n"
                         + "--tag <tag> \\\n"
                         + "--timestamp <timestamp> \\\n"
-                        + "[--timeRetained <duration>] \\\n"
+                        + "[--time_retained <duration>] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

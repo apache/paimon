@@ -37,6 +37,7 @@ from typing import Any, List, Dict, Optional, Tuple
 
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
+from pypaimon.common.options import CoreOptions
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType
@@ -172,6 +173,17 @@ def _row_equals(left: InternalRow, right: InternalRow) -> bool:
             return False
 
     return True
+
+def is_blank(s: str) -> bool:
+    if s is None:
+        return True
+
+    for ch in s:
+        if not ch.isspace():
+            return False
+
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Aggregator classes
@@ -358,218 +370,6 @@ class FieldListaggAgg(FieldAggregator):
 
         return self.delimiter.join(result)
 
-
-class FieldNestedUpdateAgg(FieldAggregator):
-    """
-    Used to update a field which representing a nested table.
-    The data type of nested table field is ARRAY<ROW>.
-    """
-
-    def __init__(
-            self,
-            name: str,
-            field_type: ArrayType,
-            field_name: str,
-            options: CoreOptions,
-    ):
-        field_type = _check_array_row(field_name, field_type)
-        self._check_option_dependencies(options, field_name)
-
-        super().__init__(name, field_type)
-
-        nested_type: RowType = field_type.element
-        self.nested_fields = len(nested_type.fields)
-
-        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
-        self.nested_key_null_strategy = options.field_nested_update_agg_nested_key_null_strategy(field_name)
-        self.nested_sequence_field = options.field_nested_update_agg_nested_sequence_field(field_name)
-        self.count_limit = options.field_nested_update_agg_count_limit(field_name)
-
-        if self.nested_key:
-            self.key_projection = ProjectedRow.from_index_mapping(
-                [nested_type.get_field_index(name) for name in self.nested_key]
-            )
-        else:
-            self.key_projection = None
-
-        if self.nested_sequence_field:
-            self.sequence_projection = ProjectedRow.from_index_mapping(
-                [nested_type.get_field_index(name) for name in self.nested_sequence_field]
-            )
-            self.has_sequence_field = True
-        else:
-            self.sequence_projection = None
-            self.has_sequence_field = False
-
-    def agg(self, accumulator: Any, input_field: Any) -> Any:
-        if input_field is None:
-            return accumulator
-
-        input_array: List[InternalRow] = input_field
-        if self.key_projection is None:
-            if accumulator is None:
-                rows: List[InternalRow] = []
-                self._add_non_null_rows(input_array, rows, self.count_limit)
-                return rows
-
-            acc: List[InternalRow] = accumulator
-            if len(acc) >= self.count_limit:
-                return acc
-
-            remain_count = self.count_limit - len(acc)
-            rows: List[InternalRow] = []
-            self._add_non_null_rows(acc, rows)
-            self._add_non_null_rows(input_array, rows, remain_count)
-            return rows
-        else:
-            row_map: Dict[Tuple[Any, ...], InternalRow] = {}
-            if accumulator is not None:
-                self._add_nested_rows(accumulator, row_map, False)
-            self._add_nested_rows(input_array, row_map, True)
-            return list(row_map.values())
-
-    def retract(self, accumulator: Any, retract_field: Any) -> Any:
-        if accumulator is None or retract_field is None:
-            return accumulator
-
-        acc: List[InternalRow] = accumulator
-        retract_rows: List[InternalRow] = retract_field
-
-        if self.key_projection is None:
-            rows: List[InternalRow] = []
-            self._add_non_null_rows(acc, rows)
-            for retract_row in retract_rows:
-                if retract_row is None:
-                    continue
-                rows = [row for row in rows if not _row_equals(row, retract_row)]
-            return rows
-        else:
-            row_map: Dict[Tuple[Any, ...], InternalRow] = {}
-            for row in acc:
-                if row is None:
-                    continue
-                key = self.key_projection.replace_row(row).to_tuple()
-                if not self._apply_nested_key_null_strategy(key):
-                    continue
-                row_map[key] = row
-
-            for row in retract_rows:
-                if row is None:
-                    continue
-                key = self.key_projection.replace_row(row).to_tuple()
-                if not self._apply_nested_key_null_strategy(key):
-                    continue
-                row_map.pop(key, None)
-            return list(row_map.values())
-
-    @staticmethod
-    def _check_option_dependencies(
-            options: CoreOptions,
-            field: str,
-    ) -> None:
-        nested_key = options.field_nested_update_agg_nested_key(field)
-        strategy_configured = options.options.contains_key(
-            f"{CoreOptions.FIELDS_PREFIX}.{field}.{CoreOptions.NESTED_KEY_NULL_STRATEGY}")
-
-        if strategy_configured and not nested_key:
-            raise ValueError(
-                "Option 'fields.<field-name>.nested-key-null-strategy' "
-                "requires 'fields.<field-name>.nested-key' to be configured."
-            )
-
-        if (
-                options.field_nested_update_agg_nested_sequence_field(field)
-                and not nested_key
-        ):
-            raise ValueError(
-                "Option 'fields.<field-name>.nested-sequence-field' "
-                "requires 'fields.<field-name>.nested-key' to be configured."
-            )
-
-    def _compare_sequence(self, new_row: InternalRow, old_row: InternalRow) -> int:
-        if not self.has_sequence_field:
-            raise ValueError(
-                "compare_sequence() called but no nested_sequence_field configured."
-            )
-
-        new_seq_key = self.sequence_projection.replace_row(new_row).to_tuple()
-        old_seq_key = self.sequence_projection.replace_row(old_row).to_tuple()
-
-        return _compare_tuple(new_seq_key, old_seq_key)
-
-    def _add_non_null_rows(
-            self,
-            array: List[InternalRow],
-            rows: List[InternalRow],
-            remain_size: Optional[int] = None,
-    ) -> None:
-        """Append non-null rows from array.
-
-        If remain_size is specified, append at most remain_size rows.
-        """
-
-        count = 0
-
-        for row in array:
-            if row is None:
-                continue
-
-            if remain_size is not None and count >= remain_size:
-                break
-
-            rows.append(row)
-            count += 1
-
-    def _add_nested_rows(
-            self,
-            array: List[InternalRow],
-            row_map: Dict[Tuple[Any, ...], InternalRow],
-            limit_new_keys,
-    ) -> None:
-        """Merge rows from ``array`` into ``rows`` using nested keys."""
-
-        if self.key_projection is None:
-            raise ValueError(
-                "key_projection should not be None when nested_key is configured."
-            )
-
-        for row in array:
-            if row is None:
-                continue
-            key = self.key_projection.replace_row(row).to_tuple()
-            if not self._apply_nested_key_null_strategy(key):
-                continue
-
-            exists: InternalRow = row_map.get(key)
-            if exists is not None:
-                if not self.has_sequence_field or self._compare_sequence(row, exists) >= 0:
-                    row_map[key] = row
-            elif not limit_new_keys or len(row_map) < self.count_limit:
-                row_map[key] = row
-
-    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
-        """Apply nested-key-null-strategy."""
-
-        if all(v is not None for v in key):
-            return True
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
-            return True
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
-            return False
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
-            raise ValueError(
-                "Nested key contains null values. "
-                "Primary key fields must not be null."
-            )
-
-        raise ValueError(
-            "Unsupported nested-key-null-strategy '{}'".format(
-                self.nested_key_null_strategy
-            )
-        )
 
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that

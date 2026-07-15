@@ -119,23 +119,33 @@ public class GlobalIndexScanner implements Closeable {
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
+                    List<IndexMetaFileGroup> groups = new ArrayList<>();
                     IndexMetaFileGroup group = indexMetas.get(fId);
                     if (group != null) {
-                        return createReaders(indexFileReader, group, rowType, Long.MIN_VALUE);
+                        groups.add(group);
                     }
                     List<IndexMetaFileGroup> extraGroups = extraIndexMetas.get(fId);
-                    if (extraGroups == null || extraGroups.isEmpty()) {
+                    if (extraGroups != null) {
+                        for (IndexMetaFileGroup extraGroup : extraGroups) {
+                            if (!groups.contains(extraGroup)) {
+                                groups.add(extraGroup);
+                            }
+                        }
+                    }
+                    if (groups.isEmpty()) {
                         return Collections.emptyList();
                     }
-                    long maxEnd = Long.MIN_VALUE;
-                    for (IndexMetaFileGroup g : extraGroups) {
-                        maxEnd = Math.max(maxEnd, g.coverageEnd());
-                    }
+
+                    // A field can be covered by its dedicated primary index and by one or more
+                    // multi-column indexes that carry it as an extra field. These are alternative
+                    // sources of matches, possibly over different row ranges, so union them. The
+                    // previous primary-only choice made coverage planning believe the extra-field
+                    // tail was indexed while the evaluator silently ignored it.
                     List<GlobalIndexReader> allReaders = new ArrayList<>();
-                    for (IndexMetaFileGroup g : extraGroups) {
-                        allReaders.addAll(createReaders(indexFileReader, g, rowType, maxEnd));
+                    for (IndexMetaFileGroup indexGroup : groups) {
+                        allReaders.addAll(createReaders(indexFileReader, indexGroup, rowType));
                     }
-                    return allReaders;
+                    return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
@@ -146,7 +156,6 @@ public class GlobalIndexScanner implements Closeable {
         private final int indexFieldId;
         private final List<Integer> fieldIds;
         private final Map<String, Map<Range, List<IndexFileMeta>>> metas = new HashMap<>();
-        private long coverageEnd = Long.MIN_VALUE;
 
         IndexMetaFileGroup(int indexFieldId, List<Integer> fieldIds) {
             this.indexFieldId = indexFieldId;
@@ -154,15 +163,9 @@ public class GlobalIndexScanner implements Closeable {
         }
 
         void addFile(String indexType, Range range, IndexFileMeta indexFile) {
-            coverageEnd = Math.max(coverageEnd, range.to);
             metas.computeIfAbsent(indexType, k -> new HashMap<>())
                     .computeIfAbsent(range, k -> new ArrayList<>())
                     .add(indexFile);
-        }
-
-        /** The largest indexed rowId across all files of this index (ranges start at 0). */
-        long coverageEnd() {
-            return coverageEnd;
         }
 
         /** The primary index column. */
@@ -187,7 +190,8 @@ public class GlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        if (indexFiles.isEmpty()) {
+        List<IndexFileMeta> ordinaryIndexFiles = ordinaryGlobalIndexFiles(indexFiles);
+        if (ordinaryIndexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
@@ -199,7 +203,7 @@ public class GlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        ordinaryIndexFiles));
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -241,7 +245,7 @@ public class GlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
@@ -261,6 +265,17 @@ public class GlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
+    private static List<IndexFileMeta> ordinaryGlobalIndexFiles(
+            Collection<IndexFileMeta> indexFiles) {
+        return indexFiles.stream()
+                .filter(
+                        indexFile -> {
+                            GlobalIndexMeta meta = indexFile.globalIndexMeta();
+                            return meta != null && meta.sourceMeta() == null;
+                        })
+                .collect(Collectors.toList());
+    }
+
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
         return globalIndexEvaluator.evaluate(predicate);
     }
@@ -274,10 +289,7 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     private Collection<GlobalIndexReader> createReaders(
-            GlobalIndexFileReader indexFileReadWrite,
-            IndexMetaFileGroup group,
-            RowType rowType,
-            long padToEnd) {
+            GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
         DataField indexField = group.indexField(rowType);
         List<DataField> extraFields = group.extraFields(rowType);
 
@@ -289,11 +301,9 @@ public class GlobalIndexScanner implements Closeable {
             GlobalIndexer globalIndexer =
                     globalIndexerFactory.create(indexField, extraFields, options);
 
-            long typeEnd = Long.MIN_VALUE;
             List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
             for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
                 Range range = rangeMetas.getKey();
-                typeEnd = Math.max(typeEnd, range.to);
                 List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
                 List<GlobalIndexIOMeta> globalMetas =
                         indexFileMetas.stream()
@@ -314,13 +324,6 @@ public class GlobalIndexScanner implements Closeable {
             List<GlobalIndexReader> unionReader = new ArrayList<>(futures.size() + 1);
             for (CompletableFuture<GlobalIndexReader> future : futures) {
                 unionReader.add(future.join());
-            }
-            // Pad this index's missing tail with an all-hit reader so AND-ing it with a
-            // longer-range index does not drop rows it has not indexed (ranges start at 0).
-            if (padToEnd > typeEnd) {
-                unionReader.add(
-                        new ConstantGlobalIndexReader(
-                                GlobalIndexResult.fromRange(new Range(typeEnd + 1, padToEnd))));
             }
             readers.add(new UnionGlobalIndexReader(unionReader));
         }

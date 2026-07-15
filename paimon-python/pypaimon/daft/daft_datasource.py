@@ -39,6 +39,7 @@ from pypaimon.daft.daft_explain import (
     READER_MODE_PYPAIMON_FALLBACK,
 )
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
+from pypaimon.schema.data_types import is_array_blob_type, is_blob_type
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -181,6 +182,7 @@ class _PaimonPKSplitTask(DataSourceTask):
         output_columns: list[str] | None = None,
         blob_column_names: set[str] | None = None,
         explicit_io_config_bytes: bytes | None = None,
+        array_blob_column_names: set[str] | None = None,
     ) -> None:
         self._table_catalog_options = table_catalog_options
         self._table_identifier = table_identifier
@@ -193,6 +195,7 @@ class _PaimonPKSplitTask(DataSourceTask):
         self._predicate = predicate
         self._output_columns = output_columns
         self._blob_column_names = blob_column_names or set()
+        self._array_blob_column_names = array_blob_column_names or set()
         self._explicit_io_config_bytes = explicit_io_config_bytes
 
     @property
@@ -214,16 +217,30 @@ class _PaimonPKSplitTask(DataSourceTask):
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
 
-        blob_io_config_bytes = self._blob_io_config_bytes(table) if self._blob_column_names else None
+        has_blob_columns = bool(
+            self._blob_column_names or self._array_blob_column_names
+        )
+        blob_io_config_bytes = (
+            self._blob_io_config_bytes(table) if has_blob_columns else None
+        )
         reader = read_builder.new_read().to_arrow_batch_reader([self._split])
         for batch in iter(reader.read_next_batch, None):
             if self._output_columns is not None:
                 batch = batch.select(self._output_columns)
-            if self._blob_column_names:
-                batch = _convert_blob_columns(batch, self._blob_column_names, blob_io_config_bytes)
+            if has_blob_columns:
+                batch = _convert_blob_columns(
+                    batch,
+                    self._blob_column_names,
+                    blob_io_config_bytes,
+                    self._array_blob_column_names,
+                )
             rb = RecordBatch.from_arrow_record_batches([batch], batch.schema)
-            if self._blob_column_names:
-                rb = _cast_blob_columns_to_file(rb, self._blob_column_names)
+            if has_blob_columns:
+                rb = _cast_blob_columns_to_file(
+                    rb,
+                    self._blob_column_names,
+                    self._array_blob_column_names,
+                )
             yield rb
 
     def _blob_io_config_bytes(self, table: FileStoreTable) -> bytes | None:
@@ -255,9 +272,16 @@ def _convert_blob_columns(
     batch: pa.RecordBatch,
     blob_column_names: set[str],
     io_config_bytes: bytes | None = None,
+    array_blob_column_names: set[str] | None = None,
 ) -> pa.RecordBatch:
     """Replace serialized BlobDescriptor columns with the File physical struct layout."""
-    from pypaimon.daft.daft_blob import FILE_PHYSICAL_TYPE, blob_column_to_file_array
+    from pypaimon.daft.daft_blob import (
+        FILE_PHYSICAL_TYPE,
+        blob_array_column_to_file_array,
+        blob_column_to_file_array,
+    )
+
+    array_blob_column_names = array_blob_column_names or set()
 
     arrays = []
     fields = []
@@ -266,22 +290,35 @@ def _convert_blob_columns(
         if field.name in blob_column_names and (pa.types.is_large_binary(field.type) or pa.types.is_binary(field.type)):
             arrays.append(blob_column_to_file_array(col, io_config_bytes))
             fields.append(pa.field(field.name, FILE_PHYSICAL_TYPE, nullable=field.nullable))
+        elif field.name in array_blob_column_names and (
+            pa.types.is_list(field.type) or pa.types.is_large_list(field.type)
+        ):
+            converted = blob_array_column_to_file_array(col, io_config_bytes)
+            arrays.append(converted)
+            fields.append(pa.field(field.name, converted.type, nullable=field.nullable))
         else:
             arrays.append(col)
             fields.append(field)
     return pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields))
 
 
-def _cast_blob_columns_to_file(rb: RecordBatch, blob_column_names: set[str]) -> RecordBatch:
+def _cast_blob_columns_to_file(
+    rb: RecordBatch,
+    blob_column_names: set[str],
+    array_blob_column_names: set[str] | None = None,
+) -> RecordBatch:
     """Cast struct-typed blob columns in a RecordBatch to DataType.file()."""
     from daft.datatype import DataType
 
     file_dtype = DataType.file()
+    array_blob_column_names = array_blob_column_names or set()
     columns = {}
     for i, field in enumerate(rb.schema()):
         col = rb.get_column(i)
         if field.name in blob_column_names:
             col = col.cast(file_dtype)
+        elif field.name in array_blob_column_names:
+            col = col.cast(DataType.list(file_dtype))
         columns[field.name] = col
     return RecordBatch.from_pydict(columns)
 
@@ -365,8 +402,15 @@ class PaimonDataSource(DataSource):
 
         pa_schema = PyarrowFieldParser.from_paimon_schema(table.fields)
 
-        self._blob_column_names: set[str] = {field.name for field in pa_schema if pa.types.is_large_binary(field.type)}
-        self._has_blob_columns = bool(self._blob_column_names)
+        self._scalar_blob_column_names = {
+            field.name for field in table.fields if is_blob_type(field.type)
+        }
+        self._array_blob_column_names = {
+            field.name for field in table.fields if is_array_blob_type(field.type)
+        }
+        self._has_blob_columns = bool(
+            self._scalar_blob_column_names or self._array_blob_column_names
+        )
 
         if self._has_blob_columns:
             require_file_range_reads()
@@ -375,8 +419,10 @@ class PaimonDataSource(DataSource):
             base_schema = Schema.from_pyarrow_schema(pa_schema)
             fields = []
             for f in base_schema:
-                if f.name in self._blob_column_names:
+                if f.name in self._scalar_blob_column_names:
                     fields.append((f.name, DataType.file()))
+                elif f.name in self._array_blob_column_names:
+                    fields.append((f.name, DataType.list(DataType.file())))
                 else:
                     fields.append((f.name, f.dtype))
             self._schema = Schema.from_field_name_and_types(fields)
@@ -519,8 +565,9 @@ class PaimonDataSource(DataSource):
                     read_pushdowns.source_limit,
                     read_pushdowns.reader_predicate,
                     read_pushdowns.task_columns,
-                    self._blob_column_names,
+                    self._scalar_blob_column_names,
                     self._explicit_io_config_bytes,
+                    self._array_blob_column_names,
                 )
 
     def explain_scan(self, pushdowns: Pushdowns, verbose: bool = False) -> PaimonScanExplain:

@@ -21,6 +21,8 @@ from typing import List, Optional
 
 import pyarrow
 
+from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
@@ -39,6 +41,7 @@ TABLE_TYPE = RowType(False, [
     DataField(8, "options", AtomicType("STRING", nullable=True)),
     DataField(9, "total_buckets", AtomicType("INT", nullable=False)),
     DataField(10, "done", AtomicType("BOOLEAN", nullable=False)),
+    DataField(11, "deleted_record_count", AtomicType("BIGINT", nullable=True)),
 ])
 
 
@@ -73,9 +76,11 @@ class PartitionsTable(SystemTable):
         manifest_file_manager = ManifestFileManager(self.base_table)
         entries = manifest_file_manager.read_entries_parallel(
             manifest_files, drop_stats=True)
+        deleted_record_counts = self._deleted_record_counts(snapshot)
 
         partition_map: dict = {}
         for entry in entries:
+            partition_key = tuple(entry.partition.values)
             spec_items = tuple(
                 (field.name, str(value))
                 for field, value in zip(
@@ -86,6 +91,7 @@ class PartitionsTable(SystemTable):
             if stats is None:
                 stats = {
                     "spec_items": spec_items,
+                    "partition_key": partition_key,
                     "record_count": 0,
                     "file_size_in_bytes": 0,
                     "file_count": 0,
@@ -110,6 +116,7 @@ class PartitionsTable(SystemTable):
         file_counts: List[int] = []
         last_update_times: List[Optional[int]] = []
         total_buckets: List[int] = []
+        deleted_counts: List[Optional[int]] = []
 
         for stats in partition_map.values():
             partition_strings.append(_render_partition(stats["spec_items"]))
@@ -118,6 +125,8 @@ class PartitionsTable(SystemTable):
             file_counts.append(stats["file_count"])
             last_update_times.append(stats["last_update_time"])
             total_buckets.append(len(stats["buckets"]))
+            deleted_counts.append(
+                deleted_record_counts.get(stats["partition_key"], 0))
 
         n = len(partition_map)
         return pyarrow.table({
@@ -136,7 +145,39 @@ class PartitionsTable(SystemTable):
             "options": pyarrow.array([None] * n, type=pyarrow.string()),
             "total_buckets": pyarrow.array(total_buckets, type=pyarrow.int32()),
             "done": pyarrow.array([False] * n, type=pyarrow.bool_()),
+            "deleted_record_count": pyarrow.array(
+                deleted_counts, type=pyarrow.int64()),
         })
+
+    def _deleted_record_counts(self, snapshot) -> dict:
+        if not self.base_table.options.deletion_vectors_enabled(False):
+            return {}
+
+        entries = IndexFileHandler(self.base_table).scan(
+            snapshot,
+            lambda entry: entry.index_file.index_type
+            == IndexManifestFile.DELETION_VECTORS_INDEX,
+        )
+        result = {}
+        for entry in entries:
+            partition_key = tuple(entry.partition.values)
+            if partition_key in result and result[partition_key] is None:
+                continue
+
+            dv_ranges = entry.index_file.dv_ranges
+            if not dv_ranges:
+                continue
+
+            count = result.get(partition_key, 0)
+            for dv_meta in dv_ranges.values():
+                if dv_meta.cardinality is None:
+                    result[partition_key] = None
+                    break
+                count += int(dv_meta.cardinality)
+            else:
+                result[partition_key] = count
+
+        return result
 
     @staticmethod
     def _empty_table() -> pyarrow.Table:
@@ -152,6 +193,7 @@ class PartitionsTable(SystemTable):
             "options": pyarrow.array([], type=pyarrow.string()),
             "total_buckets": pyarrow.array([], type=pyarrow.int32()),
             "done": pyarrow.array([], type=pyarrow.bool_()),
+            "deleted_record_count": pyarrow.array([], type=pyarrow.int64()),
         })
 
 

@@ -236,6 +236,23 @@ public class OrcFilterConverterTest {
                 true);
     }
 
+    @Test
+    public void testIsNaN() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(0, "floatField", new FloatType()),
+                                        new DataField(1, "doubleField", new DoubleType()))));
+
+        // ORC has no isNaN SearchArgument leaf, so the visitor must skip push-down and
+        // return Optional.empty() instead of throwing UnsupportedOperationException.
+        assertThat(builder.isNaN(0).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.isNaN(1).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate, boolean canPushDown) {
         Optional<OrcFilters.Predicate> optionalPredicate =
                 predicate.visit(OrcPredicateFunctionVisitor.VISITOR);

@@ -29,9 +29,11 @@ import unittest
 from decimal import Decimal
 from functools import reduce
 from typing import List
+from functools import reduce
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp
+from pypaimon.common.options import CoreOptions, Options
 from pypaimon.read.reader.aggregate import create_field_aggregator
 from pypaimon.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,

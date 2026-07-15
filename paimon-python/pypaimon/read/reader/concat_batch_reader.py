@@ -25,6 +25,7 @@ from pyarrow import RecordBatch
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.utils.range import Range
 
@@ -265,6 +266,12 @@ class BlobFallbackBatchReader(RecordBatchReader):
         self._output_type = output_type
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
         self._blob_as_descriptor = blob_as_descriptor
+        self._is_array_blob = pa.types.is_list(output_type) or pa.types.is_large_list(output_type)
+        self._data_field = DataField(
+            0,
+            field_name,
+            PyarrowFieldParser.to_paimon_type(output_type, True),
+        )
         if deletion_vector is None:
             self._deletion_vector_range = None
             self._deletion_vector = None
@@ -308,13 +315,17 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     )
                 if blob is None:
                     group[row_id] = (None, False)
-                elif blob is Blob.PLACE_HOLDER:
+                elif blob is Blob.PLACE_HOLDER or blob is Blob.ARRAY_PLACE_HOLDER:
                     group[row_id] = (None, True)
+                elif self._is_array_blob:
+                    group[row_id] = (self._array_value_for_arrow(blob), False)
                 else:
                     if self._blob_as_descriptor:
                         group[row_id] = (blob.to_descriptor().serialize(), False)
                     else:
                         group[row_id] = (blob.to_data(), False)
+            if state.selected_range_index >= len(state.selected_ranges):
+                self._close_state_reader(state)
 
         if not groups:
             return None
@@ -338,6 +349,17 @@ class BlobFallbackBatchReader(RecordBatchReader):
             [pa.array(result, type=self._output_type)],
             names=[self._field_name],
         )
+
+    def _array_value_for_arrow(self, blob_array):
+        result = []
+        for blob in blob_array:
+            if blob is None:
+                result.append(None)
+            elif self._blob_as_descriptor:
+                result.append(blob.to_descriptor().serialize())
+            else:
+                result.append(blob.to_data())
+        return result
 
     def _compute_target_ranges(self) -> List[Range]:
         ranges = Range.sort_and_merge_overlap([
@@ -395,9 +417,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             row_id - self._deletion_vector_range.from_
         )
 
-    @staticmethod
     def _state_overlaps_batch(
-        state: _BlobFileState, batch_first: int, batch_last: int
+        self, state: _BlobFileState, batch_first: int, batch_last: int
     ) -> bool:
         selected_ranges = state.selected_ranges
         while (
@@ -408,10 +429,12 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 selected_ranges[state.selected_range_index].count()
             )
             state.selected_range_index += 1
-        return (
-            state.selected_range_index < len(selected_ranges)
-            and selected_ranges[state.selected_range_index].from_ <= batch_last
-        )
+        if state.selected_range_index >= len(selected_ranges):
+            # Batch row ids only move forward. Once the last selected range is
+            # behind this batch, the reader can never be used again.
+            self._close_state_reader(state)
+            return False
+        return selected_ranges[state.selected_range_index].from_ <= batch_last
 
     def _read_blob_values(
         self, state: _BlobFileState, batch_row_ids: List[int]
@@ -434,8 +457,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 reader.file_path,
                 blob_lengths,
                 blob_offsets,
-                self._field_name,
+                self._data_field,
                 reader._input_stream,
+                blob_as_descriptor=self._blob_as_descriptor,
             )
 
             blobs = []

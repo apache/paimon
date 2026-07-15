@@ -177,7 +177,7 @@ class BlobWriter(AppendOnlyDataWriter):
         else:
             # row_count only (from BlobFileWriter)
             row_count = data_or_row_count
-            data_fields = [PyarrowFieldParser.to_paimon_schema(pa.schema([(self.blob_column, pa.large_binary())]))[0]]
+            data_fields = [self.table.field_dict[self.blob_column]]
             min_value_stats = [None]
             max_value_stats = [None]
             value_null_counts = [0]

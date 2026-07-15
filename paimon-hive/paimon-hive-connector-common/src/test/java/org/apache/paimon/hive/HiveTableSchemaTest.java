@@ -102,6 +102,29 @@ public class HiveTableSchemaTest {
     }
 
     @Test
+    public void testExtractSchemaWithCustomColumnNameDelimiter() {
+        // Column names are split with a custom delimiter (not the default comma).
+        // This requires the "column.name.delimiter" property key to be honored.
+        List<String> columns = Arrays.asList("a", "b", "c");
+        Properties properties = new Properties();
+        properties.setProperty("columns", String.join(";", columns));
+        properties.setProperty("column.name.delimiter", ";");
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+
+        HiveSchema schema = HiveSchema.extract(null, properties);
+        assertThat(schema.fieldNames()).isEqualTo(columns);
+    }
+
+    @Test
     public void testExtractSchemaWithExistsDDLAndExistsPaimonTable() throws Exception {
         // create a paimon table
         createSchema();

@@ -57,6 +57,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TableScanTest extends ScannerTestBase {
 
     @Test
+    public void testBatchScanTypes() throws Exception {
+        assertThat(AbstractBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(AppendBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredConstructors()).hasSize(1);
+
+        assertThat(table.newScan()).isInstanceOf(PrimaryKeyBatchScan.class);
+
+        createAppendOnlyTable();
+        assertThat(table.newScan()).isInstanceOf(AppendBatchTableScan.class);
+    }
+
+    @Test
     public void testPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);

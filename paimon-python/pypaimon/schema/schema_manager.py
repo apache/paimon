@@ -28,7 +28,9 @@ from pypaimon.schema.column_directive_utils import (
     remove_dropped_directive_options)
 from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
-                                        MapType, RowType, reassign_field_id)
+                                        MapType, RowType, is_array_blob_type,
+                                        is_blob_file_field, is_blob_file_type,
+                                        is_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
@@ -286,12 +288,32 @@ def _handle_drop_column(change: DropColumn, new_fields: List[DataField],
 
 
 def _get_type_root(data_type) -> str:
-    from pypaimon.schema.data_types import AtomicType, VectorType
+    from pypaimon.schema.data_types import VectorType
     if isinstance(data_type, VectorType):
         return 'VECTOR'
-    if isinstance(data_type, AtomicType) and data_type.type == 'BLOB':
+    if is_blob_file_type(data_type):
         return 'BLOB'
     return getattr(data_type, 'type', '')
+
+
+def _normalize_key_list(value: str) -> List[str]:
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+
+def _is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) -> bool:
+    """Values whose canonical home is outside the options map (or the implicit
+    default) are not a change when replayed. Mirrors the Java SchemaManager's
+    isUnchangedNormalizedKey."""
+    if old_value is not None or new_value is None:
+        return False
+    if key == "primary-key":
+        return _normalize_key_list(new_value) == old_table_schema.primary_keys
+    if key == "partition":
+        return _normalize_key_list(new_value) == old_table_schema.partition_keys
+    if key == "type":
+        # a table created without an explicit type is of the default type
+        return new_value == CoreOptions.TYPE.default_value()
+    return False
 
 
 def _assert_not_updating_partition_keys(
@@ -320,25 +342,29 @@ def _assert_not_renaming_blob_column(
         return
     field_name = field_names[0]
     for field in new_fields:
-        if field.name == field_name and str(field.type) == 'BLOB':
+        if field.name == field_name and is_blob_file_field(field):
             raise ValueError(
-                f"Cannot rename BLOB column: [{field_name}]"
+                f"Cannot rename BLOB or ARRAY<BLOB> column: [{field_name}]"
             )
 
 
-def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: List[str]):
+def _validate_blob_fields(
+    fields: List[DataField],
+    options: dict,
+    primary_keys: List[str],
+    partition_keys: List[str],
+):
     """Validate blob field configurations in the schema."""
     if options is None:
         options = {}
 
-    blob_field_names = {
-        field.name for field in fields
-        if getattr(field.type, 'type', None) == 'BLOB'
-    }
+    blob_field_names = {field.name for field in fields if is_blob_file_field(field)}
+    scalar_blob_field_names = {field.name for field in fields if is_blob_type(field.type)}
+    array_blob_field_names = {field.name for field in fields if is_array_blob_type(field.type)}
 
     if len(fields) <= len(blob_field_names):
         raise ValueError(
-            "Table with BLOB type column must have other normal columns."
+            "Table with BLOB or ARRAY<BLOB> type column must have other normal columns."
         )
 
     core_options = CoreOptions(Options(options))
@@ -347,7 +373,7 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
     for field in configured_blob_fields:
         if field not in blob_field_names:
             raise ValueError(
-                "Field '{}' in '{}' must be a BLOB field in table schema.".format(
+                "Field '{}' in '{}' must be a BLOB field or ARRAY<BLOB> field in table schema.".format(
                     field, CoreOptions.BLOB_FIELD.key()
                 )
             )
@@ -356,8 +382,15 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
     view_fields = core_options.blob_view_fields()
 
     all_inline_fields = descriptor_fields.union(view_fields)
-    non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
+    non_blob_inline_fields = all_inline_fields.difference(scalar_blob_field_names)
     if non_blob_inline_fields:
+        array_inline_fields = sorted(non_blob_inline_fields.intersection(array_blob_field_names))
+        if array_inline_fields:
+            raise ValueError(
+                "ARRAY<BLOB> is only supported by '{}'. Invalid inline blob fields: {}".format(
+                    CoreOptions.BLOB_FIELD.key(), array_inline_fields
+                )
+            )
         raise ValueError(
             "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
             "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
@@ -383,12 +416,18 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
 
         if missing_options:
             raise ValueError(
-                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                f"Schema contains BLOB or ARRAY<BLOB> type but is missing required options: "
+                f"{', '.join(missing_options)}. "
                 f"Please add these options to the schema."
             )
 
         if primary_keys:
-            raise ValueError("Blob type is not supported with primary key.")
+            raise ValueError("BLOB or ARRAY<BLOB> type is not supported with primary key.")
+
+        if blob_field_names.intersection(partition_keys):
+            raise ValueError(
+                "The BLOB or ARRAY<BLOB> type column can not be part of partition keys."
+            )
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
@@ -554,14 +593,24 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
-            _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
+            _validate_blob_fields(
+                schema.fields,
+                schema.options,
+                schema.primary_keys,
+                schema.partition_keys,
+            )
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
-        _validate_blob_fields(new_schema.fields, new_schema.options, new_schema.primary_keys)
+        _validate_blob_fields(
+            new_schema.fields,
+            new_schema.options,
+            new_schema.primary_keys,
+            new_schema.partition_keys,
+        )
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
@@ -646,10 +695,44 @@ class SchemaManager:
         disable_null_to_not_null = str(old_table_schema.options.get(
             'alter-column-null-to-not-null.disabled', 'true')).lower() != 'false'
 
+        # Structural options cannot be changed once the table has snapshots
+        # (mirrors the Java SchemaManager checkAlterTableOption /
+        # checkResetTableOption guards). The snapshot check is lazy so that
+        # alters without option changes never pay for it.
+        has_snapshots: Optional[bool] = None
+
+        def _has_snapshots() -> bool:
+            nonlocal has_snapshots
+            if has_snapshots is None:
+                from pypaimon.snapshot.snapshot_manager import SnapshotManager
+                has_snapshots = SnapshotManager(
+                    self.file_io, self.table_path, self.branch
+                ).get_latest_snapshot() is not None
+            return has_snapshots
+
         for change in changes:
             if isinstance(change, SetOption):
+                # compare against the accumulated options so repeated changes to
+                # the same key in one batch apply in order
+                old_value = new_options.get(change.key)
+                unchanged = (old_value == change.value
+                             or _is_unchanged_normalized_key(
+                                 change.key, old_value, change.value, old_table_schema))
+                if unchanged:
+                    continue
+                # the type decides the table implementation, and table kinds like
+                # format tables never create Paimon snapshots but can still hold
+                # data -- reject independently of the snapshot check
+                if change.key == "type":
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
                 new_options[change.key] = change.value
             elif isinstance(change, RemoveOption):
+                if change.key == "type":
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
+                    raise ValueError(f"Change '{change.key}' is not supported yet.")
                 new_options.pop(change.key, None)
             elif isinstance(change, UpdateComment):
                 new_comment = change.comment

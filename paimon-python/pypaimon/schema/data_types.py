@@ -278,6 +278,22 @@ class MapType(DataType):
         return "MAP<{}, {}>{}".format(self.key, self.value, null_suffix)
 
 
+def is_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, AtomicType) and data_type.type.upper() == 'BLOB'
+
+
+def is_array_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, ArrayType) and is_blob_type(data_type.element)
+
+
+def is_blob_file_type(data_type: DataType) -> bool:
+    return is_blob_type(data_type) or is_array_blob_type(data_type)
+
+
+def is_blob_file_field(field: 'DataField') -> bool:
+    return is_blob_file_type(field.type)
+
+
 @dataclass
 class DataField:
     FIELD_ID = "id"
@@ -694,7 +710,14 @@ class PyarrowFieldParser:
             if type_name.startswith('TIME'):
                 return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
-            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
+            element_type = PyarrowFieldParser.from_paimon_type(data_type.element)
+            return pyarrow.list_(
+                pyarrow.field(
+                    "item",
+                    element_type,
+                    nullable=data_type.element.nullable,
+                )
+            )
         elif isinstance(data_type, VectorType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):
@@ -770,7 +793,8 @@ class PyarrowFieldParser:
             return VectorType(nullable, element_type, pa_type.list_size)
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
-            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
+            element_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.value_type, pa_type.value_field.nullable)
             return ArrayType(nullable, element_type)
         elif types.is_map(pa_type):
             pa_type: pyarrow.MapType

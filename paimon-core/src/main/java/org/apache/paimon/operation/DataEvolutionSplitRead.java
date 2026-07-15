@@ -50,7 +50,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
@@ -80,6 +79,7 @@ import static java.util.Collections.reverseOrder;
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -448,7 +448,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     private static int findBlobFieldIndex(RowType rowType) {
         for (int i = 0; i < rowType.getFieldCount(); i++) {
-            if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+            if (isBlobFileField(rowType.getTypeAt(i))) {
                 return i;
             }
         }

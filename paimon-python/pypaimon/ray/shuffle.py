@@ -20,9 +20,10 @@
 
 The legacy ``map_groups`` strategy groups rows by
 ``(partition_keys..., bucket)`` so every distinct group lands in a
-single Ray task. This can reduce file count, but Ray requires each
-``map_groups`` group to fit in memory on one node. Keep that strategy
-behind an explicit opt-in.
+single Ray task. Primary-key writes consume the complete group in that
+task; append-only writes use the regrouped rows as a file-count
+optimization. Ray requires each ``map_groups`` group to fit in memory
+on one node, so keep that strategy behind an explicit opt-in.
 
 For append-only tables in any other bucket mode the dataset is returned
 unchanged.
@@ -117,6 +118,15 @@ def maybe_apply_repartition(
             )
         return dataset
 
+    grouped, bucket_col = _group_by_partition_bucket(dataset, table)
+    regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
+    return regrouped.drop_columns([bucket_col])
+
+
+def _group_by_partition_bucket(
+        dataset: "ray.data.Dataset",
+        table: "Table",
+):
     partition_keys = list(table.table_schema.partition_keys or [])
     extractor = table.create_row_key_extractor()
     col_names = set(f.name for f in table.table_schema.fields)
@@ -127,9 +137,7 @@ def maybe_apply_repartition(
         bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
     )
     group_keys: List[str] = partition_keys + [bucket_col]
-    grouped = ds_with_bucket.groupby(group_keys)
-    regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
-    return regrouped.drop_columns([bucket_col])
+    return ds_with_bucket.groupby(group_keys), bucket_col
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:

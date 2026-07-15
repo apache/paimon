@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -126,13 +127,18 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
-        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        List<Range> indexedRowRanges = new ArrayList<>(splits.size());
+        for (IndexVectorSearchSplit split : splits) {
+            indexedRowRanges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+        }
+
+        RoaringNavigableMap64 liveRows =
+                GlobalIndexLiveRowFilter.liveRows(table, partitionFilter, indexedRowRanges);
         RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
-        for (IndexVectorSearchSplit split : splits) {
-            Range splitRange = new Range(split.rowRangeStart(), split.rowRangeEnd());
+        for (Range splitRange : indexedRowRanges) {
             RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
@@ -300,17 +306,7 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     protected int indexedSearchLimit(String indexType) {
-        int refineFactor = configuredRefineFactor(indexType);
-        if (refineFactor == 0) {
-            return limit;
-        }
-        if (limit > Integer.MAX_VALUE / refineFactor) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Vector search limit overflow: limit=%d, refine factor=%d",
-                            limit, refineFactor));
-        }
-        return limit * refineFactor;
+        return VectorSearchRefineOptions.searchLimit(limit, configuredRefineFactor(indexType));
     }
 
     protected ScoredGlobalIndexResult maybeRerankIndexedResult(
@@ -447,7 +443,10 @@ public abstract class AbstractVectorRead implements Serializable {
                         float[] stored = getVector(row, vectorIndex);
                         checkVectorDimension(queryVector, stored);
                         offerScore(
-                                topKHeap, limit, rowId, computeScore(queryVector, stored, metric));
+                                topKHeap,
+                                limit,
+                                rowId,
+                                VectorSearchMetric.computeScore(queryVector, stored, metric));
                     });
         } catch (IOException e) {
             throw new RuntimeException("Failed to read raw vectors for vector search.", e);
@@ -523,7 +522,11 @@ public abstract class AbstractVectorRead implements Serializable {
                 continue;
             }
             checkVectorDimension(queryVector, stored);
-            offerScore(topKHeap, topK, rowId, computeScore(queryVector, stored, metric));
+            offerScore(
+                    topKHeap,
+                    topK,
+                    rowId,
+                    VectorSearchMetric.computeScore(queryVector, stored, metric));
         }
         return scoredResult(topKHeap);
     }
@@ -655,7 +658,7 @@ public abstract class AbstractVectorRead implements Serializable {
         if (metric == null) {
             metric = configuredRawSearchMetric();
         }
-        return metric == null ? "l2" : normalizeMetric(metric);
+        return metric == null ? "l2" : VectorSearchMetric.normalize(metric);
     }
 
     @Nullable
@@ -690,7 +693,7 @@ public abstract class AbstractVectorRead implements Serializable {
         for (Map.Entry<String, String> entry : options.entrySet()) {
             String key = entry.getKey();
             if (key.endsWith(".distance.metric") || key.endsWith(".metric")) {
-                String value = normalizeMetric(entry.getValue());
+                String value = VectorSearchMetric.normalize(entry.getValue());
                 if (isRawSearchMetric(value)) {
                     if (metric != null && !metric.equals(value)) {
                         return null;
@@ -705,85 +708,19 @@ public abstract class AbstractVectorRead implements Serializable {
     @Nullable
     private static String option(Map<String, String> options, String key) {
         String value = options.get(key);
-        return value == null ? null : normalizeMetric(value);
+        return value == null ? null : VectorSearchMetric.normalize(value);
     }
 
     private static boolean isRawSearchMetric(String metric) {
-        return "l2".equals(metric) || "cosine".equals(metric) || "inner_product".equals(metric);
-    }
-
-    private static String normalizeMetric(String metric) {
-        return metric.toLowerCase().replace('-', '_');
+        return VectorSearchMetric.isSupported(metric);
     }
 
     protected int configuredRefineFactor(String indexType) {
-        String value = configuredRefineFactor(options, indexType);
-        if (value == null) {
-            value = configuredRefineFactor(table.options(), indexType);
-        }
-        if (value == null) {
-            return 0;
-        }
-        try {
-            int factor = Integer.parseInt(value);
-            if (factor <= 0) {
-                throw new IllegalArgumentException(
-                        "Vector refine factor must be positive, got: " + value);
-            }
-            return factor;
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Invalid vector refine factor: " + value + ". Must be an integer.", e);
-        }
-    }
-
-    @Nullable
-    private String configuredRefineFactor(Map<String, String> options, String indexType) {
-        List<String> prefixes = new ArrayList<>();
-        String fieldPrefix = "fields." + vectorColumn.name() + ".";
-        addRefinePrefixes(prefixes, fieldPrefix, indexType);
-        addRefinePrefixes(prefixes, "", indexType);
-
-        for (String prefix : prefixes) {
-            String value = refineFactorOption(options, prefix + "refine_factor");
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "refine-factor");
-            }
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "rerank_factor");
-            }
-            if (value == null) {
-                value = refineFactorOption(options, prefix + "rerank-factor");
-            }
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
-    }
-
-    private static void addRefinePrefixes(List<String> prefixes, String base, String indexType) {
-        if (indexType != null && !indexType.isEmpty()) {
-            prefixes.add(base + indexType + ".");
-            String normalizedIndexType = normalizeIndexType(indexType);
-            if (!normalizedIndexType.equals(indexType)) {
-                prefixes.add(base + normalizedIndexType + ".");
-            }
-            if (normalizedIndexType.startsWith("ivf")) {
-                prefixes.add(base + "ivf.");
-            }
-        }
-        prefixes.add(base);
-    }
-
-    @Nullable
-    private static String refineFactorOption(Map<String, String> options, String key) {
-        String value = options.get(key);
-        return value == null ? null : value.trim();
-    }
-
-    private static String normalizeIndexType(String indexType) {
-        return indexType.toLowerCase().replace('-', '_');
+        return VectorSearchRefineOptions.resolve(
+                options,
+                table == null ? Collections.emptyMap() : table.options(),
+                vectorColumn.name(),
+                indexType);
     }
 
     private static IndexFileMeta firstVectorIndexFile(List<IndexVectorSearchSplit> splits) {
@@ -793,35 +730,6 @@ public abstract class AbstractVectorRead implements Serializable {
             }
         }
         throw new IllegalArgumentException("No vector index files found.");
-    }
-
-    private static float computeScore(float[] query, float[] stored, String metric) {
-        if ("l2".equals(metric)) {
-            float sumSq = 0;
-            for (int i = 0; i < query.length; i++) {
-                float diff = query[i] - stored[i];
-                sumSq += diff * diff;
-            }
-            return 1.0f / (1.0f + sumSq);
-        } else if ("cosine".equals(metric)) {
-            float dot = 0;
-            float normA = 0;
-            float normB = 0;
-            for (int i = 0; i < query.length; i++) {
-                dot += query[i] * stored[i];
-                normA += query[i] * query[i];
-                normB += stored[i] * stored[i];
-            }
-            float denominator = (float) (Math.sqrt(normA) * Math.sqrt(normB));
-            return denominator == 0 ? 0 : dot / denominator;
-        } else if ("inner_product".equals(metric)) {
-            float dot = 0;
-            for (int i = 0; i < query.length; i++) {
-                dot += query[i] * stored[i];
-            }
-            return dot;
-        }
-        throw new IllegalArgumentException("Unknown vector search metric: " + metric);
     }
 
     private static List<Optional<ScoredGlobalIndexResult>> emptyOptionalResults(int n) {
