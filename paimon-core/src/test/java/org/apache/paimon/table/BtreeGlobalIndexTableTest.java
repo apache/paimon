@@ -190,8 +190,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         appender.start();
         scanLogger.addAppender(appender);
         scannerLogger.addAppender(appender);
-        scanLogger.setLevel(Level.DEBUG);
-        scannerLogger.setLevel(Level.DEBUG);
+        scanLogger.setLevel(Level.INFO);
+        scannerLogger.setLevel(Level.INFO);
         try {
             PredicateBuilder builder = new PredicateBuilder(table.rowType());
             Predicate predicate =
@@ -238,7 +238,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
             }
             assertThat(fields).containsExactlyInAnyOrder("f1", "f2");
             assertThat(logs)
-                    .contains("DEBUG Scan table '" + table.name() + "' without global index.");
+                    .contains("INFO Scan table '" + table.name() + "' without global index.");
         } finally {
             scanLogger.setLevel(previousScanLevel);
             scannerLogger.setLevel(previousScannerLevel);
