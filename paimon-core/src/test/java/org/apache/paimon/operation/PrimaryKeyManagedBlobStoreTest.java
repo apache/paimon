@@ -221,11 +221,7 @@ class PrimaryKeyManagedBlobStoreTest {
                                         DataTypes.INT())));
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
-        if (payloadType.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BLOB) {
-            options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), payloadName);
-        } else {
-            options.put(CoreOptions.BLOB_FIELD.key(), payloadName);
-        }
+        options.put(CoreOptions.BLOB_FIELD.key(), payloadName);
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
         TableSchema schema =
                 new SchemaManager(fileIO, tablePath)

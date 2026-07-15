@@ -1310,86 +1310,52 @@ public class SchemaValidation {
             return;
         }
 
-        List<String> blobFields =
-                schema.fields().stream()
-                        .filter(field -> isBlobFileField(field.type()))
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        if (blobFields.isEmpty()) {
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        if (managedBlobFields.isEmpty()) {
             return;
         }
 
-        checkArgument(
-                options.blobViewField().isEmpty(),
-                "Primary-key BLOB tables do not support '%s'.",
-                CoreOptions.BLOB_VIEW_FIELD.key());
-
-        List<String> missingDescriptorFields =
-                schema.fields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
-                        .map(DataField::name)
-                        .filter(field -> !options.blobDescriptorField().contains(field))
-                        .collect(Collectors.toList());
-        checkArgument(
-                missingDescriptorFields.isEmpty(),
-                "Primary-key BLOB tables require every BLOB field in '%s'. Missing fields: %s.",
-                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-                missingDescriptorFields);
-
-        Set<String> configuredBlobFields = new HashSet<>(CoreOptions.blobField(options.toMap()));
-        List<String> missingArrayBlobFields =
-                schema.fields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.ARRAY)
-                        .filter(field -> isBlobFileField(field.type()))
-                        .map(DataField::name)
-                        .filter(field -> !configuredBlobFields.contains(field))
-                        .collect(Collectors.toList());
-        checkArgument(
-                missingArrayBlobFields.isEmpty(),
-                "Primary-key ARRAY<BLOB> fields must be declared in '%s'. Missing fields: %s.",
-                CoreOptions.BLOB_FIELD.key(),
-                missingArrayBlobFields);
-
         List<String> primaryKeyBlobFields =
-                blobFields.stream()
+                managedBlobFields.stream()
                         .filter(schema.primaryKeys()::contains)
                         .collect(Collectors.toList());
         checkArgument(
                 primaryKeyBlobFields.isEmpty(),
-                "BLOB fields cannot be primary keys: %s.",
+                "Managed BLOB fields cannot be primary keys: %s.",
                 primaryKeyBlobFields);
 
         List<String> bucketKeyBlobFields =
-                blobFields.stream()
+                managedBlobFields.stream()
                         .filter(schema.bucketKeys()::contains)
                         .collect(Collectors.toList());
         checkArgument(
                 bucketKeyBlobFields.isEmpty(),
-                "BLOB fields cannot be bucket keys: %s.",
+                "Managed BLOB fields cannot be bucket keys: %s.",
                 bucketKeyBlobFields);
 
         List<String> sequenceBlobFields =
-                blobFields.stream()
+                managedBlobFields.stream()
                         .filter(options.sequenceField()::contains)
                         .collect(Collectors.toList());
         checkArgument(
                 sequenceBlobFields.isEmpty(),
-                "BLOB fields cannot be sequence fields: %s.",
+                "Managed BLOB fields cannot be sequence fields: %s.",
                 sequenceBlobFields);
 
         checkArgument(
                 options.mergeEngine() == MergeEngine.DEDUPLICATE,
-                "Primary-key BLOB tables only support the deduplicate merge engine.");
+                "Primary-key managed BLOB tables only support the deduplicate merge engine.");
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE,
-                "Primary-key BLOB tables only support changelog-producer 'none'.");
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
         checkArgument(
                 options.dataFileExternalPaths() == null,
-                "Primary-key BLOB tables do not support '%s'.",
+                "Primary-key managed BLOB tables do not support '%s'.",
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
         checkArgument(
                 !options.pkClusteringOverride(),
-                "Primary-key BLOB tables do not support '%s'.",
+                "Primary-key managed BLOB tables do not support '%s'.",
                 CoreOptions.PK_CLUSTERING_OVERRIDE.key());
     }
 

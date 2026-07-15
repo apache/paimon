@@ -38,9 +38,9 @@ For general BLOB concepts and read options, see [BLOB Storage](../multimodal-tab
 
 ## Create a Table
 
-Use the existing BLOB declarations to define which fields use managed storage. A scalar `BLOB` must be declared with
-`blob-descriptor-field`, while `ARRAY<BLOB>` must be declared with `blob-field`. The write path resolves the managed
-fields from these declarations instead of enabling storage for every field that happens to have a BLOB logical type.
+Use `blob-field` to mark scalar or array fields whose payloads should be stored in managed BLOB files.
+`blob-descriptor-field` and `blob-view-field` are inline forms: their serialized descriptor or view metadata stays in
+the normal data file and is not materialized into a managed BLOB file.
 
 The following example accepts both a scalar value and an ordered array of values:
 
@@ -48,7 +48,7 @@ The following example accepts both a scalar value and an ordered array of values
 CREATE TABLE media (
     id BIGINT,
     name STRING,
-    content BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; media content',
+    content BYTES COMMENT '__BLOB_FIELD; media content',
     attachments ARRAY<BYTES> COMMENT '__BLOB_FIELD; related files',
     PRIMARY KEY (id) NOT ENFORCED
 ) WITH (
@@ -61,9 +61,11 @@ INSERT INTO media VALUES
     (1, 'logo', X'89504E470D0A1A0A', ARRAY[X'25504446', NULL]);
 ```
 
-For a primary-key table, a raw BLOB value is externalized before it enters the MergeTree sort buffer. An input that is
-already a serialized `BlobDescriptor` remains a reference to its existing payload. Reads return the payload bytes by
-default; the existing `blob-as-descriptor` read option can expose descriptors instead.
+For a primary-key table, a raw value in a `blob-field` is externalized before it enters the MergeTree sort buffer. An
+input that is already a serialized `BlobDescriptor` remains a reference to its existing payload. Reads return the
+payload bytes by default; the existing `blob-as-descriptor` read option can expose descriptors instead. A
+`blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
+reference sidecars.
 
 `ARRAY<BLOB>` is externalized element by element. Array order, a null array, null elements, and existing descriptor
 elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses `blob-field`; `blob-descriptor-field` and
@@ -86,11 +88,10 @@ Primary-key managed BLOB storage has the following requirements:
 
 | Item | Requirement |
 |------|-------------|
-| BLOB declaration | Scalar `BLOB` uses `blob-descriptor-field`; `ARRAY<BLOB>` uses `blob-field` |
+| Managed BLOB declaration | Scalar `BLOB` and `ARRAY<BLOB>` use `blob-field`; `blob-descriptor-field` remains inline |
 | Merge engine | `deduplicate` only |
 | Changelog producer | `none` only |
-| Key usage | A BLOB column cannot be a primary, partition, bucket, or sequence key |
-| BLOB view | `blob-view-field` is not supported |
+| Key usage | A managed BLOB column cannot be a primary, partition, bucket, or sequence key |
 | External data paths | `data-file.external-paths` is not supported |
 | PK clustering override | `pk-clustering-override` is not supported |
 

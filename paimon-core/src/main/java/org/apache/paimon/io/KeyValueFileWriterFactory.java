@@ -38,7 +38,6 @@ import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -58,7 +57,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.types.BlobType.isBlobFileField;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -220,19 +219,7 @@ public class KeyValueFileWriterFactory {
     }
 
     private Set<String> managedBlobFields() {
-        Set<String> descriptorFields = options.blobDescriptorField();
-        Set<String> blobFileFields =
-                CoreOptions.blobField(options.toMap()).stream().collect(Collectors.toSet());
-        return valueType.getFields().stream()
-                .filter(
-                        field ->
-                                (descriptorFields.contains(field.name())
-                                                && field.type().getTypeRoot() == DataTypeRoot.BLOB)
-                                        || (blobFileFields.contains(field.name())
-                                                && field.type().getTypeRoot() == DataTypeRoot.ARRAY
-                                                && isBlobFileField(field.type())))
-                .map(DataField::name)
-                .collect(Collectors.toSet());
+        return fieldNamesInBlobFile(valueType, options.blobInlineField());
     }
 
     public void deleteFile(DataFileMeta file) {

@@ -23,7 +23,9 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -66,7 +68,7 @@ class PrimaryKeyBlobFileWriterTest {
                         java.util.Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
                                 new DataField(1, "payload", DataTypes.BLOB()),
-                                new DataField(2, "unmanaged", DataTypes.BLOB())));
+                                new DataField(2, "descriptor", DataTypes.BLOB())));
         Function<String, FileStorePathFactory> pathFactories =
                 format ->
                         new FileStorePathFactory(
@@ -86,7 +88,8 @@ class PrimaryKeyBlobFileWriterTest {
                                 false,
                                 null);
         Options options = new Options();
-        options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "payload");
+        options.set(CoreOptions.BLOB_FIELD, "payload");
+        options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "descriptor");
         KeyValueFileWriterFactory factory =
                 KeyValueFileWriterFactory.builder(
                                 fileIO,
@@ -98,24 +101,23 @@ class PrimaryKeyBlobFileWriterTest {
                                 1024 * 1024)
                         .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(options));
         DataFilePathFactory pathFactory = factory.pathFactory(0);
-        Path managedBlob =
+        Path descriptorPath =
                 pathFactory.newPathFromExtension(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
-        Path unmanagedBlob =
-                pathFactory.newPathFromExtension(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        Blob descriptor = Blob.fromFile(fileIO, descriptorPath.toString());
+        InternalRow externalized =
+                factory.externalizeBlob(
+                        RowKind.INSERT,
+                        GenericRow.of(1, Blob.fromData(new byte[] {1}), descriptor));
+        assertThat(externalized.getBlob(1)).isInstanceOf(BlobRef.class);
+        assertThat(externalized.getBlob(2)).isSameAs(descriptor);
+        Path managedBlob = new Path(externalized.getBlob(1).toDescriptor().uri());
+
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 factory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
 
-        writer.write(
-                new KeyValue()
-                        .replace(
-                                GenericRow.of(1),
-                                0,
-                                RowKind.INSERT,
-                                GenericRow.of(
-                                        1,
-                                        Blob.fromFile(fileIO, managedBlob.toString()),
-                                        Blob.fromFile(fileIO, unmanagedBlob.toString()))));
+        writer.write(new KeyValue().replace(GenericRow.of(1), 0, RowKind.INSERT, externalized));
         writer.close();
+        factory.prepareCommit();
 
         DataFileMeta meta = writer.result().get(0);
         assertThat(meta.extraFiles()).singleElement().asString().endsWith(".blobref");
