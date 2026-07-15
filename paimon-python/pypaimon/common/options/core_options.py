@@ -137,6 +137,11 @@ class CoreOptions:
     FILE_FORMAT_ROW: str = "row"
     FILE_FORMAT_MOSAIC: str = "mosaic"
 
+    # Field agg constants
+    FIELDS_PREFIX = "fields"
+    DISTINCT = "distinct"
+    LIST_AGG_DELIMITER = "list-agg-delimiter"
+
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
         ConfigOptions.key("auto-create")
@@ -1345,3 +1350,21 @@ class CoreOptions:
 
     def dynamic_partition_overwrite(self) -> bool:
         return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)
+
+    def field_listagg_delimiter(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.LIST_AGG_DELIMITER}'
+            )
+            .string_type()
+            .default_value(',')
+        )
+
+    def field_collect_distinct(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.DISTINCT}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )
