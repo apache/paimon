@@ -286,6 +286,10 @@ def is_array_blob_type(data_type: DataType) -> bool:
     return isinstance(data_type, ArrayType) and is_blob_type(data_type.element)
 
 
+def is_map_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, MapType) and is_blob_type(data_type.value)
+
+
 def is_blob_file_type(data_type: DataType) -> bool:
     return is_blob_type(data_type) or is_array_blob_type(data_type)
 
@@ -656,7 +660,7 @@ class PyarrowFieldParser:
                 return pyarrow.int8()
             elif type_name == 'SMALLINT':
                 return pyarrow.int16()
-            elif type_name == 'INT':
+            elif type_name in ('INT', 'INTEGER'):
                 return pyarrow.int32()
             elif type_name == 'BIGINT':
                 return pyarrow.int64()

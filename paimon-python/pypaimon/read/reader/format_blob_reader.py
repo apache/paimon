@@ -24,12 +24,15 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
     AtomicType,
+    MapType,
     is_array_blob_type,
+    is_map_blob_type,
 )
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -72,13 +75,25 @@ class FormatBlobReader(RecordBatchReader):
             full_fields_map = {field.name: field for field in full_fields}
             projected_data_fields = [full_fields_map[name] for name in read_fields]
             self._data_field = projected_data_fields[0]
+            if isinstance(self._data_field.type, MapType) and not is_map_blob_type(
+                self._data_field.type
+            ):
+                raise ValueError(
+                    "Map-Blob value type must be BLOB, but is "
+                    f"{self._data_field.type.value}."
+                )
             self._is_array_blob = is_array_blob_type(self._data_field.type)
+            self._is_map_blob = is_map_blob_type(self._data_field.type)
             self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
 
             # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
             # that each open their own stream (one stream isn't thread-safe).
-            # ARRAY<BLOB> needs the stream to read the nested element index.
-            if not self._is_array_blob and (self._blob_as_descriptor or self._blob_parallelism > 1):
+            # Nested Blob formats need the stream to read their keys and indexes.
+            if (
+                not self._is_array_blob
+                and not self._is_map_blob
+                and (self._blob_as_descriptor or self._blob_parallelism > 1)
+            ):
                 self._input_stream.close()
                 self._input_stream = None
         except Exception:
@@ -121,7 +136,17 @@ class FormatBlobReader(RecordBatchReader):
                     break
                 blob = blob_row.values[0]
                 for field_name in self._fields:
-                    if self._is_array_blob:
+                    if self._is_map_blob:
+                        row_index = len(pydict_data[field_name])
+                        pydict_data[field_name].append(
+                            self._map_value_for_arrow(
+                                blob,
+                                field_name,
+                                row_index,
+                                blobs_to_resolve,
+                            )
+                        )
+                    elif self._is_array_blob:
                         row_index = len(pydict_data[field_name])
                         pydict_data[field_name].append(
                             self._array_value_for_arrow(
@@ -143,7 +168,7 @@ class FormatBlobReader(RecordBatchReader):
                         elif self._blob_parallelism > 1:
                             idx = len(pydict_data[field_name])
                             pydict_data[field_name].append(None)
-                            blobs_to_resolve.append((field_name, idx, None, blob))
+                            blobs_to_resolve.append((field_name, idx, 'raw', None, blob))
                         else:
                             pydict_data[field_name].append(blob.to_data())
 
@@ -180,14 +205,16 @@ class FormatBlobReader(RecordBatchReader):
                 return None
 
     def _resolve_blobs_concurrent(self, pydict_data, blobs_to_resolve):
-        blobs = [item[3] for item in blobs_to_resolve]
+        blobs = [item[4] for item in blobs_to_resolve]
         results = self._file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
         for target, data in zip(blobs_to_resolve, results):
-            field_name, row_index, element_index, _ = target
-            if element_index is None:
+            field_name, row_index, container_kind, slot, _ = target
+            if container_kind == 'raw':
                 pydict_data[field_name][row_index] = data
+            elif container_kind == 'array':
+                pydict_data[field_name][row_index][slot] = data
             else:
-                pydict_data[field_name][row_index][element_index] = data
+                pydict_data[field_name][row_index][slot] = data
 
     def _array_value_for_arrow(
         self,
@@ -211,10 +238,43 @@ class FormatBlobReader(RecordBatchReader):
             elif self._blob_parallelism > 1:
                 result.append(None)
                 blobs_to_resolve.append(
-                    (field_name, row_index, element_index, blob)
+                    (field_name, row_index, 'array', element_index, blob)
                 )
             else:
                 result.append(blob.to_data())
+        return result
+
+    def _map_value_for_arrow(
+        self,
+        blob_map,
+        field_name,
+        row_index,
+        blobs_to_resolve,
+    ):
+        if blob_map is None:
+            return None
+        if blob_map is Blob.MAP_PLACE_HOLDER:
+            raise RuntimeError(
+                "Blob placeholder is not supported by FormatBlobReader yet."
+            )
+        if None in blob_map:
+            raise ValueError(
+                "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
+            )
+
+        result = {}
+        for key, blob in blob_map.items():
+            if blob is None:
+                result[key] = None
+            elif self._blob_as_descriptor:
+                result[key] = blob.to_descriptor().serialize()
+            elif self._blob_parallelism > 1:
+                result[key] = None
+                blobs_to_resolve.append(
+                    (field_name, row_index, 'map', key, blob)
+                )
+            else:
+                result[key] = blob.to_data()
         return result
 
     def close(self):
@@ -290,6 +350,14 @@ class BlobRecordIterator:
     ARRAY_NULL_ELEMENT_LENGTH = -1
     ARRAY_INDEX_LENGTH_SIZE = 4
     MIN_ARRAY_PAYLOAD_LENGTH = ARRAY_HEADER_SIZE + ARRAY_INDEX_LENGTH_SIZE
+    MAP_HEADER_SIZE = 9
+    MAP_VERSION = 1
+    MAP_MAGIC_NUMBER = 0x4D424342
+    MAP_NULL_KEY_LENGTH = -1
+    MAP_NULL_VALUE_LENGTH = -1
+    MAP_INDEX_LENGTH_SIZE = 4
+    MAP_INDEX_LENGTHS_SIZE = MAP_INDEX_LENGTH_SIZE * 2
+    MIN_MAP_PAYLOAD_LENGTH = MAP_HEADER_SIZE + MAP_INDEX_LENGTHS_SIZE
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
 
@@ -305,7 +373,17 @@ class BlobRecordIterator:
         else:
             self.field = DataField(0, field, AtomicType("BLOB"))
         self.field_name = self.field.name
+        if isinstance(self.field.type, MapType) and not is_map_blob_type(self.field.type):
+            raise ValueError(
+                f"Map-Blob value type must be BLOB, but is {self.field.type.value}."
+            )
         self.is_array_blob = is_array_blob_type(self.field.type)
+        self.is_map_blob = is_map_blob_type(self.field.type)
+        self.map_key_serializer = (
+            create_map_blob_key_serializer(self.field.type.key)
+            if self.is_map_blob
+            else None
+        )
         self.blob_as_descriptor = blob_as_descriptor
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
@@ -324,13 +402,20 @@ class BlobRecordIterator:
             return GenericRow([None], fields, RowKind.INSERT)
         if length == self.PLACE_HOLDER_LENGTH:
             self.current_position += 1
-            placeholder = Blob.ARRAY_PLACE_HOLDER if self.is_array_blob else Blob.PLACE_HOLDER
+            if self.is_map_blob:
+                placeholder = Blob.MAP_PLACE_HOLDER
+            elif self.is_array_blob:
+                placeholder = Blob.ARRAY_PLACE_HOLDER
+            else:
+                placeholder = Blob.PLACE_HOLDER
             return GenericRow([placeholder], fields, RowKind.INSERT)
         # Create blob reference for the current blob
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
         blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
         blob_length = length - self.METADATA_OVERHEAD
-        if self.is_array_blob:
+        if self.is_map_blob:
+            blob = self._read_blob_map(blob_offset, blob_length)
+        elif self.is_array_blob:
             blob = self._read_blob_array(blob_offset, blob_length)
         elif self.input_stream is not None and not self.blob_as_descriptor:
             blob = Blob.from_data(self._read_inline_blob(blob_offset, blob_length))
@@ -450,6 +535,220 @@ class BlobRecordIterator:
         finally:
             if close_stream:
                 stream.close()
+
+    def _read_blob_map(self, position: int, length: int):
+        if position < 0 or length < self.MIN_MAP_PAYLOAD_LENGTH:
+            raise ValueError(
+                f"Invalid MAP<X, BLOB> payload position or length: {position}, {length}"
+            )
+
+        stream = self.input_stream
+        close_stream = False
+        if stream is None:
+            stream = self.file_io.new_input_stream(self.file_path)
+            close_stream = True
+        try:
+            stream.seek(position)
+            header = self._read_fully_from(stream, self.MAP_HEADER_SIZE)
+            if len(header) != self.MAP_HEADER_SIZE:
+                raise IOError("Invalid MAP<X, BLOB> payload: cannot read header")
+            magic, version, entry_count = struct.unpack('<IBI', header)
+            if magic != self.MAP_MAGIC_NUMBER:
+                raise ValueError(f"Invalid MAP<X, BLOB> payload magic number: {magic}")
+            if version != self.MAP_VERSION:
+                raise ValueError(f"Unsupported MAP<X, BLOB> payload version: {version}")
+            if entry_count > 0x7fffffff:
+                raise ValueError(f"Invalid MAP<X, BLOB> entry count: {entry_count}")
+
+            payload_end = position + length
+            data_start = position + self.MAP_HEADER_SIZE
+            index_lengths_position = payload_end - self.MAP_INDEX_LENGTHS_SIZE
+            stream.seek(index_lengths_position)
+            index_length_bytes = self._read_fully_from(
+                stream, self.MAP_INDEX_LENGTHS_SIZE
+            )
+            if len(index_length_bytes) != self.MAP_INDEX_LENGTHS_SIZE:
+                raise IOError("Invalid MAP<X, BLOB> payload: cannot read index lengths")
+            key_index_length, value_index_length = struct.unpack('<II', index_length_bytes)
+            self._check_map_index_lengths(
+                key_index_length,
+                value_index_length,
+                length,
+                entry_count,
+            )
+
+            value_index_start = index_lengths_position - value_index_length
+            key_index_start = value_index_start - key_index_length
+            stream.seek(key_index_start)
+            key_index_bytes = self._read_fully_from(stream, key_index_length)
+            if len(key_index_bytes) != key_index_length:
+                raise IOError("Invalid MAP<X, BLOB> payload: cannot read key index")
+            stream.seek(value_index_start)
+            value_index_bytes = self._read_fully_from(stream, value_index_length)
+            if len(value_index_bytes) != value_index_length:
+                raise IOError("Invalid MAP<X, BLOB> payload: cannot read value index")
+
+            self._validate_map_index(key_index_bytes, "key")
+            self._validate_map_index(value_index_bytes, "value")
+            try:
+                key_lengths = DeltaVarintCompressor.decompress(key_index_bytes)
+            except RuntimeError as error:
+                raise ValueError("Invalid MAP<X, BLOB> key index.") from error
+            try:
+                value_lengths = DeltaVarintCompressor.decompress(value_index_bytes)
+            except RuntimeError as error:
+                raise ValueError("Invalid MAP<X, BLOB> value index.") from error
+
+            data_length = key_index_start - data_start
+            key_data_length = self._check_map_key_lengths(
+                key_lengths, data_length, entry_count
+            )
+            value_data_length = data_length - key_data_length
+            self._check_map_value_lengths(
+                value_lengths, value_data_length, entry_count
+            )
+
+            stream.seek(data_start)
+            key_data = self._read_fully_from(stream, key_data_length)
+            if len(key_data) != key_data_length:
+                raise IOError("Invalid MAP<X, BLOB> payload: cannot read key data")
+            keys = []
+            key_data_offset = 0
+            for key_length in key_lengths:
+                if key_length == self.MAP_NULL_KEY_LENGTH:
+                    keys.append(None)
+                    continue
+                serialized_key = key_data[
+                    key_data_offset:key_data_offset + key_length
+                ]
+                try:
+                    keys.append(self.map_key_serializer.deserialize(serialized_key))
+                except ValueError as error:
+                    raise ValueError("Invalid MAP<X, BLOB> key.") from error
+                key_data_offset += key_length
+
+            value_data_start = data_start + key_data_length
+            value_data = None
+            if not self.blob_as_descriptor:
+                stream.seek(value_data_start)
+                value_data = self._read_fully_from(stream, value_data_length)
+                if len(value_data) != value_data_length:
+                    raise IOError("Invalid MAP<X, BLOB> payload: cannot read value data")
+
+            result = {}
+            value_offset = value_data_start
+            value_data_offset = 0
+            for key, value_length in zip(keys, value_lengths):
+                if value_length == self.MAP_NULL_VALUE_LENGTH:
+                    value = None
+                elif self.blob_as_descriptor:
+                    value = Blob.from_file(
+                        self.file_io, self.file_path, value_offset, value_length
+                    )
+                else:
+                    value = Blob.from_data(
+                        value_data[value_data_offset:value_data_offset + value_length]
+                    )
+                if value_length != self.MAP_NULL_VALUE_LENGTH:
+                    value_offset += value_length
+                    value_data_offset += value_length
+                result[key] = value
+            return result
+        finally:
+            if close_stream:
+                stream.close()
+
+    @classmethod
+    def _check_map_index_lengths(
+        cls,
+        key_index_length: int,
+        value_index_length: int,
+        payload_length: int,
+        entry_count: int,
+    ) -> None:
+        maximum_indexes_length = payload_length - cls.MIN_MAP_PAYLOAD_LENGTH
+        if key_index_length > 0x7fffffff or key_index_length > maximum_indexes_length:
+            raise ValueError(
+                f"Invalid MAP<X, BLOB> key index length: {key_index_length}"
+            )
+        if value_index_length > 0x7fffffff or value_index_length > maximum_indexes_length:
+            raise ValueError(
+                f"Invalid MAP<X, BLOB> value index length: {value_index_length}"
+            )
+        if key_index_length + value_index_length > maximum_indexes_length:
+            raise ValueError("MAP<X, BLOB> indexes exceed the payload length.")
+        if entry_count > key_index_length:
+            raise ValueError("MAP<X, BLOB> entry count exceeds key index length.")
+        if entry_count > value_index_length:
+            raise ValueError("MAP<X, BLOB> entry count exceeds value index length.")
+
+    def _check_map_key_lengths(
+        self, key_lengths, max_data_length: int, entry_count: int
+    ) -> int:
+        if len(key_lengths) != entry_count:
+            raise ValueError(
+                "MAP<X, BLOB> entry count does not match key index length."
+            )
+
+        key_data_length = 0
+        fixed_key_length = self.map_key_serializer.fixed_length
+        for key_length in key_lengths:
+            if key_length == self.MAP_NULL_KEY_LENGTH:
+                continue
+            if key_length < 0:
+                raise ValueError(f"Invalid MAP<X, BLOB> key length: {key_length}")
+            if key_length > 0x7fffffff:
+                raise ValueError(f"MAP<X, BLOB> key is too large: {key_length}")
+            if fixed_key_length >= 0 and key_length != fixed_key_length:
+                raise ValueError(
+                    f"Invalid MAP<X, BLOB> fixed-width key length: {key_length}"
+                )
+            if key_length > max_data_length - key_data_length:
+                raise ValueError(
+                    "MAP<X, BLOB> key lengths exceed the payload data length."
+                )
+            key_data_length += key_length
+        return key_data_length
+
+    def _check_map_value_lengths(
+        self, value_lengths, max_data_length: int, entry_count: int
+    ) -> None:
+        if len(value_lengths) != entry_count:
+            raise ValueError(
+                "MAP<X, BLOB> entry count does not match value index length."
+            )
+
+        value_data_length = 0
+        for value_length in value_lengths:
+            if value_length == self.MAP_NULL_VALUE_LENGTH:
+                continue
+            if value_length < 0:
+                raise ValueError(f"Invalid MAP<X, BLOB> value length: {value_length}")
+            if not self.blob_as_descriptor and value_length > 0x7fffffff:
+                raise ValueError(
+                    f"MAP<X, BLOB> inline value is too large: {value_length}"
+                )
+            if value_length > max_data_length - value_data_length:
+                raise ValueError(
+                    "MAP<X, BLOB> value lengths exceed the payload data length."
+                )
+            value_data_length += value_length
+        if value_data_length != max_data_length:
+            raise ValueError(
+                "MAP<X, BLOB> key/value lengths do not match the payload data length."
+            )
+
+    @staticmethod
+    def _validate_map_index(index_bytes: bytes, index_name: str) -> None:
+        varint_length = 0
+        for value in index_bytes:
+            varint_length += 1
+            if varint_length > 10:
+                raise ValueError(f"Invalid MAP<X, BLOB> {index_name} index.")
+            if value & 0x80 == 0:
+                varint_length = 0
+        if varint_length != 0:
+            raise ValueError(f"Invalid MAP<X, BLOB> {index_name} index.")
 
     @staticmethod
     def _validate_array_element_index(index_bytes: bytes) -> None:

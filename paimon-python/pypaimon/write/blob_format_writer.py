@@ -16,6 +16,7 @@
 # under the License.
 
 import struct
+from collections.abc import Mapping
 from typing import BinaryIO, List, Optional
 
 try:
@@ -23,7 +24,13 @@ try:
 except ImportError:
     import zlib as crc_backend
 
-from pypaimon.schema.data_types import is_array_blob_type, is_blob_file_type
+from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+from pypaimon.schema.data_types import (
+    MapType,
+    is_array_blob_type,
+    is_blob_file_type,
+    is_map_blob_type,
+)
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
@@ -33,9 +40,13 @@ class BlobFormatWriter:
     MAGIC_NUMBER = 1481511375
     ARRAY_VERSION = 1
     ARRAY_MAGIC_NUMBER = 1094861634
+    MAP_VERSION = 1
+    MAP_MAGIC_NUMBER = 0x4D424342
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
     ARRAY_NULL_ELEMENT_LENGTH = -1
+    MAP_NULL_KEY_LENGTH = -1
+    MAP_NULL_VALUE_LENGTH = -1
     BUFFER_SIZE = 4096
     METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
@@ -60,10 +71,25 @@ class BlobFormatWriter:
         blob_field_name = row.fields[0].name
         blob_field_type = row.fields[0].type
         blob_value = row.values[0]
+        if isinstance(blob_field_type, MapType) and not is_map_blob_type(blob_field_type):
+            raise ValueError(
+                f"Map-Blob value type must be BLOB, but is {blob_field_type.value}."
+            )
         if blob_value is None:
             self.lengths.append(self.NULL_LENGTH)
             if self._blob_consumer is not None:
                 self._blob_consumer(blob_field_name, None)
+            return
+
+        if is_map_blob_type(blob_field_type):
+            if blob_value is Blob.MAP_PLACE_HOLDER:
+                self.lengths.append(self.PLACE_HOLDER_LENGTH)
+                return
+            self.add_blob_map(
+                blob_field_name,
+                blob_value,
+                blob_field_type.key,
+            )
             return
 
         if is_array_blob_type(blob_field_type):
@@ -172,6 +198,77 @@ class BlobFormatWriter:
         if flush:
             self.output_stream.flush()
 
+    def add_blob_map(self, blob_field_name: str, blob_values, key_type) -> None:
+        entries = self._map_entries(blob_values)
+        if len(entries) > 0x7fffffff:
+            raise ValueError(f"Invalid MAP<X, BLOB> entry count: {len(entries)}")
+
+        key_serializer = create_map_blob_key_serializer(key_type)
+        key_bytes = []
+        for key, _ in entries:
+            if key is None:
+                key_bytes.append(None)
+                continue
+            serialized = key_serializer.serialize(key)
+            if len(serialized) > 0x7fffffff:
+                raise ValueError(f"MAP<X, BLOB> key is too large: {len(serialized)}")
+            key_bytes.append(serialized)
+
+        for _, blob_value in entries:
+            if blob_value is None:
+                continue
+            if (
+                blob_value is Blob.PLACE_HOLDER
+                or blob_value is Blob.ARRAY_PLACE_HOLDER
+                or blob_value is Blob.MAP_PLACE_HOLDER
+            ):
+                raise ValueError("MAP<X, BLOB> values do not support placeholders")
+            if not isinstance(blob_value, Blob):
+                raise ValueError("MAP<X, BLOB> values must be Blob/BlobData instances or None")
+
+        previous_pos = self.position
+        crc32 = 0
+        crc32 = self._write_with_crc(struct.pack('<I', self.MAGIC_NUMBER), crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', self.MAP_MAGIC_NUMBER), crc32)
+        crc32 = self._write_with_crc(struct.pack('<B', self.MAP_VERSION), crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', len(entries)), crc32)
+
+        key_lengths = []
+        for serialized in key_bytes:
+            if serialized is None:
+                key_lengths.append(self.MAP_NULL_KEY_LENGTH)
+            else:
+                key_lengths.append(len(serialized))
+                crc32 = self._write_with_crc(serialized, crc32)
+
+        value_lengths = []
+        flush = False
+        for _, blob_value in entries:
+            if blob_value is None:
+                value_lengths.append(self.MAP_NULL_VALUE_LENGTH)
+                continue
+            blob_pos, blob_length, crc32 = self._write_blob_data(blob_value, crc32)
+            value_lengths.append(blob_length)
+            if self._blob_consumer is not None:
+                descriptor = BlobDescriptor(self._file_path, blob_pos, blob_length)
+                flush = self._blob_consumer(blob_field_name, descriptor) or flush
+
+        key_index_bytes = DeltaVarintCompressor.compress(key_lengths)
+        value_index_bytes = DeltaVarintCompressor.compress(value_lengths)
+        crc32 = self._write_with_crc(key_index_bytes, crc32)
+        crc32 = self._write_with_crc(value_index_bytes, crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', len(key_index_bytes)), crc32)
+        crc32 = self._write_with_crc(struct.pack('<I', len(value_index_bytes)), crc32)
+
+        bin_length = self.position - previous_pos + self.METADATA_SIZE
+        self.lengths.append(bin_length)
+        crc32 = self._write_with_crc(struct.pack('<Q', bin_length), crc32)
+        self.output_stream.write(struct.pack('<I', crc32 & 0xffffffff))
+        self.position += 4
+
+        if flush:
+            self.output_stream.flush()
+
     def _write_blob_data(self, blob_value: Blob, crc32: int):
         blob_pos = self.position
 
@@ -200,7 +297,8 @@ class BlobFormatWriter:
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.table.row.row_kind import RowKind
 
-        is_blob = is_blob_file_type(fields[0].type)
+        is_map_blob = is_map_blob_type(fields[0].type)
+        is_blob = is_blob_file_type(fields[0].type) or is_map_blob
 
         if col_data is None:
             if not is_blob:
@@ -208,7 +306,9 @@ class BlobFormatWriter:
             self.lengths.append(self.NULL_LENGTH)
             return
 
-        if is_array_blob_type(fields[0].type):
+        if is_map_blob:
+            row_values = [self._to_blob_map(col_data, uri_reader_factory)]
+        elif is_array_blob_type(fields[0].type):
             row_values = [self._to_blob_array(col_data, uri_reader_factory)]
         elif is_blob:
             row_values = [self._to_blob(col_data, uri_reader_factory)]
@@ -261,6 +361,45 @@ class BlobFormatWriter:
                 raise RuntimeError("ARRAY<BLOB> elements do not support placeholders.")
             result.append(cls._to_blob(element, uri_reader_factory))
         return result
+
+    @classmethod
+    def _to_blob_map(cls, col_data, uri_reader_factory=None):
+        if col_data is Blob.MAP_PLACE_HOLDER:
+            return Blob.MAP_PLACE_HOLDER
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if col_data is None:
+            return None
+
+        result = []
+        for key, value in cls._map_entries(col_data):
+            if value is None:
+                result.append((key, None))
+                continue
+            if (
+                value is Blob.PLACE_HOLDER
+                or value is Blob.ARRAY_PLACE_HOLDER
+                or value is Blob.MAP_PLACE_HOLDER
+            ):
+                raise RuntimeError("MAP<X, BLOB> values do not support placeholders.")
+            result.append((key, cls._to_blob(value, uri_reader_factory)))
+        return result
+
+    @staticmethod
+    def _map_entries(blob_values):
+        if isinstance(blob_values, Mapping):
+            return list(blob_values.items())
+        if isinstance(blob_values, (bytes, bytearray, str)) or not hasattr(
+            blob_values, '__iter__'
+        ):
+            raise ValueError("MAP<X, BLOB> field value must be a mapping or key/value pairs")
+
+        entries = []
+        for entry in blob_values:
+            if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+                raise ValueError("MAP<X, BLOB> entries must be key/value pairs")
+            entries.append((entry[0], entry[1]))
+        return entries
 
     def reach_target_size(self, target_size: int) -> bool:
         return self.position >= target_size
