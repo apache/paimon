@@ -90,7 +90,7 @@ class PrimaryKeyManagedBlobStoreTest {
         FileIO fileIO = LocalFileIO.create();
         TestFileStore store = createArrayStore(fileIO);
         byte[] expected = "array-payload".getBytes(StandardCharsets.UTF_8);
-        Blob external = Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+        byte[] second = "second-array-payload".getBytes(StandardCharsets.UTF_8);
         KeyValue keyValue =
                 new KeyValue()
                         .replace(
@@ -100,14 +100,16 @@ class PrimaryKeyManagedBlobStoreTest {
                                         1,
                                         new GenericArray(
                                                 new Object[] {
-                                                    Blob.fromData(expected), null, external
+                                                    Blob.fromData(expected),
+                                                    null,
+                                                    Blob.fromData(second)
                                                 })));
 
         store.commitData(
                 Collections.singletonList(keyValue), ignored -> BinaryRow.EMPTY_ROW, ignored -> 0);
 
         ManifestEntry entry = store.newScan().plan().files().get(0);
-        assertThat(references(fileIO, store, entry)).hasSize(1);
+        assertThat(references(fileIO, store, entry)).hasSize(2);
         InternalArray blobs =
                 store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId())
                         .get(0)
@@ -116,7 +118,7 @@ class PrimaryKeyManagedBlobStoreTest {
         assertThat(blobs.size()).isEqualTo(3);
         assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
         assertThat(blobs.isNullAt(1)).isTrue();
-        assertThat(blobs.getBlob(2).toDescriptor()).isEqualTo(external.toDescriptor());
+        assertThat(blobs.getBlob(2).toData()).isEqualTo(second);
     }
 
     @Test

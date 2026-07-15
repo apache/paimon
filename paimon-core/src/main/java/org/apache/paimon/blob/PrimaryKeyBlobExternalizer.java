@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -52,6 +53,7 @@ public class PrimaryKeyBlobExternalizer {
     private final FileIO fileIO;
     private final RowDataToObjectArrayConverter rowConverter;
     private final int[] blobFieldIndexes;
+    private final String[] blobFieldNames;
     private final boolean[] blobArrayFields;
     private final ManagedBlobPackWriter[] packWriters;
     private final List<Path> uncommittedPacks;
@@ -68,33 +70,45 @@ public class PrimaryKeyBlobExternalizer {
         this.uncommittedPacks = new ArrayList<>();
 
         List<Integer> indexes = new ArrayList<>();
+        List<String> fieldNames = new ArrayList<>();
         List<Boolean> arrayFields = new ArrayList<>();
         List<ManagedBlobPackWriter> writers = new ArrayList<>();
+        Set<String> unknownFields = new TreeSet<>(managedBlobFields);
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             DataField field = valueType.getFields().get(i);
             if (!managedBlobFields.contains(field.name())) {
                 continue;
             }
+            unknownFields.remove(field.name());
             boolean blob = field.type().getTypeRoot() == DataTypeRoot.BLOB;
             boolean blobArray =
                     field.type().getTypeRoot() == DataTypeRoot.ARRAY
                             && ((ArrayType) field.type()).getElementType().getTypeRoot()
                                     == DataTypeRoot.BLOB;
-            if (blob || blobArray) {
-                indexes.add(i);
-                arrayFields.add(blobArray);
-                writers.add(
-                        new ManagedBlobPackWriter(
-                                fileIO,
-                                blobArray
-                                        ? RowType.of(((ArrayType) field.type()).getElementType())
-                                        : new RowType(Collections.singletonList(field)),
-                                pathFactory,
-                                targetFileSize,
-                                uncommittedPacks));
-            }
+            checkArgument(
+                    blob || blobArray,
+                    "Managed BLOB field '%s' must be BLOB or ARRAY<BLOB>, but was %s.",
+                    field.name(),
+                    field.type());
+            indexes.add(i);
+            fieldNames.add(field.name());
+            arrayFields.add(blobArray);
+            writers.add(
+                    new ManagedBlobPackWriter(
+                            fileIO,
+                            blobArray
+                                    ? RowType.of(((ArrayType) field.type()).getElementType())
+                                    : new RowType(Collections.singletonList(field)),
+                            pathFactory,
+                            targetFileSize,
+                            uncommittedPacks));
         }
+        checkArgument(
+                unknownFields.isEmpty(),
+                "Managed BLOB fields do not exist in value type: %s.",
+                unknownFields);
         this.blobFieldIndexes = indexes.stream().mapToInt(Integer::intValue).toArray();
+        this.blobFieldNames = fieldNames.toArray(new String[0]);
         this.blobArrayFields = new boolean[arrayFields.size()];
         for (int i = 0; i < arrayFields.size(); i++) {
             blobArrayFields[i] = arrayFields.get(i);
@@ -126,7 +140,8 @@ public class PrimaryKeyBlobExternalizer {
                     result.setField(fieldIndex, null);
                 } else if (blobArrayFields[i]) {
                     InternalArray array = value.getArray(fieldIndex);
-                    GenericArray externalized = externalizeArray(array, packWriters[i]);
+                    GenericArray externalized =
+                            externalizeArray(array, packWriters[i], blobFieldNames[i]);
                     if (externalized != null) {
                         if (result == null) {
                             result = copy(value);
@@ -135,9 +150,10 @@ public class PrimaryKeyBlobExternalizer {
                     }
                 } else {
                     Blob blob = value.getBlob(fieldIndex);
-                    if (blob instanceof BlobRef) {
-                        continue;
-                    }
+                    checkArgument(
+                            !(blob instanceof BlobRef),
+                            "Managed BLOB field '%s' only accepts raw BLOB input, but received BlobRef.",
+                            blobFieldNames[i]);
                     if (result == null) {
                         result = copy(value);
                     }
@@ -158,7 +174,8 @@ public class PrimaryKeyBlobExternalizer {
         return result == null ? value : result;
     }
 
-    private GenericArray externalizeArray(InternalArray array, ManagedBlobPackWriter packWriter)
+    private GenericArray externalizeArray(
+            InternalArray array, ManagedBlobPackWriter packWriter, String fieldName)
             throws IOException {
         Object[] elements = null;
         for (int i = 0; i < array.size(); i++) {
@@ -167,9 +184,11 @@ public class PrimaryKeyBlobExternalizer {
             }
 
             Blob blob = array.getBlob(i);
-            if (blob instanceof BlobRef) {
-                continue;
-            }
+            checkArgument(
+                    !(blob instanceof BlobRef),
+                    "Managed BLOB field '%s' only accepts raw BLOB input, but array element %s was BlobRef.",
+                    fieldName,
+                    i);
 
             if (elements == null) {
                 elements = new Object[array.size()];

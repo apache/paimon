@@ -61,15 +61,15 @@ INSERT INTO media VALUES
     (1, 'logo', X'89504E470D0A1A0A', ARRAY[X'25504446', NULL]);
 ```
 
-For a primary-key table, a raw value in a `blob-field` is externalized before it enters the MergeTree sort buffer. An
-input that is already a serialized `BlobDescriptor` remains a reference to its existing payload. Reads return the
-payload bytes by default; the existing `blob-as-descriptor` read option can expose descriptors instead. A
-`blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
-reference sidecars.
+For a primary-key table, a raw value in a `blob-field` is externalized before it enters the MergeTree sort buffer. A
+`blob-field` accepts raw BLOB values only and rejects an input `BlobRef`; use `blob-descriptor-field` for descriptor
+input. Reads return the payload bytes by default; the existing `blob-as-descriptor` read option can expose descriptors
+instead. A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage
+or its reference sidecars.
 
-`ARRAY<BLOB>` is externalized element by element. Array order, a null array, null elements, and existing descriptor
-elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses `blob-field`; `blob-descriptor-field` and
-`blob-view-field` remain scalar-only declarations.
+`ARRAY<BLOB>` is externalized element by element. Array order, a null array, and null elements are preserved; any
+`BlobRef` element is rejected. An empty array writes no payload. `ARRAY<BLOB>` uses `blob-field`;
+`blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
 
 `blob.target-file-size` controls when a writer rolls to a new managed payload pack. A pack can contain payloads from
 multiple rows, and a row descriptor records its URI, offset, and length.
@@ -131,7 +131,7 @@ reachability is an exact dependency of one data file, and `DataFileMeta.extraFil
 lifecycle for such metadata. Using `IndexManifest` would require a new snapshot-level index lifecycle and would be a
 larger compatibility change.
 
-Each sidecar is immutable, versioned, checksummed, and deterministic. It stores only managed payload identities; an
-ordinary external descriptor is preserved in the row but is not added to the managed reference set. Managed pack
-identity is derived from the descriptor URI and its reserved `.managed.blob` suffix, so a valid reference is retained
-even when the pack and the data file are in different directories.
+Each sidecar is immutable, versioned, checksummed, and deterministic. It stores only managed payload identities;
+descriptor and view fields remain inline and are not added to the managed reference set. Managed pack identity is
+derived from the descriptor URI and its reserved `.managed.blob` suffix, so a valid reference is retained even when the
+pack and the data file are in different directories.

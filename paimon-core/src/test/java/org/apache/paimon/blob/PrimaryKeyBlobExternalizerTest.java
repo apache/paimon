@@ -47,6 +47,48 @@ class PrimaryKeyBlobExternalizerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
+    void testRejectsNonBlobManagedField() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+
+        assertThatThrownBy(
+                        () ->
+                                new PrimaryKeyBlobExternalizer(
+                                        fileIO,
+                                        RowType.of(DataTypes.INT()),
+                                        Collections.singleton("f0"),
+                                        pathFactory,
+                                        1024L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Managed BLOB field 'f0' must be BLOB or ARRAY<BLOB>, but was INT.");
+    }
+
+    @Test
+    void testRejectsUnknownManagedField() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+
+        assertThatThrownBy(
+                        () ->
+                                new PrimaryKeyBlobExternalizer(
+                                        fileIO,
+                                        RowType.of(DataTypes.BLOB()),
+                                        Collections.singleton("missing"),
+                                        pathFactory,
+                                        1024L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Managed BLOB fields do not exist in value type: [missing].");
+    }
+
+    @Test
     void testExternalizeRawBlobBeforeBuffering() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
@@ -72,6 +114,30 @@ class PrimaryKeyBlobExternalizerTest {
 
         assertThat(blob.toData()).isEqualTo(expected);
         assertThat(fileIO.exists(new Path(blob.toDescriptor().uri()))).isTrue();
+    }
+
+    @Test
+    void testRejectsBlobRefInput() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.INT(), DataTypes.BLOB()),
+                        Collections.singleton("f1"),
+                        pathFactory,
+                        1024L);
+        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+
+        assertThatThrownBy(
+                        () -> externalizer.externalize(RowKind.INSERT, GenericRow.of(1, blobRef)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Managed BLOB field 'f1' only accepts raw BLOB input, but received BlobRef.");
     }
 
     @Test
@@ -137,7 +203,7 @@ class PrimaryKeyBlobExternalizerTest {
     }
 
     @Test
-    void testExternalizeMixedBlobArrayElements() throws Exception {
+    void testExternalizeBlobArrayElements() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
         fileIO.mkdirs(bucketPath);
@@ -152,7 +218,7 @@ class PrimaryKeyBlobExternalizerTest {
                         pathFactory,
                         1024L);
         byte[] expected = "array-element".getBytes(StandardCharsets.UTF_8);
-        Blob external = Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+        byte[] second = "second-array-element".getBytes(StandardCharsets.UTF_8);
 
         InternalRow result =
                 externalizer.externalize(
@@ -160,7 +226,9 @@ class PrimaryKeyBlobExternalizerTest {
                         GenericRow.of(
                                 1,
                                 new GenericArray(
-                                        new Object[] {Blob.fromData(expected), null, external})));
+                                        new Object[] {
+                                            Blob.fromData(expected), null, Blob.fromData(second)
+                                        })));
         InternalArray blobs = result.getArray(1);
 
         assertThat(blobs.size()).isEqualTo(3);
@@ -168,10 +236,44 @@ class PrimaryKeyBlobExternalizerTest {
         assertThat(blobs.getBlob(0).toDescriptor().uri())
                 .endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
         assertThat(blobs.isNullAt(1)).isTrue();
-        assertThat(blobs.getBlob(2).toDescriptor()).isEqualTo(external.toDescriptor());
+        assertThat(blobs.getBlob(2)).isInstanceOf(BlobRef.class);
 
         externalizer.prepareCommit();
         assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
+        assertThat(blobs.getBlob(2).toData()).isEqualTo(second);
+    }
+
+    @Test
+    void testRejectsBlobRefArrayElement() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        Collections.singleton("f1"),
+                        pathFactory,
+                        1024L);
+        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+
+        assertThatThrownBy(
+                        () ->
+                                externalizer.externalize(
+                                        RowKind.INSERT,
+                                        GenericRow.of(
+                                                1,
+                                                new GenericArray(
+                                                        new Object[] {
+                                                            Blob.fromData(new byte[] {1}), blobRef
+                                                        }))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Managed BLOB field 'f1' only accepts raw BLOB input, but array element 1 was BlobRef.");
+        assertThat(fileIO.listStatus(bucketPath)).isEmpty();
     }
 
     @Test
