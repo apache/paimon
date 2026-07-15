@@ -200,7 +200,8 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(MultisetType multisetType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Lance file format does not support type MULTISET");
         }
 
         @Override
