@@ -117,7 +117,7 @@ class PrimaryKeyBlobExternalizerTest {
     }
 
     @Test
-    void testRejectsBlobRefInput() throws Exception {
+    void testRematerializesBlobRefInput() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
         fileIO.mkdirs(bucketPath);
@@ -131,13 +131,23 @@ class PrimaryKeyBlobExternalizerTest {
                         Collections.singleton("f1"),
                         pathFactory,
                         1024L);
-        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+        byte[] expected = "external-blob".getBytes(StandardCharsets.UTF_8);
+        Path source = new Path(tempDir.resolve("external.blob").toUri());
+        try (org.apache.paimon.fs.PositionOutputStream out =
+                fileIO.newOutputStream(source, false)) {
+            out.write(expected);
+        }
+        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, source.toString());
 
-        assertThatThrownBy(
-                        () -> externalizer.externalize(RowKind.INSERT, GenericRow.of(1, blobRef)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Managed BLOB field 'f1' only accepts raw BLOB input, but received BlobRef.");
+        Blob result =
+                externalizer.externalize(RowKind.INSERT, GenericRow.of(1, blobRef)).getBlob(1);
+
+        assertThat(result).isInstanceOf(BlobRef.class);
+        assertThat(result.toDescriptor().uri())
+                .isNotEqualTo(source.toString())
+                .endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        externalizer.prepareCommit();
+        assertThat(result.toData()).isEqualTo(expected);
     }
 
     @Test
@@ -244,7 +254,7 @@ class PrimaryKeyBlobExternalizerTest {
     }
 
     @Test
-    void testRejectsBlobRefArrayElement() throws Exception {
+    void testRematerializesBlobRefArrayElement() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
         fileIO.mkdirs(bucketPath);
@@ -258,22 +268,32 @@ class PrimaryKeyBlobExternalizerTest {
                         Collections.singleton("f1"),
                         pathFactory,
                         1024L);
-        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, "file:/external/blob", 3, 5);
+        byte[] expected = "external-array-blob".getBytes(StandardCharsets.UTF_8);
+        Path source = new Path(tempDir.resolve("external-array.blob").toUri());
+        try (org.apache.paimon.fs.PositionOutputStream out =
+                fileIO.newOutputStream(source, false)) {
+            out.write(expected);
+        }
+        BlobRef blobRef = (BlobRef) Blob.fromFile(fileIO, source.toString());
 
-        assertThatThrownBy(
-                        () ->
-                                externalizer.externalize(
-                                        RowKind.INSERT,
-                                        GenericRow.of(
-                                                1,
-                                                new GenericArray(
-                                                        new Object[] {
-                                                            Blob.fromData(new byte[] {1}), blobRef
-                                                        }))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Managed BLOB field 'f1' only accepts raw BLOB input, but array element 1 was BlobRef.");
-        assertThat(fileIO.listStatus(bucketPath)).isEmpty();
+        InternalArray result =
+                externalizer
+                        .externalize(
+                                RowKind.INSERT,
+                                GenericRow.of(
+                                        1,
+                                        new GenericArray(
+                                                new Object[] {
+                                                    Blob.fromData(new byte[] {1}), blobRef
+                                                })))
+                        .getArray(1);
+
+        assertThat(result.getBlob(1)).isInstanceOf(BlobRef.class);
+        assertThat(result.getBlob(1).toDescriptor().uri())
+                .isNotEqualTo(source.toString())
+                .endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        externalizer.prepareCommit();
+        assertThat(result.getBlob(1).toData()).isEqualTo(expected);
     }
 
     @Test

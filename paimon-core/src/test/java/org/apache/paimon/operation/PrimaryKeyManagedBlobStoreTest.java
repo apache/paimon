@@ -91,6 +91,12 @@ class PrimaryKeyManagedBlobStoreTest {
         TestFileStore store = createArrayStore(fileIO);
         byte[] expected = "array-payload".getBytes(StandardCharsets.UTF_8);
         byte[] second = "second-array-payload".getBytes(StandardCharsets.UTF_8);
+        Path source = new Path(tempDir.resolve("external-array.blob").toUri());
+        try (org.apache.paimon.fs.PositionOutputStream out =
+                fileIO.newOutputStream(source, false)) {
+            out.write(second);
+        }
+        Blob external = Blob.fromFile(fileIO, source.toString());
         KeyValue keyValue =
                 new KeyValue()
                         .replace(
@@ -100,9 +106,7 @@ class PrimaryKeyManagedBlobStoreTest {
                                         1,
                                         new GenericArray(
                                                 new Object[] {
-                                                    Blob.fromData(expected),
-                                                    null,
-                                                    Blob.fromData(second)
+                                                    Blob.fromData(expected), null, external
                                                 })));
 
         store.commitData(
@@ -118,6 +122,7 @@ class PrimaryKeyManagedBlobStoreTest {
         assertThat(blobs.size()).isEqualTo(3);
         assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
         assertThat(blobs.isNullAt(1)).isTrue();
+        assertThat(blobs.getBlob(2).toDescriptor().uri()).isNotEqualTo(source.toString());
         assertThat(blobs.getBlob(2).toData()).isEqualTo(second);
     }
 

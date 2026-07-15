@@ -61,15 +61,15 @@ INSERT INTO media VALUES
     (1, 'logo', X'89504E470D0A1A0A', ARRAY[X'25504446', NULL]);
 ```
 
-For a primary-key table, a raw value in a `blob-field` is externalized before it enters the MergeTree sort buffer. A
-`blob-field` accepts raw BLOB values only and rejects an input `BlobRef`; use `blob-descriptor-field` for descriptor
-input. Reads return the payload bytes by default; the existing `blob-as-descriptor` read option can expose descriptors
-instead. A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage
-or its reference sidecars.
+For a primary-key table, a value in a `blob-field` is externalized before it enters the MergeTree sort buffer. Raw BLOB
+data is written directly; a `BlobRef` input is read from its descriptor and copied into a new table-managed BLOB pack.
+The original external reference is therefore not retained. Reads return the payload bytes by default; the existing
+`blob-as-descriptor` read option can expose descriptors instead. A `blob-descriptor-field` is written inline to the
+normal data file and does not participate in managed storage or its reference sidecars.
 
-`ARRAY<BLOB>` is externalized element by element. Array order, a null array, and null elements are preserved; any
-`BlobRef` element is rejected. An empty array writes no payload. `ARRAY<BLOB>` uses `blob-field`;
-`blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
+`ARRAY<BLOB>` is externalized element by element. Array order, a null array, and null elements are preserved; `BlobRef`
+elements are read and copied into the managed pack like scalar references. An empty array writes no payload.
+`ARRAY<BLOB>` uses `blob-field`; `blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
 
 `blob.target-file-size` controls when a writer rolls to a new managed payload pack. A pack can contain payloads from
 multiple rows, and a row descriptor records its URI, offset, and length.
