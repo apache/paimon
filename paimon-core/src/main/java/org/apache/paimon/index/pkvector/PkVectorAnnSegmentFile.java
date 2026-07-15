@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -142,6 +143,9 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             }
 
             List<ResultEntry> results = writer.finish();
+            if (liveRowCount == 0 && results.isEmpty()) {
+                results = Collections.singletonList(fileWriter.emptyResult());
+            }
             checkArgument(
                     results.size() == 1,
                     "ANN segment build must produce exactly one payload file, but produced %s.",
@@ -205,6 +209,16 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             return path;
         }
 
+        private ResultEntry emptyResult() throws IOException {
+            deleteCreatedFiles();
+            createdFiles.clear();
+            String fileName = newFileName("empty-vector");
+            try (PositionOutputStream ignored = newOutputStream(fileName)) {
+                // The searcher does not open payloads for segments without live rows.
+            }
+            return new ResultEntry(fileName, 0, null);
+        }
+
         private void deleteCreatedFiles() {
             for (Path path : createdFiles.values()) {
                 fileIO.deleteQuietly(path);
@@ -251,6 +265,13 @@ public class PkVectorAnnSegmentFile extends IndexFile {
 
         static Source lazy(PrimaryKeyIndexSourceFile sourceFile, ReaderFactory readerFactory) {
             return new Source(sourceFile, readerFactory, position -> false);
+        }
+
+        static Source lazy(
+                PrimaryKeyIndexSourceFile sourceFile,
+                ReaderFactory readerFactory,
+                LongPredicate excludedPosition) {
+            return new Source(sourceFile, readerFactory, excludedPosition);
         }
 
         private PkVectorReader openReader() throws IOException {

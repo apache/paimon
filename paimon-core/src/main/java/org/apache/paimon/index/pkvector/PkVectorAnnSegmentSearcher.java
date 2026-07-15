@@ -154,6 +154,9 @@ public class PkVectorAnnSegmentSearcher {
                 globalIndexMeta != null && globalIndexMeta.sourceMeta() != null,
                 "Vector segment %s has no source metadata.",
                 segment.fileName());
+        if (segment.rowCount() == 0) {
+            return Collections.emptyList();
+        }
         GlobalIndexer indexer =
                 GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
         checkArgument(

@@ -81,6 +81,46 @@ class PkVectorAnnSegmentFileTest {
     }
 
     @Test
+    void testBuildsSearchableEmptySegmentWhenAllRowsAreExcluded() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = annFile(fileIO);
+        IndexFileMeta segment =
+                annFile.build(
+                        Collections.singletonList(
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("data-1", 2),
+                                        new ArrayReader(new float[][] {{0, 0}, {1, 0}}),
+                                        position -> true)),
+                        vectorField(),
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann");
+
+        assertThat(segment.rowCount()).isZero();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            assertThat(
+                            new PkVectorAnnSegmentSearcher(
+                                            fileIO,
+                                            annFile,
+                                            vectorField(),
+                                            indexOptions(),
+                                            "l2",
+                                            executor)
+                                    .search(
+                                            segment,
+                                            PrimaryKeyIndexSourceMeta.fromIndexFile(segment),
+                                            new float[] {0, 0},
+                                            1,
+                                            Collections.emptyMap(),
+                                            Collections.emptyMap()))
+                    .isEmpty();
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void testBuildsAndSearchesMultiSourceSegment() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = annFile(fileIO);

@@ -20,6 +20,7 @@ package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
@@ -51,6 +52,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.function.LongPredicate;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -64,6 +66,7 @@ public class BucketedVectorIndexMaintainer {
     private final String metric;
     private final String algorithm;
     private final PkVectorDataFileReader.Factory vectorReaderFactory;
+    private final DeletionVector.Factory deletionVectorFactory;
     private final PrimaryKeyIndexLevels<IndexFileMeta> annLevels;
     private ExecutorService executor;
     private final List<IndexFileMeta> annSegments;
@@ -81,6 +84,32 @@ public class BucketedVectorIndexMaintainer {
             List<DataFileMeta> restoredDataFiles,
             List<IndexFileMeta> restoredPayloads,
             ExecutorService executor) {
+        this(
+                vectorFieldId,
+                annSegmentFile,
+                vectorField,
+                indexOptions,
+                metric,
+                algorithm,
+                vectorReaderFactory,
+                DeletionVector.emptyFactory(),
+                restoredDataFiles,
+                restoredPayloads,
+                executor);
+    }
+
+    BucketedVectorIndexMaintainer(
+            int vectorFieldId,
+            PkVectorAnnSegmentFile annSegmentFile,
+            DataField vectorField,
+            Options indexOptions,
+            String metric,
+            String algorithm,
+            PkVectorDataFileReader.Factory vectorReaderFactory,
+            DeletionVector.Factory deletionVectorFactory,
+            List<DataFileMeta> restoredDataFiles,
+            List<IndexFileMeta> restoredPayloads,
+            ExecutorService executor) {
         this.vectorFieldId = vectorFieldId;
         this.annSegmentFile = annSegmentFile;
         this.vectorField = vectorField;
@@ -88,6 +117,7 @@ public class BucketedVectorIndexMaintainer {
         this.metric = metric;
         this.algorithm = algorithm;
         this.vectorReaderFactory = vectorReaderFactory;
+        this.deletionVectorFactory = deletionVectorFactory;
         CoreOptions coreOptions = new CoreOptions(indexOptions);
         this.annLevels =
                 new PrimaryKeyIndexLevels<>(
@@ -215,7 +245,7 @@ public class BucketedVectorIndexMaintainer {
     }
 
     private void startPendingBuild(
-            List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments) {
+            List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments) throws IOException {
         PendingBuild build = new PendingBuild(sourceFiles, inputSegments);
         build.start();
         pendingBuild = build;
@@ -343,20 +373,41 @@ public class BucketedVectorIndexMaintainer {
         }
     }
 
-    private IndexFileMeta buildAnnSegment(List<DataFileMeta> files) {
+    private IndexFileMeta buildAnnSegment(
+            List<DataFileMeta> files, Map<String, DeletionVector> deletionVectors) {
         try {
             List<PkVectorAnnSegmentFile.Source> sources = new ArrayList<>(files.size());
             for (DataFileMeta file : files) {
                 PrimaryKeyIndexSourceFile sourceFile =
                         new PrimaryKeyIndexSourceFile(file.fileName(), file.rowCount());
+                DeletionVector deletionVector = deletionVectors.get(file.fileName());
+                LongPredicate excludedPosition =
+                        deletionVector != null ? deletionVector::isDeleted : position -> false;
                 sources.add(
                         PkVectorAnnSegmentFile.Source.lazy(
-                                sourceFile, () -> vectorReaderFactory.create(file)));
+                                sourceFile,
+                                () -> vectorReaderFactory.create(file),
+                                excludedPosition));
             }
             return annSegmentFile.build(sources, vectorField, indexOptions, metric, algorithm);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to build an ANN vector segment.", e);
         }
+    }
+
+    private Map<String, DeletionVector> snapshotDeletionVectors(List<DataFileMeta> files)
+            throws IOException {
+        Map<String, DeletionVector> snapshots = new LinkedHashMap<>();
+        for (DataFileMeta file : files) {
+            Optional<DeletionVector> deletionVector = deletionVectorFactory.create(file.fileName());
+            if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+                snapshots.put(
+                        file.fileName(),
+                        DeletionVector.deserializeFromBytes(
+                                DeletionVector.serializeToBytes(deletionVector.get())));
+            }
+        }
+        return snapshots;
     }
 
     private void validateCoverage(
@@ -392,20 +443,24 @@ public class BucketedVectorIndexMaintainer {
 
         private final List<DataFileMeta> sourceFiles;
         private final List<IndexFileMeta> inputSegments;
+        private final Map<String, DeletionVector> deletionVectors;
         @Nullable private IndexFileMeta result;
         @Nullable private Future<IndexFileMeta> future;
         private boolean cancelled;
 
-        private PendingBuild(List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments) {
+        private PendingBuild(List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments)
+                throws IOException {
             this.sourceFiles = new ArrayList<>(sourceFiles);
             this.inputSegments = new ArrayList<>(inputSegments);
+            this.deletionVectors = snapshotDeletionVectors(sourceFiles);
         }
 
         private void start() {
             future =
                     executor.submit(
                             () -> {
-                                IndexFileMeta segment = buildAnnSegment(sourceFiles);
+                                IndexFileMeta segment =
+                                        buildAnnSegment(sourceFiles, deletionVectors);
                                 synchronized (PendingBuild.this) {
                                     if (!cancelled) {
                                         result = segment;
@@ -587,6 +642,22 @@ public class BucketedVectorIndexMaintainer {
                 @Nullable List<DataFileMeta> restoredDataFiles,
                 @Nullable List<IndexFileMeta> restoredPayloads,
                 ExecutorService executor) {
+            return create(
+                    partition,
+                    bucket,
+                    restoredDataFiles,
+                    restoredPayloads,
+                    executor,
+                    DeletionVector.emptyFactory());
+        }
+
+        public BucketedVectorIndexMaintainer create(
+                BinaryRow partition,
+                int bucket,
+                @Nullable List<DataFileMeta> restoredDataFiles,
+                @Nullable List<IndexFileMeta> restoredPayloads,
+                ExecutorService executor,
+                DeletionVector.Factory deletionVectorFactory) {
             checkArgument(indexOptions != null, "ANN index options are not configured.");
             List<DataFileMeta> dataFiles =
                     restoredDataFiles == null ? Collections.emptyList() : restoredDataFiles;
@@ -601,6 +672,7 @@ public class BucketedVectorIndexMaintainer {
                     algorithm,
                     new PkVectorDataFileReader.Factory(
                             readerFactoryBuilder, partition, bucket, vectorField, vectorDimension),
+                    deletionVectorFactory,
                     dataFiles,
                     payloads,
                     executor);
