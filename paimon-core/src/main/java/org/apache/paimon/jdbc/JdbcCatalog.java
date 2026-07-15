@@ -720,6 +720,16 @@ public class JdbcCatalog extends AbstractCatalog {
         }
     }
 
+    /**
+     * Use {@code putIfAbsent} because a JDBC catalog stores the schema file at the warehouse
+     * default path while an object table's PATH option may point to a different user-specified data
+     * directory. Overwriting would wrongly redirect the object table to the schema directory.
+     */
+    @Override
+    protected void putPathOption(TableSchema schema, Path tablePath) {
+        schema.options().putIfAbsent(PATH.key(), tablePath.toString());
+    }
+
     @Override
     protected TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         assertMainBranch(identifier);

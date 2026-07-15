@@ -907,7 +907,12 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s.copy(branchOptions.toMap());
                             });
         }
-        schema.ifPresent(s -> s.options().putIfAbsent(PATH.key(), tablePath.toString()));
+        schema.ifPresent(s -> putPathOption(s, tablePath));
         return schema;
+    }
+
+    /** Set the PATH option on the loaded schema. */
+    protected void putPathOption(TableSchema schema, Path tablePath) {
+        schema.options().put(PATH.key(), tablePath.toString());
     }
 }
