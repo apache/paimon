@@ -91,7 +91,7 @@ public abstract class PartitionLoader implements Serializable {
 
         Preconditions.checkArgument(
                 !table.partitionKeys().isEmpty(),
-                "{} is not supported for non-partitioned table.",
+                "%s is not supported for non-partitioned table.",
                 FlinkConnectorOptions.SCAN_PARTITIONS.key());
 
         int maxPartitionNum = -1;
