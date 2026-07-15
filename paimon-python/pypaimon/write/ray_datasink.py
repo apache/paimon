@@ -188,6 +188,10 @@ class PaimonDatasink(_DatasinkBase):
                 self._pending_commit_messages = []
                 return
 
+            # Ray does not call on_write_start when the input has no blocks.
+            if self._writer_builder is None:
+                self.on_write_start()
+
             logger.info(
                 f"Committing {len(non_empty_messages)} commit messages "
                 f"for table {self._table_name}"
