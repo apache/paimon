@@ -45,7 +45,11 @@ from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        ListPartitionsResponse, ListTablesResponse,
                                        ListTagsResponse,
                                        PagedList, Partition,
-                                       RESTResponse, ErrorResponse)
+                                       RESTResponse, ErrorResponse,
+                                       GetResourceResponse,
+                                       ListResourcesResponse,
+                                       ListResourceDetailsResponse,
+                                       ListResourcesGloballyResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
@@ -60,7 +64,9 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
-                                                TagAlreadyExistException)
+                                                TagAlreadyExistException,
+                                                ResourceNotExistException,
+                                                ResourceAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -80,6 +86,7 @@ TABLE_NAME_PATTERN = "tableNamePattern"
 TABLE_TYPE = "tableType"
 VIEW_NAME_PATTERN = "viewNamePattern"
 FUNCTION_NAME_PATTERN = "functionNamePattern"
+RESOURCE_NAME_PATTERN = "resourceNamePattern"
 PARTITION_NAME_PATTERN = "partitionNamePattern"
 TAG_NAME_PREFIX = "tagNamePrefix"
 MAX_RESULTS = "maxResults"
@@ -215,6 +222,7 @@ class RESTCatalogServer:
         self.table_latest_snapshot_store: Dict[str, str] = {}
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
+        self.resource_store: Dict[str, GetResourceResponse] = {}  # key: "db.resource_name"
         # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
         self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
         # Branch store: key = full table name, value = set of branch names.
@@ -392,6 +400,10 @@ class RESTCatalogServer:
             if resource_path == self.resource_paths.functions() and method == "GET":
                 return self._functions_globally_handle(parameters)
 
+            # Global resources endpoint (catalog-scoped)
+            if resource_path == self.resource_paths.resources() and method == "GET":
+                return self._resources_globally_handle(parameters)
+
             database = resource_path.split("/")[4]
             # Database-specific endpoints
             if resource_path.startswith(self.resource_paths.database(database)):
@@ -422,6 +434,10 @@ class RESTCatalogServer:
                         return self._functions_handle(method, data, database_name, parameters)
                     elif resource_type == ResourcePaths.FUNCTION_DETAILS:
                         return self._function_details_handle(database_name, parameters)
+                    elif resource_type == ResourcePaths.RESOURCES:
+                        return self._resources_handle(method, data, database_name, parameters)
+                    elif resource_type == ResourcePaths.RESOURCE_DETAILS:
+                        return self._resource_details_handle(database_name, parameters)
 
                 elif len(path_parts) >= 3:
                     # Individual resource operations
@@ -435,6 +451,8 @@ class RESTCatalogServer:
                         return self._table_partitions_handle(method, identifier, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._function_handle(method, data, identifier)
+                    elif resource_type == ResourcePaths.RESOURCES:
+                        return self._resource_handle(method, data, identifier)
 
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
@@ -478,6 +496,16 @@ class RESTCatalogServer:
         except FunctionAlreadyExistException as e:
             response = ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_FUNCTION, e.identifier.get_full_name(), str(e), 409
+            )
+            return self._mock_response(response, 409)
+        except ResourceNotExistException as e:
+            response = ErrorResponse(
+                "RESOURCE", e.identifier.get_object_name(), str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except ResourceAlreadyExistException as e:
+            response = ErrorResponse(
+                "RESOURCE", e.identifier.get_full_name(), str(e), 409
             )
             return self._mock_response(response, 409)
         except TagNotExistException as e:
@@ -751,6 +779,165 @@ class RESTCatalogServer:
             )
         else:
             response = ListFunctionsGloballyResponse(functions=[], next_page_token=None)
+        return self._mock_response(response, 200)
+
+    # ======================= Resource Handlers ===============================
+
+    def _resources_handle(self, method: str, data: str, database_name: str,
+                          parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle database-scoped resource list / create."""
+        if method == "GET":
+            resource_name_pattern = parameters.get(RESOURCE_NAME_PATTERN)
+            resources = [
+                key.split(".", 1)[1]
+                for key in self.resource_store.keys()
+                if key.startswith(database_name + ".")
+                and (not resource_name_pattern
+                     or self._match_name_pattern(key.split(".", 1)[1], resource_name_pattern))
+            ]
+            return self._generate_final_list_resources_response(parameters, resources)
+        elif method == "POST":
+            import json as json_module
+            request_dict = json_module.loads(data)
+            resource_name = request_dict.get("name")
+            key = f"{database_name}.{resource_name}"
+            if key in self.resource_store:
+                identifier = Identifier.create(database_name, resource_name)
+                raise ResourceAlreadyExistException(identifier)
+            self.resource_store[key] = GetResourceResponse(
+                name=resource_name,
+                comment=request_dict.get("comment"),
+                uri=request_dict.get("uri"),
+                size=request_dict.get("size", 0),
+                last_modified_time=request_dict.get("lastModifiedTime", 0),
+                resource_type=request_dict.get("resourceType"),
+                owner="owner",
+                created_at=1,
+                created_by="owner",
+                updated_at=1,
+                updated_by="owner",
+            )
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _resource_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
+        """Handle individual resource operations (GET, POST alter, DELETE)."""
+        key = identifier.get_full_name()
+        if method == "GET":
+            if key not in self.resource_store:
+                raise ResourceNotExistException(identifier)
+            return self._mock_response(self.resource_store[key], 200)
+        elif method == "POST":
+            if key not in self.resource_store:
+                raise ResourceNotExistException(identifier)
+            import json as json_module
+            request_dict = json_module.loads(data)
+            changes = request_dict.get("changes", [])
+            self._apply_resource_changes(identifier, changes)
+            return self._mock_response("", 200)
+        elif method == "DELETE":
+            if key not in self.resource_store:
+                raise ResourceNotExistException(identifier)
+            del self.resource_store[key]
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _resource_details_handle(self, database_name: str,
+                                 parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle resource details listing."""
+        resource_name_pattern = parameters.get(RESOURCE_NAME_PATTERN)
+        details = []
+        for key, resp in self.resource_store.items():
+            if key.startswith(database_name + "."):
+                resource_name = key.split(".", 1)[1]
+                if not resource_name_pattern or self._match_name_pattern(resource_name, resource_name_pattern):
+                    details.append(resp)
+        return self._generate_final_list_resource_details_response(parameters, details)
+
+    def _resources_globally_handle(self, parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle catalog-scoped resource listing."""
+        database_name_pattern = parameters.get(DATABASE_NAME_PATTERN)
+        resource_name_pattern = parameters.get(RESOURCE_NAME_PATTERN)
+        identifiers = []
+        for key in self.resource_store.keys():
+            db_name, resource_name = key.split(".", 1)
+            if database_name_pattern and not self._match_name_pattern(db_name, database_name_pattern):
+                continue
+            if resource_name_pattern and not self._match_name_pattern(resource_name, resource_name_pattern):
+                continue
+            identifiers.append(Identifier.create(db_name, resource_name))
+        return self._generate_final_list_resources_globally_response(parameters, identifiers)
+
+    def _apply_resource_changes(self, identifier: Identifier, changes: List[Dict]) -> None:
+        """Apply resource changes to the resource store, mirroring Java mock server logic."""
+        from pypaimon.resource.resource_change import Actions
+        key = identifier.get_full_name()
+        resource_resp = self.resource_store[key]
+
+        comment = resource_resp.comment
+        uri = resource_resp.uri
+
+        for change in changes:
+            action = change.get(Actions.FIELD_TYPE)
+            if action == Actions.UPDATE_COMMENT_ACTION:
+                comment = change.get("comment")
+            elif action == Actions.UPDATE_URI_ACTION:
+                uri = change.get("uri")
+
+        self.resource_store[key] = GetResourceResponse(
+            name=resource_resp.name,
+            comment=comment,
+            uri=uri,
+            size=resource_resp.size,
+            last_modified_time=resource_resp.last_modified_time,
+            resource_type=resource_resp.resource_type,
+            owner=resource_resp.owner,
+            created_at=resource_resp.created_at,
+            created_by=resource_resp.created_by,
+            updated_at=resource_resp.updated_at,
+            updated_by=resource_resp.updated_by,
+        )
+
+    def _generate_final_list_resources_response(self, parameters: Dict[str, str],
+                                                resources: List[str]) -> Tuple[str, int]:
+        if resources:
+            max_results = self._get_max_results(parameters)
+            page_token = parameters.get(PAGE_TOKEN)
+            paged = self._build_paged_entities(resources, max_results, page_token)
+            response = ListResourcesResponse(
+                resources=paged.elements,
+                next_page_token=paged.next_page_token
+            )
+        else:
+            response = ListResourcesResponse(resources=[], next_page_token=None)
+        return self._mock_response(response, 200)
+
+    def _generate_final_list_resource_details_response(self, parameters: Dict[str, str],
+                                                       details: List) -> Tuple[str, int]:
+        if details:
+            max_results = self._get_max_results(parameters)
+            page_token = parameters.get(PAGE_TOKEN)
+            paged = self._build_paged_entities(details, max_results, page_token)
+            response = ListResourceDetailsResponse(
+                resources=paged.elements,
+                next_page_token=paged.next_page_token,
+            )
+        else:
+            response = ListResourceDetailsResponse(resources=[], next_page_token=None)
+        return self._mock_response(response, 200)
+
+    def _generate_final_list_resources_globally_response(self, parameters: Dict[str, str],
+                                                         identifiers: List) -> Tuple[str, int]:
+        if identifiers:
+            max_results = self._get_max_results(parameters)
+            page_token = parameters.get(PAGE_TOKEN)
+            paged = self._build_paged_entities(identifiers, max_results, page_token)
+            response = ListResourcesGloballyResponse(
+                resources=paged.elements,
+                next_page_token=paged.next_page_token,
+            )
+        else:
+            response = ListResourcesGloballyResponse(resources=[], next_page_token=None)
         return self._mock_response(response, 200)
 
     def _table_partitions_handle(

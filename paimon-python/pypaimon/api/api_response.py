@@ -600,3 +600,175 @@ class ListFunctionsGloballyResponse(PagedResponse[Identifier]):
             result["functions"] = None
         result["nextPageToken"] = self.next_page_token
         return result
+
+
+@dataclass
+class GetResourceResponse(AuditRESTResponse):
+    """Response for getting a resource."""
+    FIELD_NAME = "name"
+    FIELD_COMMENT = "comment"
+    FIELD_URI = "uri"
+    FIELD_SIZE = "size"
+    FIELD_LAST_MODIFIED_TIME = "lastModifiedTime"
+    FIELD_RESOURCE_TYPE = "resourceType"
+
+    name: Optional[str] = json_field(FIELD_NAME, default=None)
+    comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
+    uri: Optional[str] = json_field(FIELD_URI, default=None)
+    size: int = json_field(FIELD_SIZE, default=0)
+    last_modified_time: int = json_field(FIELD_LAST_MODIFIED_TIME, default=0)
+    resource_type: Optional[str] = json_field(FIELD_RESOURCE_TYPE, default=None)
+
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        comment: Optional[str] = None,
+        uri: Optional[str] = None,
+        size: int = 0,
+        last_modified_time: int = 0,
+        resource_type: Optional[str] = None,
+        owner: Optional[str] = None,
+        created_at: Optional[int] = None,
+        created_by: Optional[str] = None,
+        updated_at: Optional[int] = None,
+        updated_by: Optional[str] = None,
+    ):
+        super().__init__(owner, created_at, created_by, updated_at, updated_by)
+        self.name = name
+        self.comment = comment
+        self.uri = uri
+        self.size = size
+        self.last_modified_time = last_modified_time
+        self.resource_type = resource_type
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "GetResourceResponse":
+        return cls(
+            name=data.get("name"),
+            comment=data.get("comment"),
+            uri=data.get("uri"),
+            size=data.get("size", 0),
+            last_modified_time=data.get("lastModifiedTime", 0),
+            resource_type=data.get("resourceType"),
+            owner=data.get("owner"),
+            created_at=data.get("createdAt"),
+            created_by=data.get("createdBy"),
+            updated_at=data.get("updatedAt"),
+            updated_by=data.get("updatedBy"),
+        )
+
+    def to_dict(self) -> Dict:
+        result = {
+            "name": self.name,
+            "comment": self.comment,
+            "uri": self.uri,
+            "size": self.size,
+            "lastModifiedTime": self.last_modified_time,
+            "resourceType": self.resource_type,
+        }
+        if self.owner is not None:
+            result["owner"] = self.owner
+        if self.created_at is not None:
+            result["createdAt"] = self.created_at
+        if self.created_by is not None:
+            result["createdBy"] = self.created_by
+        if self.updated_at is not None:
+            result["updatedAt"] = self.updated_at
+        if self.updated_by is not None:
+            result["updatedBy"] = self.updated_by
+        return result
+
+
+@dataclass
+class ListResourcesResponse(PagedResponse[str]):
+    """Response for listing resources."""
+    FIELD_RESOURCES = "resources"
+
+    resources: Optional[List[str]] = json_field(FIELD_RESOURCES, default=None)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN, default=None)
+
+    def data(self) -> Optional[List[str]]:
+        return self.resources
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self.next_page_token
+
+
+@dataclass
+class ListResourceDetailsResponse(PagedResponse['GetResourceResponse']):
+    """Response for listing resource details."""
+    FIELD_RESOURCES = "resources"
+
+    resources: Optional[List[GetResourceResponse]] = json_field(
+        FIELD_RESOURCES, default=None)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN, default=None)
+
+    def data(self) -> Optional[List[GetResourceResponse]]:
+        return self.resources
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self.next_page_token
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "ListResourceDetailsResponse":
+        resources = data.get("resources")
+        if resources is not None:
+            resources = [GetResourceResponse.from_dict(d) for d in resources]
+        return cls(
+            resources=resources,
+            next_page_token=data.get("nextPageToken"),
+        )
+
+    def to_dict(self) -> Dict:
+        result = {}
+        if self.resources is not None:
+            result["resources"] = [d.to_dict() for d in self.resources]
+        else:
+            result["resources"] = None
+        result["nextPageToken"] = self.next_page_token
+        return result
+
+
+@dataclass
+class ListResourcesGloballyResponse(PagedResponse[Identifier]):
+    """Response for listing resources globally across databases."""
+    FIELD_RESOURCES = "resources"
+
+    resources: Optional[List[Identifier]] = json_field(FIELD_RESOURCES, default=None)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN, default=None)
+
+    def data(self) -> Optional[List[Identifier]]:
+        return self.resources
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self.next_page_token
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "ListResourcesGloballyResponse":
+        resources = data.get("resources")
+        if resources is not None:
+            resources = [
+                Identifier.from_string(f) if isinstance(f, str) else
+                Identifier.create(f.get("database"), f.get("object"))
+                if isinstance(f, dict) else f
+                for f in resources
+            ]
+        return cls(
+            resources=resources,
+            next_page_token=data.get("nextPageToken"),
+        )
+
+    def to_dict(self) -> Dict:
+        result = {}
+        if self.resources is not None:
+            result["resources"] = [
+                {"database": f.get_database_name(), "object": f.get_object_name()}
+                for f in self.resources
+            ]
+        else:
+            result["resources"] = None
+        result["nextPageToken"] = self.next_page_token
+        return result
