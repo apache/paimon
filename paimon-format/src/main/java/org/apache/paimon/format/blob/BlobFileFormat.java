@@ -35,7 +35,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -46,7 +45,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileFormat} for blob file. */
@@ -59,6 +57,14 @@ public class BlobFileFormat extends FileFormat {
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     @Nullable public BlobConsumer writeConsumer;
+
+    public BlobFileFormat() {
+        this(false);
+    }
+
+    public BlobFileFormat(boolean blobAsDescriptor) {
+        this(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
 
     public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
         super(BlobFileFormatFactory.IDENTIFIER);
@@ -103,8 +109,8 @@ public class BlobFileFormat extends FileFormat {
     public void validateDataFields(RowType rowType) {
         checkArgument(rowType.getFieldCount() == 1, "BlobFileFormat only support one field.");
         checkArgument(
-                isBlobFileField(rowType.getField(0).type()),
-                "BlobFileFormat only support blob type or array of blob type.");
+                BlobElementSerializerFactory.supports(rowType.getField(0).type()),
+                "BlobFileFormat only supports BLOB, ARRAY<BLOB>, or supported MAP<X, BLOB> types.");
     }
 
     @Override
@@ -116,22 +122,27 @@ public class BlobFileFormat extends FileFormat {
 
     private class BlobFormatWriterFactory implements FormatWriterFactory {
 
-        private final RowType type;
+        private final String blobFieldName;
+        private final BlobElementSerializer elementSerializer;
 
         private BlobFormatWriterFactory(RowType type) {
-            this.type = type;
+            checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
+            this.blobFieldName = type.getFieldNames().get(0);
+            this.elementSerializer = BlobElementSerializerFactory.create(type.getTypeAt(0));
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(
-                    out,
-                    writeConsumer,
-                    type,
-                    writeNullOnMissingFile,
-                    writeNullOnFetchFailure,
-                    blobFetchMetricReporter,
-                    copyBufferSize);
+            BlobElementSerializer.Writer elementWriter =
+                    elementSerializer.createWriter(
+                            out,
+                            blobFieldName,
+                            writeConsumer,
+                            writeNullOnMissingFile,
+                            writeNullOnFetchFailure,
+                            blobFetchMetricReporter,
+                            copyBufferSize);
+            return new BlobFormatWriter(out, writeConsumer, elementWriter);
         }
     }
 
@@ -140,7 +151,7 @@ public class BlobFileFormat extends FileFormat {
         private final boolean blobAsDescriptor;
         private final int fieldCount;
         private final int blobIndex;
-        private final DataType blobFieldType;
+        private final BlobElementSerializer elementSerializer;
 
         public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
             this.blobAsDescriptor = blobAsDescriptor;
@@ -149,7 +160,8 @@ public class BlobFileFormat extends FileFormat {
             Preconditions.checkState(
                     this.blobIndex >= 0,
                     "Read type of a blob format does not contain any blob field.");
-            this.blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
+            DataType blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
+            this.elementSerializer = BlobElementSerializerFactory.create(blobFieldType);
         }
 
         @Override
@@ -157,31 +169,26 @@ public class BlobFileFormat extends FileFormat {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
             SeekableInputStream in = null;
-            BlobFileMeta fileMeta;
+            boolean elementReaderOwnsInputStream = false;
             try {
                 in = fileIO.newInputStream(filePath);
-                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+                BlobFileMeta fileMeta =
+                        new BlobFileMeta(in, context.fileSize(), context.selection());
+                BlobElementSerializer.Reader elementReader =
+                        elementSerializer.createReader(fileIO, filePath, in, blobAsDescriptor);
+                elementReaderOwnsInputStream = elementReader.requiresInputStream();
+                return new BlobFormatReader(
+                        filePath, fileMeta, fieldCount, blobIndex, elementReader);
             } finally {
-                if (blobAsDescriptor && blobFieldType.getTypeRoot() != DataTypeRoot.ARRAY) {
+                if (!elementReaderOwnsInputStream) {
                     IOUtils.closeQuietly(in);
-                    in = null;
                 }
             }
-
-            return new BlobFormatReader(
-                    fileIO,
-                    filePath,
-                    fileMeta,
-                    in,
-                    fieldCount,
-                    blobIndex,
-                    blobFieldType,
-                    blobAsDescriptor);
         }
 
         private static int findBlobFieldIndex(RowType rowType) {
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (isBlobFileField(rowType.getTypeAt(i))) {
+                if (BlobElementSerializerFactory.supports(rowType.getTypeAt(i))) {
                     return i;
                 }
             }
