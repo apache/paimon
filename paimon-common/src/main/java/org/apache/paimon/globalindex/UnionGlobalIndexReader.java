@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 
 /**
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
@@ -36,9 +37,15 @@ import java.util.function.Function;
 public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     private final List<GlobalIndexReader> readers;
+    private final LongConsumer durationConsumer;
 
     public UnionGlobalIndexReader(List<GlobalIndexReader> readers) {
+        this(readers, null);
+    }
+
+    UnionGlobalIndexReader(List<GlobalIndexReader> readers, LongConsumer durationConsumer) {
         this.readers = readers;
+        this.durationConsumer = durationConsumer;
     }
 
     @Override
@@ -158,28 +165,36 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
+        long start = durationConsumer == null ? 0L : System.nanoTime();
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
             futures.add(visitor.apply(reader));
         }
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(
-                        v -> {
-                            Optional<GlobalIndexResult> result = Optional.empty();
-                            for (CompletableFuture<Optional<GlobalIndexResult>> f : futures) {
-                                Optional<GlobalIndexResult> current = f.join();
-                                if (!current.isPresent()) {
-                                    continue;
-                                }
-                                if (!result.isPresent()) {
-                                    result = current;
-                                } else {
-                                    result = Optional.of(result.get().or(current.get()));
-                                }
-                            }
-                            return result;
-                        });
+        CompletableFuture<Optional<GlobalIndexResult>> result =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .thenApply(
+                                v -> {
+                                    Optional<GlobalIndexResult> union = Optional.empty();
+                                    for (CompletableFuture<Optional<GlobalIndexResult>> f :
+                                            futures) {
+                                        Optional<GlobalIndexResult> current = f.join();
+                                        if (!current.isPresent()) {
+                                            continue;
+                                        }
+                                        if (!union.isPresent()) {
+                                            union = current;
+                                        } else {
+                                            union = Optional.of(union.get().or(current.get()));
+                                        }
+                                    }
+                                    return union;
+                                });
+        if (durationConsumer != null) {
+            return result.whenComplete(
+                    (ignored, throwable) -> durationConsumer.accept(System.nanoTime() - start));
+        }
+        return result;
     }
 
     @Override

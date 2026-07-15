@@ -47,12 +47,21 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.OutputStreamAppender;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,6 +166,86 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(splits).isNotEmpty();
         assertThat(splits).allMatch(split -> split instanceof DataSplit);
+    }
+
+    @Test
+    public void testGlobalIndexDiagnosticLogs() throws Exception {
+        write(10L);
+        createIndex("f1");
+        createIndex("f2");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OutputStreamAppender appender =
+                OutputStreamAppender.newBuilder()
+                        .setName("global-index-diagnostic-test")
+                        .setTarget(output)
+                        .setLayout(PatternLayout.newBuilder().withPattern("%level %msg%n").build())
+                        .build();
+        Logger scanLogger = (Logger) LogManager.getLogger(DataEvolutionBatchScan.class);
+        Logger scannerLogger = (Logger) LogManager.getLogger(GlobalIndexScanner.class);
+        Level previousScanLevel = scanLogger.getLevel();
+        Level previousScannerLevel = scannerLogger.getLevel();
+
+        appender.start();
+        scanLogger.addAppender(appender);
+        scannerLogger.addAppender(appender);
+        scanLogger.setLevel(Level.DEBUG);
+        scannerLogger.setLevel(Level.DEBUG);
+        try {
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate =
+                    PredicateBuilder.and(
+                            builder.equal(1, BinaryString.fromString("a7")),
+                            builder.equal(2, BinaryString.fromString("b7")));
+            assertThat(readF1(table, predicate)).containsExactly("a7");
+
+            PredicateBuilder rowIdBuilder =
+                    new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
+            int rowIdIndex = table.rowType().getFieldCount();
+            Predicate mixedRowIdPredicate =
+                    PredicateBuilder.or(
+                            rowIdBuilder.equal(rowIdIndex, 1L),
+                            rowIdBuilder.equal(1, BinaryString.fromString("a7")));
+            ReadBuilder readBuilder = table.newReadBuilder().withFilter(mixedRowIdPredicate);
+            assertThat(readBuilder.newScan().plan().splits())
+                    .isNotEmpty()
+                    .allMatch(split -> split instanceof DataSplit);
+
+            String logs = new String(output.toByteArray(), StandardCharsets.UTF_8);
+            Matcher summary =
+                    Pattern.compile(
+                                    "INFO Scan table '[^']+' with global index\\. "
+                                            + "searchMode='fast', total=(\\d+) ms, metadata=(\\d+) ms, "
+                                            + "lookup=(\\d+) ms, coverage=(\\d+) ms\\.")
+                            .matcher(logs);
+            assertThat(summary.find()).isTrue();
+            long total = Long.parseLong(summary.group(1));
+            long phaseSum =
+                    Long.parseLong(summary.group(2))
+                            + Long.parseLong(summary.group(3))
+                            + Long.parseLong(summary.group(4));
+            assertThat(total).isGreaterThanOrEqualTo(phaseSum);
+
+            Matcher logicalIndexes =
+                    Pattern.compile(
+                                    "INFO Global index lookup table='[^']+', type='btree', "
+                                            + "fields='\\[(f1|f2)\\]', lookup=\\d+ ms\\.")
+                            .matcher(logs);
+            List<String> fields = new ArrayList<>();
+            while (logicalIndexes.find()) {
+                fields.add(logicalIndexes.group(1));
+            }
+            assertThat(fields).containsExactlyInAnyOrder("f1", "f2");
+            assertThat(logs)
+                    .contains("DEBUG Scan table '" + table.name() + "' without global index.");
+        } finally {
+            scanLogger.setLevel(previousScanLevel);
+            scannerLogger.setLevel(previousScannerLevel);
+            scanLogger.removeAppender(appender);
+            scannerLogger.removeAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test

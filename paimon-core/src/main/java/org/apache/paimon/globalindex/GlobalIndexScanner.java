@@ -36,6 +36,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -51,6 +54,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
@@ -63,6 +67,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Scanner for shard-based global indexes. */
 public class GlobalIndexScanner implements Closeable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexScanner.class);
+
     private final Options options;
     private final RowType rowType;
     private final ExecutorService executor;
@@ -70,6 +76,7 @@ public class GlobalIndexScanner implements Closeable {
     private final IndexPathFactory indexPathFactory;
     private final GlobalIndexCoverage coverage;
     private final FileStoreTable table;
+    private final Map<IndexMetaFileGroup, Map<String, LongAdder>> lookupDurations;
 
     private GlobalIndexScanner(
             FileStoreTable table,
@@ -87,6 +94,7 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         this.coverage = new GlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
+        this.lookupDurations = LOG.isInfoEnabled() ? new HashMap<>() : null;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
@@ -277,7 +285,23 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        return globalIndexEvaluator.evaluate(predicate);
+        Optional<GlobalIndexResult> result = globalIndexEvaluator.evaluate(predicate);
+        if (lookupDurations != null) {
+            lookupDurations.forEach(
+                    (group, durations) ->
+                            durations.forEach(
+                                    (indexType, duration) ->
+                                            LOG.info(
+                                                    "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                                    table.name(),
+                                                    indexType,
+                                                    group.fieldIds.stream()
+                                                            .map(rowType::getField)
+                                                            .map(DataField::name)
+                                                            .collect(Collectors.toList()),
+                                                    duration.sum() / 1_000_000)));
+        }
+        return result;
     }
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {
@@ -325,7 +349,15 @@ public class GlobalIndexScanner implements Closeable {
             for (CompletableFuture<GlobalIndexReader> future : futures) {
                 unionReader.add(future.join());
             }
-            readers.add(new UnionGlobalIndexReader(unionReader));
+            if (lookupDurations == null) {
+                readers.add(new UnionGlobalIndexReader(unionReader));
+            } else {
+                LongAdder duration =
+                        lookupDurations
+                                .computeIfAbsent(group, ignored -> new HashMap<>())
+                                .computeIfAbsent(indexType, ignored -> new LongAdder());
+                readers.add(new UnionGlobalIndexReader(unionReader, duration::add));
+            }
         }
 
         return readers;
