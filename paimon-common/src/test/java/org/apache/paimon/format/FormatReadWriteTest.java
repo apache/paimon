@@ -20,6 +20,8 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -48,6 +50,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -113,6 +116,42 @@ public abstract class FormatReadWriteTest {
         assertThat(result.get(1)).isEqualTo(GenericRow.of(2, 2L));
         assertThat(result.get(2).getInt(0)).isEqualTo(3);
         assertThat(result.get(2).isNullAt(1)).isTrue();
+    }
+
+    protected void testArrayBlobDescriptorRoundTrip() throws IOException {
+        FileFormat format = fileFormat();
+        RowType rowType = DataTypes.ROW(DataTypes.ARRAY(DataTypes.BLOB()));
+        byte[] expected = "managed-array-blob".getBytes(StandardCharsets.UTF_8);
+        Path payload = new Path(parent, "payload.managed.blob");
+        try (PositionOutputStream out = fileIO.newOutputStream(payload, false)) {
+            out.write(expected);
+        }
+        BlobDescriptor first = new BlobDescriptor(payload.toString(), 0, expected.length);
+        BlobDescriptor second = new BlobDescriptor("file:/blob/second", 7, 11);
+
+        write(
+                format.createWriterFactory(rowType),
+                file,
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {
+                                    Blob.fromDescriptor(uri -> null, first),
+                                    null,
+                                    Blob.fromDescriptor(uri -> null, second)
+                                })));
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRow row = reader.readBatch().next();
+            InternalArray blobs = row.getArray(0);
+            assertThat(blobs.size()).isEqualTo(3);
+            assertThat(blobs.getBlob(0).toDescriptor()).isEqualTo(first);
+            assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
+            assertThat(blobs.isNullAt(1)).isTrue();
+            assertThat(blobs.getBlob(2).toDescriptor()).isEqualTo(second);
+        }
     }
 
     @Test

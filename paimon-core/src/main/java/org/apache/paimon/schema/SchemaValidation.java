@@ -216,6 +216,7 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
 
@@ -1208,9 +1209,12 @@ public class SchemaValidation {
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
-            checkArgument(
-                    options.dataEvolutionEnabled(),
-                    "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+            boolean primaryKeyManagedBlob = !schema.primaryKeys().isEmpty();
+            if (!primaryKeyManagedBlob) {
+                checkArgument(
+                        options.dataEvolutionEnabled(),
+                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+            }
             checkArgument(
                     fields.size() > blobNames.size(),
                     "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
@@ -1298,6 +1302,61 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
+    }
+
+    private static void validatePrimaryKeyBlobConfiguration(
+            TableSchema schema, CoreOptions options) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        if (managedBlobFields.isEmpty()) {
+            return;
+        }
+
+        List<String> primaryKeyBlobFields =
+                managedBlobFields.stream()
+                        .filter(schema.primaryKeys()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                primaryKeyBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be primary keys: %s.",
+                primaryKeyBlobFields);
+
+        List<String> bucketKeyBlobFields =
+                managedBlobFields.stream()
+                        .filter(schema.bucketKeys()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                bucketKeyBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be bucket keys: %s.",
+                bucketKeyBlobFields);
+
+        List<String> sequenceBlobFields =
+                managedBlobFields.stream()
+                        .filter(options.sequenceField()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                sequenceBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be sequence fields: %s.",
+                sequenceBlobFields);
+
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                "Primary-key managed BLOB tables only support the deduplicate merge engine.");
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE,
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+        checkArgument(
+                options.dataFileExternalPaths() == null,
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {

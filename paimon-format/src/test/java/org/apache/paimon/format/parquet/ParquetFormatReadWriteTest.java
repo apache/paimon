@@ -64,6 +64,11 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testArrayBlobDescriptors() throws Exception {
+        testArrayBlobDescriptorRoundTrip();
+    }
+
+    @Test
     public void testWriteMetadata() throws Exception {
         ParquetFileFormat format =
                 new ParquetFileFormat(
