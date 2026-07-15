@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -54,23 +55,34 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
     private final FileStoreTable table;
     private final PrimaryKeyIndexDefinition definition;
     @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Snapshot pinnedSnapshot;
 
     public PrimaryKeyFullTextScan(
             FileStoreTable table,
             PrimaryKeyIndexDefinition definition,
             @Nullable PartitionPredicate partitionFilter) {
+        this(table, definition, partitionFilter, null);
+    }
+
+    PrimaryKeyFullTextScan(
+            FileStoreTable table,
+            PrimaryKeyIndexDefinition definition,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Snapshot pinnedSnapshot) {
         checkArgument(
                 definition.family() == PrimaryKeyIndexDefinition.Family.FULL_TEXT,
                 "Primary-key full-text scan requires a full-text index definition.");
         this.table = table;
         this.definition = definition;
         this.partitionFilter = partitionFilter;
+        this.pinnedSnapshot = pinnedSnapshot;
     }
 
     @Override
     public Plan scan() {
-        SnapshotReader snapshotReader = table.newSnapshotReader().keepStats();
-        DataTableScan dataScan = table.newScan(ignored -> snapshotReader);
+        FileStoreTable scanTable = scanTable();
+        SnapshotReader snapshotReader = scanTable.newSnapshotReader().keepStats();
+        DataTableScan dataScan = scanTable.newScan(ignored -> snapshotReader);
         checkArgument(
                 dataScan instanceof PrimaryKeyBatchScan,
                 "Primary-key full-text search requires a primary-key batch scan.");
@@ -89,8 +101,16 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
         if (snapshotPlan.snapshotId() == null) {
             return new Plan(0, Collections.emptyList());
         }
-        Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotPlan.snapshotId());
+        Snapshot snapshot =
+                pinnedSnapshot == null
+                        ? snapshotReader.snapshotManager().snapshot(snapshotPlan.snapshotId())
+                        : pinnedSnapshot;
         checkArgument(snapshot != null, "Primary-key full-text snapshot does not exist.");
+        checkArgument(
+                snapshot.id() == snapshotPlan.snapshotId(),
+                "Primary-key full-text plan snapshot %s does not match pinned snapshot %s.",
+                snapshotPlan.snapshotId(),
+                snapshot.id());
 
         IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
         checkArgument(
@@ -103,6 +123,17 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
                                         && (partitionFilter == null
                                                 || partitionFilter.test(entry.partition())));
         return plan(snapshot.id(), snapshotPlan.splits(), payloadEntries, definition.fieldId());
+    }
+
+    private FileStoreTable scanTable() {
+        if (pinnedSnapshot == null) {
+            return table;
+        }
+        return (FileStoreTable)
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                String.valueOf(pinnedSnapshot.id())));
     }
 
     private boolean matchesDefinition(IndexManifestEntry entry) {

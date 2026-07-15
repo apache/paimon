@@ -18,12 +18,15 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.Optional;
@@ -42,6 +45,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private String fieldName;
     private String query;
     private PartitionPredicate partitionFilter;
+    @Nullable private Snapshot pinnedSnapshot;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -71,7 +75,8 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
         return definition.isPresent()
-                ? new PrimaryKeyFullTextScan(table, definition.get(), partitionFilter)
+                ? new PrimaryKeyFullTextScan(
+                        table, definition.get(), partitionFilter, pinnedSnapshot)
                 : new DataEvolutionFullTextScan(
                         table, partitionFilter, Collections.singletonList(textColumn));
     }
@@ -114,5 +119,10 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
             }
         }
         return Optional.empty();
+    }
+
+    FullTextSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+        this.pinnedSnapshot = snapshot;
+        return this;
     }
 }

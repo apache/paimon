@@ -24,6 +24,64 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 /** Tests for hybrid search. */
 class HybridSearchTest extends PaimonSparkTestBase {
 
+  test("primary-key hybrid search fuses vector and full-text physical positions") {
+    withTable("T") {
+      spark.sql(
+        s"""
+           |CREATE TABLE T (id INT, content STRING, vec ARRAY<FLOAT>)
+           |TBLPROPERTIES (
+           |  'primary-key' = 'id',
+           |  'bucket' = '1',
+           |  'deletion-vectors.enabled' = 'true',
+           |  'pk-full-text.index.columns' = 'content',
+           |  'vector-field' = 'vec',
+           |  'field.vec.vector-dim' = '2',
+           |  'pk-vector.index.columns' = 'vec',
+           |  'fields.vec.pk-vector.index.type' = '${TestVectorGlobalIndexerFactory.IDENTIFIER}',
+           |  'fields.vec.pk-vector.distance.metric' = 'l2',
+           |  'test.vector.dimension' = '2',
+           |  'test.vector.metric' = 'l2')
+           |""".stripMargin)
+
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (0, 'lake format', array(1.0f, 0.0f)),
+                  |  (1, 'paimon hybrid search', array(0.9f, 0.1f)),
+                  |  (2, 'paimon full text', array(0.0f, 1.0f))
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      val rows = spark
+        .sql("""
+               |SELECT id, __paimon_search_score
+               |FROM hybrid_search(
+               |  'T',
+               |  array(
+               |    named_struct(
+               |      'field', 'vec',
+               |      'query_vector', array(1.0f, 0.0f),
+               |      'limit', 2,
+               |      'weight', 1.0f,
+               |      'options', map())),
+               |  array(
+               |    named_struct(
+               |      'column', 'content',
+               |      'query', '{"match":{"column":"content","terms":"paimon"}}',
+               |      'limit', 2,
+               |      'weight', 1.0f,
+               |      'options', map())),
+               |  3,
+               |  'rrf')
+               |ORDER BY __paimon_search_score DESC, id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.length == 3)
+      assert(rows.head.getInt(0) == 1)
+      assert(rows.forall(row => !row.isNullAt(1) && row.getFloat(1) > 0.0f))
+    }
+  }
+
   test("hybrid search ranks results from multiple vector columns") {
     withTable("T") {
       spark.sql("""

@@ -131,6 +131,8 @@ class PrimaryKeyFullTextScanTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS, "content");
         when(table.coreOptions()).thenReturn(new CoreOptions(tableOptions));
+        when(table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11")))
+                .thenReturn(table);
 
         SnapshotReader reader = mock(SnapshotReader.class, RETURNS_SELF);
         SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
@@ -169,7 +171,7 @@ class PrimaryKeyFullTextScanTest {
         configureBatchScan(table, reader, snapshot);
 
         PrimaryKeyFullTextScan.Plan plan =
-                new PrimaryKeyFullTextScan(table, definition, partitionFilter).scan();
+                new PrimaryKeyFullTextScan(table, definition, partitionFilter, snapshot).scan();
 
         assertThat(plan.snapshotId()).isEqualTo(11);
         PrimaryKeyFullTextSearchSplit split = (PrimaryKeyFullTextSearchSplit) plan.splits().get(0);
@@ -177,6 +179,7 @@ class PrimaryKeyFullTextScanTest {
                 .extracting(IndexFileMeta::fileName)
                 .containsExactly("current");
         assertThat(split.uncoveredDataFiles()).isEmpty();
+        verify(table).copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11"));
         verify(reader).withPartitionFilter(partitionFilter);
         verify(reader).indexFileHandler();
     }
