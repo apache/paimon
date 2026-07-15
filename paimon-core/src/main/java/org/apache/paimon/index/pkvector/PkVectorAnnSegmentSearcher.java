@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -148,6 +149,27 @@ public class PkVectorAnnSegmentSearcher {
             Set<String> activeSourceFiles,
             Map<String, List<Range>> rowRangesByFile,
             Map<String, String> searchOptions) {
+        return searchAsync(
+                        segment,
+                        sourceMeta,
+                        query,
+                        limit,
+                        deletionVectors,
+                        activeSourceFiles,
+                        rowRangesByFile,
+                        searchOptions)
+                .join();
+    }
+
+    CompletableFuture<List<PkVectorSearchResult>> searchAsync(
+            IndexFileMeta segment,
+            PrimaryKeyIndexSourceMeta sourceMeta,
+            float[] query,
+            int limit,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, List<Range>> rowRangesByFile,
+            Map<String, String> searchOptions) {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         GlobalIndexMeta globalIndexMeta = segment.globalIndexMeta();
         checkArgument(
@@ -189,51 +211,70 @@ public class PkVectorAnnSegmentSearcher {
             if (liveRows != null) {
                 search.withIncludeRowIds(liveRows);
             }
-            Optional<ScoredGlobalIndexResult> result = reader.visitVectorSearch(search).join();
-            if (!result.isPresent()) {
-                return Collections.emptyList();
-            }
-
-            long sourceRowCount = totalRowCount(sourceMeta.sourceFiles());
-            List<PkVectorSearchResult> candidates = new ArrayList<>();
-            ScoredGlobalIndexResult scored = result.get();
-            for (long ordinal : scored.results()) {
-                checkArgument(
-                        ordinal >= 0 && ordinal < sourceRowCount,
-                        "ANN segment %s returned ordinal %s outside [0, %s).",
-                        segment.fileName(),
-                        ordinal,
-                        sourceRowCount);
-                FilePosition filePosition = filePosition(sourceMeta.sourceFiles(), ordinal);
-                checkArgument(
-                        activeSourceFiles.contains(filePosition.dataFileName),
-                        "ANN segment %s returned inactive source %s.",
-                        segment.fileName(),
-                        filePosition.dataFileName);
-                DeletionVector deletionVector = deletionVectors.get(filePosition.dataFileName);
-                checkArgument(
-                        deletionVector == null
-                                || !deletionVector.isDeleted(filePosition.rowPosition),
-                        "ANN segment %s returned snapshot-deleted row position %s.",
-                        segment.fileName(),
-                        filePosition.rowPosition);
-                List<Range> rowRanges = rowRangesByFile.get(filePosition.dataFileName);
-                checkArgument(
-                        rowRanges == null || contains(rowRanges, filePosition.rowPosition),
-                        "ANN segment %s returned a row outside the pre-filter.",
-                        segment.fileName());
-                candidates.add(
-                        new PkVectorSearchResult(
-                                filePosition.dataFileName,
-                                filePosition.rowPosition,
-                                VectorSearchMetric.scoreToDistance(
-                                        scored.scoreGetter().score(ordinal), metric)));
-            }
-            Collections.sort(candidates, BEST_FIRST);
-            return Collections.unmodifiableList(candidates);
-        } finally {
+            return reader.visitVectorSearch(search)
+                    .whenComplete((ignored, error) -> IOUtils.closeQuietly(reader))
+                    .thenApply(
+                            result ->
+                                    mapResults(
+                                            segment,
+                                            sourceMeta,
+                                            deletionVectors,
+                                            activeSourceFiles,
+                                            rowRangesByFile,
+                                            result));
+        } catch (RuntimeException | Error t) {
             IOUtils.closeQuietly(reader);
+            throw t;
         }
+    }
+
+    private List<PkVectorSearchResult> mapResults(
+            IndexFileMeta segment,
+            PrimaryKeyIndexSourceMeta sourceMeta,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, List<Range>> rowRangesByFile,
+            Optional<ScoredGlobalIndexResult> result) {
+        if (!result.isPresent()) {
+            return Collections.emptyList();
+        }
+
+        long sourceRowCount = totalRowCount(sourceMeta.sourceFiles());
+        List<PkVectorSearchResult> candidates = new ArrayList<>();
+        ScoredGlobalIndexResult scored = result.get();
+        for (long ordinal : scored.results()) {
+            checkArgument(
+                    ordinal >= 0 && ordinal < sourceRowCount,
+                    "ANN segment %s returned ordinal %s outside [0, %s).",
+                    segment.fileName(),
+                    ordinal,
+                    sourceRowCount);
+            FilePosition filePosition = filePosition(sourceMeta.sourceFiles(), ordinal);
+            checkArgument(
+                    activeSourceFiles.contains(filePosition.dataFileName),
+                    "ANN segment %s returned inactive source %s.",
+                    segment.fileName(),
+                    filePosition.dataFileName);
+            DeletionVector deletionVector = deletionVectors.get(filePosition.dataFileName);
+            checkArgument(
+                    deletionVector == null || !deletionVector.isDeleted(filePosition.rowPosition),
+                    "ANN segment %s returned snapshot-deleted row position %s.",
+                    segment.fileName(),
+                    filePosition.rowPosition);
+            List<Range> rowRanges = rowRangesByFile.get(filePosition.dataFileName);
+            checkArgument(
+                    rowRanges == null || contains(rowRanges, filePosition.rowPosition),
+                    "ANN segment %s returned a row outside the pre-filter.",
+                    segment.fileName());
+            candidates.add(
+                    new PkVectorSearchResult(
+                            filePosition.dataFileName,
+                            filePosition.rowPosition,
+                            VectorSearchMetric.scoreToDistance(
+                                    scored.scoreGetter().score(ordinal), metric)));
+        }
+        Collections.sort(candidates, BEST_FIRST);
+        return Collections.unmodifiableList(candidates);
     }
 
     @Nullable
