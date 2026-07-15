@@ -522,11 +522,19 @@ class TableRead:
         return arrow_table.to_pandas()
 
     def to_duckdb(self, splits: List[Split], table_name: str,
-                  connection: Optional["DuckDBPyConnection"] = None) -> "DuckDBPyConnection":
+                  connection: Optional["DuckDBPyConnection"] = None,
+                  parallelism: Optional[int] = None,
+                  blob_parallelism: Optional[int] = None) -> "DuckDBPyConnection":
+        """Materialize ``splits`` into an in-memory table registered with DuckDB.
+
+        See :meth:`to_arrow` for the semantics of ``parallelism`` and
+        ``blob_parallelism``.
+        """
         import duckdb
 
         con = connection or duckdb.connect(database=":memory:")
-        con.register(table_name, self.to_arrow(splits))
+        con.register(table_name, self.to_arrow(
+            splits, parallelism=parallelism, blob_parallelism=blob_parallelism))
         return con
 
     def to_ray(
