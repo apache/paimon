@@ -26,7 +26,10 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
 import org.apache.paimon.format.shredding.ShreddingWritePlanType;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -60,12 +63,14 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
                             ShreddingWritePlanType.VARIANT,
                             ShreddingWritePlanType.MAP_SHARED_SHREDDING));
 
+    private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
 
     public ParquetFileFormat(FormatContext formatContext) {
-        super(IDENTIFIER, formatContext.options());
+        super(IDENTIFIER);
 
+        this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
     }
@@ -105,13 +110,15 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     }
 
     @Override
-    protected FormatWriterFactory createRawWriterFactory(RowType type) {
-        return new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
-    }
-
-    @Override
-    protected Set<ShreddingWritePlanType> supportedShreddingWritePlans() {
-        return SUPPORTED_SHREDDING_WRITE_PLANS;
+    public FormatWriterFactory createWriterFactory(RowType type) {
+        FormatWriterFactory rawFactory =
+                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+        ShreddingWritePlanFactory writePlanFactory =
+                ShreddingWritePlanWriterFactories.createWritePlanFactory(
+                        type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
+        return writePlanFactory == null
+                ? rawFactory
+                : new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory);
     }
 
     @Override

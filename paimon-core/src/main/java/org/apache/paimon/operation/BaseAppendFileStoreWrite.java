@@ -26,8 +26,6 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
-import org.apache.paimon.data.shredding.MapSharedShreddingCoreUtils;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -133,9 +131,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             boolean ignorePreviousFiles) {
         DataFilePathFactory dataPathFactory =
                 pathFactory.createDataFilePathFactory(partition, bucket);
-        MapSharedShreddingContext sharedShreddingContext =
-                MapSharedShreddingCoreUtils.createAndRestoreContext(
-                        writeType, restoredFiles, dataPathFactory, options, fileIO);
+        boolean mapSharedShreddingEnabled =
+                !MapSharedShreddingUtils.detectShreddingColumns(writeType, options).isEmpty();
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -166,7 +163,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.dataEvolutionEnabled(),
                 rowSidecarFileFormat(),
                 blobContext,
-                sharedShreddingContext);
+                mapSharedShreddingEnabled);
     }
 
     @Override

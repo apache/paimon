@@ -23,7 +23,6 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -100,7 +99,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
-    @Nullable private final MapSharedShreddingContext sharedShreddingContext;
+    private final boolean mapSharedShreddingEnabled;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -164,7 +163,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 dataEvolutionEnabled,
                 rowSidecarFileFormat,
                 blobContext,
-                null);
+                false);
     }
 
     public AppendOnlyWriter(
@@ -196,7 +195,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean dataEvolutionEnabled,
             @Nullable FileFormat rowSidecarFileFormat,
             @Nullable BlobFileContext blobContext,
-            @Nullable MapSharedShreddingContext sharedShreddingContext) {
+            boolean mapSharedShreddingEnabled) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -227,7 +226,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
-        this.sharedShreddingContext = sharedShreddingContext;
+        this.mapSharedShreddingEnabled = mapSharedShreddingEnabled;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -356,7 +355,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     public void toBufferedWriter() throws Exception {
-        if (sharedShreddingContext != null && !sharedShreddingContext.isEmpty()) {
+        if (mapSharedShreddingEnabled) {
             throw new UnsupportedOperationException(
                     "MAP shared-shredding does not support force buffer spill yet because it may rewrite data files.");
         }
@@ -387,7 +386,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 blobContext != null
                         || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty();
         if (hasDedicatedFields) {
-            if (sharedShreddingContext != null && !sharedShreddingContext.isEmpty()) {
+            if (mapSharedShreddingEnabled) {
                 throw new UnsupportedOperationException(
                         "MAP shared-shredding does not support blob or vector file writes yet.");
             }
@@ -429,9 +428,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private FormatWriterFactory writerFactory() {
-        return sharedShreddingContext == null
-                ? fileFormat.createWriterFactory(writeSchema)
-                : fileFormat.createWriterFactory(writeSchema, sharedShreddingContext);
+        return fileFormat.createWriterFactory(writeSchema);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
 import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.data.shredding.MapShreddingDefine;
@@ -117,12 +116,7 @@ class ShreddingWritePlanFormatTest {
                                 0, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
                         DataTypes.FIELD(1, "v", DataTypes.VARIANT()));
 
-        assertThatThrownBy(
-                        () ->
-                                format.createWriterFactory(
-                                        rowType,
-                                        new MapSharedShreddingContext(
-                                                Collections.singletonMap("tags", 2))))
+        assertThatThrownBy(() -> format.createWriterFactory(rowType))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Composing multiple active shredding write plans is not supported.");
     }
@@ -133,10 +127,7 @@ class ShreddingWritePlanFormatTest {
         Path file = new Path(tempDir.toString(), UUID.randomUUID() + "." + extension);
         RowType rowType = logicalRowType();
 
-        FormatWriterFactory writerFactory =
-                format.createWriterFactory(
-                        rowType,
-                        new MapSharedShreddingContext(Collections.singletonMap("tags", 2)));
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = writerFactory.create(out, compression);
         writer.addElement(GenericRow.of(1, stringKeyMap("a", 10L, "b", 20L, "c", 30L)));
@@ -171,14 +162,12 @@ class ShreddingWritePlanFormatTest {
 
         MapSharedShreddingFieldMeta fieldMeta =
                 MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get("tags"), compression);
-        assertThat(fieldMeta.nameToId())
-                .containsEntry("a", 0)
-                .containsEntry("b", 1)
-                .containsEntry("c", 2);
-        assertThat(fieldMeta.fieldToColumns())
-                .containsEntry(0, Collections.singletonList(0))
-                .containsEntry(1, Collections.singletonList(1));
-        assertThat(fieldMeta.overflowFieldSet()).containsExactly(2);
+        assertThat(fieldMeta.nameToId()).containsOnlyKeys("a", "b", "c");
+        assertThat(fieldMeta.fieldToColumns()).hasSize(2);
+        assertThat(fieldMeta.fieldToColumns().values())
+                .containsExactlyInAnyOrder(
+                        Collections.singletonList(0), Collections.singletonList(1));
+        assertThat(fieldMeta.overflowFieldSet()).hasSize(1);
         assertThat(fieldMeta.numColumns()).isEqualTo(2);
         assertThat(fieldMeta.maxRowWidth()).isEqualTo(3);
     }

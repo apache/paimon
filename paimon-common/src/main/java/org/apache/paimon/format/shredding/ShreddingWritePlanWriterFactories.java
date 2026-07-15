@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.shredding;
 
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
 import org.apache.paimon.data.shredding.MapSharedShreddingWritePlanFactory;
 import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
 import org.apache.paimon.options.Options;
@@ -37,7 +36,6 @@ public class ShreddingWritePlanWriterFactories {
     public static ShreddingWritePlanFactory createWritePlanFactory(
             RowType rowType,
             Options options,
-            @Nullable MapSharedShreddingContext mapSharedShreddingContext,
             Set<ShreddingWritePlanType> supportedTypes,
             String formatIdentifier) {
         ShreddingWritePlanFactory activeFactory = null;
@@ -50,13 +48,14 @@ public class ShreddingWritePlanWriterFactories {
             activeType = ShreddingWritePlanType.VARIANT;
         }
 
-        if (mapSharedShreddingContext != null && !mapSharedShreddingContext.isEmpty()) {
+        MapSharedShreddingWritePlanFactory mapFactory =
+                new MapSharedShreddingWritePlanFactory(rowType, options);
+        if (mapFactory.shouldCreateWritePlan()) {
             if (activeFactory != null) {
                 throw new UnsupportedOperationException(
                         "Composing multiple active shredding write plans is not supported.");
             }
-            activeFactory =
-                    new MapSharedShreddingWritePlanFactory(rowType, mapSharedShreddingContext);
+            activeFactory = mapFactory;
             activeType = ShreddingWritePlanType.MAP_SHARED_SHREDDING;
         }
 

@@ -19,13 +19,8 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
 import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
-import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
-import org.apache.paimon.format.shredding.ShreddingWritePlanType;
-import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
-import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -33,12 +28,10 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.normalizeFileFormat;
 
@@ -50,15 +43,9 @@ import static org.apache.paimon.CoreOptions.normalizeFileFormat;
 public abstract class FileFormat {
 
     protected String formatIdentifier;
-    private final Options options;
 
     protected FileFormat(String formatIdentifier) {
-        this(formatIdentifier, new Options());
-    }
-
-    protected FileFormat(String formatIdentifier, Options options) {
         this.formatIdentifier = formatIdentifier;
-        this.options = options;
     }
 
     public String getFormatIdentifier() {
@@ -76,39 +63,7 @@ public abstract class FileFormat {
             RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> filters);
 
     /** Create a {@link FormatWriterFactory} from the type. */
-    public FormatWriterFactory createWriterFactory(RowType type) {
-        return createWriterFactory(type, null);
-    }
-
-    /**
-     * Create a {@link FormatWriterFactory} from the type and optional restored MAP shared-shredding
-     * context.
-     */
-    public final FormatWriterFactory createWriterFactory(
-            RowType type, @Nullable MapSharedShreddingContext mapSharedShreddingContext) {
-        ShreddingWritePlanFactory writePlanFactory =
-                ShreddingWritePlanWriterFactories.createWritePlanFactory(
-                        type,
-                        options,
-                        mapSharedShreddingContext,
-                        supportedShreddingWritePlans(),
-                        formatIdentifier);
-        FormatWriterFactory rawFactory = createRawWriterFactory(type);
-        return writePlanFactory == null
-                ? rawFactory
-                : new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory);
-    }
-
-    /** Create the raw format writer factory without logical-to-physical conversion. */
-    protected FormatWriterFactory createRawWriterFactory(RowType type) {
-        throw new UnsupportedOperationException(
-                "Raw writer factory is not implemented for file format: " + formatIdentifier);
-    }
-
-    /** Shredding write plans supported by this format. */
-    protected Set<ShreddingWritePlanType> supportedShreddingWritePlans() {
-        return Collections.emptySet();
-    }
+    public abstract FormatWriterFactory createWriterFactory(RowType type);
 
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);
