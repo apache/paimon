@@ -1141,6 +1141,35 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>full_text_search</td>
+      <td>
+         CALL [catalog.]sys.full_text_search(<br/>
+            `table` => 'identifier',<br/>
+            `column` => 'columnName',<br/>
+            query => 'queryJson',<br/>
+            top_k => topK,<br/>
+            projection => 'col1,col2,__paimon_search_score',<br/>
+            options => 'key1=value1;key2=value2')<br/>
+      </td>
+      <td>
+         To perform full-text search on a table and return deterministically ordered JSON rows. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>column(required): the character column to search.</li>
+            <li>query(required): native full-text query JSON.</li>
+            <li>top_k(required): the maximum number of results, from 1 through 10,000.</li>
+            <li>projection(optional): comma-separated result columns. Add <code>__paimon_search_score</code> to return the primary-key RRF score.</li>
+            <li>options(optional): additional dynamic options of the table. The query authorization setting cannot be overridden.</li>
+      </td>
+      <td>
+         CALL sys.full_text_search(<br/>
+            `table` => 'default.articles',<br/>
+            `column` => 'content',<br/>
+            query => '{"match":{"query":"paimon lake"}}',<br/>
+            top_k => 10,<br/>
+            projection => 'id,title,__paimon_search_score')
+      </td>
+   </tr>
+   <tr>
       <td>vector_search</td>
       <td>
          CALL [catalog.]sys.vector_search(<br/>

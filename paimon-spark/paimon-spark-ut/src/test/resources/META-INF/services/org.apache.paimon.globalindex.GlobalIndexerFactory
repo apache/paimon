@@ -1,0 +1,1 @@
+org.apache.paimon.spark.sql.TestPrimaryKeyFullTextGlobalIndexerFactory

@@ -4,7 +4,10 @@ Full-text search global index for Apache Paimon, backed by the native `paimon-fu
 
 ## Overview
 
-This module provides full-text search capabilities for Paimon's Data Evolution (append) tables through the Global Index framework. It contains only the Paimon integration layer. Native full-text access, JNI, FFI, index archive handling, and query parsing are provided by the separate `paimon-full-text-index` dependency.
+This module provides full-text search for both Data Evolution (append) tables through the Global
+Index framework and compaction-visible primary-key tables through file-aligned index archives. It
+contains only the Paimon integration layer. Native full-text access, JNI, FFI, index archive
+handling, and query parsing are provided by the separate `paimon-full-text-index` dependency.
 
 ### Architecture
 
@@ -93,7 +96,55 @@ All integers are **big-endian**.
 
 ## Usage
 
-### Build Index
+### Primary-Key Tables
+
+Primary-key full-text indexing uses the fixed `full-text` SPI automatically. Configure the text
+column directly on the table; no separate implementation selector is needed.
+
+```sql
+CREATE TABLE articles (
+    id BIGINT,
+    content STRING,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '16',
+    'deletion-vectors.enabled' = 'true',
+    'pk-full-text.index.columns' = 'content',
+    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}'
+);
+```
+
+Paimon creates native archives from level-1-or-higher compact-output data files and incrementally
+consolidates them with the shared primary-key index LSM policy. One archive can cover multiple
+ordered source files; its row IDs concatenate their physical row positions. The shared
+`fields.<column>.pk-index.compaction.level-fanout` and
+`fields.<column>.pk-index.compaction.stale-ratio-threshold` options control size-tier and stale-source
+rebuilds. No full-text implementation selector or full-text-specific compaction option is needed.
+
+Level-0 files are outside full-text search until compaction publishes the data file and archive
+atomically. This compaction-visible rule also applies to `global-index.search-mode=full` and
+`detail`; those modes build temporary indexes only for eligible compact files whose persistent
+archive is missing.
+
+Within each archive segment the native engine produces a scored ranking. Paimon shifts and filters
+each source file's live positions with its deletion vector, maps results back to physical files,
+fuses segment-local rankings with RRF, and exposes the synthetic score as
+`__paimon_search_score` in Spark and the Flink `full_text_search` procedure.
+
+```sql
+CALL sys.full_text_search(
+    `table` => 'default.articles',
+    `column` => 'content',
+    query => '{"match":{"query":"paimon lake"}}',
+    top_k => 10,
+    projection => 'id,content,__paimon_search_score'
+);
+```
+
+See [Primary-Key Full-Text Index](../docs/docs/primary-key-table/full-text-index.md) for
+requirements, Spark and Java examples, search modes, Hybrid search, and first-release limitations.
+
+### Build a Global Index
 
 ```sql
 CALL sys.create_global_index(

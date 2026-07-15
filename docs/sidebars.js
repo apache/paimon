@@ -85,6 +85,7 @@ const sidebars = {
       "primary-key-table/compaction",
       "primary-key-table/query-performance",
       "primary-key-table/vector-index",
+      "primary-key-table/full-text-index",
       "primary-key-table/chain-table",
       "primary-key-table/pk-clustering-override",
       {
