@@ -18,21 +18,31 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.HybridSearchRanker;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.HybridSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Implementation for {@link HybridSearchBuilder}. */
 public class HybridSearchBuilderImpl implements HybridSearchBuilder {
@@ -120,12 +130,27 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
     public List<Route> routeBuilders() {
         validateSearch();
 
+        Snapshot snapshot = null;
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            if (!TimeTravelUtil.tryTravelToSnapshot(fileStoreTable).isPresent()) {
+                snapshot = fileStoreTable.latestSnapshot().orElse(null);
+            }
+        }
         List<Route> routeBuilders = new ArrayList<>(routes.size());
         for (HybridSearchRoute route : routes) {
             if (route.isVector()) {
-                routeBuilders.add(new Route(route, newVectorSearchBuilder(route)));
+                VectorSearchBuilder builder = newVectorSearchBuilder(route);
+                if (snapshot != null && builder instanceof VectorSearchBuilderImpl) {
+                    ((VectorSearchBuilderImpl) builder).withSnapshot(snapshot);
+                }
+                routeBuilders.add(new Route(route, builder));
             } else {
-                routeBuilders.add(new Route(route, newFullTextSearchBuilder(route)));
+                FullTextSearchBuilder builder = newFullTextSearchBuilder(route);
+                if (snapshot != null && builder instanceof FullTextSearchBuilderImpl) {
+                    ((FullTextSearchBuilderImpl) builder).withSnapshot(snapshot);
+                }
+                routeBuilders.add(new Route(route, builder));
             }
         }
         return routeBuilders;
@@ -154,6 +179,24 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
     public ScoredGlobalIndexResult rank(List<RouteResult> routeResults) {
         validateSearch();
 
+        boolean hasPhysical = false;
+        boolean hasGlobal = false;
+        for (RouteResult routeResult : routeResults) {
+            if (routeResult.result() instanceof PrimaryKeyScoredResult) {
+                hasPhysical = true;
+            } else {
+                hasGlobal = true;
+            }
+        }
+        if (hasPhysical && hasGlobal) {
+            throw new UnsupportedOperationException(
+                    "Hybrid search cannot combine physical primary-key positions and global "
+                            + "row-id address spaces.");
+        }
+        if (hasPhysical) {
+            return rankPhysical(routeResults);
+        }
+
         List<HybridSearchRanker.WeightedResult> weightedResults =
                 new ArrayList<>(routeResults.size());
         for (RouteResult routeResult : routeResults) {
@@ -166,9 +209,138 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
         return HybridSearchRanker.rank(ranker, weightedResults, limit);
     }
 
+    private PrimaryKeyScoredResult rankPhysical(List<RouteResult> routeResults) {
+        Long snapshotId = null;
+        List<PrimaryKeySearchRanker.Ranking> rankings = new ArrayList<>(routeResults.size());
+        List<PrimaryKeyScoredResult> physicalResults = new ArrayList<>(routeResults.size());
+        for (RouteResult routeResult : routeResults) {
+            PrimaryKeyScoredResult result = (PrimaryKeyScoredResult) routeResult.result();
+            if (snapshotId == null) {
+                snapshotId = result.snapshotId();
+            } else {
+                checkArgument(
+                        snapshotId == result.snapshotId(),
+                        "Primary-key hybrid routes must use the same snapshot, but found %s and %s.",
+                        snapshotId,
+                        result.snapshotId());
+            }
+            physicalResults.add(result);
+            if (!result.positions().isEmpty()) {
+                rankings.add(
+                        new PrimaryKeySearchRanker.Ranking(
+                                result.positions(), routeResult.route().weight()));
+            }
+        }
+
+        List<PrimaryKeySearchPosition> positions;
+        if (HybridSearchRanker.WEIGHTED_SCORE_RANKER.equals(ranker)) {
+            positions = PrimaryKeySearchRanker.weightedScore(rankings, limit);
+        } else if (HybridSearchRanker.MRR_RANKER.equals(ranker)) {
+            positions = PrimaryKeySearchRanker.weightedMrr(rankings, limit);
+        } else {
+            positions = PrimaryKeySearchRanker.weightedRrf(rankings, limit);
+        }
+        return new PrimaryKeyScoredResult(
+                snapshotId, physicalSources(physicalResults, positions), positions);
+    }
+
+    private static List<DataSplit> physicalSources(
+            List<PrimaryKeyScoredResult> results, List<PrimaryKeySearchPosition> positions) {
+        Map<PhysicalFileKey, DataSplit> available = new LinkedHashMap<>();
+        for (PrimaryKeyScoredResult result : results) {
+            for (IndexedSplit indexedSplit : result.splits()) {
+                DataSplit source = indexedSplit.dataSplit();
+                checkArgument(
+                        source.dataFiles().size() == 1,
+                        "Primary-key scored source split must contain exactly one data file.");
+                PhysicalFileKey key =
+                        new PhysicalFileKey(
+                                source.partition(),
+                                source.bucket(),
+                                source.dataFiles().get(0).fileName());
+                DataSplit previous = available.putIfAbsent(key, source);
+                if (previous != null) {
+                    checkArgument(
+                            previous.snapshotId() == source.snapshotId()
+                                    && previous.bucketPath().equals(source.bucketPath())
+                                    && Objects.equals(
+                                            previous.totalBuckets(), source.totalBuckets())
+                                    && previous.dataFiles().get(0).fileSize()
+                                            == source.dataFiles().get(0).fileSize()
+                                    && previous.dataFiles().get(0).rowCount()
+                                            == source.dataFiles().get(0).rowCount()
+                                    && Objects.equals(deletionFile(previous), deletionFile(source)),
+                            "Primary-key hybrid routes contain inconsistent metadata for data file %s.",
+                            key.dataFileName);
+                }
+            }
+        }
+
+        Map<PhysicalFileKey, DataSplit> selected = new LinkedHashMap<>();
+        for (PrimaryKeySearchPosition position : positions) {
+            PhysicalFileKey key = PhysicalFileKey.from(position);
+            DataSplit source = available.get(key);
+            checkArgument(
+                    source != null,
+                    "Primary-key hybrid result references unknown data file %s.",
+                    position.dataFileName());
+            selected.putIfAbsent(key, source);
+        }
+        return Collections.unmodifiableList(new ArrayList<>(selected.values()));
+    }
+
+    private static DeletionFile deletionFile(DataSplit split) {
+        if (!split.deletionFiles().isPresent()) {
+            return null;
+        }
+        checkArgument(
+                split.deletionFiles().get().size() == 1,
+                "Primary-key scored source split must contain exactly one deletion-file entry.");
+        return split.deletionFiles().get().get(0);
+    }
+
+    private static class PhysicalFileKey {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final String dataFileName;
+
+        private PhysicalFileKey(BinaryRow partition, int bucket, String dataFileName) {
+            this.partition = partition.copy();
+            this.bucket = bucket;
+            this.dataFileName = dataFileName;
+        }
+
+        private static PhysicalFileKey from(PrimaryKeySearchPosition position) {
+            return new PhysicalFileKey(
+                    position.partition(), position.bucket(), position.dataFileName());
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof PhysicalFileKey)) {
+                return false;
+            }
+            PhysicalFileKey that = (PhysicalFileKey) o;
+            return bucket == that.bucket
+                    && partition.equals(that.partition)
+                    && dataFileName.equals(that.dataFileName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, dataFileName);
+        }
+    }
+
     @Override
     public RouteResult toRouteResult(Route route, GlobalIndexResult result) {
-        if (result instanceof ScoredGlobalIndexResult) {
+        if (result instanceof PrimaryKeyVectorResult) {
+            return new RouteResult(route.route(), ((PrimaryKeyVectorResult) result).scoredResult());
+        } else if (result instanceof ScoredGlobalIndexResult) {
             return new RouteResult(route.route(), (ScoredGlobalIndexResult) result);
         } else if (result.results().isEmpty()) {
             return new RouteResult(route.route(), ScoredGlobalIndexResult.createEmpty());
@@ -200,11 +372,6 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
                 table.newFullTextSearchBuilder()
                         .withQuery(route.fieldName(), route.fullTextQuery())
                         .withLimit(route.limit());
-        if (fullTextSearchBuilder.newFullTextScan() instanceof PrimaryKeyFullTextScan) {
-            throw new UnsupportedOperationException(
-                    "Hybrid search does not support primary-key full-text indexes because their "
-                            + "results use physical file positions instead of global row ids.");
-        }
         if (partitionFilter != null) {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
         }
