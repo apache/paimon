@@ -20,7 +20,7 @@ package org.apache.paimon.spark.read
 
 import org.apache.paimon.options.ExpireConfig
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.table.source.DataTableBatchScan
+import org.apache.paimon.table.source.AbstractBatchTableScan
 
 import java.time.Duration
 import java.util
@@ -110,7 +110,7 @@ class BatchReadTagConcurrentExpireTest extends PaimonSparkTestBase {
     assert(!splits.isEmpty)
 
     // Verify protection tag was created
-    val batchScan = scan.asInstanceOf[DataTableBatchScan]
+    val batchScan = scan.asInstanceOf[AbstractBatchTableScan]
     val tagName = batchScan.readProtectionTagName
     assert(tagName != null, "Protection tag should be created during scan planning")
     assert(table.tagManager().tagExists(tagName))

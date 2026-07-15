@@ -196,6 +196,37 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     }
   }
 
+  test(s"Paimon Metric: delta row-level operation record metrics") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, v INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true')")
+      sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 10)")
+
+      val deleteDf = sql("DELETE FROM T WHERE id < 3")
+      val deleteMetrics = commandMetrics(deleteDf)
+      val deleteExecutionMetrics = commandExecutionMetrics(deleteMetrics)
+      assert(deleteExecutionMetrics(deleteMetrics("deletedRecords").id) == "3")
+
+      val updateDf = sql("UPDATE T SET v = v + 1 WHERE id >= 8")
+      val updateMetrics = commandMetrics(updateDf)
+      val updateExecutionMetrics = commandExecutionMetrics(updateMetrics)
+      assert(updateExecutionMetrics(updateMetrics("updatedRecords").id) == "2")
+
+      val mergeDf = sql("""
+                          |MERGE INTO T
+                          |USING (SELECT * FROM VALUES (3, 30), (4, 40), (100, 1) AS s(id, v)) s
+                          |ON T.id = s.id
+                          |WHEN MATCHED AND s.id = 3 THEN UPDATE SET T.v = s.v
+                          |WHEN MATCHED AND s.id = 4 THEN DELETE
+                          |WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)
+                          |""".stripMargin)
+      val mergeMetrics = commandMetrics(mergeDf)
+      val mergeExecutionMetrics = commandExecutionMetrics(mergeMetrics)
+      assert(mergeExecutionMetrics(mergeMetrics("updatedRecords").id) == "1")
+      assert(mergeExecutionMetrics(mergeMetrics("deletedRecords").id) == "1")
+      assert(mergeExecutionMetrics(mergeMetrics("insertedRecords").id) == "1")
+    }
+  }
+
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {
     metrics.find(_.name() == name).get.value()
   }

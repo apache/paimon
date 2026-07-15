@@ -62,11 +62,20 @@ public class OffsetSeekableInputStream extends SeekableInputStream {
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
+        if (b == null) {
+            throw new NullPointerException();
+        } else if (off < 0 || len < 0 || len > b.length - off) {
+            throw new IndexOutOfBoundsException();
+        } else if (len == 0) {
+            return 0;
+        }
+
         if (length != -1) {
-            len = (int) Math.min(len, length - getPos());
-            if (len == 0) {
+            long remaining = length - getPos();
+            if (remaining <= 0) {
                 return -1;
             }
+            len = (int) Math.min(len, remaining);
         }
         return wrapped.read(b, off, len);
     }

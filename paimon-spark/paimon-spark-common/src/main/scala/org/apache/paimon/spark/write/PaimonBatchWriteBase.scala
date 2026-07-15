@@ -21,7 +21,6 @@ package org.apache.paimon.spark.write
 import org.apache.paimon.Snapshot
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.spark.{PaimonDeletedRecordsTaskMetric, SparkTypeUtils}
-import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
@@ -29,11 +28,8 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, ROW_ID, S
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 
-import org.apache.spark.sql.PaimonSparkSession
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
-import org.apache.spark.sql.execution.SQLExecution
-import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.StructType
 
 import java.util.Collections
@@ -133,7 +129,9 @@ abstract class PaimonBatchWriteBase(
     } finally {
       batchTableCommit.close()
     }
-    postDriverMetrics(deletedRecordsTaskMetric(operation, addCommitMessage, deletedCommitMessage))
+    postDriverMetrics(
+      metricRegistry.buildSparkCommitMetrics() ++
+        deletedRecordsTaskMetric(operation, addCommitMessage, deletedCommitMessage))
     postCommit(commitMessages)
   }
 
@@ -176,24 +174,6 @@ abstract class PaimonBatchWriteBase(
     } finally {
       batchTableCommit.close()
     }
-  }
-
-  // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
-  // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
-  protected def postDriverMetrics(extraMetrics: Array[CustomTaskMetric] = Array.empty): Unit = {
-    val spark = PaimonSparkSession.active
-    // todo: find a more suitable way to get metrics.
-    val commitMetrics = metricRegistry.buildSparkCommitMetrics() ++ extraMetrics
-    val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
-    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
-    val metricUpdates = executionMetrics.flatMap {
-      m =>
-        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
-          case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
-          case None => None
-        }
-    }
-    SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
   }
 
   private def buildDeletedCommitMessage(

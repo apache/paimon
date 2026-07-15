@@ -26,7 +26,12 @@ import pyarrow.compute as pc
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import (
+    DataField,
+    PyarrowFieldParser,
+    is_array_blob_type,
+    is_blob_file_field,
+)
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
@@ -253,7 +258,7 @@ class TableUpdateByRowId:
             arrays.append(
                 pa.array(
                     [
-                        value_for_arrow(values_by_name[col_name])
+                        value_for_arrow(values_by_name[col_name], table_field)
                         for _, values_by_name in row_entries
                     ],
                     type=arrow_field.type,
@@ -439,18 +444,20 @@ class TableUpdateByRowId:
             if self._is_blob_column(col_name):
                 if blob_object_columns and col_name in blob_object_columns:
                     update_values = blob_object_columns[col_name]
+                    placeholder = self._blob_placeholder(col_name)
                     blob_columns[col_name] = [
                         update_values[update_positions[i]]
                         if i in update_positions
-                        else Blob.PLACE_HOLDER
+                        else placeholder
                         for i in range(blob_row_count)
                     ]
                     continue
                 update_col = update_by_col[col_name]
+                placeholder = self._blob_placeholder(col_name)
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
                     if i in update_positions
-                    else Blob.PLACE_HOLDER
+                    else placeholder
                     for i in range(blob_row_count)
                 ]
                 continue
@@ -510,8 +517,18 @@ class TableUpdateByRowId:
     def _is_blob_column(self, column_name: str) -> bool:
         for table_field in self.table.fields:
             if table_field.name == column_name:
-                return getattr(table_field.type, 'type', None) == 'BLOB'
+                return is_blob_file_field(table_field)
         return False
+
+    def _blob_placeholder(self, column_name: str):
+        for table_field in self.table.fields:
+            if table_field.name == column_name:
+                return (
+                    Blob.ARRAY_PLACE_HOLDER
+                    if is_array_blob_type(table_field.type)
+                    else Blob.PLACE_HOLDER
+                )
+        return Blob.PLACE_HOLDER
 
     def _write_group(
             self,

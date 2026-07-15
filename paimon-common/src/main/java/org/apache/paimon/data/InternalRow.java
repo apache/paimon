@@ -153,6 +153,8 @@ public interface InternalRow extends DataGetters {
                 return InternalMap.class;
             case ROW:
                 return InternalRow.class;
+            case BLOB:
+                return Blob.class;
             default:
                 throw new IllegalArgumentException("Illegal type: " + type);
         }

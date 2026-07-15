@@ -24,6 +24,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
@@ -169,6 +170,15 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.deletionVectorsEnabled()) {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
+        BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
+        if (options.primaryKeyVectorIndexEnabled()
+                || options.primaryKeyFullTextIndexEnabled()
+                || !options.primaryKeyBTreeIndexColumns().isEmpty()
+                || !options.primaryKeyBitmapIndexColumns().isEmpty()) {
+            primaryKeyIndexMaintainerFactory =
+                    BucketedPrimaryKeyIndexMaintainer.Factory.create(
+                            newIndexFileHandler(), newReaderFactoryBuilder(), schema);
+        }
         return new KeyValueFileStoreWrite(
                 fileIO,
                 schemaManager,
@@ -187,6 +197,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newScan(),
                 indexFactory,
                 dvMaintainerFactory,
+                primaryKeyIndexMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
                 tableName);

@@ -20,7 +20,7 @@ Tests for SnapshotManager batch lookahead functionality.
 """
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 def _create_mock_snapshot(snapshot_id: int, commit_kind: str = "APPEND"):
@@ -160,6 +160,67 @@ class SnapshotManagerTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Cannot find earliest snapshot"):
             manager.try_get_earliest_snapshot()
+
+
+def _file_info(path):
+    info = Mock()
+    info.path = path
+    return info
+
+
+class SnapshotManagerFilesystemHintTest(unittest.TestCase):
+    """Tests for _get_latest_snapshot_from_filesystem hint reconciliation."""
+
+    SNAP_DIR = "/tmp/test_table/snapshot"
+    LATEST = "/tmp/test_table/snapshot/LATEST"
+
+    def _snap(self, n):
+        return "{}/snapshot-{}".format(self.SNAP_DIR, n)
+
+    def test_ignores_stale_latest_hint(self):
+        # LATEST still points to snapshot 1 but snapshot 2 was committed (a
+        # lagging _commit_latest_hint); the newer snapshot must win.
+        present = {self.SNAP_DIR, self.LATEST, self._snap(1), self._snap(2)}
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+        file_io.read_file_utf8.side_effect = (
+            lambda p: "1" if p == self.LATEST else "content-" + p.rsplit("-", 1)[-1])
+        file_io.list_status.return_value = [
+            _file_info(self._snap(1)), _file_info(self._snap(2))]
+        manager = _build_manager(file_io)
+        with patch(
+                'pypaimon.snapshot.snapshot_manager.JSON.from_json',
+                side_effect=lambda content, cls: content):
+            result = manager._get_latest_snapshot_from_filesystem()
+        self.assertEqual(result, "content-2")
+
+    def test_fails_closed_when_hint_unreadable_and_listing_empty(self):
+        # LATEST exists (the table is non-empty) but cannot be read, and the
+        # listing came back empty (e.g. a swallowed PermissionError). Returning
+        # None here would let the immutable-option guard fail open.
+        present = {self.SNAP_DIR, self.LATEST}
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+
+        def _read(p):
+            if p == self.LATEST:
+                raise IOError("permission denied")
+            raise AssertionError("unexpected read of " + p)
+
+        file_io.read_file_utf8.side_effect = _read
+        file_io.list_status.return_value = []
+        manager = _build_manager(file_io)
+        with self.assertRaises(RuntimeError):
+            manager._get_latest_snapshot_from_filesystem()
+
+    def test_returns_none_when_table_genuinely_empty(self):
+        # No LATEST and no snapshot files: a real empty table, not an error.
+        present = {self.SNAP_DIR}
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+        file_io.list_status.return_value = []
+        manager = _build_manager(file_io)
+        self.assertIsNone(manager._get_latest_snapshot_from_filesystem())
 
 
 if __name__ == '__main__':

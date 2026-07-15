@@ -86,6 +86,9 @@ class ProjectedRow(InternalRow):
         return ProjectedRow(projection)
 
     def to_tuple(self) -> Tuple[Any, ...]:
+        assert isinstance(self.row, InternalRow), (
+            f"Expected InternalRow, but got {type(self.row).__name__}"
+        )
         return tuple(
             self.row.get_field(index)
             if index >= 0 else None

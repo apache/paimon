@@ -20,7 +20,7 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.casting.FallbackMappingRow
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.{BinaryRow, BlobPlaceholder, GenericRow, InternalRow}
+import org.apache.paimon.data.{BinaryRow, BlobArrayPlaceholder, BlobPlaceholder, GenericRow, InternalRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
@@ -29,7 +29,7 @@ import org.apache.paimon.operation.AbstractFileStoreWrite
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
@@ -72,6 +72,14 @@ case class DataEvolutionTableDataWrite(
     mappings
   }
   private val rawBlobFallbackMarkerIndexes = rawBlobFallbackFields.map(_._2)
+  private val rawBlobFallbackPlaceholders: Array[AnyRef] = rawBlobFallbackFields.map {
+    case (fieldIndex, _) =>
+      if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.ARRAY) {
+        BlobArrayPlaceholder.INSTANCE
+      } else {
+        BlobPlaceholder.INSTANCE
+      }
+  }
   private val rawBlobFallbackRow = new GenericRow(rawBlobFallbackMarkerIndexes.length)
   private val rawBlobFallbackMappingRow = new FallbackMappingRow(rawBlobFallbackMappings)
 
@@ -98,7 +106,11 @@ case class DataEvolutionTableDataWrite(
       case (markerIndex, fallbackIndex) =>
         rawBlobFallbackRow.setField(
           fallbackIndex,
-          if (row.getBoolean(markerIndex)) BlobPlaceholder.INSTANCE else null)
+          if (row.getBoolean(markerIndex)) {
+            rawBlobFallbackPlaceholders(fallbackIndex)
+          } else {
+            null
+          })
     }
     rawBlobFallbackRow
   }

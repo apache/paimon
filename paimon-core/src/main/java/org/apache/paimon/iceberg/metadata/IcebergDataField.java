@@ -32,6 +32,7 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
@@ -206,6 +207,14 @@ public class IcebergDataField {
                         SpecialFields.getMapValueFieldId(fieldId, depth + 1),
                         !mapType.getValueType().isNullable(),
                         toTypeObject(mapType.getValueType(), fieldId, depth + 1));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) dataType;
+                return new IcebergMapType(
+                        SpecialFields.getMapKeyFieldId(fieldId, depth + 1),
+                        toTypeObject(multisetType.getElementType(), fieldId, depth + 1),
+                        SpecialFields.getMapValueFieldId(fieldId, depth + 1),
+                        true,
+                        "int");
             case ROW:
                 RowType rowType = (RowType) dataType;
                 return new IcebergStructType(

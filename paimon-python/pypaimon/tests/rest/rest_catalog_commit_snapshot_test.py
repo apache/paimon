@@ -296,6 +296,35 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
 class TestRESTCommit(RESTBaseTest):
 
+    def test_multiple_row_tracking_commits_preserve_all_rows(self):
+        pa_schema = pa.schema([('id', pa.int32())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            })
+        table_name = 'default.test_row_tracking_commits'
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        for values in ([1, 2, 3], [4, 5, 6]):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            table_write.write_arrow(
+                pa.Table.from_pydict({'id': values}, schema=pa_schema))
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 6)
+        self.assertEqual(
+            sorted(actual.column('id').to_pylist()), [1, 2, 3, 4, 5, 6])
+
     def test_commit_succeeded_on_server_but_client_fails(self):
         pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
         opts = {

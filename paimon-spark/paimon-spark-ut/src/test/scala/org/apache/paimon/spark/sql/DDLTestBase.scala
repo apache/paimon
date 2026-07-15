@@ -135,6 +135,21 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: alter table set location is not supported") {
+    withTempDir {
+      newLocation =>
+        withTable("paimon_tbl") {
+          sql("CREATE TABLE paimon_tbl (id int)")
+
+          val error = intercept[Exception] {
+            sql(s"ALTER TABLE paimon_tbl SET LOCATION '${newLocation.getCanonicalPath}'")
+          }.getMessage
+
+          assert(error.contains("ALTER TABLE ... SET LOCATION is not supported for Paimon tables."))
+        }
+    }
+  }
+
   test("Paimon DDL: create table like with paimon SparkCatalog") {
     assume(gteqSpark3_4)
     withTable("source_tbl", "target_tbl") {

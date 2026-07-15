@@ -38,6 +38,7 @@ import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
@@ -86,6 +87,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final boolean refreshAsync;
     protected final boolean blobAsDescriptor;
     protected final Set<Integer> blobFieldPositions;
+    private final boolean hasBlobFileFields;
 
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
@@ -142,6 +144,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
         this.blobAsDescriptor = options.get(CoreOptions.LOOKUP_CACHE_BLOB_DESCRIPTOR);
         this.blobFieldPositions = BlobAsDescriptorRow.blobFieldPositions(projectedType);
+        this.hasBlobFileFields =
+                projectedType.getFieldTypes().stream().anyMatch(BlobType::isBlobFileField);
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
@@ -194,7 +198,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         // blob.toDescriptor() succeeds during cache serialization, even when the table
         // was not originally written with blob-as-descriptor=true.
         LookupFileStoreTable readerTable = context.table;
-        if (blobAsDescriptor && !blobFieldPositions.isEmpty()) {
+        if (blobAsDescriptor && hasBlobFileFields) {
             readerTable =
                     (LookupFileStoreTable)
                             context.table.copy(
@@ -215,9 +219,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
             return;
         }
 
-        // Parallel bootstrap read serializes rows with BlobSerializer, which materializes
-        // BlobRef into BlobData. Disable parallelism when caching blob descriptors.
-        boolean useParallelBootstrapRead = !(blobAsDescriptor && !blobFieldPositions.isEmpty());
+        // Parallel bootstrap serialization drops runtime readers from descriptor-backed blobs.
+        // Disable it when caching blob descriptors so cache conversion sees the original blobs.
+        boolean useParallelBootstrapRead = !(blobAsDescriptor && hasBlobFileFields);
 
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(

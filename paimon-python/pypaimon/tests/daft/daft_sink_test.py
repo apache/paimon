@@ -536,6 +536,60 @@ class TestBlobType:
             file_size = ref.size() if callable(getattr(ref, "size", None)) else ref.length
             assert file_size is not None
 
+    def test_read_array_blob_type(self, local_paimon_catalog):
+        """ARRAY<BLOB> columns are returned as lists of File objects."""
+        catalog, _ = local_paimon_catalog
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("cover", pa.large_binary()),
+            ("payloads", array_blob_type),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "bucket": "1",
+                "file.format": "parquet",
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+        catalog.create_table(
+            "test_db.array_blob_table",
+            paimon_schema,
+            ignore_if_exists=True,
+        )
+        table = catalog.get_table("test_db.array_blob_table")
+        _write_to_paimon(table, pa.table({
+            "id": [1, 2],
+            "cover": [b"cover", None],
+            "payloads": pa.array(
+                [[b"hello", None, b"world"], None],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema))
+
+        result_df = _read_table(table).sort("id")
+        assert str(result_df.schema()["cover"].dtype) == "File[Unknown]"
+        assert str(result_df.schema()["payloads"].dtype) == "List[File[Unknown]]"
+
+        result = result_df.to_pydict()
+        payloads = result["payloads"]
+        assert isinstance(result["cover"][0], daft.File)
+        assert result["cover"][1] is None
+        with result["cover"][0].open() as stream:
+            assert stream.read() == b"cover"
+        assert payloads[1] is None
+        assert payloads[0][1] is None
+        assert all(
+            isinstance(ref, daft.File)
+            for ref in (payloads[0][0], payloads[0][2])
+        )
+        with payloads[0][0].open() as stream:
+            assert stream.read() == b"hello"
+        with payloads[0][2].open() as stream:
+            assert stream.read() == b"world"
+
 
 # ---------------------------------------------------------------------------
 # Truncate tests

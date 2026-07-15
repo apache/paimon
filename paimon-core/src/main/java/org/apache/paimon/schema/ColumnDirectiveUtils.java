@@ -221,16 +221,39 @@ public final class ColumnDirectiveUtils {
             return new VectorType(sourceType.isNullable(), directive.vectorDim(), elementType);
         } else {
             DataTypeRoot root = sourceType.getTypeRoot();
+            if (root == DataTypeRoot.ARRAY) {
+                Preconditions.checkArgument(
+                        CoreOptions.BLOB_FIELD.key().equals(directive.optionKey()),
+                        "Column %s declared with '%s' must be of BYTES, BINARY or BLOB type, but was %s. "
+                                + "ARRAY<BLOB> is only supported by '%s'.",
+                        fieldName,
+                        directive.optionKey(),
+                        sourceType,
+                        CoreOptions.BLOB_FIELD.key());
+                DataType elementType = ((ArrayType) sourceType).getElementType();
+                Preconditions.checkArgument(
+                        isBlobSourceRoot(elementType.getTypeRoot()),
+                        "Column %s declared with a BLOB directive must be of BYTES, BINARY, "
+                                + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, but was %s.",
+                        fieldName,
+                        sourceType);
+                return new ArrayType(
+                        sourceType.isNullable(), new BlobType(elementType.isNullable()));
+            }
             Preconditions.checkArgument(
-                    root == DataTypeRoot.VARBINARY
-                            || root == DataTypeRoot.BINARY
-                            || root == DataTypeRoot.BLOB,
-                    "Column %s declared with a BLOB directive must be of BYTES, "
-                            + "BINARY or BLOB type, but was %s.",
+                    isBlobSourceRoot(root),
+                    "Column %s declared with a BLOB directive must be of BYTES, BINARY, "
+                            + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, but was %s.",
                     fieldName,
                     sourceType);
             return new BlobType(sourceType.isNullable());
         }
+    }
+
+    private static boolean isBlobSourceRoot(DataTypeRoot root) {
+        return root == DataTypeRoot.VARBINARY
+                || root == DataTypeRoot.BINARY
+                || root == DataTypeRoot.BLOB;
     }
 
     /**
@@ -279,19 +302,19 @@ public final class ColumnDirectiveUtils {
             new ConfigOption[] {CoreOptions.VECTOR_FIELD};
 
     /**
-     * Remove directive-managed options when a BLOB or VECTOR column is dropped. Only acts on BLOB
-     * or VECTOR type columns; other types are ignored.
+     * Remove directive-managed options when a BLOB or VECTOR column is dropped. Only acts on BLOB,
+     * {@code ARRAY<BLOB>} or VECTOR type columns; other types are ignored.
      */
     public static void removeDroppedDirectiveOptions(
-            String fieldName, DataTypeRoot typeRoot, Map<String, String> options) {
-        if (typeRoot == DataTypeRoot.BLOB) {
+            String fieldName, DataType type, Map<String, String> options) {
+        if (BlobType.isBlobFileField(type)) {
             for (ConfigOption<String> option : BLOB_OPTIONS) {
                 removeFromCsvOption(option.key(), fieldName, options);
                 for (FallbackKey fk : option.fallbackKeys()) {
                     removeFromCsvOption(fk.getKey(), fieldName, options);
                 }
             }
-        } else if (typeRoot == DataTypeRoot.VECTOR) {
+        } else if (type.getTypeRoot() == DataTypeRoot.VECTOR) {
             for (ConfigOption<String> option : VECTOR_OPTIONS) {
                 removeFromCsvOption(option.key(), fieldName, options);
                 for (FallbackKey fk : option.fallbackKeys()) {

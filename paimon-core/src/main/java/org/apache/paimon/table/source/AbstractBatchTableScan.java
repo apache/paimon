@@ -1,0 +1,267 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.table.source;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.tag.BatchReadTagCreator;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalLong;
+
+import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
+
+/** Base {@link TableScan} implementation for batch planning. */
+public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractBatchTableScan.class);
+
+    private StartingScanner startingScanner;
+    private boolean hasNext;
+
+    private Integer pushDownLimit;
+    private TopN topN;
+
+    private final SchemaManager schemaManager;
+    @Nullable private String readProtectionTagName;
+
+    protected AbstractBatchTableScan(
+            TableSchema schema,
+            SchemaManager schemaManager,
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            TableQueryAuth queryAuth) {
+        super(schema, options, snapshotReader, queryAuth);
+
+        this.hasNext = true;
+        this.schemaManager = schemaManager;
+        if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
+            if (options.toConfiguration()
+                    .get(CoreOptions.BATCH_SCAN_MODE)
+                    .equals(CoreOptions.BatchScanMode.NONE)) {
+                snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
+            }
+        }
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
+            snapshotReader.onlyReadRealBuckets();
+        }
+        Integer scanBucket = options.scanBucket();
+        if (scanBucket != null) {
+            snapshotReader.withBucket(scanBucket);
+        }
+    }
+
+    @Override
+    public InnerTableScan withFilter(Predicate predicate) {
+        super.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withLimit(int limit) {
+        // Record it; applyPushDownLimit pushes the file-store limit only when safe.
+        this.pushDownLimit = limit;
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withTopN(TopN topN) {
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
+    protected final TableScan.Plan planWithoutAuth() {
+        if (!hasNext) {
+            throw new EndOfScanException();
+        }
+        hasNext = false;
+
+        Plan preProcessedPlan = preProcessPlan();
+        if (preProcessedPlan != null) {
+            return preProcessedPlan;
+        }
+
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+
+        StartingScanner.Result result;
+        Optional<StartingScanner.Result> pushed = applyPushDownLimit();
+        if (pushed.isPresent()) {
+            result = pushed.get();
+        } else {
+            pushed = applyPushDownTopN();
+            result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
+        }
+
+        if (result instanceof ScannedResult) {
+            maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
+        }
+
+        return postProcessPlan(DataFilePlan.fromResult(result));
+    }
+
+    @Nullable
+    protected Plan preProcessPlan() {
+        return null;
+    }
+
+    protected Plan postProcessPlan(Plan plan) {
+        return plan;
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+        return startingScanner.scanPartitions(snapshotReader);
+    }
+
+    private Optional<StartingScanner.Result> applyPushDownLimit() {
+        // A read-time filter (WHERE or auth) drops rows after scanning, so only push the limit down
+        // when neither is present.
+        if (pushDownLimit == null
+                || snapshotReader.hasNonPartitionFilter()
+                || authHasNonPartitionFilter) {
+            return Optional.empty();
+        }
+        snapshotReader.withLimit(pushDownLimit);
+
+        StartingScanner.Result result = startingScanner.scan(snapshotReader);
+        if (!(result instanceof ScannedResult)) {
+            return Optional.of(result);
+        }
+
+        long scannedRowCount = 0;
+        SnapshotReader.Plan plan = ((ScannedResult) result).plan();
+        List<Split> splits = plan.splits();
+        if (splits.isEmpty()) {
+            return Optional.of(result);
+        }
+
+        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
+        List<Split> limitedSplits = new ArrayList<>();
+        for (Split split : splits) {
+            OptionalLong mergedRowCount = split.mergedRowCount();
+            if (mergedRowCount.isPresent()) {
+                limitedSplits.add(split);
+                scannedRowCount += mergedRowCount.getAsLong();
+                if (scannedRowCount >= pushDownLimit) {
+                    SnapshotReader.Plan newPlan =
+                            new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    LOG.info(
+                            "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
+                            splits.size(),
+                            limitedSplits.size(),
+                            pushDownLimit);
+                    return Optional.of(new ScannedResult(newPlan));
+                }
+            }
+        }
+        return Optional.of(result);
+    }
+
+    private Optional<StartingScanner.Result> applyPushDownTopN() {
+        // A read-time filter (WHERE or auth) drops rows after split pruning, so split-level TopN
+        // pruning could keep too few splits. Skip it when either is present.
+        if (topN == null
+                || pushDownLimit != null
+                || snapshotReader.hasNonPartitionFilter()
+                || authHasNonPartitionFilter
+                || !schema.primaryKeys().isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<SortValue> orders = topN.orders();
+        if (orders.size() != 1) {
+            return Optional.empty();
+        }
+
+        if (topN.limit() > 100) {
+            return Optional.empty();
+        }
+
+        SortValue order = orders.get(0);
+        DataType type = order.field().type();
+        if (!minmaxAvailable(type)) {
+            return Optional.empty();
+        }
+
+        StartingScanner.Result result = startingScanner.scan(snapshotReader.keepStats());
+        if (!(result instanceof ScannedResult)) {
+            return Optional.of(result);
+        }
+
+        SnapshotReader.Plan plan = ((ScannedResult) result).plan();
+        List<Split> splits = plan.splits();
+        if (splits.isEmpty()) {
+            return Optional.of(result);
+        }
+
+        TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
+        List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(order, topN.limit(), splits));
+        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        return Optional.of(new ScannedResult(newPlan));
+    }
+
+    @Override
+    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
+    }
+
+    @Override
+    @Nullable
+    public String readProtectionTagName() {
+        return readProtectionTagName;
+    }
+
+    protected final void maybeCreateReadProtectionTag(long snapshotId) {
+        Duration timeRetained = options().scanPlanAutoTagTimeRetained();
+        if (timeRetained == null) {
+            return;
+        }
+        SnapshotManager sm = snapshotReader.snapshotManager();
+        TagManager tagMgr = new TagManager(sm.fileIO(), sm.tablePath(), sm.branch());
+        BatchReadTagCreator creator = new BatchReadTagCreator(tagMgr, sm, timeRetained);
+        this.readProtectionTagName = creator.createReadTag(snapshotId);
+    }
+}

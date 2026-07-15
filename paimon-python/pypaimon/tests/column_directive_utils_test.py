@@ -99,6 +99,31 @@ class TestApplyAddColumnDirective(unittest.TestCase):
         self.assertEqual(result.comment, "pic")
         self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "pic")
 
+    def test_blob_field_array_source_type(self):
+        opts = {}
+        result = apply_add_column_directive(
+            "__BLOB_FIELD; pictures",
+            "pictures",
+            ArrayType(True, AtomicType("BYTES", False)),
+            opts,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result.type, ArrayType)
+        self.assertEqual(result.type.element.type, "BLOB")
+        self.assertFalse(result.type.element.nullable)
+        self.assertEqual(result.comment, "pictures")
+        self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "pictures")
+
+    def test_inline_blob_directive_rejects_array_source_type(self):
+        with self.assertRaisesRegex(ValueError, "ARRAY<BLOB> is only supported"):
+            apply_add_column_directive(
+                "__BLOB_DESCRIPTOR_FIELD",
+                "pictures",
+                ArrayType(True, AtomicType("BYTES")),
+                {},
+            )
+
     def test_vector_field(self):
         opts = {}
         result = apply_add_column_directive(

@@ -43,7 +43,6 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
@@ -104,6 +103,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -327,6 +327,11 @@ public class SchemaManager implements Serializable {
                         Objects.equals(oldValue, newValue)
                                 || isUnchangedNormalizedKey(
                                         setOption.key(), oldValue, newValue, oldTableSchema);
+                // reject 'type' even without snapshots: format tables hold data but
+                // create no snapshots, so the snapshot check would not catch them
+                if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
+                    throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
                 if (hasSnapshots.get() && !unchanged) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
@@ -335,6 +340,9 @@ public class SchemaManager implements Serializable {
                 }
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
+                if (CoreOptions.TYPE.key().equals(removeOption.key())) {
+                    throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
                 if (hasSnapshots.get()) {
                     checkResetTableOption(oldOptions, removeOption.key());
                 }
@@ -431,6 +439,8 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotUpdatingPrimaryKeyIndexColumn(
+                        oldTableSchema, rename.fieldNames(), "rename");
                 assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
@@ -469,7 +479,7 @@ public class SchemaManager implements Serializable {
                             .ifPresent(
                                     f ->
                                             ColumnDirectiveUtils.removeDroppedDirectiveOptions(
-                                                    dropName, f.type().getTypeRoot(), newOptions));
+                                                    dropName, f.type(), newOptions));
                 }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
@@ -487,6 +497,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotUpdatingPrimaryKeyIndexColumn(
+                        oldTableSchema, update.fieldNames(), "update type of");
                 assertNotChangingBlobColumnType(
                         newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
@@ -934,6 +946,7 @@ public class SchemaManager implements Serializable {
             throw new UnsupportedOperationException(
                     String.format("Cannot drop partition key or primary key: [%s]", columnToDrop));
         }
+        assertNotUpdatingPrimaryKeyIndexColumn(schema, change.fieldNames(), "drop");
     }
 
     private static void assertNotUpdatingPartitionKeys(
@@ -968,10 +981,27 @@ public class SchemaManager implements Serializable {
         }
         String fieldName = fieldNames[0];
         for (DataField field : fields) {
-            if (field.name().equals(fieldName) && field.type().is(DataTypeRoot.BLOB)) {
+            if (field.name().equals(fieldName) && isBlobFileField(field.type())) {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotUpdatingPrimaryKeyIndexColumn(
+            TableSchema schema, String[] fieldNames, String operation) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        CoreOptions options = new CoreOptions(schema.options());
+        if (options.primaryKeyVectorIndexColumns().contains(fieldName)
+                || options.primaryKeyBTreeIndexColumns().contains(fieldName)
+                || options.primaryKeyBitmapIndexColumns().contains(fieldName)
+                || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot %s primary-key index column: [%s]", operation, fieldName));
         }
     }
 
@@ -985,8 +1015,8 @@ public class SchemaManager implements Serializable {
             if (!field.name().equals(fieldName)) {
                 continue;
             }
-            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
-            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            boolean wasBlob = isBlobFileField(field.type());
+            boolean willBeBlob = isBlobFileField(newType);
             if (wasBlob || willBeBlob) {
                 throw new UnsupportedOperationException(
                         String.format(
@@ -1259,23 +1289,45 @@ public class SchemaManager implements Serializable {
     }
 
     /**
-     * Checks whether a key whose old value is null actually hasn't changed. This handles keys like
-     * 'primary-key' and 'partition' that are stripped from options during schema normalization and
-     * stored in dedicated schema fields instead.
+     * Whether an option change is a semantic no-op: 'primary-key'/'partition' are normalized into
+     * dedicated schema fields (old value null), and 'type' compares case-insensitively, defaulting
+     * when unset.
      */
     public static boolean isUnchangedNormalizedKey(
             String key,
             @Nullable String oldValue,
             @Nullable String newValue,
             TableSchema tableSchema) {
-        if (oldValue != null || newValue == null) {
+        return isUnchangedNormalizedKey(
+                key, oldValue, newValue, tableSchema.primaryKeys(), tableSchema.partitionKeys());
+    }
+
+    /**
+     * Overload for callers holding the primary/partition keys rather than a {@link TableSchema}.
+     */
+    public static boolean isUnchangedNormalizedKey(
+            String key,
+            @Nullable String oldValue,
+            @Nullable String newValue,
+            List<String> primaryKeys,
+            List<String> partitionKeys) {
+        if (newValue == null) {
+            return false;
+        }
+        if (CoreOptions.TYPE.key().equals(key)) {
+            // 'type' compares case-insensitively (like convertToEnum); an unset type is the default
+            String effectiveOld =
+                    oldValue == null ? CoreOptions.TYPE.defaultValue().toString() : oldValue;
+            return newValue.equalsIgnoreCase(effectiveOld);
+        }
+        if (oldValue != null) {
             return false;
         }
         if (CoreOptions.PRIMARY_KEY.key().equals(key)) {
-            return normalizeKeyList(newValue).equals(tableSchema.primaryKeys());
+            return normalizeKeyList(newValue).equals(primaryKeys);
         }
         if (CoreOptions.PARTITION.key().equals(key)) {
-            return normalizeKeyList(newValue).equals(tableSchema.partitionKeys());
+            return normalizeKeyList(newValue).equals(partitionKeys);
         }
         return false;
     }

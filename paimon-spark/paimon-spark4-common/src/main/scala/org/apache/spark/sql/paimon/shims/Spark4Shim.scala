@@ -25,7 +25,7 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensi
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.format.FormatTableBatchWrite
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.spark.write.PaimonBatchWrite
+import org.apache.paimon.spark.write.{PaimonBatchWrite, PaimonDeltaBatchWrite}
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
@@ -203,6 +203,14 @@ class Spark4Shim extends SparkShim {
       overwritePartitions,
       copyOnWriteScan,
       operationType)
+
+  override def createPaimonDeltaBatchWrite(
+      table: FileStoreTable,
+      rowSchema: StructType,
+      rowIdSchema: StructType,
+      operationType: Snapshot.Operation,
+      readSnapshotId: Option[Long]): BatchWrite =
+    new PaimonDeltaBatchWrite(table, rowSchema, rowIdSchema, operationType, readSnapshotId)
 
   override def createFormatTableBatchWrite(
       table: FormatTable,

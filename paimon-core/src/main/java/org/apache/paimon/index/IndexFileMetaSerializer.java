@@ -50,7 +50,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                                 globalIndexMeta.extraFieldIds() == null
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
-                                globalIndexMeta.indexMeta());
+                                globalIndexMeta.indexMeta(),
+                                globalIndexMeta.sourceMeta());
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
@@ -65,16 +66,25 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
     public IndexFileMeta fromRow(InternalRow row) {
         GlobalIndexMeta globalIndexMeta = null;
         if (!row.isNullAt(6)) {
-            InternalRow globalIndexRow = row.getRow(6, 5);
+            InternalRow globalIndexRow = row.getRow(6, 6);
             Long rowRangeStart = globalIndexRow.getLong(0);
             Long rowRangeEnd = globalIndexRow.getLong(1);
             Integer indexFieldId = globalIndexRow.getInt(2);
             int[] extralFields =
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
+            byte[] sourceMeta =
+                    globalIndexRow.getFieldCount() <= 5 || globalIndexRow.isNullAt(5)
+                            ? null
+                            : globalIndexRow.getBinary(5);
             globalIndexMeta =
                     new GlobalIndexMeta(
-                            rowRangeStart, rowRangeEnd, indexFieldId, extralFields, indexMeta);
+                            rowRangeStart,
+                            rowRangeEnd,
+                            indexFieldId,
+                            extralFields,
+                            indexMeta,
+                            sourceMeta);
         }
         return new IndexFileMeta(
                 row.getString(0).toString(),

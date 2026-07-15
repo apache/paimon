@@ -20,7 +20,11 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobView;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+
+import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.data.GenericArrayData;
 
 import java.util.Set;
 
@@ -40,13 +44,33 @@ public class FlinkRowDataWithBlob extends FlinkRowData {
     @Override
     public byte[] getBinary(int pos) {
         if (blobFields.contains(pos)) {
-            Blob blob = row.getBlob(pos);
-            if (blob instanceof BlobView && !((BlobView) blob).isResolved()) {
-                return Blob.serializeBlob(blob);
-            }
-            return blobAsDescriptor ? blob.toDescriptor().serialize() : blob.toData();
+            return blobToBytes(row.getBlob(pos));
         } else {
             return row.getBinary(pos);
         }
+    }
+
+    @Override
+    public ArrayData getArray(int pos) {
+        if (blobFields.contains(pos)) {
+            InternalArray array = row.getArray(pos);
+            Object[] elements = new Object[array.size()];
+            for (int i = 0; i < array.size(); i++) {
+                elements[i] = array.isNullAt(i) ? null : blobToBytes(array.getBlob(i));
+            }
+            return new GenericArrayData(elements);
+        } else {
+            return super.getArray(pos);
+        }
+    }
+
+    private byte[] blobToBytes(Blob blob) {
+        if (blob == null) {
+            return null;
+        }
+        if (blob instanceof BlobView && !((BlobView) blob).isResolved()) {
+            return Blob.serializeBlob(blob);
+        }
+        return blobAsDescriptor ? blob.toDescriptor().serialize() : blob.toData();
     }
 }

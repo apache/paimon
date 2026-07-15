@@ -28,6 +28,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,6 +43,11 @@ public class AvroFormatReadWriteTest extends FormatReadWriteTest {
     @Override
     protected FileFormat fileFormat() {
         return new AvroFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+    }
+
+    @Test
+    public void testArrayBlobDescriptors() throws Exception {
+        testArrayBlobDescriptorRoundTrip();
     }
 
     @Override

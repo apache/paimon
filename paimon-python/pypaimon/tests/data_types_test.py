@@ -72,6 +72,21 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(str(data_type_class(True, element_type)),
                          str(data_type_class.from_dict(data_type_class(True, element_type).to_dict())))
 
+    def test_array_element_nullability_roundtrip(self):
+        for element_nullable in (True, False):
+            paimon_type = ArrayType(
+                True,
+                AtomicType("BLOB", nullable=element_nullable),
+            )
+
+            arrow_type = PyarrowFieldParser.from_paimon_type(paimon_type)
+
+            self.assertEqual(arrow_type.value_field.nullable, element_nullable)
+            self.assertEqual(
+                PyarrowFieldParser.to_paimon_type(arrow_type, nullable=True),
+                paimon_type,
+            )
+
     def test_map_type(self):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")

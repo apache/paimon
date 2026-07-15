@@ -27,7 +27,10 @@ daft = pytest.importorskip("daft")
 from daft.datatype import DataType
 from daft.io import IOConfig, S3Config
 
-from pypaimon.daft.daft_blob import blob_column_to_file_array
+from pypaimon.daft.daft_blob import (
+    blob_array_column_to_file_array,
+    blob_column_to_file_array,
+)
 from pypaimon.daft.daft_compat import (
     file_range_position_field,
     file_range_size_field,
@@ -79,6 +82,28 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         blob = serialize_io_config(IOConfig(s3=S3Config(key_id="AK", access_key="SK")))
         self.assertEqual(blob_column_to_file_array(col, blob).field("io_config").to_pylist(),
                          [blob, None, blob])
+
+    def test_blob_array_column_to_file_array(self):
+        descriptor_a = BlobDescriptor("oss://b/a", 1, 2).serialize()
+        descriptor_b = BlobDescriptor("oss://b/b", 3, 4).serialize()
+        column = pa.array(
+            [[descriptor_a, None, descriptor_b], None, []],
+            type=pa.list_(pa.large_binary()),
+        )
+
+        converted = blob_array_column_to_file_array(column)
+
+        files = converted[0].as_py()
+        self.assertEqual(
+            [None if value is None else value["url"] for value in files],
+            ["oss://b/a", None, "oss://b/b"],
+        )
+        self.assertEqual([
+            None if value is None else value[file_range_position_field()]
+            for value in files
+        ], [1, None, 3])
+        self.assertFalse(converted[1].is_valid)
+        self.assertEqual(converted[2].as_py(), [])
 
     def test_malformed_blob_descriptor_raises_value_error(self):
         cases = [

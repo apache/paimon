@@ -46,10 +46,10 @@ under the License.
             <version>${project.version}</version>
             <!-- We don't want any production code from paimon-core to reference paimon-codegen directly -->
             <scope>runtime</scope>
-            <!-- Prevent dependency from being accessible to modules depending on paimon-core -->
+            <!-- Prevent dependency from being accessible to modules depending on paimon-codegen-loader -->
             <optional>true</optional>
             <exclusions>
-                <!-- Prevent akka and scala from being visible to other modules depending on paimon-core -->
+                <!-- Prevent transitive dependencies from being visible to modules depending on paimon-codegen-loader -->
                 <exclusion>
                     <groupId>*</groupId>
                     <artifactId>*</artifactId>

@@ -68,7 +68,7 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
                         + "--table <table_name> \\\n"
                         + "--tag <tag> \\\n"
                         + "--watermark <watermark> \\\n"
-                        + "[--timeRetained <duration>] \\\n"
+                        + "[--time_retained <duration>] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

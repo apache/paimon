@@ -95,7 +95,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             CoreOptions options,
             String tableName,
             @Nullable Integer writeId) {
-        super(snapshotManager, scan, options, partitionType, null, null, tableName);
+        super(snapshotManager, scan, options, partitionType, null, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.mfFactory = mfFactory;

@@ -22,6 +22,7 @@ from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.schema.data_types import is_blob_type
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
@@ -643,4 +644,4 @@ def _bytes_value(value) -> bytes:
 
 
 def _is_blob_field(field) -> bool:
-    return getattr(field.type, "type", None) == "BLOB"
+    return is_blob_type(field.type)

@@ -32,6 +32,13 @@ class RewriteFileIndexProcedureTest extends PaimonSparkTestBase {
             |""".stripMargin)
 
       sql("INSERT INTO t VALUES (1, 'a', '2025-08-17', 5), (2, 'b', '2025-10-06', 0)")
+      val latestSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+      checkAnswer(
+        sql("CALL sys.rewrite_file_index(table => 't')"),
+        Row(0, 0)
+      )
+      assert(loadTable("t").snapshotManager().latestSnapshotId() == latestSnapshotId)
+
       sql("ALTER TABLE t SET TBLPROPERTIES ('file-index.bloom-filter.columns'='k,v')")
       checkAnswer(
         sql("CALL sys.rewrite_file_index(table => 't')"),

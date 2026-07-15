@@ -18,13 +18,15 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
 import java.util.Collections;
-import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -66,20 +68,51 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextScan newFullTextScan() {
-        return new FullTextScanImpl(table, partitionFilter, textColumns());
+        DataField textColumn = textColumn();
+        Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
+        return definition.isPresent()
+                ? new PrimaryKeyFullTextScan(table, definition.get(), partitionFilter)
+                : new DataEvolutionFullTextScan(
+                        table, partitionFilter, Collections.singletonList(textColumn));
     }
 
     @Override
     public FullTextRead newFullTextRead() {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
-        return new FullTextReadImpl(table, partitionFilter, limit, textColumns(), query);
+        DataField textColumn = textColumn();
+        Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
+        return definition.isPresent()
+                ? new PrimaryKeyFullTextRead(table, definition.get(), textColumn, query, limit)
+                : new DataEvolutionFullTextRead(
+                        table,
+                        partitionFilter,
+                        limit,
+                        Collections.singletonList(textColumn),
+                        query);
     }
 
-    private List<DataField> textColumns() {
+    private DataField textColumn() {
         checkNotNull(query, "Query must be set via withQuery()");
         checkNotNull(fieldName, "Field name must be set via withQuery()");
         DataField textColumn = table.rowType().getField(fieldName);
         checkNotNull(textColumn, "Text column '%s' does not exist.", fieldName);
-        return Collections.singletonList(textColumn);
+        return textColumn;
+    }
+
+    private Optional<PrimaryKeyIndexDefinition> primaryKeyFullTextDefinition(DataField textColumn) {
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            return Optional.empty();
+        }
+        if (table.coreOptions().primaryKeyFullTextIndexColumns().isEmpty()) {
+            return Optional.empty();
+        }
+        for (PrimaryKeyIndexDefinition definition :
+                PrimaryKeyIndexDefinitions.create(table.schema()).definitions()) {
+            if (definition.family() == PrimaryKeyIndexDefinition.Family.FULL_TEXT
+                    && definition.fieldId() == textColumn.id()) {
+                return Optional.of(definition);
+            }
+        }
+        return Optional.empty();
     }
 }

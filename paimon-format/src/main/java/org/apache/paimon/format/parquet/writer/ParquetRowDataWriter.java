@@ -316,8 +316,7 @@ public class ParquetRowDataWriter {
 
         @Override
         public void write(InternalArray arrayData, int ordinal) {
-            // Currently we don't support BLOB inside arrays/maps.
-            throw new UnsupportedOperationException("BLOB in array is not supported.");
+            writeBlob(arrayData.getBlob(ordinal));
         }
 
         private void writeBlob(Blob blob) {

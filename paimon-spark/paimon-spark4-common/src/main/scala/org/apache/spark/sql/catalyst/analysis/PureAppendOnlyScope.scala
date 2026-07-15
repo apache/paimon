@@ -29,10 +29,11 @@ import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
  * ([[Spark41UpdateTableRewrite]] for UPDATE + metadata-only DELETE reverse-optimization,
  * [[Spark41MergeIntoRewrite]] for MERGE).
  *
- * These rules only intercept operations against Paimon tables that are valid for Spark's V2
- * copy-on-write rewrite: no primary key, data evolution, deletion vectors, or fixed-length
- * `CHAR(n)` columns. Row-tracking-only tables are included; tables that violate any of these
- * constraints go through Paimon's postHoc V1 commands or Spark's built-in analysis path.
+ * These rules intercept operations against Paimon tables that are valid for Spark's V2
+ * copy-on-write rewrite (no primary key, data evolution, deletion vectors, or fixed-length
+ * `CHAR(n)` columns; row-tracking-only tables are included) or for the delta-based rewrite
+ * (unaware-bucket deletion-vector append tables, see [[targetsV2DeltaTable]]). Tables that violate
+ * these constraints go through Paimon's postHoc V1 commands or Spark's built-in analysis path.
  *
  * Kept as a mix-in trait so the two rewrite objects stay single-responsibility (one rule per Spark
  * row-level command, mirroring Spark's own `RewriteUpdateTable` / `RewriteMergeIntoTable` layout)
@@ -47,6 +48,19 @@ trait PureAppendOnlyScope {
         !sparkTable.coreOptions.dataEvolutionEnabled() &&
         !sparkTable.coreOptions.deletionVectorsEnabled() &&
         !SparkTypeUtils.containsCharType(fs.rowType())
+    }
+  }
+
+  /**
+   * Whether the target is a Paimon table on the delta-based row-level path. Delegates to
+   * `SparkTable.supportsV2DeltaOps` so the delta gating conditions have a single source of truth
+   * (unlike the copy-on-write scope above, the full capability predicate is also the correct plan
+   * scope: its extra `useV2Write` / Spark version checks are trivially true once the table has
+   * exposed `SupportsRowLevelOperations` on 4.1).
+   */
+  protected def targetsV2DeltaTable(aliasedTable: LogicalPlan): Boolean = {
+    targetsPaimonFileStoreTable(aliasedTable) {
+      case (sparkTable, _) => SparkTable.supportsV2DeltaOps(sparkTable)
     }
   }
 
