@@ -69,6 +69,29 @@ public class FullHistoryCopyPlanTest {
     }
 
     @Test
+    public void testInternalPayloadUsesMappingAnchor() {
+        Path tableRoot = new Path("dfs://old/warehouse/db/t");
+        FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
+        builder.addDataFile(
+                new Path("dfs://old/warehouse/db/t/data/bucket-0/internal.orc"), tableRoot);
+        builder.addDataFile(new Path("dfs://old/warehouse/db/t/data/bucket-0/external.orc"));
+
+        FullHistoryCopyPlan plan =
+                FullHistoryCopyPlan.build(
+                        builder.build(),
+                        PathMapping.parse(
+                                Arrays.asList(
+                                        "dfs://old/warehouse/db/t=dfs://new/warehouse/db/t",
+                                        "dfs://old/warehouse/db/t/data=dfs://new/external")));
+
+        assertThat(plan.files())
+                .extracting(file -> file.target().toString())
+                .containsExactly(
+                        "dfs://new/warehouse/db/t/data/bucket-0/internal.orc",
+                        "dfs://new/external/bucket-0/external.orc");
+    }
+
+    @Test
     public void testPayloadPlanExcludesMetadataAndRecordsSize() throws Exception {
         org.apache.paimon.fs.FileIO fileIO = org.apache.paimon.fs.local.LocalFileIO.create();
         java.nio.file.Path sourceRoot = java.nio.file.Files.createTempDirectory("copy-plan-source");

@@ -19,6 +19,7 @@
 package org.apache.paimon.clone;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
@@ -33,6 +34,8 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -81,6 +84,9 @@ public class FullHistoryPayloadFileVisitor {
         private final FileStorePathFactory pathFactory;
         private final ManifestList manifestList;
         private final ManifestFile manifestFile;
+        private final Path tableMappingAnchor;
+        private final Path dataMappingAnchor;
+        private final boolean indexFileInDataFileDir;
         private final Set<String> visitedSnapshotData = new HashSet<>();
         private final Set<String> visitedChangelogLists = new HashSet<>();
         private final Set<String> visitedAppendDeltaLists = new HashSet<>();
@@ -95,6 +101,14 @@ public class FullHistoryPayloadFileVisitor {
             this.pathFactory = table.store().pathFactory();
             this.manifestList = table.store().manifestListFactory().create();
             this.manifestFile = table.store().manifestFileFactory().create();
+            this.tableMappingAnchor = table.location();
+            CoreOptions options = CoreOptions.fromMap(table.schema().options());
+            String dataFilePathDirectory = options.dataFilePathDirectory();
+            this.dataMappingAnchor =
+                    dataFilePathDirectory != null && isAbsolutePath(dataFilePathDirectory)
+                            ? pathFactory.dataFilePath()
+                            : tableMappingAnchor;
+            this.indexFileInDataFileDir = options.indexFileInDataFileDir();
         }
 
         private void visitSnapshot(Snapshot snapshot) throws IOException {
@@ -105,7 +119,7 @@ public class FullHistoryPayloadFileVisitor {
 
             if (snapshot.changelogManifestList() != null) {
                 visitChangelogManifest(snapshot.changelogManifestList());
-            } else {
+            } else if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
                 visitAppendDeltaFiles(snapshot.deltaManifestList());
             }
             visitIndexManifest(snapshot.indexManifest());
@@ -114,7 +128,7 @@ public class FullHistoryPayloadFileVisitor {
         private void visitChangelog(Changelog changelog) throws IOException {
             if (changelog.changelogManifestList() != null) {
                 visitChangelogManifest(changelog.changelogManifestList());
-            } else {
+            } else if (changelog.commitKind() == Snapshot.CommitKind.APPEND) {
                 visitAppendDeltaFiles(changelog.deltaManifestList());
             }
         }
@@ -174,7 +188,9 @@ public class FullHistoryPayloadFileVisitor {
                     continue;
                 }
                 for (ManifestEntry entry : readManifest(meta)) {
-                    if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
+                    if (entry.kind() == FileKind.ADD
+                            && entry.file().fileSource().orElse(FileSource.APPEND)
+                                    == FileSource.APPEND) {
                         visitDataFile(entry);
                     }
                 }
@@ -195,12 +211,14 @@ public class FullHistoryPayloadFileVisitor {
             visitor.accept(
                     dataPathFactory.toPath(entry),
                     FullHistoryCopyPlan.FileKind.DATA,
-                    entry.file().fileSize());
+                    entry.file().fileSize(),
+                    entry.externalPath() == null ? dataMappingAnchor : null);
             for (String extraFile : entry.extraFiles()) {
                 visitor.accept(
                         dataPathFactory.toAlignedPath(extraFile, entry),
                         FullHistoryCopyPlan.FileKind.DATA,
-                        -1L);
+                        -1L,
+                        entry.externalPath() == null ? dataMappingAnchor : null);
             }
         }
 
@@ -215,16 +233,30 @@ public class FullHistoryPayloadFileVisitor {
                     visitor.accept(
                             indexFileHandler.filePath(entry),
                             FullHistoryCopyPlan.FileKind.INDEX,
-                            entry.indexFile().fileSize());
+                            entry.indexFile().fileSize(),
+                            entry.indexFile().externalPath() == null
+                                    ? indexFileInDataFileDir
+                                            ? dataMappingAnchor
+                                            : tableMappingAnchor
+                                    : null);
                 }
             }
+        }
+
+        private static boolean isAbsolutePath(String path) {
+            java.net.URI uri = new Path(path).toUri();
+            return uri.getScheme() != null || uri.getPath().startsWith("/");
         }
     }
 
     /** Receives one reachable payload path at a time. Duplicate paths are allowed. */
     @FunctionalInterface
     public interface Visitor {
-        void accept(Path path, FullHistoryCopyPlan.FileKind kind, long expectedSize)
+        void accept(
+                Path path,
+                FullHistoryCopyPlan.FileKind kind,
+                long expectedSize,
+                @Nullable Path mappingAnchor)
                 throws IOException;
     }
 }

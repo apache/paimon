@@ -76,12 +76,7 @@ public class FullHistoryCloneMarker {
                 expected.equals(actual),
                 "Target table root %s belongs to a different full-history clone.",
                 clonePlan.targetRoot());
-        Path success = new Path(clonePlan.targetRoot(), SUCCESS_FILE_NAME);
-        if (targetFileIO.exists(success)) {
-            checkArgument(
-                    expected.equals(targetFileIO.readFileUtf8(success)),
-                    "Success marker at target table root %s belongs to a different clone.",
-                    clonePlan.targetRoot());
+        if (isSuccessful(targetFileIO, clonePlan, mapping, targetDatabase, targetTable)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Full-history clone at target table root %s is already completed.",
@@ -109,11 +104,7 @@ public class FullHistoryCloneMarker {
                 clonePlan.targetRoot());
 
         Path success = new Path(clonePlan.targetRoot(), SUCCESS_FILE_NAME);
-        if (targetFileIO.exists(success)) {
-            checkArgument(
-                    expected.equals(targetFileIO.readFileUtf8(success)),
-                    "Success marker at target table root %s belongs to a different clone.",
-                    clonePlan.targetRoot());
+        if (isSuccessful(targetFileIO, clonePlan, mapping, targetDatabase, targetTable)) {
             return;
         }
         if (!targetFileIO.tryToWriteAtomic(success, expected)) {
@@ -122,6 +113,30 @@ public class FullHistoryCloneMarker {
                     "Success marker at target table root %s belongs to a different clone.",
                     clonePlan.targetRoot());
         }
+    }
+
+    public static boolean isSuccessful(
+            FileIO targetFileIO,
+            FullHistoryClonePlan clonePlan,
+            PathMapping mapping,
+            @Nullable String targetDatabase,
+            @Nullable String targetTable)
+            throws IOException {
+        Path success = new Path(clonePlan.targetRoot(), SUCCESS_FILE_NAME);
+        if (!targetFileIO.exists(success)) {
+            return false;
+        }
+        String expected = content(clonePlan, mapping, targetDatabase, targetTable);
+        Path marker = new Path(clonePlan.targetRoot(), FILE_NAME);
+        checkArgument(
+                targetFileIO.exists(marker) && expected.equals(targetFileIO.readFileUtf8(marker)),
+                "Target table root %s is not owned by this full-history clone.",
+                clonePlan.targetRoot());
+        checkArgument(
+                expected.equals(targetFileIO.readFileUtf8(success)),
+                "Success marker at target table root %s belongs to a different clone.",
+                clonePlan.targetRoot());
+        return true;
     }
 
     private static String content(

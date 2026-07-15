@@ -51,24 +51,31 @@ public class PathMapping implements Serializable {
 
         List<Entry> entries = new ArrayList<>();
         Map<String, String> seenSources = new HashMap<>();
-        for (String mapping : mappings) {
+        for (int i = 0; i < mappings.size(); i++) {
+            String mapping = mappings.get(i);
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(mapping) && mapping.indexOf('=') > 0,
-                    "Path mapping must be in source=target format: %s",
-                    mapping);
+                    "Path mapping at index %s must be in source=target format.",
+                    i);
             int split = mapping.indexOf('=');
             String sourcePrefix = normalizePrefix(mapping.substring(0, split));
             String targetPrefix = normalizePrefix(mapping.substring(split + 1));
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(sourcePrefix)
                             && !StringUtils.isNullOrWhitespaceOnly(targetPrefix),
-                    "Path mapping must be in source=target format: %s",
-                    mapping);
+                    "Path mapping at index %s must be in source=target format.",
+                    i);
             String previousTarget = seenSources.put(sourcePrefix, targetPrefix);
             checkArgument(
                     previousTarget == null,
                     "Duplicate path mapping source prefix: %s",
                     sourcePrefix);
+            for (Entry entry : entries) {
+                checkArgument(
+                        !samePath(sourcePrefix, entry.sourcePrefix),
+                        "Duplicate path mapping source prefix: %s",
+                        sourcePrefix);
+            }
             entries.add(new Entry(sourcePrefix, targetPrefix));
         }
 
@@ -96,22 +103,24 @@ public class PathMapping implements Serializable {
                 new Comparator<Entry>() {
                     @Override
                     public int compare(Entry left, Entry right) {
-                        return Integer.compare(
-                                right.sourcePrefix.length(), left.sourcePrefix.length());
+                        return Integer.compare(right.sourcePathLength(), left.sourcePathLength());
                     }
                 });
         return new PathMapping(Collections.unmodifiableList(entries));
     }
 
     public Optional<String> rewrite(String sourcePath) {
-        String normalizedSourcePath = new Path(sourcePath).toString();
+        String normalizedSourcePath = normalizeRuntimePath(sourcePath);
         for (Entry entry : entries) {
             if (entry.matches(normalizedSourcePath)) {
-                String suffix = normalizedSourcePath.substring(entry.sourcePrefix.length());
-                if (entry.targetPrefix.endsWith("/") && suffix.startsWith("/")) {
-                    suffix = suffix.substring(1);
-                }
-                return Optional.of(entry.targetPrefix + suffix);
+                String suffix = relativeSuffix(normalizedSourcePath, entry.sourcePrefix);
+                String rewritten = appendSuffix(entry.targetPrefix, suffix);
+                checkArgument(
+                        isSameOrDescendant(rewritten, entry.targetPrefix),
+                        "Rewritten path escaped target prefix %s: %s",
+                        entry.targetPrefix,
+                        rewritten);
+                return Optional.of(rewritten);
             }
         }
         return Optional.empty();
@@ -121,6 +130,20 @@ public class PathMapping implements Serializable {
         Optional<String> rewritten = rewrite(sourcePath);
         checkArgument(rewritten.isPresent(), "No path mapping matched source path: %s", sourcePath);
         return rewritten.get();
+    }
+
+    public String rewriteRequiredUnder(String sourcePath, String sourceAnchor) {
+        String normalizedSource = normalizeRuntimePath(sourcePath);
+        String normalizedAnchor = normalizeRuntimePath(sourceAnchor);
+        checkArgument(
+                isSameOrDescendant(normalizedSource, normalizedAnchor),
+                "Source path %s is not under mapping anchor %s.",
+                sourcePath,
+                sourceAnchor);
+
+        String targetAnchor = rewriteRequired(normalizedAnchor);
+        String suffix = relativeSuffix(normalizedSource, normalizedAnchor);
+        return appendSuffix(targetAnchor, suffix);
     }
 
     public Map<String, String> rewriteAllRequired(Collection<String> sourcePaths) {
@@ -154,8 +177,9 @@ public class PathMapping implements Serializable {
         URI uri = new Path(normalized).toUri();
         checkArgument(
                 uri.getQuery() == null && uri.getFragment() == null,
-                "Path mapping prefixes must not contain a query or fragment: %s",
-                prefix);
+                "Path mapping prefixes must not contain a query or fragment.");
+        checkArgument(
+                uri.getUserInfo() == null, "Path mapping prefixes must not contain user info.");
         while (normalized.length() > 1
                 && normalized.endsWith("/")
                 && !normalized.matches("^[A-Za-z][A-Za-z0-9+.-]*:/+$")) {
@@ -164,14 +188,56 @@ public class PathMapping implements Serializable {
         return normalized;
     }
 
+    private static String normalizeRuntimePath(String path) {
+        Path normalized = new Path(path);
+        checkArgument(
+                normalized.toUri().getUserInfo() == null,
+                "Source paths and mapping anchors must not contain user info.");
+        return normalized.toString();
+    }
+
+    private static String appendSuffix(String prefix, String suffix) {
+        if (suffix.isEmpty()) {
+            return new Path(prefix).toString();
+        }
+        if (prefix.endsWith("/") && suffix.startsWith("/")) {
+            suffix = suffix.substring(1);
+        } else if (!prefix.endsWith("/") && !suffix.startsWith("/")) {
+            suffix = "/" + suffix;
+        }
+        return new Path(prefix + suffix).toString();
+    }
+
+    private static String relativeSuffix(String path, String parent) {
+        String pathPart = new Path(path).toUri().getPath();
+        String parentPart = new Path(parent).toUri().getPath();
+        return pathPart.substring(parentPart.length());
+    }
+
     static boolean overlaps(String left, String right) {
-        return isSameOrDescendant(left, right) || isSameOrDescendant(right, left);
+        return isSameOrDescendantForOverlap(left, right)
+                || isSameOrDescendantForOverlap(right, left);
+    }
+
+    private static boolean samePath(String left, String right) {
+        return isSameOrDescendantForOverlap(left, right)
+                && isSameOrDescendantForOverlap(right, left);
     }
 
     private static boolean isSameOrDescendant(String path, String parent) {
+        return isSameOrDescendant(path, parent, false);
+    }
+
+    private static boolean isSameOrDescendantForOverlap(String path, String parent) {
+        return isSameOrDescendant(path, parent, true);
+    }
+
+    private static boolean isSameOrDescendant(String path, String parent, boolean allowLocalAlias) {
         URI pathUri = new Path(path).toUri();
         URI parentUri = new Path(parent).toUri();
-        if (!equalsIgnoreCase(pathUri.getScheme(), parentUri.getScheme())
+        if (!(allowLocalAlias
+                        ? sameSchemeForOverlap(pathUri, parentUri)
+                        : equalsIgnoreCase(pathUri.getScheme(), parentUri.getScheme()))
                 || !equalsIgnoreCase(pathUri.getAuthority(), parentUri.getAuthority())) {
             return false;
         }
@@ -184,6 +250,19 @@ public class PathMapping implements Serializable {
 
     private static boolean equalsIgnoreCase(String left, String right) {
         return left == null ? right == null : right != null && left.equalsIgnoreCase(right);
+    }
+
+    private static boolean sameSchemeForOverlap(URI left, URI right) {
+        if (equalsIgnoreCase(left.getScheme(), right.getScheme())) {
+            return true;
+        }
+        return isLocalAbsolutePath(left) && isLocalAbsolutePath(right);
+    }
+
+    private static boolean isLocalAbsolutePath(URI uri) {
+        return (uri.getScheme() == null || "file".equalsIgnoreCase(uri.getScheme()))
+                && uri.getAuthority() == null
+                && uri.getPath().startsWith("/");
     }
 
     private static class Entry implements Serializable {
@@ -199,9 +278,11 @@ public class PathMapping implements Serializable {
         }
 
         private boolean matches(String sourcePath) {
-            return sourcePath.equals(sourcePrefix)
-                    || (sourcePrefix.endsWith("/") && sourcePath.startsWith(sourcePrefix))
-                    || sourcePath.startsWith(sourcePrefix + "/");
+            return isSameOrDescendant(sourcePath, sourcePrefix);
+        }
+
+        private int sourcePathLength() {
+            return new Path(sourcePrefix).toUri().getPath().length();
         }
     }
 }

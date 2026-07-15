@@ -20,6 +20,8 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.clone.FullHistoryFileCollector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -27,17 +29,22 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -141,6 +148,10 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
         assertThat(resumed.snapshotManager().safelyGetAllSnapshots())
                 .extracting(snapshot -> snapshot.id())
                 .containsExactlyInAnyOrder(1L, 2L);
+
+        targetFileIO.delete(source.location(), true);
+        targetFileIO.delete(new Path(sourceExternal), true);
+        validateAllTimeTravel(resumed);
     }
 
     @Test
@@ -181,6 +192,70 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
                 FileStoreTableFactory.create(LocalFileIO.create(), new Path(targetRoot));
         assertThat(target.schemaManager().listAllIds()).containsExactly(0L);
         assertThat(target.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testCloneUsesTableRootForInternalFileWithNestedMapping() throws Exception {
+        Map<String, String> tableOptions =
+                Collections.singletonMap(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "data");
+        FileStoreTable source =
+                createFileStoreTable(
+                        RowType.of(DataTypes.INT()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList("f0"),
+                        tableOptions);
+        writeRows(source, 0, 1);
+        Path sourceDataFile =
+                new FullHistoryFileCollector(source).collect().dataFiles().iterator().next();
+        Path sourceDataRoot = new Path(source.location(), "data");
+        String targetRoot = new Path(getTempDirPath("nested-mapping-target-table")).toString();
+        Path targetDataRoot = new Path(getTempDirPath("nested-mapping-target-data"));
+        Path targetDataFile =
+                new Path(
+                        targetDataRoot
+                                + sourceDataFile
+                                        .toString()
+                                        .substring(sourceDataRoot.toString().length()));
+        Map<String, String> sourceCatalogConfig = Collections.singletonMap("warehouse", warehouse);
+        Map<String, String> targetCatalogConfig =
+                Collections.singletonMap(
+                        "warehouse", getTempDirPath("nested-mapping-target-warehouse"));
+        CloneAction action =
+                new CloneAction(
+                        database,
+                        tableName,
+                        sourceCatalogConfig,
+                        "target_db",
+                        "target_table",
+                        targetCatalogConfig,
+                        4,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "paimon",
+                        "full-history",
+                        Arrays.asList(
+                                source.location() + "=" + targetRoot,
+                                sourceDataRoot + "=" + targetDataRoot),
+                        false,
+                        false);
+
+        action.run();
+
+        LocalFileIO targetFileIO = LocalFileIO.create();
+        assertThat(targetFileIO.exists(new Path(targetRoot, "_SUCCESS"))).isTrue();
+        assertThat(targetFileIO.exists(targetDataFile)).isFalse();
+        Path expectedDataFile =
+                new Path(
+                        targetRoot
+                                + sourceDataFile
+                                        .toString()
+                                        .substring(source.location().toString().length()));
+        assertThat(targetFileIO.exists(expectedDataFile)).isTrue();
+        FileStoreTable target = FileStoreTableFactory.create(targetFileIO, new Path(targetRoot));
+        assertThat(target.newScan().plan().splits()).isNotEmpty();
     }
 
     private CloneAction createAction(
@@ -225,6 +300,38 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
         } finally {
             tableWrite.close();
             tableCommit.close();
+        }
+    }
+
+    private void validateAllTimeTravel(FileStoreTable table) throws Exception {
+        List<String> branches = new ArrayList<>(table.branchManager().branches());
+        branches.add(DEFAULT_MAIN_BRANCH);
+        for (String branch : branches) {
+            FileStoreTable branchTable = table.switchToBranch(branch);
+            for (Snapshot snapshot : branchTable.snapshotManager().safelyGetAllSnapshots()) {
+                assertThat(
+                                branchTable
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                                        String.valueOf(snapshot.id())))
+                                        .newScan()
+                                        .plan()
+                                        .splits())
+                        .isNotEmpty();
+            }
+            for (Pair<Tag, String> tagAndName : branchTable.tagManager().tagObjects()) {
+                assertThat(
+                                branchTable
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        CoreOptions.SCAN_TAG_NAME.key(),
+                                                        tagAndName.getRight()))
+                                        .newScan()
+                                        .plan()
+                                        .splits())
+                        .isNotEmpty();
+            }
         }
     }
 
