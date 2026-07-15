@@ -66,8 +66,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -78,7 +76,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
@@ -102,8 +99,7 @@ public class SortedIndexTopoBuilder {
             FileStoreTable table,
             List<String> indexColumns,
             PartitionPredicate partitionPredicate,
-            Options userOptions,
-            @Nullable String commitUser)
+            Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
@@ -206,7 +202,7 @@ public class SortedIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest), commitUser);
+            commit(table, allStreams.get(0).union(rest), CoreOptions.createCommitUser(userOptions));
             return true;
         }
 
@@ -219,8 +215,7 @@ public class SortedIndexTopoBuilder {
             String indexColumn,
             String indexType,
             PartitionPredicate partitionPredicate,
-            Options userOptions,
-            @Nullable String commitUser)
+            Options userOptions)
             throws Exception {
         if (buildIndex(
                 env,
@@ -228,8 +223,7 @@ public class SortedIndexTopoBuilder {
                 table,
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
-                userOptions,
-                commitUser)) {
+                userOptions)) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         }
     }
@@ -328,14 +322,12 @@ public class SortedIndexTopoBuilder {
     }
 
     private static void commit(
-            FileStoreTable table, DataStream<Committable> written, @Nullable String commitUser) {
+            FileStoreTable table, DataStream<Committable> written, String commitUser) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
                         true,
-                        commitUser == null
-                                ? "SortedIndexCommitter-" + UUID.randomUUID()
-                                : commitUser,
+                        commitUser,
                         context ->
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),

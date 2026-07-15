@@ -111,8 +111,7 @@ public class SortedIndexTopoBuilderTest {
                                 mock(FileStoreTable.class),
                                 Collections.singletonList("id"),
                                 null,
-                                new Options(),
-                                null))
+                                new Options()))
                 .isFalse();
         verify(indexBuilder).incrementalScan();
         verifyNoInteractions(env);
