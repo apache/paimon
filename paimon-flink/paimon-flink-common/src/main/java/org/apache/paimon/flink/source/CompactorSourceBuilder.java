@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributionStrategy;
+import org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
@@ -106,11 +107,14 @@ public class CompactorSourceBuilder {
             return new ContinuousFileStoreSource(readBuilder, compactBucketsTable.options(), null);
         } else {
             Options options = compactBucketsTable.coreOptions().toConfiguration();
+            SplitAssignMode splitAssignMode =
+                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
+            validateBucketDistributionStrategy(bucketDistributionStrategy, splitAssignMode);
             return new StaticFileStoreSource(
                     readBuilder,
                     null,
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                    splitAssignMode,
                     bucketDistributionStrategy
                                     == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
                             ? split -> bucketFileSize((DataSplit) split.split())
@@ -221,6 +225,20 @@ public class CompactorSourceBuilder {
             CompactionBucketDistributionStrategy bucketDistributionStrategy) {
         this.bucketDistributionStrategy = bucketDistributionStrategy;
         return this;
+    }
+
+    static void validateBucketDistributionStrategy(
+            CompactionBucketDistributionStrategy bucketDistributionStrategy,
+            SplitAssignMode splitAssignMode) {
+        if (bucketDistributionStrategy == CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH
+                && splitAssignMode == SplitAssignMode.PREEMPTIVE) {
+            throw new IllegalArgumentException(
+                    "compaction.bucket-distribution-strategy=size-aware-batch requires "
+                            + "scan.split-enumerator.mode=fair because it relies on grouped "
+                            + "bucket assignment. Preemptive split assignment can split the "
+                            + "same bucket across different writers while the sink skips "
+                            + "bucket shuffle.");
+        }
     }
 
     static Integer sourceParallelism(

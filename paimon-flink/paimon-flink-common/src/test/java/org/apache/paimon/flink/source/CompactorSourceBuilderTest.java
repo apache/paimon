@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributionStrategy;
+import org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.DataSplit;
@@ -33,6 +34,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CompactorSourceBuilder}. */
 public class CompactorSourceBuilderTest {
@@ -67,6 +70,28 @@ public class CompactorSourceBuilderTest {
                         CompactorSourceBuilder.sourceParallelism(
                                 options, CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH))
                 .isEqualTo(4);
+    }
+
+    @Test
+    public void testSizeAwareBatchRejectsPreemptiveSplitAssignment() {
+        assertThatThrownBy(
+                        () ->
+                                CompactorSourceBuilder.validateBucketDistributionStrategy(
+                                        CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH,
+                                        SplitAssignMode.PREEMPTIVE))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("size-aware-batch requires")
+                .hasMessageContaining("scan.split-enumerator.mode=fair");
+    }
+
+    @Test
+    public void testSizeAwareBatchAllowsFairSplitAssignment() {
+        assertThatCode(
+                        () ->
+                                CompactorSourceBuilder.validateBucketDistributionStrategy(
+                                        CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH,
+                                        SplitAssignMode.FAIR))
+                .doesNotThrowAnyException();
     }
 
     @Test
