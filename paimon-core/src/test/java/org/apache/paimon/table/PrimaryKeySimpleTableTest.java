@@ -51,6 +51,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -2325,6 +2326,55 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testDataFileTableQuery() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages);
+
+        DataFileTableQuery query =
+                table.newDataFileTableQuery().withValueProjection(new int[] {2, 1, 0});
+        refreshDataFileTableQuery(query, commitMessages);
+
+        InternalRow value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(value.getLong(0)).isEqualTo(100L);
+        assertThat(value.getInt(1)).isEqualTo(10);
+        assertThat(value.getInt(2)).isEqualTo(1);
+        assertThat(query.lookup(row(1), 0, row(30))).isNull();
+
+        query.withRowFilter(row -> row.getLong(0) >= 200L);
+        assertThat(query.lookup(row(1), 0, row(10))).isNull();
+        assertThat(query.lookup(row(1), 0, row(20))).isNotNull();
+
+        write.write(rowData(1, 10, 300L));
+        commitMessages = write.prepareCommit(true, 1);
+        commit.commit(1, commitMessages);
+        refreshDataFileTableQuery(query, commitMessages);
+        value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(value.getLong(0)).isEqualTo(300L);
+        query.withRowFilter(row -> row.getLong(0) < 200L);
+        assertThat(query.lookup(row(1), 0, row(10))).isNull();
+
+        query.withRowFilter(row -> true);
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 300L));
+        commitMessages = write.prepareCommit(true, 2);
+        commit.commit(2, commitMessages);
+        refreshDataFileTableQuery(query, commitMessages);
+        assertThat(query.lookup(row(1), 0, row(10))).isNull();
+
+        query.close();
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testTableQueryDownloadsRemoteLookupFile() throws Exception {
         // Writer persists remote lookup ssts (deletion-vectors off -> "value" processor).
         FileStoreTable table =
@@ -2699,6 +2749,23 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                     msg.partition(),
                     msg.bucket(),
                     Collections.emptyList(),
+                    msg.newFilesIncrement().newFiles());
+            query.refreshFiles(
+                    msg.partition(),
+                    msg.bucket(),
+                    msg.compactIncrement().compactBefore(),
+                    msg.compactIncrement().compactAfter());
+        }
+    }
+
+    private void refreshDataFileTableQuery(
+            DataFileTableQuery query, List<CommitMessage> commitMessages) {
+        for (CommitMessage m : commitMessages) {
+            CommitMessageImpl msg = (CommitMessageImpl) m;
+            query.refreshFiles(
+                    msg.partition(),
+                    msg.bucket(),
+                    msg.newFilesIncrement().deletedFiles(),
                     msg.newFilesIncrement().newFiles());
             query.refreshFiles(
                     msg.partition(),

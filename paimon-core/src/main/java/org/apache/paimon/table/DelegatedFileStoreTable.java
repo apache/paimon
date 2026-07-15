@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -353,6 +354,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public LocalTableQuery newLocalTableQuery() {
         return wrapped.newLocalTableQuery();
+    }
+
+    @Override
+    public DataFileTableQuery newDataFileTableQuery() {
+        return wrapped.newDataFileTableQuery();
     }
 
     @Override

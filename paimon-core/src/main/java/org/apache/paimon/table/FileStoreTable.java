@@ -27,6 +27,7 @@ import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.RowKeyExtractor;
@@ -137,6 +138,8 @@ public interface FileStoreTable extends DataTable {
     TableCommitImpl newCommit(String commitUser);
 
     LocalTableQuery newLocalTableQuery();
+
+    DataFileTableQuery newDataFileTableQuery();
 
     boolean supportStreamingReadOverwrite();
 
