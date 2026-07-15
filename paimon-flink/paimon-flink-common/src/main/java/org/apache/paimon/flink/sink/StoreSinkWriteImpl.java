@@ -48,8 +48,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
-    private final String commitUser;
-    private final StoreSinkWriteState state;
+    protected final String commitUser;
+    protected final StoreSinkWriteState state;
     private final IOManagerImpl paimonIOManager;
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
@@ -57,7 +57,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
 
-    private TableWriteImpl<?> write;
+    protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
