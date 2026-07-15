@@ -219,7 +219,8 @@ public class SortedIndexTopoBuilder {
             String indexColumn,
             String indexType,
             PartitionPredicate partitionPredicate,
-            Options userOptions)
+            Options userOptions,
+            @Nullable String commitUser)
             throws Exception {
         if (buildIndex(
                 env,
@@ -228,7 +229,7 @@ public class SortedIndexTopoBuilder {
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
                 userOptions,
-                null)) {
+                commitUser)) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         }
     }

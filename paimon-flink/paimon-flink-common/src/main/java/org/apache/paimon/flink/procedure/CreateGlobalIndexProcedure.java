@@ -140,7 +140,8 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                         indexColumns.get(0),
                         indexType,
                         partitionPredicate,
-                        userOptions);
+                        userOptions,
+                        null);
                 return new String[] {
                     displayIndexType(indexType)
                             + " global index created successfully for table: "
