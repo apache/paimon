@@ -39,7 +39,8 @@ public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
     @Override
     public VectorRead newVectorRead() {
         if (isPrimaryKeyVectorSearch()) {
-            return new SparkPrimaryKeyVectorRead(table, vectorColumn, vector, limit, options);
+            return new SparkPrimaryKeyVectorRead(
+                    table, vectorColumn, vector, limit, options, filter);
         }
         return new SparkDataEvolutionVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);

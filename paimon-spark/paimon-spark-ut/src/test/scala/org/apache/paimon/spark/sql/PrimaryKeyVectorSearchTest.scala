@@ -290,6 +290,54 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("distributed primary-key vector search applies residual filter before top k") {
+    withTable("T") {
+      createVectorTable(
+        columns = "id INT, payload STRING, embedding ARRAY<FLOAT>",
+        bucket = 4,
+        extraOptions = Seq("global-index.thread-num" -> "2"))
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 'drop', array(1.0f, 0.0f)),
+                  |  (2, 'keep', array(2.0f, 0.0f)),
+                  |  (3, 'keep', array(3.0f, 0.0f)),
+                  |  (4, 'keep', array(4.0f, 0.0f)),
+                  |  (5, 'keep', array(5.0f, 0.0f)),
+                  |  (6, 'keep', array(6.0f, 0.0f)),
+                  |  (7, 'keep', array(7.0f, 0.0f)),
+                  |  (8, 'keep', array(8.0f, 0.0f)),
+                  |  (9, 'keep', array(9.0f, 0.0f)),
+                  |  (10, 'keep', array(10.0f, 0.0f)),
+                  |  (11, 'keep', array(11.0f, 0.0f)),
+                  |  (12, 'keep', array(12.0f, 0.0f)),
+                  |  (13, 'keep', array(13.0f, 0.0f)),
+                  |  (14, 'keep', array(14.0f, 0.0f)),
+                  |  (15, 'keep', array(15.0f, 0.0f)),
+                  |  (16, 'keep', array(16.0f, 0.0f))
+                  |""".stripMargin)
+
+      val jobGroup = s"primary-key-vector-residual-filter-${System.nanoTime()}"
+      spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+      try {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+          val ids = spark
+            .sql("""
+                   |SELECT id
+                   |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                   |WHERE payload = 'keep'
+                   |""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSet
+          assert(ids == Set(2, 3))
+        }
+      } finally {
+        spark.sparkContext.clearJobGroup()
+      }
+      assert(spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).nonEmpty)
+    }
+  }
+
   test("deduplicate updates and deletes primary-key vector results") {
     withTable("T") {
       createVectorTable()
