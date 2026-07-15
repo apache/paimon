@@ -64,6 +64,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests automatic source-backed BTree/Bitmap evaluation in ordinary batch planning. */
@@ -113,6 +115,44 @@ class PrimaryKeySortedIndexBatchScanTest {
         TableScan.Plan result = fixture.scan.plan();
 
         assertThat(result.splits()).singleElement().isInstanceOf(DataSplit.class);
+    }
+
+    @Test
+    void testRejectsNonSplitGlobalIndexResult() {
+        ScanFixture fixture = fixture(reader(2));
+
+        assertThatThrownBy(
+                        () -> fixture.scan.withGlobalIndexResult(GlobalIndexResult.createEmpty()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(GlobalIndexSplitResult.class.getSimpleName());
+    }
+
+    @Test
+    void testPostProcessPlanSkipsIndexWhenGlobalIndexResultExists() {
+        ScanFixture fixture = fixture(reader(2));
+        fixture.scan.withGlobalIndexResult(mock(GlobalIndexSplitResult.class));
+        TableScan.Plan dataPlan =
+                new PlanImpl(
+                        null,
+                        11L,
+                        Collections.<Split>singletonList(dataSplit(11, fixture.dataFile)));
+
+        TableScan.Plan result = fixture.scan.postProcessPlan(dataPlan);
+
+        assertThat(result).isSameAs(dataPlan);
+    }
+
+    @Test
+    void testUnindexedFilterSkipsSortedIndexPlanning() {
+        ScanFixture fixture = fixture(reader(2));
+        Predicate idFilter =
+                new PredicateBuilder(tableSchema(true, 2).logicalRowType()).equal(0, 42);
+        fixture.scan.withFilter(idFilter);
+
+        TableScan.Plan result = fixture.scan.plan();
+
+        assertThat(result.splits()).singleElement().isInstanceOf(DataSplit.class);
+        verify(fixture.scan.snapshotReader, never()).indexFileHandler();
     }
 
     private static TableSchema tableSchema(boolean globalIndexEnabled, int bucket) {
