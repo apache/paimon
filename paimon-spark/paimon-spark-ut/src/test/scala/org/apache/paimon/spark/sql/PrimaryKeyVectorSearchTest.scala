@@ -398,6 +398,65 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("lateral primary-key vector search reads physical positions") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f), array(0.0f, 0.0f)),
+                  |  (2, array(5.0f, 0.0f), array(0.5f, 0.0f))
+                  |""".stripMargin)
+
+      val rows = spark
+        .sql("""
+               |SELECT q.id AS query_id, r.id AS result_id, r._row_id AS row_id,
+               |       r.__paimon_search_score AS score
+               |FROM T AS q,
+               |LATERAL (
+               |  SELECT id, _row_id, __paimon_search_score
+               |  FROM vector_search('T', 'embedding', q.query_embedding, 1)
+               |) AS r
+               |ORDER BY query_id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.length == 2)
+      assert(rows.map(_.getInt(1)).toSeq == Seq(1, 1))
+      assert(rows.map(_.getLong(2)).distinct.length == 1)
+      assert(Math.abs(rows(0).getFloat(3) - 0.5f) < 1e-6)
+      assert(Math.abs(rows(1).getFloat(3) - 0.8f) < 1e-6)
+    }
+  }
+
+  test("lateral primary-key vector search projects physical metadata") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f), array(0.0f, 0.0f)),
+                  |  (2, array(5.0f, 0.0f), array(0.5f, 0.0f))
+                  |""".stripMargin)
+
+      val rows = spark
+        .sql("""
+               |SELECT q.id AS query_id, r._row_id AS row_id,
+               |       r.__paimon_search_score AS score
+               |FROM T AS q,
+               |LATERAL (
+               |  SELECT _row_id, __paimon_search_score
+               |  FROM vector_search('T', 'embedding', q.query_embedding, 1)
+               |) AS r
+               |ORDER BY query_id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.length == 2)
+      assert(rows.map(_.getLong(1)).distinct.length == 1)
+      assert(Math.abs(rows(0).getFloat(2) - 0.5f) < 1e-6)
+      assert(Math.abs(rows(1).getFloat(2) - 0.8f) < 1e-6)
+    }
+  }
+
   private def createVectorTable(
       columns: String = "id INT, embedding ARRAY<FLOAT>",
       primaryKey: String = "id",

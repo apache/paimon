@@ -176,6 +176,61 @@ class PkVectorAnnSegmentFileTest {
     }
 
     @Test
+    void testBatchSearchPreservesQueryOrderAndMapsPhysicalPositions() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = annFile(fileIO);
+        IndexFileMeta segment =
+                annFile.build(
+                        Arrays.asList(
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("data-1", 2),
+                                        new ArrayReader(new float[][] {{5, 0}, {10, 0}})),
+                                new PkVectorAnnSegmentFile.Source(
+                                        dataFile("data-2", 2),
+                                        new ArrayReader(new float[][] {{0, 0}, {2, 0}}))),
+                        vectorField(),
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann");
+        PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
+        BitmapDeletionVector data2Deletes = new BitmapDeletionVector();
+        data2Deletes.delete(0);
+        Map<String, org.apache.paimon.deletionvectors.DeletionVector> deletionVectors =
+                new HashMap<>();
+        deletionVectors.put("data-2", data2Deletes);
+        Map<String, List<Range>> rowRangesByFile = new HashMap<>();
+        rowRangesByFile.put("data-1", Collections.singletonList(new Range(1, 1)));
+        rowRangesByFile.put("data-2", Collections.singletonList(new Range(1, 1)));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        List<List<PkVectorSearchResult>> results;
+        try {
+            results =
+                    new PkVectorAnnSegmentSearcher(
+                                    fileIO, annFile, vectorField(), indexOptions(), "l2", executor)
+                            .searchBatch(
+                                    segment,
+                                    sourceMeta,
+                                    new float[][] {{0, 0}, {10, 0}},
+                                    1,
+                                    deletionVectors,
+                                    new HashSet<>(Arrays.asList("data-1", "data-2")),
+                                    rowRangesByFile,
+                                    Collections.emptyMap());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0))
+                .extracting(PkVectorSearchResult::dataFileName, PkVectorSearchResult::rowPosition)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("data-2", 1L));
+        assertThat(results.get(1))
+                .extracting(PkVectorSearchResult::dataFileName, PkVectorSearchResult::rowPosition)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("data-1", 1L));
+    }
+
+    @Test
     void testSearchFiltersInactiveSources() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = annFile(fileIO);
