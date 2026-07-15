@@ -99,6 +99,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         private final Path tempPath;
         private final Path targetPath;
+        private boolean committed;
 
         private TempFileCommitter(Path tempPath, Path targetPath) {
             this.tempPath = tempPath;
@@ -117,11 +118,12 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
             if (fileIO.exists(tempPath)) {
                 fileIO.deleteQuietly(tempPath);
             }
+            committed = true;
         }
 
         @Override
         public void discard(FileIO fileIO) throws IOException {
-            if (fileIO.exists(targetPath)) {
+            if (committed && fileIO.exists(targetPath)) {
                 fileIO.deleteQuietly(targetPath);
             }
             if (fileIO.exists(tempPath)) {

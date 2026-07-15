@@ -151,9 +151,12 @@ public class FullHistoryCloneMarkerTest {
 
         assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.SUCCESS_FILE_NAME)))
                 .isFalse();
+        assertThat(FullHistoryCloneMarker.isSuccessful(fileIO, plan, mapping, null, null))
+                .isFalse();
         FullHistoryCloneMarker.markSuccessful(fileIO, plan, mapping, null, null);
         assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.SUCCESS_FILE_NAME)))
                 .isTrue();
+        assertThat(FullHistoryCloneMarker.isSuccessful(fileIO, plan, mapping, null, null)).isTrue();
 
         assertThatThrownBy(
                         () ->

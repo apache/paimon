@@ -38,6 +38,8 @@ target table will be append table.
 Full-history clone physically copies a complete Paimon table to mapped storage paths. It preserves
 all retained schemas, snapshots, tags, branches, long-lived changelogs, data files, extra files, and
 indexes. It does not create or register a table in the target catalog.
+The source catalog must expose the complete retained history through Paimon's filesystem metadata
+layout.
 
 Stop writes to the source table for the entire initial run and any retry. The action checks a source
 metadata fingerprint and fails if the retained metadata roots change.
@@ -59,12 +61,14 @@ clone \
 
 Every reachable source path must match one `path_mapping`. The mapped source table root is the
 physical target root. `target_database` and `target_table` are optional logical identifiers and do
-not change that path or register the table.
+not change that path or register the table. Mapping and source paths must use the same explicit
+filesystem scheme; for example, `file:/path` does not match `/path`.
 
 The target root must initially be absent or empty. A failed clone may be resumed with
 `--clone_if_exists true`; existing same-size files are skipped and conflicting sizes fail. Resume is
 accepted only when the ownership marker matches and `_SUCCESS` is absent. A completed clone cannot
-be resumed.
+be resumed. Run at most one full-history clone job for a target root at a time; `clone_if_exists`
+is a failed-job resume protocol, not a concurrent execution protocol.
 
 Mapped external-data and external-index target locations must be dedicated to this clone and must
 not be changed while the initial run or a retry is active. Payload files are published through

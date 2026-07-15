@@ -94,16 +94,30 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
         FullHistorySourceFingerprint.verify(sourceTable, expectedFingerprint);
         new FullHistoryPayloadFileVisitor(sourceTable)
                 .visit(
-                        (source, kind, expectedSize) ->
+                        (source, kind, expectedSize, mappingAnchor) ->
                                 collector.collect(
-                                        createCopy(sourceFileIO, source, kind, expectedSize)));
+                                        createCopy(
+                                                sourceFileIO,
+                                                source,
+                                                kind,
+                                                expectedSize,
+                                                mappingAnchor)));
         FullHistorySourceFingerprint.verify(sourceTable, expectedFingerprint);
     }
 
     private FullHistoryCopyPlan.FileCopy createCopy(
-            FileIO sourceFileIO, Path source, FullHistoryCopyPlan.FileKind kind, long expectedSize)
+            FileIO sourceFileIO,
+            Path source,
+            FullHistoryCopyPlan.FileKind kind,
+            long expectedSize,
+            Path mappingAnchor)
             throws IOException {
-        Path target = new Path(pathMapping.rewriteRequired(source.toString()));
+        Path target =
+                new Path(
+                        mappingAnchor == null
+                                ? pathMapping.rewriteRequired(source.toString())
+                                : pathMapping.rewriteRequiredUnder(
+                                        source.toString(), mappingAnchor.toString()));
         checkArgument(
                 !source.equals(target),
                 "Source and target file paths must be different: %s",

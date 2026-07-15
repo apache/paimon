@@ -43,19 +43,25 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_FIELD;
-import static org.apache.paimon.CoreOptions.BLOB_VIEW_FIELD;
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
+import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
@@ -103,8 +109,13 @@ public class FullHistoryMetadataRewriter {
         SchemaManager sourceSchemaManager = sourceBranchTable.schemaManager();
         SchemaManager targetSchemaManager = new SchemaManager(targetFileIO, targetRoot, branch);
         for (TableSchema sourceSchema : sourceSchemaManager.listAll()) {
-            validateBlobOptions(sourceSchema);
-            TableSchema targetSchema = sourceSchema.copy(rewriteOptions(sourceSchema.options()));
+            FullHistoryClonePlanner.validateSupportedSchema(sourceSchema);
+            TableSchema targetSchema =
+                    sourceSchema.copy(
+                            rewriteOptions(
+                                    sourceSchema.options(),
+                                    pathMapping,
+                                    sourceBranchTable.location()));
             if (targetSchemaManager.schemaExists(targetSchema.id())) {
                 checkState(
                         Objects.equals(targetSchemaManager.schema(targetSchema.id()), targetSchema),
@@ -121,40 +132,120 @@ public class FullHistoryMetadataRewriter {
         }
     }
 
-    private void validateBlobOptions(TableSchema schema) {
-        CoreOptions options = CoreOptions.fromMap(schema.options());
-        checkArgument(
-                options.blobDescriptorField().isEmpty(),
-                "Full-history clone does not support %s because its URI is stored inside data files.",
-                BLOB_DESCRIPTOR_FIELD.key());
-        checkArgument(
-                options.blobViewField().isEmpty(),
-                "Full-history clone does not support %s because it references another table.",
-                BLOB_VIEW_FIELD.key());
+    static Map<String, String> rewriteOptions(
+            Map<String, String> sourceOptions, PathMapping pathMapping) {
+        String path = sourceOptions.get(PATH.key());
+        return rewriteOptions(sourceOptions, pathMapping, path == null ? null : new Path(path));
     }
 
-    private Map<String, String> rewriteOptions(Map<String, String> sourceOptions) {
+    static Map<String, String> rewriteOptions(
+            Map<String, String> sourceOptions,
+            PathMapping pathMapping,
+            @Nullable Path sourceTableRoot) {
         Map<String, String> targetOptions = new HashMap<>(sourceOptions);
-        rewritePathOption(targetOptions, PATH.key());
-        rewritePathOption(targetOptions, GLOBAL_INDEX_EXTERNAL_PATH.key());
+        rewritePathOption(targetOptions, PATH.key(), pathMapping);
+        rewritePathOption(targetOptions, GLOBAL_INDEX_EXTERNAL_PATH.key(), pathMapping);
+        rewriteDataFilePathDirectory(sourceOptions, targetOptions, pathMapping, sourceTableRoot);
 
         String externalPaths = targetOptions.get(DATA_FILE_EXTERNAL_PATHS.key());
         if (externalPaths != null) {
-            targetOptions.put(
-                    DATA_FILE_EXTERNAL_PATHS.key(),
+            List<String> sourcePaths =
                     Arrays.stream(externalPaths.split(","))
                             .map(String::trim)
+                            .collect(Collectors.toList());
+            List<String> targetPaths =
+                    sourcePaths.stream()
                             .map(pathMapping::rewriteRequired)
-                            .collect(Collectors.joining(",")));
+                            .collect(Collectors.toList());
+            targetOptions.put(DATA_FILE_EXTERNAL_PATHS.key(), String.join(",", targetPaths));
+            rewriteSpecificFileSystem(sourceOptions, targetOptions, sourcePaths, targetPaths);
         }
         return targetOptions;
     }
 
-    private void rewritePathOption(Map<String, String> options, String key) {
+    private static void rewriteSpecificFileSystem(
+            Map<String, String> sourceOptions,
+            Map<String, String> targetOptions,
+            List<String> sourcePaths,
+            List<String> targetPaths) {
+        CoreOptions sourceCoreOptions = CoreOptions.fromMap(sourceOptions);
+        if (sourceCoreOptions.externalPathStrategy()
+                != CoreOptions.ExternalPathStrategy.SPECIFIC_FS) {
+            return;
+        }
+
+        String sourceSpecificFileSystem = sourceCoreOptions.externalSpecificFS();
+        checkArgument(
+                sourceSpecificFileSystem != null,
+                "%s must be set when %s is specific-fs.",
+                DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(),
+                DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
+        Set<String> targetSchemes = new HashSet<>();
+        for (int i = 0; i < sourcePaths.size(); i++) {
+            String sourceScheme = new Path(sourcePaths.get(i)).toUri().getScheme();
+            if (sourceSpecificFileSystem.equalsIgnoreCase(sourceScheme)) {
+                String targetScheme = new Path(targetPaths.get(i)).toUri().getScheme();
+                checkArgument(
+                        targetScheme != null,
+                        "Mapped external path must have a scheme: %s",
+                        targetPaths.get(i));
+                targetSchemes.add(targetScheme.toLowerCase(Locale.ROOT));
+            }
+        }
+        checkArgument(
+                targetSchemes.size() == 1,
+                "External paths selected by %s=%s must map to exactly one target file system, but found %s.",
+                DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(),
+                sourceSpecificFileSystem,
+                targetSchemes);
+        String targetSpecificFileSystem = targetSchemes.iterator().next();
+        for (int i = 0; i < sourcePaths.size(); i++) {
+            String sourceScheme = new Path(sourcePaths.get(i)).toUri().getScheme();
+            String targetScheme = new Path(targetPaths.get(i)).toUri().getScheme();
+            if (!sourceSpecificFileSystem.equalsIgnoreCase(sourceScheme)) {
+                checkArgument(
+                        !targetSpecificFileSystem.equalsIgnoreCase(targetScheme),
+                        "Mapping external path at index %s to %s would select additional external paths for %s.",
+                        i,
+                        targetSpecificFileSystem,
+                        DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key());
+            }
+        }
+        targetOptions.put(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), targetSpecificFileSystem);
+    }
+
+    private static void rewritePathOption(
+            Map<String, String> options, String key, PathMapping pathMapping) {
         String path = options.get(key);
         if (path != null) {
             options.put(key, pathMapping.rewriteRequired(path));
         }
+    }
+
+    private static void rewriteDataFilePathDirectory(
+            Map<String, String> sourceOptions,
+            Map<String, String> targetOptions,
+            PathMapping pathMapping,
+            @Nullable Path sourceTableRoot) {
+        String path = sourceOptions.get(DATA_FILE_PATH_DIRECTORY.key());
+        if (path != null && isAbsolutePath(path)) {
+            Path sourcePath = new Path(path);
+            if (sourcePath.toUri().getScheme() == null) {
+                checkArgument(
+                        sourceTableRoot != null,
+                        "The source table root is required to resolve %s.",
+                        DATA_FILE_PATH_DIRECTORY.key());
+                sourcePath = new Path(sourceTableRoot, sourcePath);
+            }
+            targetOptions.put(
+                    DATA_FILE_PATH_DIRECTORY.key(),
+                    pathMapping.rewriteRequired(sourcePath.toString()));
+        }
+    }
+
+    private static boolean isAbsolutePath(String path) {
+        java.net.URI uri = new Path(path).toUri();
+        return uri.getScheme() != null || uri.getPath().startsWith("/");
     }
 
     private static class BranchRewriter {
@@ -209,44 +300,24 @@ public class FullHistoryMetadataRewriter {
             for (Pair<Tag, String> tagAndName : source.tagManager().tagObjects()) {
                 Tag sourceTag = tagAndName.getLeft();
                 Snapshot rewritten = rewriteSnapshot(sourceTag);
-                LocalDateTime createTime =
-                        sourceTag.getTagCreateTime() == null
-                                ? DateTimeUtils.toLocalDateTime(
-                                        source.fileIO()
-                                                .getFileStatus(
-                                                        source.tagManager()
-                                                                .tagPath(tagAndName.getRight()))
-                                                .getModificationTime())
-                                : sourceTag.getTagCreateTime();
-                Tag targetTag =
-                        new Tag(
-                                rewritten.version(),
-                                rewritten.id(),
-                                rewritten.schemaId(),
-                                rewritten.baseManifestList(),
-                                rewritten.baseManifestListSize(),
-                                rewritten.deltaManifestList(),
-                                rewritten.deltaManifestListSize(),
-                                rewritten.changelogManifestList(),
-                                rewritten.changelogManifestListSize(),
-                                rewritten.indexManifest(),
-                                rewritten.commitUser(),
-                                rewritten.commitIdentifier(),
-                                rewritten.commitKind(),
-                                rewritten.timeMillis(),
-                                rewritten.totalRecordCount(),
-                                rewritten.deltaRecordCount(),
-                                rewritten.changelogRecordCount(),
-                                rewritten.watermark(),
-                                rewritten.statistics(),
-                                rewritten.properties(),
-                                rewritten.nextRowId(),
-                                rewritten.operation(),
-                                createTime,
-                                sourceTag.getTagTimeRetained());
+                String content = rewritten.toJson();
+                if (sourceTag.getTagTimeRetained() != null) {
+                    LocalDateTime createTime =
+                            sourceTag.getTagCreateTime() == null
+                                    ? DateTimeUtils.toLocalDateTime(
+                                            source.fileIO()
+                                                    .getFileStatus(
+                                                            source.tagManager()
+                                                                    .tagPath(tagAndName.getRight()))
+                                                    .getModificationTime())
+                                    : sourceTag.getTagCreateTime();
+                    content =
+                            Tag.fromSnapshotAndTagTtl(
+                                            rewritten, sourceTag.getTagTimeRetained(), createTime)
+                                    .toJson();
+                }
                 target.fileIO()
-                        .overwriteFileUtf8(
-                                targetManager.tagPath(tagAndName.getRight()), targetTag.toJson());
+                        .overwriteFileUtf8(targetManager.tagPath(tagAndName.getRight()), content);
             }
         }
 

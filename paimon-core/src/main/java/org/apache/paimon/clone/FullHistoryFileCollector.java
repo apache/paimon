@@ -54,11 +54,11 @@ public class FullHistoryFileCollector {
         }
         new FullHistoryPayloadFileVisitor(table)
                 .visit(
-                        (path, kind, size) -> {
+                        (path, kind, size, mappingAnchor) -> {
                             if (kind == FullHistoryCopyPlan.FileKind.DATA) {
-                                builder.addDataFile(path);
+                                builder.addDataFile(path, mappingAnchor);
                             } else if (kind == FullHistoryCopyPlan.FileKind.INDEX) {
-                                builder.addIndexFile(path);
+                                builder.addIndexFile(path, mappingAnchor);
                             }
                         });
         return builder.build();
