@@ -26,7 +26,6 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -61,10 +60,19 @@ public class ManagedBlobReferenceFile {
 
     public static void write(FileIO fileIO, Path path, List<Reference> references)
             throws IOException {
-        List<Reference> normalized = new ArrayList<>(new HashSet<>(references));
+        List<Reference> normalized = new ArrayList<>(references);
         normalized.sort(
                 Comparator.comparing(Reference::storageRootId)
                         .thenComparing(Reference::relativePath));
+        int uniqueCount = 0;
+        for (Reference reference : normalized) {
+            if (uniqueCount == 0 || !reference.equals(normalized.get(uniqueCount - 1))) {
+                normalized.set(uniqueCount++, reference);
+            }
+        }
+        if (uniqueCount < normalized.size()) {
+            normalized.subList(uniqueCount, normalized.size()).clear();
+        }
 
         try (DataOutputStream out = new DataOutputStream(fileIO.newOutputStream(path, false))) {
             out.writeInt(MAGIC);

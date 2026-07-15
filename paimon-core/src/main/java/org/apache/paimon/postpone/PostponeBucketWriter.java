@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -54,8 +55,6 @@ import java.util.List;
 /** {@link RecordWriter} for {@code bucket = -2} tables. */
 public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
-    private final FileIO fileIO;
-    private final DataFilePathFactory pathFactory;
     private final MergeFunction<KeyValue> mergeFunction;
     private final KeyValueFileWriterFactory writerFactory;
     private final List<DataFileMeta> files;
@@ -84,8 +83,6 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
         this.mergeFunction = mergeFunction;
         this.writerFactory = writerFactory;
         this.fileRead = fileRead;
-        this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
         this.spillCompression = spillCompression;
         this.maxDiskSize = maxDiskSize;
         this.files = new ArrayList<>();
@@ -104,11 +101,22 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     @Override
     public void write(KeyValue record) throws Exception {
-        validateRetract(record);
-        boolean success = sinkWriter.write(record);
+        InternalRow value = writerFactory.externalizeBlob(record.valueKind(), record.value());
+        KeyValue externalizedRecord =
+                value == record.value()
+                        ? record
+                        : new KeyValue()
+                                .replace(
+                                        record.key(),
+                                        record.sequenceNumber(),
+                                        record.valueKind(),
+                                        value)
+                                .setLevel(record.level());
+        validateRetract(externalizedRecord);
+        boolean success = sinkWriter.write(externalizedRecord);
         if (!success) {
             flush();
-            success = sinkWriter.write(record);
+            success = sinkWriter.write(externalizedRecord);
             if (!success) {
                 // Should not get here, because writeBuffer will throw too big exception out.
                 // But we throw again in case of something unexpected happens. (like someone changed
@@ -205,7 +213,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
             } finally {
                 // remove small files
                 for (DataFileMeta file : files) {
-                    fileIO.deleteQuietly(pathFactory.toPath(file));
+                    writerFactory.deleteFile(file);
                 }
             }
         }
@@ -214,6 +222,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flush();
+        writerFactory.prepareCommit();
         List<DataFileMeta> result = new ArrayList<>(files);
         files.clear();
         return new CommitIncrement(
@@ -237,6 +246,10 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     @Override
     public void close() throws Exception {
-        sinkWriter.close();
+        try {
+            writerFactory.abortManagedBlobWrites();
+        } finally {
+            sinkWriter.close();
+        }
     }
 }

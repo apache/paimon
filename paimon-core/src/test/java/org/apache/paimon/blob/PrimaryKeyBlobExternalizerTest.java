@@ -26,6 +26,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.DataTypes;
@@ -35,8 +37,10 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,6 +49,49 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PrimaryKeyBlobExternalizerTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    void testClosesPackStreamWhenFlushFails() throws Exception {
+        AtomicBoolean closed = new AtomicBoolean();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                            throws IOException {
+                        return new PositionOutputStreamWrapper(
+                                super.newOutputStream(path, overwrite)) {
+                            @Override
+                            public void flush() throws IOException {
+                                throw new IOException("flush failure");
+                            }
+
+                            @Override
+                            public void close() throws IOException {
+                                closed.set(true);
+                                super.close();
+                            }
+                        };
+                    }
+                };
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                new PrimaryKeyBlobExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.BLOB()),
+                        Collections.singleton("f0"),
+                        pathFactory,
+                        1024L);
+        externalizer.externalize(RowKind.INSERT, GenericRow.of(Blob.fromData(new byte[] {1})));
+
+        assertThatThrownBy(externalizer::prepareCommit)
+                .isInstanceOf(IOException.class)
+                .hasMessage("flush failure");
+        assertThat(closed).isTrue();
+    }
 
     @Test
     void testRejectsNonBlobManagedField() throws Exception {

@@ -279,10 +279,10 @@ public class PrimaryKeyBlobExternalizer {
             if (writer == null) {
                 return;
             }
-            try {
+            PositionOutputStream currentOut = out;
+            try (PositionOutputStream ignored = currentOut) {
                 writer.close();
-                out.flush();
-                out.close();
+                currentOut.flush();
             } finally {
                 writer = null;
                 out = null;

@@ -27,6 +27,7 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -35,10 +36,12 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
@@ -83,6 +86,96 @@ class PrimaryKeyManagedBlobStoreTest {
         KeyValue read =
                 store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()).get(0);
         assertThat(read.value().getBlob(1).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testPostponeBucketExternalizesBlobArray() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store =
+                createStore(
+                        fileIO,
+                        "payloads",
+                        DataTypes.ARRAY(DataTypes.BLOB()),
+                        BucketMode.POSTPONE_BUCKET);
+        byte[] expected = "postpone-bucket-blob-array".getBytes(StandardCharsets.UTF_8);
+        KeyValue keyValue =
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                RowKind.INSERT,
+                                GenericRow.of(
+                                        1,
+                                        new GenericArray(new Object[] {Blob.fromData(expected)})));
+
+        store.commitData(
+                Collections.singletonList(keyValue),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> BucketMode.POSTPONE_BUCKET);
+
+        ManifestEntry entry = store.newScan().plan().files().get(0);
+        assertThat(entry.bucket()).isEqualTo(BucketMode.POSTPONE_BUCKET);
+        assertThat(references(fileIO, store, entry)).hasSize(1);
+        KeyValue read =
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()).get(0);
+        assertThat(read.value().getArray(1).getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testPostponeBucketBufferedRewriteKeepsManagedBlobReferences() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store =
+                createStore(fileIO, "payload", DataTypes.BLOB(), BucketMode.POSTPONE_BUCKET);
+        AbstractFileStoreWrite<KeyValue> write = store.newWrite();
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("io").toString())) {
+            try {
+                write.withIOManager(ioManager);
+                write.write(
+                        BinaryRow.EMPTY_ROW,
+                        BucketMode.POSTPONE_BUCKET,
+                        keyValue(
+                                1,
+                                RowKind.INSERT,
+                                "before-buffered-rewrite".getBytes(StandardCharsets.UTF_8)));
+                PostponeBucketWriter writer =
+                        (PostponeBucketWriter)
+                                write.getWriterWrapper(
+                                                BinaryRow.EMPTY_ROW, BucketMode.POSTPONE_BUCKET)
+                                        .writer;
+                writer.toBufferedWriter();
+
+                assertThat(writer.useBufferedSinkWriter()).isTrue();
+                Path bucketPath =
+                        store.pathFactory()
+                                .bucketPath(BinaryRow.EMPTY_ROW, BucketMode.POSTPONE_BUCKET);
+                assertThat(fileIO.listStatus(bucketPath))
+                        .extracting(status -> status.getPath().getName())
+                        .allMatch(
+                                name ->
+                                        name.endsWith(
+                                                ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX));
+
+                write.write(
+                        BinaryRow.EMPTY_ROW,
+                        BucketMode.POSTPONE_BUCKET,
+                        keyValue(
+                                2,
+                                RowKind.INSERT,
+                                "after-buffered-rewrite".getBytes(StandardCharsets.UTF_8)));
+                List<CommitMessage> messages = write.prepareCommit(false, 1L);
+                try (FileStoreCommit commit = store.newCommit()) {
+                    commit.commit(new ManifestCommittable(1L, null, messages), false);
+                }
+            } finally {
+                write.close();
+            }
+        }
+
+        ManifestEntry entry = store.newScan().plan().files().get(0);
+        assertThat(references(fileIO, store, entry)).hasSize(2);
+        assertThat(store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()))
+                .extracting(
+                        kv -> new String(kv.value().getBlob(1).toData(), StandardCharsets.UTF_8))
+                .containsExactlyInAnyOrder("before-buffered-rewrite", "after-buffered-rewrite");
     }
 
     @Test
@@ -213,6 +306,11 @@ class PrimaryKeyManagedBlobStoreTest {
 
     private TestFileStore createStore(FileIO fileIO, String payloadName, DataType payloadType)
             throws Exception {
+        return createStore(fileIO, payloadName, payloadType, 1);
+    }
+
+    private TestFileStore createStore(
+            FileIO fileIO, String payloadName, DataType payloadType, int bucket) throws Exception {
         Path tablePath = new Path(tempDir.toUri());
         List<DataField> valueFields =
                 Arrays.asList(
@@ -227,7 +325,7 @@ class PrimaryKeyManagedBlobStoreTest {
                                         SpecialFields.KEY_FIELD_PREFIX + "id",
                                         DataTypes.INT())));
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.BUCKET.key(), String.valueOf(bucket));
         options.put(CoreOptions.BLOB_FIELD.key(), payloadName);
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
         TableSchema schema =
@@ -256,7 +354,7 @@ class PrimaryKeyManagedBlobStoreTest {
         return new TestFileStore.Builder(
                         "avro",
                         tempDir.toString(),
-                        1,
+                        bucket,
                         RowType.of(),
                         keyType,
                         valueType,
