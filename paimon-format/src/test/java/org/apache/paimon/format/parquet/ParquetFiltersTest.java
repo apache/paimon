@@ -32,18 +32,36 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.parquet.bytes.BytesInput;
+import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.EncodingStats;
+import org.apache.parquet.column.page.DictionaryPage;
+import org.apache.parquet.column.page.DictionaryPageReadStore;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.compat.FilterCompat.FilterPredicateCompat;
+import org.apache.parquet.filter2.dictionarylevel.DictionaryFilter;
 import org.apache.parquet.filter2.predicate.FilterApi;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.filter2.predicate.ParquetFilters;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.apache.parquet.schema.Types;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -327,7 +345,8 @@ class ParquetFiltersTest {
     @Test
     public void testDecimalBinary() {
         // precision > 18 uses Binary
-        int precision = 20;
+        int fieldPrecision = 20;
+        int literalPrecision = 8;
         int scale = 0;
         PredicateBuilder builder =
                 new PredicateBuilder(
@@ -336,13 +355,15 @@ class ParquetFiltersTest {
                                         new DataField(
                                                 0,
                                                 "decimal1",
-                                                new DecimalType(precision, scale)))));
+                                                new DecimalType(fieldPrecision, scale)))));
 
-        Decimal positive = Decimal.fromBigDecimal(new BigDecimal("10000939"), precision, scale);
+        Decimal positive =
+                Decimal.fromBigDecimal(new BigDecimal("10000939"), literalPrecision, scale);
         Binary expectedPositive =
                 Binary.fromConstantByteArray(
                         new byte[] {0, 0, 0, 0, 0, 0, (byte) 0x98, (byte) 0x9A, 0x2B});
-        Decimal negative = Decimal.fromBigDecimal(new BigDecimal("-10000939"), precision, scale);
+        Decimal negative =
+                Decimal.fromBigDecimal(new BigDecimal("-10000939"), literalPrecision, scale);
         Binary expectedNegative =
                 Binary.fromConstantByteArray(
                         new byte[] {
@@ -379,6 +400,196 @@ class ParquetFiltersTest {
                 builder.equal(0, negative),
                 FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedNegative),
                 true);
+
+        Decimal fullWidth =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("99999999999999999999"), fieldPrecision, scale);
+        assertThat(fullWidth.toUnscaledBytes()).hasSize(9);
+        test(
+                builder.equal(0, fullWidth),
+                FilterApi.eq(
+                        FilterApi.binaryColumn("decimal1"),
+                        Binary.fromConstantByteArray(fullWidth.toUnscaledBytes())),
+                true);
+    }
+
+    @Test
+    public void testDecimalBinaryMaxPrecision() {
+        int precision = 38;
+        int scale = 10;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+        Decimal value =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("12345678901234567890.1234567890"), precision, scale);
+        Binary expected =
+                Binary.fromConstantByteArray(
+                        new byte[] {
+                            0,
+                            0,
+                            0,
+                            1,
+                            (byte) 0x8E,
+                            (byte) 0xE9,
+                            0x0F,
+                            (byte) 0xF6,
+                            (byte) 0xC3,
+                            0x73,
+                            (byte) 0xE0,
+                            (byte) 0xEE,
+                            0x4E,
+                            0x3F,
+                            0x0A,
+                            (byte) 0xD2
+                        });
+
+        test(
+                builder.equal(0, value),
+                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expected),
+                true);
+    }
+
+    @Test
+    public void testInFilterDecimalBinary() {
+        int fieldPrecision = 20;
+        int scale = 0;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(fieldPrecision, scale)))));
+
+        List<Object> literals =
+                IntStream.rangeClosed(1, 21)
+                        .mapToObj(
+                                value ->
+                                        (Object)
+                                                Decimal.fromBigDecimal(
+                                                        BigDecimal.valueOf(value),
+                                                        fieldPrecision,
+                                                        scale))
+                        .collect(Collectors.toList());
+        Set<Binary> expected =
+                IntStream.rangeClosed(1, 21)
+                        .mapToObj(
+                                value -> {
+                                    byte[] bytes = new byte[9];
+                                    bytes[8] = (byte) value;
+                                    return Binary.fromConstantByteArray(bytes);
+                                })
+                        .collect(Collectors.toSet());
+
+        test(
+                builder.in(0, literals),
+                FilterApi.in(FilterApi.binaryColumn("decimal1"), expected),
+                true);
+        test(
+                builder.notIn(0, literals),
+                FilterApi.notIn(FilterApi.binaryColumn("decimal1"), expected),
+                true);
+    }
+
+    @Test
+    public void testDecimalDictionaryFilter() {
+        int fieldPrecision = 20;
+        int scale = 0;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(fieldPrecision, scale)))));
+        Decimal positive =
+                Decimal.fromBigDecimal(new BigDecimal("10000939"), fieldPrecision, scale);
+        Decimal negative =
+                Decimal.fromBigDecimal(new BigDecimal("-10000939"), fieldPrecision, scale);
+        Decimal missing = Decimal.fromBigDecimal(new BigDecimal("10000940"), fieldPrecision, scale);
+
+        byte[] positiveBytes = new byte[] {0, 0, 0, 0, 0, 0, (byte) 0x98, (byte) 0x9A, 0x2B};
+        byte[] negativeBytes =
+                new byte[] {
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    0x67,
+                    0x65,
+                    (byte) 0xD5
+                };
+        DictionaryPage dictionaryPage =
+                new DictionaryPage(
+                        BytesInput.concat(
+                                BytesInput.from(positiveBytes), BytesInput.from(negativeBytes)),
+                        2,
+                        Encoding.PLAIN);
+        DictionaryPageReadStore dictionaries =
+                new DictionaryPageReadStore() {
+                    @Override
+                    public DictionaryPage readDictionaryPage(ColumnDescriptor descriptor) {
+                        return dictionaryPage;
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+
+        PrimitiveType primitiveType =
+                Types.required(PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY)
+                        .length(9)
+                        .as(LogicalTypeAnnotation.decimalType(scale, fieldPrecision))
+                        .named("decimal1");
+        EncodingStats encodingStats =
+                new EncodingStats.Builder()
+                        .addDictEncoding(Encoding.PLAIN)
+                        .addDataEncoding(Encoding.RLE_DICTIONARY)
+                        .build();
+        Set<Encoding> encodings =
+                new HashSet<>(Arrays.asList(Encoding.PLAIN, Encoding.RLE_DICTIONARY, Encoding.RLE));
+        ColumnChunkMetaData metadata =
+                ColumnChunkMetaData.get(
+                        ColumnPath.get("decimal1"),
+                        primitiveType,
+                        CompressionCodecName.UNCOMPRESSED,
+                        encodingStats,
+                        encodings,
+                        null,
+                        0,
+                        0,
+                        2,
+                        0,
+                        0);
+
+        assertThat(
+                        DictionaryFilter.canDrop(
+                                convert(builder.equal(0, positive)),
+                                Collections.singletonList(metadata),
+                                dictionaries))
+                .isFalse();
+        assertThat(
+                        DictionaryFilter.canDrop(
+                                convert(builder.equal(0, negative)),
+                                Collections.singletonList(metadata),
+                                dictionaries))
+                .isFalse();
+        assertThat(
+                        DictionaryFilter.canDrop(
+                                convert(builder.equal(0, missing)),
+                                Collections.singletonList(metadata),
+                                dictionaries))
+                .isTrue();
     }
 
     @Test
@@ -641,6 +852,11 @@ class ParquetFiltersTest {
         } else {
             assertThat(filter).isEqualTo(FilterCompat.NOOP);
         }
+    }
+
+    private FilterPredicate convert(Predicate predicate) {
+        FilterCompat.Filter filter = ParquetFilters.convert(PredicateBuilder.splitAnd(predicate));
+        return ((FilterPredicateCompat) filter).getFilterPredicate();
     }
 
     private void test(Predicate predicate, String expected, boolean canPushDown) {
