@@ -38,6 +38,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.function.LongPredicate;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -115,18 +118,36 @@ public class PrimaryKeyVectorBucketSearch {
             int indexedLimit,
             int exactLimit)
             throws IOException {
+        return join(
+                searchAsync(
+                        state,
+                        activeFiles,
+                        deletionVectors,
+                        rowRangesByFile,
+                        query,
+                        indexedLimit,
+                        exactLimit,
+                        Runnable::run));
+    }
+
+    public CompletableFuture<Result> searchAsync(
+            PkVectorBucketIndexState state,
+            List<DataFileMeta> activeFiles,
+            Map<String, DeletionVector> deletionVectors,
+            Map<String, List<Range>> rowRangesByFile,
+            float[] query,
+            int indexedLimit,
+            int exactLimit,
+            Executor executor) {
         checkArgument(indexedLimit > 0, "Vector indexed search limit must be positive.");
         checkArgument(exactLimit > 0, "Vector exact search limit must be positive.");
         Map<String, DataFileMeta> filesByName = new HashMap<>();
         for (DataFileMeta file : activeFiles) {
             checkArgument(filesByName.put(file.fileName(), file) == null, "Duplicate data file.");
         }
-        PriorityQueue<PkVectorSearchResult> indexedNearest =
-                new PriorityQueue<>(indexedLimit, BEST_FIRST.reversed());
-        PriorityQueue<PkVectorSearchResult> exactNearest =
-                new PriorityQueue<>(exactLimit, BEST_FIRST.reversed());
         Set<String> activeSourceFiles = new HashSet<>(filesByName.keySet());
         Set<String> covered = new HashSet<>();
+        List<CompletableFuture<List<PkVectorSearchResult>>> indexedFutures = new ArrayList<>();
         for (IndexFileMeta ann : state.annSegments()) {
             PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(ann);
             for (PrimaryKeyIndexSourceFile source : sourceMeta.sourceFiles()) {
@@ -141,30 +162,19 @@ public class PrimaryKeyVectorBucketSearch {
                 covered.add(source.fileName());
             }
             checkArgument(annSearcher != null, "ANN search is not configured.");
-            List<PkVectorSearchResult> annResults =
-                    rowRangesByFile.isEmpty()
-                            ? annSearcher.search(
-                                    ann,
-                                    sourceMeta,
-                                    query,
-                                    indexedLimit,
-                                    deletionVectors,
-                                    activeSourceFiles,
-                                    searchOptions)
-                            : annSearcher.search(
-                                    ann,
-                                    sourceMeta,
-                                    query,
-                                    indexedLimit,
-                                    deletionVectors,
-                                    activeSourceFiles,
-                                    rowRangesByFile,
-                                    searchOptions);
-            for (PkVectorSearchResult result : annResults) {
-                add(indexedNearest, result, indexedLimit);
-            }
+            indexedFutures.add(
+                    annSearcher.searchAsync(
+                            ann,
+                            sourceMeta,
+                            query,
+                            indexedLimit,
+                            deletionVectors,
+                            activeSourceFiles,
+                            rowRangesByFile,
+                            searchOptions));
         }
 
+        List<CompletableFuture<List<PkVectorSearchResult>>> exactFutures = new ArrayList<>();
         if (searchMode != GlobalIndexSearchMode.FAST) {
             for (DataFileMeta file : activeFiles) {
                 if (covered.contains(file.fileName())) {
@@ -179,16 +189,56 @@ public class PrimaryKeyVectorBucketSearch {
                         position ->
                                 (dv != null && dv.isDeleted(position))
                                         || (rowRanges != null && !contains(rowRanges, position));
-                try (PkVectorReader reader = vectorReaderFactory.create(file)) {
-                    for (PkVectorSearchResult result :
-                            PkVectorExactSearcher.search(
-                                    file.fileName(), reader, query, metric, exactLimit, excluded)) {
-                        add(exactNearest, result, exactLimit);
-                    }
-                }
+                exactFutures.add(
+                        CompletableFuture.supplyAsync(
+                                () -> exactSearch(file, query, exactLimit, excluded), executor));
             }
         }
-        return new Result(sorted(indexedNearest), sorted(exactNearest));
+        List<CompletableFuture<?>> futures = new ArrayList<>();
+        futures.addAll(indexedFutures);
+        futures.addAll(exactFutures);
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            PriorityQueue<PkVectorSearchResult> indexedNearest =
+                                    new PriorityQueue<>(indexedLimit, BEST_FIRST.reversed());
+                            for (CompletableFuture<List<PkVectorSearchResult>> future :
+                                    indexedFutures) {
+                                for (PkVectorSearchResult result : future.join()) {
+                                    add(indexedNearest, result, indexedLimit);
+                                }
+                            }
+                            PriorityQueue<PkVectorSearchResult> exactNearest =
+                                    new PriorityQueue<>(exactLimit, BEST_FIRST.reversed());
+                            for (CompletableFuture<List<PkVectorSearchResult>> future :
+                                    exactFutures) {
+                                for (PkVectorSearchResult result : future.join()) {
+                                    add(exactNearest, result, exactLimit);
+                                }
+                            }
+                            return new Result(sorted(indexedNearest), sorted(exactNearest));
+                        });
+    }
+
+    private List<PkVectorSearchResult> exactSearch(
+            DataFileMeta file, float[] query, int limit, LongPredicate excluded) {
+        try (PkVectorReader reader = vectorReaderFactory.create(file)) {
+            return PkVectorExactSearcher.search(
+                    file.fileName(), reader, query, metric, limit, excluded);
+        } catch (IOException e) {
+            throw new CompletionException(e);
+        }
+    }
+
+    private static <T> T join(CompletableFuture<T> future) throws IOException {
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof IOException) {
+                throw (IOException) e.getCause();
+            }
+            throw e;
+        }
     }
 
     private static boolean contains(List<Range> ranges, long position) {

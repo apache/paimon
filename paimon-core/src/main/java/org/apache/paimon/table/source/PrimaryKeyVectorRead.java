@@ -65,6 +65,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -188,19 +190,29 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
 
     protected SearchResult searchBuckets(List<BucketVectorSearchSplit> splits) {
         try {
-            SearchContext context = new SearchContext(table);
-            List<Candidate> indexedCandidates = new ArrayList<>();
-            List<Candidate> exactCandidates = new ArrayList<>();
+            SearchContext context = createSearchContext();
+            List<CompletableFuture<SearchResult>> futures = new ArrayList<>(splits.size());
+            // Start from the caller because each bucket submits leaf searches to the same executor.
+            // Wrapping the whole bucket in that executor and waiting inside it can starve leaf
+            // work.
             for (BucketVectorSearchSplit split : splits) {
-                SearchResult result = search(split, context);
-                indexedCandidates.addAll(result.indexedCandidates());
-                exactCandidates.addAll(result.exactCandidates());
+                futures.add(searchAsync(split, context));
             }
-            return new SearchResult(
-                    topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            List<SearchResult> results = new ArrayList<>(futures.size());
+            for (CompletableFuture<SearchResult> future : futures) {
+                results.add(future.join());
+            }
+            return mergeSearchResults(results);
         } catch (IOException e) {
             throw new RuntimeException("Failed to search primary-key vector index.", e);
+        } catch (CompletionException e) {
+            throw new RuntimeException("Failed to search primary-key vector index.", e.getCause());
         }
+    }
+
+    SearchContext createSearchContext() {
+        return new SearchContext(table);
     }
 
     protected GlobalIndexResult createResult(
@@ -227,8 +239,8 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                 topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
     }
 
-    private SearchResult search(BucketVectorSearchSplit split, SearchContext context)
-            throws IOException {
+    CompletableFuture<SearchResult> searchAsync(
+            BucketVectorSearchSplit split, SearchContext context) throws IOException {
         DataSplit dataSplit = split.dataSplit();
         List<DataFileMeta> activeFiles =
                 dataSplit.dataFiles().stream()
@@ -261,18 +273,21 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         searchOptions,
                         metric,
                         table.coreOptions().globalIndexSearchMode());
-        PrimaryKeyVectorBucketSearch.Result result =
-                bucketSearch.search(
+        return bucketSearch
+                .searchAsync(
                         state,
                         activeFiles,
                         deletionVectors,
                         rowRangesByFile(split),
                         query,
                         indexedLimit,
-                        limit);
-        return new SearchResult(
-                candidates(dataSplit, result.indexedCandidates()),
-                candidates(dataSplit, result.exactCandidates()));
+                        limit,
+                        context.executor)
+                .thenApply(
+                        result ->
+                                new SearchResult(
+                                        candidates(dataSplit, result.indexedCandidates()),
+                                        candidates(dataSplit, result.exactCandidates())));
     }
 
     private Map<String, List<Range>> rowRangesByFile(BucketVectorSearchSplit split)
@@ -621,7 +636,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         }
     }
 
-    private static class SearchContext {
+    static class SearchContext {
 
         private final FileIO fileIO;
         private final IndexFileHandler indexFileHandler;
