@@ -351,6 +351,39 @@ class PrimaryKeyVectorBucketSearchTest {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("data-1", 1L, 4F));
     }
 
+    @Test
+    void testBatchExactFallbackPreservesQueryOrderAndOpensFileOnce() throws Exception {
+        DataFileMeta data = dataFile("data");
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{0, 0}, {5, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+
+        List<PrimaryKeyVectorBucketSearch.Result> results =
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                null,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.FULL)
+                        .searchBatch(
+                                new PkVectorBucketIndexState(
+                                        7, "test-vector-ann", Collections.emptyList()),
+                                Collections.singletonList(data),
+                                Collections.emptyMap(),
+                                new float[][] {{0, 0}, {5, 0}},
+                                1,
+                                1);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).exactCandidates())
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(0L);
+        assertThat(results.get(1).exactCandidates())
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(1L);
+        verify(readerFactory).create(data);
+    }
+
     private static PkVectorDataFileReader reader(float[][] vectors) throws IOException {
         PkVectorDataFileReader reader = mock(PkVectorDataFileReader.class);
         when(reader.dimension()).thenReturn(2);
