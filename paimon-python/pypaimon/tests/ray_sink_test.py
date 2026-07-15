@@ -453,6 +453,41 @@ class RaySinkTest(unittest.TestCase):
             datasink.on_write_complete(write_result)
         self.assertEqual(len(datasink._pending_commit_messages), 1)
 
+    def test_on_write_complete_without_on_write_start(self):
+        from ray.data.datasource.datasink import WriteResult
+
+        write_result = WriteResult(
+            num_rows=0,
+            size_bytes=0,
+            write_returns=[],
+        )
+
+        for overwrite, static_partition in [
+            (True, None),
+            (False, {'dt': '2024-01-01'}),
+        ]:
+            with self.subTest(
+                overwrite=overwrite,
+                static_partition=static_partition,
+            ):
+                table = Mock()
+                table.identifier.get_full_name.return_value = 'test_db.test_table'
+                writer_builder = table.new_batch_write_builder.return_value
+                writer_builder.overwrite.return_value = writer_builder
+                table_commit = writer_builder.new_commit.return_value
+
+                datasink = PaimonDatasink(
+                    table,
+                    overwrite=overwrite,
+                    static_partition=static_partition,
+                )
+                datasink.on_write_complete(write_result)
+
+                table.new_batch_write_builder.assert_called_once_with()
+                writer_builder.overwrite.assert_called_once_with(static_partition)
+                table_commit.commit.assert_called_once_with([])
+                table_commit.close.assert_called_once_with()
+
     def test_table_write_ray_forwards_static_partition(self):
         dataset = Mock()
         table_write = TableWrite.__new__(TableWrite)

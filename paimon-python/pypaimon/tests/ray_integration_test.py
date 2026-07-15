@@ -396,6 +396,31 @@ class RayIntegrationTest(unittest.TestCase):
         result = read_paimon(identifier, self.catalog_options)
         self.assertEqual(result.count(), 0)
 
+    def test_write_paimon_zero_block_overwrite_unpartitioned(self):
+        """An overwrite with no Ray blocks clears an unpartitioned table."""
+        from pypaimon.ray import read_paimon, write_paimon
+
+        pa_schema = pa.schema([('id', pa.int64())])
+        identifier = 'default.test_write_zero_block_overwrite_unpartitioned'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+
+        initial = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1, 2]}, schema=pa_schema)
+        )
+        write_paimon(initial, identifier, self.catalog_options)
+
+        write_paimon(
+            ray.data.range(0),
+            identifier,
+            self.catalog_options,
+            overwrite=True,
+        )
+
+        result = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(result.count(), 0)
+
     def test_table_write_ray_builder_partition_overwrite(self):
         """Builder-level partition overwrite is honored by write_ray()."""
         from pypaimon.ray import read_paimon
