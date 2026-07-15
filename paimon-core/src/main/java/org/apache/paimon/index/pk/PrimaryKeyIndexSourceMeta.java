@@ -27,23 +27,40 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Ordered source data files covered by a source-backed primary-key index payload. */
 public final class PrimaryKeyIndexSourceMeta {
 
-    private static final int VERSION = 1;
+    private static final int VERSION_1 = 1;
+    private static final int VERSION_2 = 2;
 
     private final List<PrimaryKeyIndexSourceFile> sourceFiles;
+    private final String definitionFingerprint;
 
     public PrimaryKeyIndexSourceMeta(List<PrimaryKeyIndexSourceFile> sourceFiles) {
+        this(sourceFiles, null);
+    }
+
+    public PrimaryKeyIndexSourceMeta(
+            List<PrimaryKeyIndexSourceFile> sourceFiles, String definitionFingerprint) {
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         checkArgument(!this.sourceFiles.isEmpty(), "An index must reference source files.");
+        checkArgument(
+                definitionFingerprint == null || !definitionFingerprint.trim().isEmpty(),
+                "Definition fingerprint must not be empty.");
+        this.definitionFingerprint = definitionFingerprint;
     }
 
     public PrimaryKeyIndexSourceMeta(PrimaryKeyIndexSourceFile sourceFile) {
         this(Collections.singletonList(sourceFile));
+    }
+
+    public PrimaryKeyIndexSourceMeta(
+            PrimaryKeyIndexSourceFile sourceFile, String definitionFingerprint) {
+        this(Collections.singletonList(sourceFile), definitionFingerprint);
     }
 
     public List<PrimaryKeyIndexSourceFile> sourceFiles() {
@@ -58,6 +75,10 @@ public final class PrimaryKeyIndexSourceMeta {
         return sourceFiles.get(0);
     }
 
+    public Optional<String> definitionFingerprint() {
+        return Optional.ofNullable(definitionFingerprint);
+    }
+
     public static PrimaryKeyIndexSourceMeta fromIndexFile(IndexFileMeta indexFile) {
         GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
         checkArgument(
@@ -70,11 +91,14 @@ public final class PrimaryKeyIndexSourceMeta {
     public byte[] serialize() {
         try {
             DataOutputSerializer output = new DataOutputSerializer(128);
-            output.writeInt(VERSION);
+            output.writeInt(definitionFingerprint == null ? VERSION_1 : VERSION_2);
             output.writeInt(sourceFiles.size());
             for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
                 output.writeUTF(sourceFile.fileName());
                 output.writeLong(sourceFile.rowCount());
+            }
+            if (definitionFingerprint != null) {
+                output.writeUTF(definitionFingerprint);
             }
             return output.getCopyOfBuffer();
         } catch (IOException e) {
@@ -86,7 +110,10 @@ public final class PrimaryKeyIndexSourceMeta {
         try {
             DataInputDeserializer input = new DataInputDeserializer(bytes);
             int version = input.readInt();
-            checkArgument(version == VERSION, "Unsupported index source version: %s.", version);
+            checkArgument(
+                    version == VERSION_1 || version == VERSION_2,
+                    "Unsupported index source version: %s.",
+                    version);
             int sourceFileCount = input.readInt();
             checkArgument(sourceFileCount > 0, "An index must reference source files.");
             // Each entry needs at least the two-byte writeUTF length and one long.
@@ -102,9 +129,10 @@ public final class PrimaryKeyIndexSourceMeta {
             for (int i = 0; i < sourceFileCount; i++) {
                 sourceFiles.add(new PrimaryKeyIndexSourceFile(input.readUTF(), input.readLong()));
             }
+            String definitionFingerprint = version == VERSION_2 ? input.readUTF() : null;
             checkArgument(
                     input.available() == 0, "Unexpected trailing bytes in index source metadata.");
-            return new PrimaryKeyIndexSourceMeta(sourceFiles);
+            return new PrimaryKeyIndexSourceMeta(sourceFiles, definitionFingerprint);
         } catch (IOException e) {
             throw new IllegalArgumentException("Failed to deserialize index source metadata.", e);
         }

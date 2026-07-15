@@ -27,7 +27,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.PrimaryKeyVectorPositionReader;
+import org.apache.paimon.table.source.PrimaryKeyIndexPositionReader;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -63,7 +63,7 @@ class PrimaryKeyIndexedSplitReadTest {
         RecordReader<InternalRow> reader =
                 new PrimaryKeyIndexedSplitRead(rawRead).createReader(split);
 
-        assertThat(reader).isInstanceOf(PrimaryKeyVectorPositionReader.class);
+        assertThat(reader).isInstanceOf(PrimaryKeyIndexPositionReader.class);
         ArgumentCaptor<RoaringBitmap32> positions = ArgumentCaptor.forClass(RoaringBitmap32.class);
         verify(rawRead).createFileReader(eq(dataSplit), positions.capture());
         assertThat(positions.getValue()).isEqualTo(RoaringBitmap32.bitmapOf(1, 3));

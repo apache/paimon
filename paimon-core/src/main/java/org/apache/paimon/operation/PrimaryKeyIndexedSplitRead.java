@@ -26,7 +26,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.PrimaryKeyVectorPositionReader;
+import org.apache.paimon.table.source.PrimaryKeyIndexPositionReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -116,6 +116,6 @@ public class PrimaryKeyIndexedSplitRead implements SplitRead<InternalRow> {
         IntFunction<Float> scoreGetter =
                 scoreByPosition == null ? position -> Float.NaN : scoreByPosition::get;
         FileRecordReader<InternalRow> reader = rawRead.createFileReader(dataSplit, rowPositions);
-        return new PrimaryKeyVectorPositionReader(reader, rowPositions, scoreGetter);
+        return new PrimaryKeyIndexPositionReader(reader, rowPositions, scoreGetter);
     }
 }

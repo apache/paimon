@@ -60,6 +60,19 @@ class PrimaryKeyIndexSourceMetaTest {
     }
 
     @Test
+    void testDefinitionFingerprintRoundTrip() {
+        PrimaryKeyIndexSourceMeta metadata =
+                new PrimaryKeyIndexSourceMeta(
+                        new PrimaryKeyIndexSourceFile("data-1", 5), "full-text-definition");
+
+        PrimaryKeyIndexSourceMeta restored =
+                PrimaryKeyIndexSourceMeta.deserialize(metadata.serialize());
+
+        assertThat(restored.sourceFile()).isEqualTo(metadata.sourceFile());
+        assertThat(restored.definitionFingerprint()).contains("full-text-definition");
+    }
+
+    @Test
     void testRejectsInvalidSourceFile() {
         assertThatThrownBy(() -> new PrimaryKeyIndexSourceFile("data-1", -1))
                 .hasMessageContaining("row count must not be negative");
@@ -68,13 +81,13 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testRejectsUnsupportedVersion() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(64);
-        output.writeInt(2);
+        output.writeInt(3);
         output.writeInt(1);
         output.writeUTF("data-1");
         output.writeLong(1);
 
         assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(output.getCopyOfBuffer()))
-                .hasMessageContaining("Unsupported index source version: 2");
+                .hasMessageContaining("Unsupported index source version: 3");
     }
 
     @Test

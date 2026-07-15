@@ -106,6 +106,8 @@ class PrimaryKeyVectorScanTest {
         when(snapshot.id()).thenReturn(11L);
         when(table.coreOptions()).thenReturn(coreOptions);
         when(table.latestSnapshot()).thenReturn(Optional.of(snapshot));
+        when(table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11")))
+                .thenReturn(table);
 
         SnapshotReader snapshotReader = mock(SnapshotReader.class, RETURNS_SELF);
         SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
@@ -136,7 +138,8 @@ class PrimaryKeyVectorScanTest {
         when(snapshotReader.indexFileHandler()).thenReturn(indexFileHandler);
         configureBatchScan(table, snapshotReader, snapshot);
 
-        PrimaryKeyVectorScan.Plan plan = new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
+        PrimaryKeyVectorScan.Plan plan =
+                new PrimaryKeyVectorScan(table, 7, "ivf-pq", null, null, snapshot).scan();
 
         assertThat(plan.snapshotId()).isEqualTo(11);
         assertThat(plan.splits()).hasSize(1);
@@ -144,6 +147,7 @@ class PrimaryKeyVectorScanTest {
         assertThat(bucketSplit.payloadFiles())
                 .extracting(IndexFileMeta::fileName)
                 .containsExactly("ann-match");
+        verify(table).copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11"));
     }
 
     @Test
