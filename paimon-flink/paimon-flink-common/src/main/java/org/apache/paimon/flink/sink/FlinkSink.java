@@ -191,14 +191,16 @@ public abstract class FlinkSink<T> implements Serializable {
     public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+        boolean isStreaming = isStreaming(written);
         boolean streamingCheckpointEnabled =
-                isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
+                isStreaming && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
 
         if (coordinatorCommitEnabled()) {
-            return doCoordinatorCommit(written, checkpointConfig, streamingCheckpointEnabled);
+            return doCoordinatorCommit(
+                    written, checkpointConfig, isStreaming, streamingCheckpointEnabled);
         }
         return doOperatorCommit(written, commitUser, streamingCheckpointEnabled);
     }
@@ -206,8 +208,10 @@ public abstract class FlinkSink<T> implements Serializable {
     private DataStreamSink<?> doCoordinatorCommit(
             DataStream<Committable> written,
             CheckpointConfig checkpointConfig,
+            boolean isStreaming,
             boolean streamingCheckpointEnabled) {
-        checkCoordinatorCommitPreconditions(table, checkpointConfig, streamingCheckpointEnabled);
+        checkCoordinatorCommitPreconditions(
+                table, checkpointConfig, isStreaming, streamingCheckpointEnabled);
         // The commit runs inside the writer's OperatorCoordinator on the JobManager, so there
         // is no global committer operator. Committables are still forwarded by the writer for
         // observability and are discarded here.
@@ -357,15 +361,15 @@ public abstract class FlinkSink<T> implements Serializable {
     static void checkCoordinatorCommitPreconditions(
             FileStoreTable table,
             CheckpointConfig checkpointConfig,
+            boolean isStreaming,
             boolean streamingCheckpointEnabled) {
         Options options = Options.fromMap(table.options());
 
-        // Region failover only benefits streaming jobs. A batch job persists its shuffle data and
-        // has no region-failover concern, so coordinator commit brings no benefit and batch is not
-        // supported. The commit is driven by checkpoint completion, so checkpointing must be on.
+        // Streaming commits are driven by checkpoint completion. Batch jobs commit when every
+        // writer reaches endInput, so they do not require checkpointing.
         checkArgument(
-                streamingCheckpointEnabled,
-                "Could not enable coordinator commit because it requires streaming mode with checkpointing enabled.");
+                !isStreaming || streamingCheckpointEnabled,
+                "Could not enable coordinator commit in streaming mode without checkpointing.");
 
         // The checks below reject configurations that introduce an all-to-all shuffle. Such a
         // shuffle places every operator into a single failover region, which defeats the region

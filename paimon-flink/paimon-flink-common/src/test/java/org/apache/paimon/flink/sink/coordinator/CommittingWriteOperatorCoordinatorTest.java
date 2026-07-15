@@ -209,6 +209,91 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
+    public void testSubtasksEndInputAcrossDifferentCheckpoints() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1L, 1)));
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, 1L, 2)));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+        assertResults(table, "1, 1", "2, 2");
+
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 3)));
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, 2L, 4)));
+        coordinator.notifyCheckpointComplete(2L);
+        coordinator.waitProcessAllActions();
+        // The early end-input entry stays buffered while the other subtask is still running.
+        assertResults(table, "1, 1", "2, 2", "4, 4");
+
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 5)));
+        coordinator.waitProcessAllActions();
+        // Streaming mode still waits for a completed checkpoint before the final commit.
+        assertResults(table, "1, 1", "2, 2", "4, 4");
+
+        coordinator.notifyCheckpointComplete(3L);
+        coordinator.waitProcessAllActions();
+        assertResults(table, "1, 1", "2, 2", "3, 3", "4, 4", "5, 5");
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testRepeatedEndInputEventIsIdempotent() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        CommittableEvent repeated = event(committable(table, Long.MAX_VALUE, 1));
+        coordinator.handleEventFromOperator(0, 0, repeated);
+        coordinator.handleEventFromOperator(0, 0, repeated);
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 2)));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+
+        assertThat(failureCause).isNull();
+        assertResults(table, "1, 1", "2, 2");
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCheckpointDisabledCommitsWhenAllSubtasksEndInput() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator =
+                new CommittingWriteOperatorCoordinator(
+                        context,
+                        commitContext ->
+                                new StoreCommitter(
+                                        table,
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(commitContext.commitUser())
+                                                .newCommit(),
+                                        commitContext),
+                        false,
+                        commitUser,
+                        false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
+        coordinator.waitProcessAllActions();
+        assertThat(table.latestSnapshot()).isNotPresent();
+
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 2)));
+        coordinator.waitProcessAllActions();
+        assertResults(table, "1, 1", "2, 2");
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
     public void testRestoringAlignsBeforeRunning() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 2);

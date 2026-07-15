@@ -72,6 +72,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CommittingWriteOperatorCoordinator.class);
+    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     private final OperatorCoordinator.Context context;
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
@@ -93,6 +94,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private Committer<Committable, ManifestCommittable> committer;
     private String commitUser;
     private MemoryBackendStateStore stateStore;
+    private boolean endInputCommitted;
 
     public CommittingWriteOperatorCoordinator(
             OperatorCoordinator.Context context,
@@ -117,6 +119,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 Executors.newSingleThreadExecutor(
                         new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context));
         this.state = State.CREATED;
+        this.endInputCommitted = false;
     }
 
     @Override
@@ -190,7 +193,6 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     } else if (event instanceof RestoredCommittableEvent) {
                         handleRestoredCommittableEvent(subtask, (RestoredCommittableEvent) event);
                     } else {
-                        // TODO: end input handling
                         throw new UnsupportedOperationException("Unsupported event type: " + event);
                     }
                 },
@@ -209,28 +211,44 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                                 "Completing checkpoint should be notified in RUNNING state, while current state is "
                                         + state);
                     }
+                    if (endInputCommitted) {
+                        LOG.debug(
+                                "Ignore completion of checkpoint {} because end input has already been committed.",
+                                checkpointId);
+                        return;
+                    }
                     // writers always report a committable per (subtask, checkpoint) during
-                    // snapshot, even if empty; missing means the writer is broken
+                    // snapshot until they finish. An ended writer covers every later ordinary
+                    // checkpoint because it cannot produce more data.
                     if (!alignCommittables(checkpointId)) {
                         throw new IllegalStateException("Not all committables reported by writer");
                     }
+                    boolean finalCommit = allSubtasksEndInput();
+                    long targetCheckpointId = finalCommit ? END_INPUT_CHECKPOINT_ID : checkpointId;
                     Map<Long, Long> watermarkPerCheckpoint =
-                            alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
+                            alignWatermarkPerCheckpoint(targetCheckpointId, subtaskCommittables);
                     commitUpToCheckpoint(
-                            checkpointId,
+                            targetCheckpointId,
                             pollManifestCommittablesForCheckpoint(
-                                    checkpointId,
+                                    targetCheckpointId,
                                     subtaskCommittables,
                                     watermarkPerCheckpoint,
                                     committer),
                             watermarkPerCheckpoint,
                             committables -> {
                                 try {
-                                    committer.commit(committables);
+                                    if (finalCommit) {
+                                        committer.filterAndCommit(committables, false, true);
+                                    } else {
+                                        committer.commit(committables);
+                                    }
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
                             });
+                    if (finalCommit) {
+                        endInputCommitted = true;
+                    }
                 },
                 "completing checkpoint %d",
                 checkpointId);
@@ -297,8 +315,15 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     private void handleCommittableEvent(int subtask, CommittableEvent event) throws Exception {
         if (state == State.RUNNING) {
+            if (endInputCommitted && event.getCheckpointId() == END_INPUT_CHECKPOINT_ID) {
+                LOG.debug(
+                        "Ignore repeated end input event from subtask {} after final commit.",
+                        subtask);
+                return;
+            }
             updateSubtaskCommittables(
                     subtask, WriterCommittables.from(event, committablesSerializer));
+            commitEndInputIfCheckpointDisabled();
         } else {
             throw new IllegalStateException(
                     "Illegal state " + state + " while handling committable event " + event);
@@ -311,16 +336,30 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             updateSubtaskCommittables(
                     subtask, WriterCommittables.fromRestore(event, committablesSerializer));
             if (alignCommittables(event.getRestoredCheckpointId())) {
-                recover(event.getRestoredCheckpointId());
+                boolean finalCommit = allSubtasksEndInput();
+                recover(finalCommit ? END_INPUT_CHECKPOINT_ID : event.getRestoredCheckpointId());
+                if (finalCommit) {
+                    endInputCommitted = true;
+                }
                 transitionState(State.RUNNING);
             }
         } else if (state == State.RUNNING) {
-            // a region failover replayed restore committables while the coordinator itself is
-            // not restoring; it already holds the committed state, so ignore them
-            LOG.info(
-                    "Ignore restore committables from subtask {} of checkpoint {}, coordinator is running.",
-                    subtask,
-                    event.getRestoredCheckpointId());
+            // A region failover replays entries from an already committed checkpoint. Ordinary
+            // entries can be ignored, but an end-input entry is newer than every ordinary
+            // checkpoint and may still be waiting for the other subtasks to finish.
+            WriterCommittables restored =
+                    WriterCommittables.fromRestore(event, committablesSerializer);
+            if (restored.isEndInput() && !endInputCommitted) {
+                // region failover will reset
+                updateSubtaskCommittables(
+                        subtask, new WriterCommittables(restored.getEndInputCommittables()));
+                commitEndInputIfCheckpointDisabled();
+            } else {
+                LOG.info(
+                        "Ignore restore committables from subtask {} of checkpoint {}, coordinator is running.",
+                        subtask,
+                        event.getRestoredCheckpointId());
+            }
         } else {
             throw new IllegalStateException(
                     "Illegal state "
@@ -340,11 +379,39 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     private boolean alignCommittables(long checkpointId) {
         for (WriterCommittables committables : subtaskCommittables) {
-            if (committables == null || committables.getMaxCheckpointId() < checkpointId) {
+            if (committables == null || !committables.coversCheckpoint(checkpointId)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private boolean allSubtasksEndInput() {
+        for (WriterCommittables committables : subtaskCommittables) {
+            if (committables == null || !committables.isEndInput()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void commitEndInputIfCheckpointDisabled() throws Exception {
+        if (streamingCheckpointEnabled || endInputCommitted || !allSubtasksEndInput()) {
+            return;
+        }
+
+        Map<Long, Long> watermarkPerCheckpoint =
+                alignWatermarkPerCheckpoint(END_INPUT_CHECKPOINT_ID, subtaskCommittables);
+        commitUpToCheckpoint(
+                END_INPUT_CHECKPOINT_ID,
+                pollManifestCommittablesForCheckpoint(
+                        END_INPUT_CHECKPOINT_ID,
+                        subtaskCommittables,
+                        watermarkPerCheckpoint,
+                        committer),
+                watermarkPerCheckpoint,
+                committables -> committer.filterAndCommit(committables, false, true));
+        endInputCommitted = true;
     }
 
     // replaces CommittableStateManager because committables are not stored in the committer

@@ -270,7 +270,7 @@ under the License.
             <td><h5>sink.coordinator-commit.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, run the Paimon committer inside the Flink JobManager via an OperatorCoordinator. This decouples commit from any single TaskManager subtask so that region failover does not have to restart the whole pipeline. Only supports unaware-bucket append tables in streaming mode with checkpointing enabled; unsupported configurations fail during sink planning.</td>
+            <td>If true, run the Paimon committer inside the Flink JobManager via an OperatorCoordinator. This decouples commit from any single TaskManager subtask so that region failover does not have to restart the whole pipeline. Only supports unaware-bucket append tables. Streaming mode requires checkpointing enabled; batch mode commits after all writers reach end input. Unsupported configurations fail during sink planning.</td>
         </tr>
         <tr>
             <td><h5>sink.cross-partition.managed-memory</h5></td>
