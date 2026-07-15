@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterator, List, Optional
@@ -167,7 +168,7 @@ class TableRead:
     def to_arrow(
         self,
         splits: List[Split],
-        parallelism: Optional[int] = None,
+        parallelism: Optional[Any] = None,
         blob_parallelism: Optional[int] = None,
     ) -> Optional[pyarrow.Table]:
         """Read ``splits`` into a single arrow ``Table``.
@@ -180,7 +181,11 @@ class TableRead:
                 overrides it for this call. ``1`` keeps reads serial;
                 ``>= 2`` enables a thread pool that reads splits
                 concurrently and assembles the final table in input order.
-                Must be ``>= 1``.
+                The string ``"auto"`` resolves to ``min(number of splits,
+                CPU count)``. Must be ``>= 1`` or ``"auto"``. Note that with
+                ``>= 2`` (or ``"auto"``) and a ``limit`` set, the returned
+                rows are an arbitrary subset of the requested size, since
+                which splits fill the row quota first is non-deterministic.
             blob_parallelism: number of threads for concurrent blob reads
                 within each batch. ``None`` or ``1`` (default) reads blobs
                 serially; ``>= 2`` uses a thread pool with ``pread`` for
@@ -191,8 +196,7 @@ class TableRead:
                 shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        # TODO: default read.parallelism to min(splits, cpu_count()) once stable
-        effective = self._resolve_parallelism(parallelism)
+        effective = self._resolve_parallelism(parallelism, len(splits))
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
@@ -274,13 +278,19 @@ class TableRead:
             finally:
                 reader.close()
 
-    def _resolve_parallelism(self, runtime: Optional[int]) -> int:
+    def _resolve_parallelism(self, runtime: Optional[Any], num_splits: int) -> int:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
         table option > built-in default of 1. The validation message names
         whichever source produced the offending value, so users know where
         to fix it.
+
+        Both the runtime argument and the option accept an integer (>= 1) or
+        the string ``"auto"``, which resolves to ``min(num_splits, cpu
+        count)`` -- recommended for single-process reads (pandas/duckdb/arrow)
+        and left off by default under distributed engines that already
+        parallelize across splits.
         """
         if runtime is not None:
             value = runtime
@@ -288,6 +298,24 @@ class TableRead:
         else:
             value = self._read_parallelism
             source = "read.parallelism"
+        return self._parse_parallelism(value, source, num_splits)
+
+    @staticmethod
+    def _parse_parallelism(value: Any, source: str, num_splits: int) -> int:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "auto":
+                # os.cpu_count() may return None on exotic platforms; fall
+                # back to 1 so "auto" never crashes. min() with num_splits
+                # avoids spinning up more workers than there is work.
+                cpu = os.cpu_count() or 1
+                return max(1, min(num_splits, cpu))
+            try:
+                value = int(normalized)
+            except ValueError:
+                raise ValueError(
+                    f"{source} must be a positive integer or \"auto\", "
+                    f"got {value!r}")
         if value < 1:
             raise ValueError(f"{source} must be >= 1, got {value}")
         return value
@@ -512,7 +540,7 @@ class TableRead:
     def to_pandas(
         self,
         splits: List[Split],
-        parallelism: Optional[int] = None,
+        parallelism: Optional[Any] = None,
     ) -> pandas.DataFrame:
         """Read ``splits`` into a pandas ``DataFrame``.
 

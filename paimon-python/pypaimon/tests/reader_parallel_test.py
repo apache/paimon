@@ -28,6 +28,46 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.read.table_read import TableRead, _RemainingRows
 
 
+class ResolveParallelismTest(unittest.TestCase):
+    """Pure unit tests for parallelism parsing — no Paimon table needed."""
+
+    def test_int_passthrough(self):
+        self.assertEqual(TableRead._parse_parallelism(4, "parallelism", 10), 4)
+        self.assertEqual(TableRead._parse_parallelism(1, "parallelism", 10), 1)
+
+    def test_int_string_parsed(self):
+        self.assertEqual(TableRead._parse_parallelism("4", "read.parallelism", 10), 4)
+
+    def test_auto_resolves_to_min_splits_cpu(self):
+        cpu = os.cpu_count() or 1
+        # More splits than CPUs => capped at CPU count.
+        self.assertEqual(
+            TableRead._parse_parallelism("auto", "read.parallelism", cpu + 100), cpu)
+        # Fewer splits than CPUs => capped at split count.
+        self.assertEqual(
+            TableRead._parse_parallelism("auto", "read.parallelism", 1), 1)
+
+    def test_auto_case_insensitive(self):
+        cpu = os.cpu_count() or 1
+        self.assertEqual(
+            TableRead._parse_parallelism("AUTO", "read.parallelism", cpu + 100), cpu)
+        self.assertEqual(
+            TableRead._parse_parallelism(" auto ", "read.parallelism", cpu + 100), cpu)
+
+    def test_invalid_int_raises_with_source(self):
+        with self.assertRaises(ValueError) as ctx:
+            TableRead._parse_parallelism(0, "parallelism", 10)
+        self.assertIn("parallelism", str(ctx.exception))
+        with self.assertRaises(ValueError) as ctx:
+            TableRead._parse_parallelism("0", "read.parallelism", 10)
+        self.assertIn("read.parallelism", str(ctx.exception))
+
+    def test_non_numeric_string_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            TableRead._parse_parallelism("nonsense", "read.parallelism", 10)
+        self.assertIn("read.parallelism", str(ctx.exception))
+
+
 class RemainingRowsTest(unittest.TestCase):
     """Pure unit tests for the row-quota counter — no Paimon table needed."""
 
@@ -175,6 +215,33 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         parallel_df = rb_parallel.new_read().to_pandas(splits_parallel) \
             .sort_values('user_id').reset_index(drop=True)
         self.assertTrue(serial_df.equals(parallel_df))
+
+    def test_auto_method_arg_matches_serial(self):
+        rb = self.table.new_read_builder()
+        splits = self._scan_splits(rb)
+        self.assertGreaterEqual(len(splits), 2)
+        read = rb.new_read()
+        serial = read.to_arrow(splits, parallelism=1)
+        # "auto" resolves to min(splits, cpu). With >= 2 splits and a
+        # multi-core CI box this exercises the parallel fan-out path.
+        auto = read.to_arrow(splits, parallelism="auto")
+        # Input split order preserved => byte-identical tables.
+        self.assertEqual(serial, auto)
+        self.assertEqual(auto.num_rows, self.expected_rows)
+
+    def test_auto_table_option_matches_serial(self):
+        data = self.table.new_read_builder().new_read().to_arrow(
+            self._scan_splits(self.table.new_read_builder()), parallelism=1)
+        auto_table = self._build_table(
+            'append_parallel_auto', {'read.parallelism': 'auto'}, data)
+        rb = auto_table.new_read_builder()
+        splits = self._scan_splits(rb)
+        self.assertGreaterEqual(len(splits), 2)
+        # No explicit parallelism — picks up read.parallelism=auto from the option.
+        auto_df = rb.new_read().to_pandas(splits) \
+            .sort_values('user_id').reset_index(drop=True)
+        serial_df = data.to_pandas().sort_values('user_id').reset_index(drop=True)
+        self.assertTrue(serial_df.equals(auto_df))
 
     # ------------------------------------------------------------------
     # Priority: method arg > table option > built-in default.
