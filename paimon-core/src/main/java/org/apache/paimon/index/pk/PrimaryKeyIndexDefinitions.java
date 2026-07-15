@@ -46,10 +46,12 @@ public class PrimaryKeyIndexDefinitions {
         List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
         List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
         validateNoDuplicates(vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
         validateNoDuplicates(btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
         validateNoDuplicates(bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
-        validateOneIndexPerColumn(vectorColumns, btreeColumns, bitmapColumns);
+        validateNoDuplicates(fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
+        validateOneIndexPerColumn(vectorColumns, btreeColumns, bitmapColumns, fullTextColumns);
         List<PrimaryKeyIndexDefinition> definitions = new ArrayList<>();
 
         for (DataField field : schema.fields()) {
@@ -84,6 +86,16 @@ public class PrimaryKeyIndexDefinitions {
                                 PrimaryKeyIndexDefinition.Family.VECTOR,
                                 options.primaryKeyIndexCompactionLevelFanout(column),
                                 options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
+            } else if (fullTextColumns.contains(column)) {
+                definitions.add(
+                        new PrimaryKeyIndexDefinition(
+                                column,
+                                field.id(),
+                                "full-text",
+                                options.primaryKeyFullTextIndexOptions(column),
+                                PrimaryKeyIndexDefinition.Family.FULL_TEXT,
+                                options.primaryKeyIndexCompactionLevelFanout(column),
+                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
             }
         }
 
@@ -102,11 +114,15 @@ public class PrimaryKeyIndexDefinitions {
     }
 
     private static void validateOneIndexPerColumn(
-            List<String> vectorColumns, List<String> btreeColumns, List<String> bitmapColumns) {
+            List<String> vectorColumns,
+            List<String> btreeColumns,
+            List<String> bitmapColumns,
+            List<String> fullTextColumns) {
         Set<String> indexedColumns = new HashSet<>();
         validateUniqueColumns(indexedColumns, vectorColumns);
         validateUniqueColumns(indexedColumns, btreeColumns);
         validateUniqueColumns(indexedColumns, bitmapColumns);
+        validateUniqueColumns(indexedColumns, fullTextColumns);
     }
 
     private static void validateUniqueColumns(Set<String> indexedColumns, List<String> columns) {

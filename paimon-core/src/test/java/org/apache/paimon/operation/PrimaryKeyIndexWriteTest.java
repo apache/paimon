@@ -129,6 +129,29 @@ class PrimaryKeyIndexWriteTest {
     }
 
     @Test
+    void testCreatesCoordinatorForFullTextDefinition() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "10");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "comment");
+        TestFileStore store = createStore(options);
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        write.withIOManager(ioManager);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue record = generator.next();
+
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.createWriterContainer(generator.getPartition(record), 1);
+
+        assertThat(container.primaryKeyIndexMaintainer).isNotNull();
+        assertThat(readField(container.primaryKeyIndexMaintainer, "fullTextMaintainer"))
+                .isNotNull();
+        assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
+                .isEmpty();
+        write.close();
+    }
+
+    @Test
     void testPostponeBucketDefersCoordinatorUntilFixedBucketCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET));

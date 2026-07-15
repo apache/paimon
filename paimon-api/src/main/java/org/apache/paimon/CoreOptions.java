@@ -2755,6 +2755,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Comma-separated columns indexed by primary-key Bitmap indexes.");
 
+    public static final ConfigOption<String> PK_FULL_TEXT_INDEX_COLUMNS =
+            key("pk-full-text.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated character columns indexed by primary-key full-text indexes. "
+                                    + "The first release supports exactly one column.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4287,6 +4295,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(PK_VECTOR_INDEX_COLUMNS).isPresent();
     }
 
+    public boolean primaryKeyFullTextIndexEnabled() {
+        return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
+    }
+
     public int primaryKeyIndexCompactionLevelFanout(String column) {
         return options.getInteger(primaryKeyIndexCompactionLevelFanoutKey(column), 5);
     }
@@ -4315,6 +4327,10 @@ public class CoreOptions implements Serializable {
         return primaryKeyIndexColumns(PK_BITMAP_INDEX_COLUMNS);
     }
 
+    public List<String> primaryKeyFullTextIndexColumns() {
+        return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
+    }
+
     private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
         String columns = options.get(option);
         if (columns == null) {
@@ -4329,6 +4345,47 @@ public class CoreOptions implements Serializable {
 
     public Options primaryKeyBitmapIndexOptions(String column) {
         return primaryKeySortedIndexOptions(column, "pk-bitmap", "bitmap-index.");
+    }
+
+    public Options primaryKeyFullTextIndexOptions(String column) {
+        String optionKey = "fields." + column + ".pk-full-text.index.options";
+        TreeMap<String, String> resolved = new TreeMap<>();
+        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
+            if (entry.getKey().startsWith("full-text.")) {
+                resolved.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        String serialized = options.get(optionKey);
+        if (serialized == null || serialized.trim().isEmpty()) {
+            return new Options(resolved);
+        }
+
+        LinkedHashMap<String, String> parsed;
+        try {
+            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    optionKey + " must be a JSON object of option key-value pairs.", e);
+        }
+
+        for (Map.Entry<String, String> entry : parsed.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            checkArgument(
+                    key != null && !key.trim().isEmpty(),
+                    "%s contains an empty option key.",
+                    optionKey);
+            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
+            String qualifiedKey = key.startsWith("full-text.") ? key : "full-text." + key;
+            String previous = resolved.put(qualifiedKey, value);
+            checkArgument(
+                    previous == null || previous.equals(value),
+                    "%s defines conflicting values for %s.",
+                    optionKey,
+                    qualifiedKey);
+        }
+        return new Options(resolved);
     }
 
     private Options primaryKeySortedIndexOptions(

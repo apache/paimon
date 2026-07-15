@@ -86,6 +86,38 @@ class PrimaryKeyIndexDefinitionsTest {
     }
 
     @Test
+    void testCreatesFullTextDefinitionWithoutIndexType() {
+        Map<String, String> options = new HashMap<>();
+        options.put("pk-full-text.index.columns", "name");
+
+        List<PrimaryKeyIndexDefinition> definitions =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions();
+
+        assertThat(definitions).hasSize(1);
+        assertThat(definitions.get(0).column()).isEqualTo("name");
+        assertThat(definitions.get(0).indexType()).isEqualTo("full-text");
+        assertThat(definitions.get(0).family().name()).isEqualTo("FULL_TEXT");
+    }
+
+    @Test
+    void testResolvesFullTextIndexOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("pk-full-text.index.columns", "name");
+        options.put(
+                "fields.name.pk-full-text.index.options",
+                "{\"full-text.tokenizer\":\"jieba\",\"ngram.min-gram\":\"2\"}");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.options().get("full-text.tokenizer")).isEqualTo("jieba");
+        assertThat(definition.options().get("full-text.ngram.min-gram")).isEqualTo("2");
+        assertThat(definition.options().toMap())
+                .doesNotContainKey("pk-full-text.index.columns")
+                .doesNotContainKey("fields.name.pk-full-text.index.options");
+    }
+
+    @Test
     void testLegacyVectorCompactionOptionsAreIgnored() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
