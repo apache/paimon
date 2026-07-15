@@ -383,8 +383,10 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             extra_options={'sequence.field': 'ts',
                            'fields.val.nested-sequence-field': 'ts2'})
         self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
-        with self.assertRaises(NotImplementedError):
-            self._read(table)
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}],
+        )
 
     def test_trailing_comma_sequence_field_tolerated(self):
         """A trailing comma (``'ts,'``) must be tolerated, matching Java

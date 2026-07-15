@@ -688,8 +688,9 @@ class FieldNestedPartialUpdateAgg(FieldAggregator):
         if not self.nested_key:
             raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
 
-        self.key_projection = ProjectedRow.from_index_mapping(
-            [nested_type.get_field_index(name) for name in self.nested_key]
+        self.key_projection = FieldProjection.from_fields(
+            [nested_type.get_field_index(name) for name in self.nested_key],
+            self.nested_key
         )
 
         self.nested_key_null_strategy = (
@@ -700,35 +701,57 @@ class FieldNestedPartialUpdateAgg(FieldAggregator):
         if input_field is None:
             return accumulator
 
-        rows: List[InternalRow] = []
+        rows: List[Record] = []
         if accumulator is not None:
             self._add_non_null_rows(accumulator, rows)
         self._add_non_null_rows(input_field, rows)
 
-        row_map: Dict[Tuple[Any, ...], InternalRow] = {}
+        row_map: Dict[Tuple[Any, ...], Record] = {}
         for row in rows:
-            key = self.key_projection.replace_row(row).to_tuple()
+            key = self.key_projection.apply(row)
             if not self._apply_nested_key_null_strategy(key):
                 continue
 
             to_update = row_map.get(key)
             if to_update is None:
-                to_update = GenericRow([None] * self.nested_fields, row.fields)
+                if isinstance(row, InternalRow):
+                    to_update = GenericRow([None] * self.nested_fields, row.fields)
+                elif isinstance(row, dict):
+                    to_update = {}.fromkeys(row.keys())
+                else:
+                    raise TypeError(
+                        "Unsupported row type '{}'. Expected InternalRow or dict.".format(
+                            type(row).__name__
+                        )
+                    )
             self._partial_update(to_update, row)
             row_map[key] = to_update
 
         return list(row_map.values())
 
-    def _partial_update(self, to_update: GenericRow, input_row: InternalRow) -> None:
-        for i in range(self.nested_fields):
-            value = input_row.get_field(i)
-            if value is not None:
-                to_update.values[i] = value
+    def _partial_update(self, to_update: Record, input_row: Record) -> None:
+        if isinstance(to_update, InternalRow) and isinstance(input_row, InternalRow):
+            for i in range(self.nested_fields):
+                value = input_row.get_field(i)
+                if value is not None:
+                    to_update.values[i] = value
+        elif isinstance(to_update, dict) and isinstance(input_row, dict):
+            for k, v in input_row.items():
+                if v is not None:
+                    to_update[k] = v
+        else:
+            raise TypeError(
+                "Unsupported row types: to_update={}, input_row={}. "
+                "Expected both to be either InternalRow or dict.".format(
+                    type(to_update).__name__,
+                    type(input_row).__name__,
+                )
+            )
 
     def _add_non_null_rows(
             self,
-            array: List[InternalRow],
-            rows: List[InternalRow],
+            array: List[Record],
+            rows: List[Record],
     ) -> None:
         """Append non-null rows from array."""
 

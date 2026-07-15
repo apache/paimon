@@ -62,7 +62,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "first_value", "first_non_null_value",
     "sum", "max", "min",
     "bool_or", "bool_and",
-    "nested_update"
+    "nested_update", "nested_partial_update"
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
