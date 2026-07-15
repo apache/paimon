@@ -20,6 +20,7 @@ package org.apache.paimon.clone;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
@@ -41,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -94,6 +96,36 @@ public class FullHistoryFileCollectorTest {
     }
 
     @Test
+    public void testCollectedInternalDataFileFollowsTableRootMapping() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_FILE_PATH_DIRECTORY, "data");
+        FileStoreTable table = createTable(options);
+        writeRows(table, 0, "A", 1);
+        FullHistoryFileSet files = new FullHistoryFileCollector(table).collect();
+        Path sourceDataFile = files.dataFiles().iterator().next();
+        Path targetRoot = new Path(tempDir.resolve("target-table").toString());
+        Path sourceDataRoot = new Path(table.location(), "data");
+        Path nestedTarget = new Path(externalDir.resolve("nested-target").toString());
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                table.location() + "=" + targetRoot,
+                                sourceDataRoot + "=" + nestedTarget));
+
+        assertThat(mapping.rewriteRequired(sourceDataFile.toString()))
+                .startsWith(nestedTarget.toString());
+
+        FullHistoryCopyPlan plan = FullHistoryCopyPlan.build(files, mapping);
+
+        String sourceRoot = table.location().toString();
+        assertThat(plan.files())
+                .filteredOn(file -> file.kind() == FullHistoryCopyPlan.FileKind.DATA)
+                .extracting(file -> file.target().toString())
+                .containsExactly(
+                        targetRoot + sourceDataFile.toString().substring(sourceRoot.length()));
+    }
+
+    @Test
     public void testStreamingPayloadVisitorMatchesReachableFileSet() throws Exception {
         FileStoreTable table = createTable(new Options());
         writeRows(table, 0, "A", 1);
@@ -107,7 +139,7 @@ public class FullHistoryFileCollectorTest {
         Set<Path> indexFiles = new LinkedHashSet<>();
         new FullHistoryPayloadFileVisitor(table)
                 .visit(
-                        (path, kind, size) -> {
+                        (path, kind, size, mappingAnchor) -> {
                             if (kind == FullHistoryCopyPlan.FileKind.DATA) {
                                 dataFiles.add(path);
                             } else {
@@ -117,6 +149,34 @@ public class FullHistoryFileCollectorTest {
 
         assertThat(dataFiles).isEqualTo(expected.dataFiles());
         assertThat(indexFiles).isEqualTo(expected.indexFiles());
+    }
+
+    @Test
+    public void testPayloadVisitorIgnoresDeletedAppendFilesAfterCompaction() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 2);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+        FileStoreTable table = createPrimaryKeyTable(options);
+        writeRows(table, 0, "A", 1);
+        writeRows(table, 1, "A", 2);
+        table.newExpireSnapshots().config(table.coreOptions().expireConfig()).expire();
+
+        assertThat(table.snapshotManager().safelyGetAllSnapshots())
+                .singleElement()
+                .extracting(Snapshot::commitKind)
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        Set<Path> visited = new LinkedHashSet<>();
+        new FullHistoryPayloadFileVisitor(table)
+                .visit(
+                        (path, kind, size, mappingAnchor) -> {
+                            if (kind == FullHistoryCopyPlan.FileKind.DATA) {
+                                visited.add(path);
+                            }
+                        });
+
+        assertThat(visited).isNotEmpty().allMatch(this::exists);
+        assertThat(visited).isEqualTo(new FullHistoryFileCollector(table).collect().dataFiles());
     }
 
     private boolean exists(Path path) {
@@ -144,6 +204,28 @@ public class FullHistoryFileCollectorTest {
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+    }
+
+    private FileStoreTable createPrimaryKeyTable(Options options) throws Exception {
+        Path tablePath = new Path(tempDir.resolve("table-" + tableId++).toString());
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"id", "pt"});
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "id");
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.singletonList("id"),
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);

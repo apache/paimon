@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -38,20 +39,26 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DateTimeUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -93,6 +100,23 @@ public class FullHistoryMetadataRewriterTest {
         source = FileStoreTableFactory.create(fileIO, sourceRoot);
 
         assertThat(FullHistorySourceFingerprint.compute(source)).isNotEqualTo(before);
+    }
+
+    @Test
+    public void testSourceFingerprintIncludesTableLocation() throws Exception {
+        Path firstRoot = new Path(tempDir.resolve("location-fingerprint-first/table").toString());
+        Path secondRoot = new Path(tempDir.resolve("location-fingerprint-second/table").toString());
+        String externalRoot =
+                new Path(tempDir.resolve("location-fingerprint-external").toUri()).toString();
+        FileStoreTable first = createTable(firstRoot, externalRoot);
+        TableSchema identicalSchema = first.schema();
+        assertThat(new SchemaManager(fileIO, secondRoot).restore(identicalSchema)).isTrue();
+        FileStoreTable second = FileStoreTableFactory.create(fileIO, secondRoot, identicalSchema);
+
+        String firstFingerprint = FullHistorySourceFingerprint.compute(first);
+        String secondFingerprint = FullHistorySourceFingerprint.compute(second);
+        assertThat(firstFingerprint).startsWith("v2:");
+        assertThat(firstFingerprint).isNotEqualTo(secondFingerprint);
     }
 
     @Test
@@ -166,10 +190,8 @@ public class FullHistoryMetadataRewriterTest {
 
         writeRows(source, 0, "A", 1);
         source.createTag("tag1", 1);
-        java.time.LocalDateTime sourceTagCreateTime =
-                DateTimeUtils.toLocalDateTime(
-                        fileIO.getFileStatus(source.tagManager().tagPath("tag1"))
-                                .getModificationTime());
+        assertThat(fileIO.readFileUtf8(source.tagManager().tagPath("tag1")))
+                .doesNotContain("tagCreateTime", "tagTimeRetained");
         source.createBranch("branch1", "tag1");
         writeRows(source.switchToBranch("branch1"), 1, "B", 2);
         source.switchToBranch("branch1")
@@ -205,8 +227,10 @@ public class FullHistoryMetadataRewriterTest {
         assertThat(target.tagManager().tagObjects())
                 .extracting(tag -> tag.getRight())
                 .containsExactly("tag1");
-        assertThat(target.tagManager().tagObjects().get(0).getLeft().getTagCreateTime())
-                .isEqualTo(sourceTagCreateTime);
+        assertThat(target.tagManager().tagObjects().get(0).getLeft().getTagCreateTime()).isNull();
+        assertThat(target.tagManager().tagObjects().get(0).getLeft().getTagTimeRetained()).isNull();
+        assertThat(fileIO.readFileUtf8(target.tagManager().tagPath("tag1")))
+                .doesNotContain("tagCreateTime", "tagTimeRetained");
         assertThat(target.branchManager().branches()).containsExactly("branch1");
         assertThat(target.switchToBranch("branch1").snapshotManager().safelyGetAllSnapshots())
                 .extracting(snapshot -> snapshot.id())
@@ -238,6 +262,325 @@ public class FullHistoryMetadataRewriterTest {
         assertThat(targetDataFiles)
                 .extracting(Path::getName)
                 .containsExactlyInAnyOrderElementsOf(sourceNames);
+
+        Path missingTarget = targetDataFiles.iterator().next();
+        fileIO.delete(missingTarget, false);
+        FileStoreTable sourceAtClone = source;
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                sourceAtClone,
+                                                target,
+                                                mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Target file does not exist")
+                .hasMessageContaining(missingTarget.toString());
+    }
+
+    @Test
+    public void testStreamingValidationRejectsMissingStatisticsFile() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("statistics-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("statistics-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("statistics-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("statistics-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        writeRows(source, 0, "A", 1);
+
+        Snapshot snapshot = source.snapshotManager().latestSnapshot();
+        TableCommitImpl commit = source.newCommit(UUID.randomUUID().toString());
+        try {
+            commit.updateStatistics(new Statistics(snapshot.id(), snapshot.schemaId(), 1L, 1L));
+        } finally {
+            commit.close();
+        }
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryFileSet sourceFiles = new FullHistoryFileCollector(source).collect();
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(sourceFiles, mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        Snapshot targetSnapshot = target.snapshotManager().latestSnapshot();
+        Path statisticsPath =
+                target.store().pathFactory().statsFileFactory().toPath(targetSnapshot.statistics());
+        fileIO.delete(statisticsPath, false);
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                source,
+                                                target,
+                                                mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Target statistics file does not exist")
+                .hasMessageContaining(statisticsPath.toString());
+    }
+
+    @Test
+    public void testStreamingValidationRejectsTruncatedExtraFile() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("extra-file-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("extra-file-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("extra-file-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("extra-file-target-external").toUri()).toString();
+        Options options = new Options();
+        options.set("file-index.bloom-filter.columns", "id");
+        options.set("file-index.in-manifest-threshold", "1B");
+        FileStoreTable source = createTable(sourceRoot, sourceExternal, options);
+        writeRows(source, 0, "A", 1, 2, 3);
+
+        List<Path> sourceExtraFiles = new ArrayList<>();
+        new FullHistoryPayloadFileVisitor(source)
+                .visit(
+                        (path, kind, expectedSize, mappingAnchor) -> {
+                            if (expectedSize < 0) {
+                                sourceExtraFiles.add(path);
+                            }
+                        });
+        assertThat(sourceExtraFiles).isNotEmpty();
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryFileSet sourceFiles = new FullHistoryFileCollector(source).collect();
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(sourceFiles, mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        List<Path> targetExtraFiles = new ArrayList<>();
+        new FullHistoryPayloadFileVisitor(target)
+                .visit(
+                        (path, kind, expectedSize, mappingAnchor) -> {
+                            if (expectedSize < 0) {
+                                targetExtraFiles.add(path);
+                            }
+                        });
+        assertThat(targetExtraFiles).hasSameSizeAs(sourceExtraFiles);
+        Path truncated = targetExtraFiles.get(0);
+        assertThat(fileIO.getFileSize(truncated)).isGreaterThan(1L);
+        fileIO.writeFile(truncated, "x", true);
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                source,
+                                                target,
+                                                mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Target data files do not match");
+    }
+
+    @Test
+    public void testRewriteTagWithRetention() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("ttl-tag-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("ttl-tag-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("ttl-tag-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("ttl-tag-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        writeRows(source, 0, "A", 1);
+        source.createTag("ttl-tag", 1, Duration.ofDays(7));
+        Tag sourceTag = source.tagManager().tagObjects().get(0).getLeft();
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        new FullHistoryCloneValidator(source, target, mapping, payloadPlan).validate();
+        Tag targetTag = target.tagManager().tagObjects().get(0).getLeft();
+        assertThat(targetTag.getTagCreateTime()).isEqualTo(sourceTag.getTagCreateTime());
+        assertThat(targetTag.getTagTimeRetained()).isEqualTo(Duration.ofDays(7));
+    }
+
+    @Test
+    public void testRewriteAbsoluteDataFilePathDirectory() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("path-directory-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("path-directory-target/table").toString());
+        Path sourceDataRoot = new Path(tempDir.resolve("path-directory-source-data").toString());
+        Path targetDataRoot = new Path(tempDir.resolve("path-directory-target-data").toString());
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, sourceRoot.toString());
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.DATA_FILE_PATH_DIRECTORY, sourceDataRoot.toString());
+        RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, sourceRoot),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+        writeRows(source, 0, 1, 2);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceDataRoot + "=" + targetDataRoot));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        new FullHistoryCloneValidator(source, target, mapping, payloadPlan).validate();
+        assertThat(target.schema().options())
+                .containsEntry(
+                        CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), targetDataRoot.toString());
+        assertThat(new FullHistoryFileCollector(target).collect().dataFiles())
+                .allMatch(path -> path.toString().startsWith(targetDataRoot.toString()))
+                .allMatch(this::exists);
+    }
+
+    @Test
+    public void testRewriteSchemeLessAbsoluteDataFilePathDirectory() {
+        Map<String, String> sourceOptions = new HashMap<>();
+        sourceOptions.put(CoreOptions.PATH.key(), "hdfs://source/warehouse/table");
+        sourceOptions.put(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "/cold/data");
+
+        Map<String, String> targetOptions =
+                FullHistoryMetadataRewriter.rewriteOptions(
+                        sourceOptions,
+                        PathMapping.parse(
+                                Arrays.asList(
+                                        "hdfs://source/warehouse/table="
+                                                + "s3://target/warehouse/table",
+                                        "hdfs://source/cold/data=s3://target/cold/data")));
+
+        assertThat(targetOptions)
+                .containsEntry(CoreOptions.PATH.key(), "s3://target/warehouse/table")
+                .containsEntry(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "s3://target/cold/data");
+    }
+
+    @Test
+    public void testRewriteSchemeLessAbsoluteDataDirectoryWithoutPathOption() {
+        Map<String, String> sourceOptions = new HashMap<>();
+        sourceOptions.put(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "/cold/data");
+
+        Map<String, String> targetOptions =
+                FullHistoryMetadataRewriter.rewriteOptions(
+                        sourceOptions,
+                        PathMapping.parse(
+                                Arrays.asList(
+                                        "hdfs://source/warehouse/table="
+                                                + "s3://target/warehouse/table",
+                                        "hdfs://source/cold/data=s3://target/cold/data")),
+                        new Path("hdfs://source/warehouse/table"));
+
+        assertThat(targetOptions)
+                .doesNotContainKey(CoreOptions.PATH.key())
+                .containsEntry(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "s3://target/cold/data");
+    }
+
+    @Test
+    public void testRewriteSpecificFsForCrossSchemeMapping() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("specific-fs-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("specific-fs-target/table").toString());
+        String sourceExternal1 = "traceable://old-cluster/volume-1/table";
+        String sourceExternal2 = "traceable://old-cluster/volume-2/table";
+        String targetExternal1 =
+                new Path(tempDir.resolve("specific-fs-target-volume-1").toUri()).toString();
+        String targetExternal2 =
+                new Path(tempDir.resolve("specific-fs-target-volume-2").toUri()).toString();
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, sourceRoot.toString());
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, sourceExternal1 + "," + sourceExternal2);
+        options.set(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, ExternalPathStrategy.SPECIFIC_FS);
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, "traceable");
+        RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, sourceRoot),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal1 + "=" + targetExternal1,
+                                sourceExternal2 + "=" + targetExternal2));
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        assertThat(target.schema().options())
+                .containsEntry(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file")
+                .containsEntry(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                        targetExternal1 + "," + targetExternal2);
+        assertThat(target.store().pathFactory().getExternalPaths())
+                .extracting(Path::toString)
+                .containsExactly(targetExternal1, targetExternal2);
+    }
+
+    @Test
+    public void testRejectSpecificFsTargetSchemeExpansion() {
+        Map<String, String> sourceOptions = new HashMap<>();
+        sourceOptions.put(CoreOptions.PATH.key(), "hdfs://source/warehouse/table");
+        sourceOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                "traceable://source/selected,other://source/unselected");
+        sourceOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.SPECIFIC_FS.toString());
+        sourceOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "traceable");
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryMetadataRewriter.rewriteOptions(
+                                        sourceOptions,
+                                        PathMapping.parse(
+                                                Arrays.asList(
+                                                        "hdfs://source/warehouse/table="
+                                                                + "s3://target/warehouse/table",
+                                                        "traceable://source/selected="
+                                                                + "file:/target/selected",
+                                                        "other://source/unselected="
+                                                                + "file:/target/unselected"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("would select additional external paths")
+                .hasMessageContaining("index 1");
     }
 
     @Test
@@ -271,6 +614,50 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     @Test
+    public void testPlannerRejectsIcebergCompatibilityInHistoricalSchema() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("iceberg-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("iceberg-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("iceberg-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("iceberg-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        source.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                IcebergOptions.StorageType.TABLE_LOCATION.toString()));
+        source.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                IcebergOptions.StorageType.DISABLED.toString()));
+        source = FileStoreTableFactory.create(fileIO, sourceRoot);
+        assertThat(
+                        Options.fromMap(source.schema().options())
+                                .get(IcebergOptions.METADATA_ICEBERG_STORAGE))
+                .isEqualTo(IcebergOptions.StorageType.DISABLED);
+        FileStoreTable finalSource = source;
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryClonePlanner(
+                                                finalSource,
+                                                PathMapping.parse(
+                                                        Arrays.asList(
+                                                                sourceRoot + "=" + targetRoot,
+                                                                sourceExternal
+                                                                        + "="
+                                                                        + targetExternal)))
+                                        .planStructure())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(IcebergOptions.METADATA_ICEBERG_STORAGE.key())
+                .hasMessageContaining("table-location")
+                .hasMessageContaining("not copied");
+        assertThat(fileIO.exists(targetRoot)).isFalse();
+    }
+
+    @Test
     public void testPlannerRejectsMissingExternalPathMapping() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("mapping-source/table").toString());
         Path targetRoot = new Path(tempDir.resolve("mapping-target/table").toString());
@@ -289,6 +676,78 @@ public class FullHistoryMetadataRewriterTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No path mapping")
                 .hasMessageContaining(sourceExternal);
+    }
+
+    @Test
+    public void testPlannerRejectsMissingAbsoluteDataPathDirectoryMapping() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("missing-data-path-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("missing-data-path-target/table").toString());
+        Path sourceDataRoot = new Path(tempDir.resolve("missing-data-path-source-data").toString());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, sourceRoot.toString());
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.DATA_FILE_PATH_DIRECTORY, sourceDataRoot.toString());
+        RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, sourceRoot),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryClonePlanner(
+                                                source,
+                                                PathMapping.parse(
+                                                        Collections.singletonList(
+                                                                sourceRoot + "=" + targetRoot)))
+                                        .planStructure())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No path mapping")
+                .hasMessageContaining(sourceDataRoot.toString());
+    }
+
+    @Test
+    public void testPlannerRejectsSpecificFsMappedToMultipleSchemes() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("mixed-specific-fs-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("mixed-specific-fs-target/table").toString());
+        String sourceExternal1 = "traceable://old-cluster/volume-1/table";
+        String sourceExternal2 = "traceable://old-cluster/volume-2/table";
+        Options options = new Options();
+        options.set(CoreOptions.PATH, sourceRoot.toString());
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, sourceExternal1 + "," + sourceExternal2);
+        options.set(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, ExternalPathStrategy.SPECIFIC_FS);
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, "traceable");
+        RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, sourceRoot),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal1 + "=s3://new-cluster/volume-1/table",
+                                sourceExternal2 + "=oss://new-cluster/volume-2/table"));
+        assertThatThrownBy(() -> new FullHistoryClonePlanner(source, mapping).planStructure())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("exactly one target file system")
+                .hasMessageContaining("oss")
+                .hasMessageContaining("s3");
     }
 
     @Test
@@ -353,6 +812,63 @@ public class FullHistoryMetadataRewriterTest {
                 .containsExactly(1, 2, 3);
         assertThat(fileIO.readFileUtf8(new Path(targetIndexRoot, indexFileName)))
                 .isEqualTo("index-content");
+    }
+
+    @Test
+    public void testInternalIndexFollowsTableRootMapping() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("internal-index-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("internal-index-target/table").toString());
+        Path nestedTargetRoot =
+                new Path(tempDir.resolve("internal-index-unexpected-target").toString());
+        FileStoreTable source = createUnpartitionedTable(sourceRoot, null);
+        writeRows(source, 0, 1);
+
+        String indexFileName = "index-test";
+        Path sourceIndexRoot = new Path(sourceRoot, "index");
+        Path sourceIndexPath = new Path(sourceIndexRoot, indexFileName);
+        fileIO.writeFile(sourceIndexPath, "index-content", false);
+        IndexManifestEntry sourceIndexEntry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta(
+                                "test-index",
+                                indexFileName,
+                                fileIO.getFileSize(sourceIndexPath),
+                                1,
+                                null,
+                                null,
+                                null));
+        String indexManifest =
+                source.store()
+                        .indexManifestFileFactory()
+                        .create()
+                        .writeWithoutRolling(Collections.singletonList(sourceIndexEntry));
+        Snapshot snapshot = source.snapshotManager().latestSnapshot();
+        fileIO.overwriteFileUtf8(
+                source.snapshotManager().snapshotPath(snapshot.id()),
+                copyWithIndexManifest(snapshot, indexManifest).toJson());
+        source = FileStoreTableFactory.create(fileIO, sourceRoot);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceIndexRoot + "=" + nestedTargetRoot));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        assertThat(payloadPlan.files())
+                .filteredOn(file -> file.kind() == FullHistoryCopyPlan.FileKind.INDEX)
+                .extracting(file -> file.target().toString())
+                .containsExactly(new Path(targetRoot, "index/" + indexFileName).toString());
+
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        new FullHistoryCloneValidator(source, target, mapping, payloadPlan).validate();
+        assertThat(fileIO.exists(new Path(nestedTargetRoot, indexFileName))).isFalse();
     }
 
     @Test
@@ -455,7 +971,9 @@ public class FullHistoryMetadataRewriterTest {
         options.set(CoreOptions.PATH, tableRoot.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "id");
-        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, indexExternalRoot);
+        if (indexExternalRoot != null) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, indexExternalRoot);
+        }
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(

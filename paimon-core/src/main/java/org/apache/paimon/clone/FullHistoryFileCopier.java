@@ -75,12 +75,14 @@ public class FullHistoryFileCopier {
             copyTwoPhase(sourceFileIO, targetFileIO, file, expectedSize);
         }
 
-        long targetSize = targetFileIO.getFileSize(file.target());
-        if (targetSize != expectedSize) {
-            throw new IOException(
-                    String.format(
-                            "Copied target file %s has unexpected size: expected %s, actual %s.",
-                            file.target(), expectedSize, targetSize));
+        if (overwrite) {
+            long targetSize = targetFileIO.getFileSize(file.target());
+            if (targetSize != expectedSize) {
+                throw new IOException(
+                        String.format(
+                                "Copied target file %s has unexpected size: expected %s, actual %s.",
+                                file.target(), expectedSize, targetSize));
+            }
         }
     }
 
@@ -92,12 +94,14 @@ public class FullHistoryFileCopier {
             throws IOException {
         TwoPhaseOutputStream output = null;
         TwoPhaseOutputStream.Committer committer = null;
+        boolean published = false;
         try (SeekableInputStream input = sourceFileIO.newInputStream(file.source())) {
             output = targetFileIO.newTwoPhaseOutputStream(file.target(), false);
             copyBytes(input, output, expectedSize);
             committer = output.closeForCommit();
             output = null;
             committer.commit(targetFileIO);
+            published = true;
             long targetSize = targetFileIO.getFileSize(file.target());
             if (targetSize != expectedSize) {
                 throw new IOException(
@@ -106,7 +110,19 @@ public class FullHistoryFileCopier {
                                 file.target(), expectedSize, targetSize));
             }
         } catch (Throwable failure) {
-            discard(targetFileIO, output, committer, failure);
+            if (!published) {
+                discard(targetFileIO, output, committer, failure);
+            }
+            if (committer != null && failure instanceof IOException) {
+                try {
+                    if (targetFileIO.exists(file.target())
+                            && targetFileIO.getFileSize(file.target()) == expectedSize) {
+                        return;
+                    }
+                } catch (Throwable validationFailure) {
+                    failure.addSuppressed(validationFailure);
+                }
+            }
             if (failure instanceof IOException) {
                 throw (IOException) failure;
             } else if (failure instanceof RuntimeException) {

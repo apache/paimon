@@ -130,6 +130,83 @@ public class FullHistoryFileCopierTest {
         assertThat(targetFileIO.exists(target)).isFalse();
     }
 
+    @Test
+    public void testConcurrentMatchingCopyIsIdempotent() throws Exception {
+        java.nio.file.Path sourceDir = tempDir.resolve("concurrent-source");
+        java.nio.file.Path targetDir = tempDir.resolve("concurrent-target");
+        Path source = new Path(sourceDir.resolve("data/file.orc").toString());
+        Path target = new Path(targetDir.resolve("data/file.orc").toString());
+        sourceFileIO.writeFile(source, "matching-content", false);
+        FullHistoryCopyPlan plan =
+                singleFilePlan(source, sourceDir.toString(), targetDir.toString());
+        FileIO concurrentTargetFileIO = new ConcurrentCommitFileIO();
+
+        FullHistoryFileCopier.copy(sourceFileIO, concurrentTargetFileIO, plan, false);
+
+        assertThat(concurrentTargetFileIO.readFileUtf8(target)).isEqualTo("matching-content");
+    }
+
+    @Test
+    public void testPostCommitValidationFailureDoesNotDeleteTarget() throws Exception {
+        java.nio.file.Path sourceDir = tempDir.resolve("post-commit-source");
+        java.nio.file.Path targetDir = tempDir.resolve("post-commit-target");
+        Path source = new Path(sourceDir.resolve("data/file.orc").toString());
+        Path target = new Path(targetDir.resolve("data/file.orc").toString());
+        sourceFileIO.writeFile(source, "published-content", false);
+        FullHistoryCopyPlan plan =
+                singleFilePlan(source, sourceDir.toString(), targetDir.toString());
+        FileIO targetWithTransientValidationFailure = new PostCommitSizeFailureFileIO(target);
+
+        FullHistoryFileCopier.copy(sourceFileIO, targetWithTransientValidationFailure, plan, false);
+
+        assertThat(targetWithTransientValidationFailure.readFileUtf8(target))
+                .isEqualTo("published-content");
+    }
+
+    private static class ConcurrentCommitFileIO extends LocalFileIO {
+
+        private boolean injectConcurrentCommit = true;
+
+        @Override
+        public boolean rename(Path source, Path target) throws java.io.IOException {
+            if (injectConcurrentCommit) {
+                injectConcurrentCommit = false;
+                super.copyFile(source, target, false);
+                return false;
+            }
+            return super.rename(source, target);
+        }
+    }
+
+    private static class PostCommitSizeFailureFileIO extends LocalFileIO {
+
+        private final Path target;
+        private boolean published;
+        private boolean validationFailureInjected;
+
+        private PostCommitSizeFailureFileIO(Path target) {
+            this.target = target;
+        }
+
+        @Override
+        public boolean rename(Path source, Path target) throws java.io.IOException {
+            boolean renamed = super.rename(source, target);
+            if (renamed && this.target.equals(target)) {
+                published = true;
+            }
+            return renamed;
+        }
+
+        @Override
+        public long getFileSize(Path path) throws java.io.IOException {
+            if (published && !validationFailureInjected && target.equals(path)) {
+                validationFailureInjected = true;
+                throw new java.io.IOException("Injected post-commit validation failure.");
+            }
+            return super.getFileSize(path);
+        }
+    }
+
     private static class FailingReadFileIO extends LocalFileIO {
 
         @Override

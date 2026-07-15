@@ -66,7 +66,7 @@ public class TagTimeExpire {
             String tagName = pair.getRight();
             LocalDateTime createTime = tag.getTagCreateTime();
             Duration timeRetained = tag.getTagTimeRetained();
-            if (createTime == null) {
+            if (createTime == null || timeRetained == null) {
                 if (olderThanTime != null) {
                     FileStatus tagFileStatus;
                     try {

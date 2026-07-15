@@ -20,6 +20,7 @@ package org.apache.paimon.clone;
 
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.Tag;
@@ -51,7 +52,9 @@ public class FullHistorySourceFingerprint {
 
     public static String compute(FileStoreTable table) throws IOException {
         MessageDigest digest = sha256();
-        update(digest, "full-history-source-v1");
+        update(digest, "full-history-source-v2");
+        update(digest, "table-location");
+        update(digest, new Path(table.location().toString()).toString());
 
         List<String> branches = new ArrayList<>(table.branchManager().branches());
         branches.add(DEFAULT_MAIN_BRANCH);
@@ -101,7 +104,7 @@ public class FullHistorySourceFingerprint {
                 update(digest, changelog.toJson());
             }
         }
-        return "v1:" + toHex(digest.digest());
+        return "v2:" + toHex(digest.digest());
     }
 
     private static MessageDigest sha256() {

@@ -96,6 +96,11 @@ class FullHistoryCloneFinalizeOperator extends BoundedOneInputOperator<Boolean, 
     @Override
     public void endInput() throws Exception {
         PathMapping mapping = PathMapping.parse(pathMappings);
+        if (FullHistoryCloneMarker.isSuccessful(
+                targetFileIO, clonePlan, mapping, targetDatabase, targetTableName)) {
+            output.collect(new StreamRecord<>(true));
+            return;
+        }
         FullHistorySourceFingerprint.verify(sourceTable, clonePlan.sourceFingerprint());
         new FullHistoryMetadataRewriter(sourceTable, targetFileIO, clonePlan.targetRoot(), mapping)
                 .rewrite();
@@ -103,7 +108,7 @@ class FullHistoryCloneFinalizeOperator extends BoundedOneInputOperator<Boolean, 
                 FileStoreTableFactory.create(targetFileIO, clonePlan.targetRoot());
         new FullHistoryCloneValidator(
                         sourceTable, targetTable, mapping, clonePlan.payloadCopyPlan())
-                .validateMetadata();
+                .validatePublishedCloneStreaming();
         FullHistorySourceFingerprint.verify(sourceTable, clonePlan.sourceFingerprint());
         FullHistoryCloneMarker.markSuccessful(
                 targetFileIO, clonePlan, mapping, targetDatabase, targetTableName);

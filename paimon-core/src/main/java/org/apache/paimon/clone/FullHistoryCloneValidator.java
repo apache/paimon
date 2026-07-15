@@ -29,7 +29,11 @@ import org.apache.paimon.utils.Pair;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,20 +66,8 @@ public class FullHistoryCloneValidator {
     }
 
     public ValidationResult validate() throws Exception {
-        validateMetadata();
-        validateAllTimeTravel();
-
-        FullHistoryFileSet sourceFiles = new FullHistoryFileCollector(sourceTable).collect();
-        FullHistoryFileSet targetFiles = new FullHistoryFileCollector(targetTable).collect();
-        checkState(
-                mappedPaths(sourceFiles.dataFiles()).equals(targetFiles.dataFiles()),
-                "Target data files do not match the mapped source data files.");
-        checkState(
-                mappedPaths(sourceFiles.indexFiles()).equals(targetFiles.indexFiles()),
-                "Target index files do not match the mapped source index files.");
-
+        FullHistoryFileSet targetFiles = validatePublishedClone();
         validatePayloadFiles(targetFiles);
-        validateAllFilesExist(targetFiles);
 
         long payloadBytes =
                 payloadPlan.files().stream()
@@ -83,6 +75,38 @@ public class FullHistoryCloneValidator {
                         .sum();
         return new ValidationResult(
                 payloadPlan.files().size(), payloadBytes, targetFiles.metadataFiles().size());
+    }
+
+    public FullHistoryFileSet validatePublishedClone() throws Exception {
+        validatePublishedCloneStreaming();
+        validateAllTimeTravel();
+
+        FullHistoryFileSet sourceFiles = new FullHistoryFileCollector(sourceTable).collect();
+        FullHistoryFileSet targetFiles = new FullHistoryFileCollector(targetTable).collect();
+        checkState(
+                mappedPaths(sourceFiles.dataPayloadPaths()).equals(targetFiles.dataFiles()),
+                "Target data files do not match the mapped source data files.");
+        checkState(
+                mappedPaths(sourceFiles.indexPayloadPaths()).equals(targetFiles.indexFiles()),
+                "Target index files do not match the mapped source index files.");
+        validateAllFilesExist(targetFiles);
+        return targetFiles;
+    }
+
+    public void validatePublishedCloneStreaming() throws Exception {
+        validateMetadata();
+        validateAllStatisticsFiles();
+
+        // Scan planning materializes every live split. Visit the metadata graph directly and
+        // accumulate only fixed-size comparison digests instead of retaining every payload path.
+        PayloadSummary expected = summarizePayload(sourceTable, true);
+        PayloadSummary actual = summarizePayload(targetTable, false);
+        checkState(
+                expected.dataFiles.equals(actual.dataFiles),
+                "Target data files do not match the mapped source data files.");
+        checkState(
+                expected.indexFiles.equals(actual.indexFiles),
+                "Target index files do not match the mapped source index files.");
     }
 
     public void validateMetadata() throws Exception {
@@ -104,7 +128,7 @@ public class FullHistoryCloneValidator {
             FileStoreTable source = sourceTable.switchToBranch(branch);
             FileStoreTable target = targetTable.switchToBranch(branch);
             checkState(
-                    source.schemaManager().listAllIds().equals(target.schemaManager().listAllIds()),
+                    schemaIds(source).equals(schemaIds(target)),
                     "Target schema IDs in branch %s do not match the source.",
                     branch);
             checkState(
@@ -130,6 +154,20 @@ public class FullHistoryCloneValidator {
         }
     }
 
+    private void validateAllStatisticsFiles() throws IOException {
+        List<String> branches = new ArrayList<>(targetTable.branchManager().branches());
+        branches.add(DEFAULT_MAIN_BRANCH);
+        for (String branch : branches) {
+            FileStoreTable target = targetTable.switchToBranch(branch);
+            for (Snapshot snapshot : target.snapshotManager().safelyGetAllSnapshots()) {
+                validateStatisticsFile(target, snapshot);
+            }
+            for (Pair<Tag, String> tagAndName : target.tagManager().tagObjects()) {
+                validateStatisticsFile(target, tagAndName.getLeft());
+            }
+        }
+    }
+
     private void validateTimeTravel(FileStoreTable target) throws IOException {
         for (Snapshot snapshot : target.snapshotManager().safelyGetAllSnapshots()) {
             target.copy(
@@ -148,6 +186,21 @@ public class FullHistoryCloneValidator {
         }
     }
 
+    private void validateStatisticsFile(FileStoreTable table, Snapshot snapshot)
+            throws IOException {
+        if (snapshot.statistics() == null) {
+            return;
+        }
+        Path path = table.store().pathFactory().statsFileFactory().toPath(snapshot.statistics());
+        checkState(table.fileIO().exists(path), "Target statistics file does not exist: %s", path);
+    }
+
+    private List<Long> schemaIds(FileStoreTable table) {
+        return table.schemaManager().listAll().stream()
+                .map(schema -> schema.id())
+                .collect(Collectors.toList());
+    }
+
     private Set<Long> snapshotIds(FileStoreTable table) throws IOException {
         return table.snapshotManager().safelyGetAllSnapshots().stream()
                 .map(Snapshot::id)
@@ -159,7 +212,7 @@ public class FullHistoryCloneValidator {
         for (Pair<Tag, String> tagAndName : table.tagManager().tagObjects()) {
             Tag tag = tagAndName.getLeft();
             Object createTime = tag.getTagCreateTime();
-            if (createTime == null) {
+            if (createTime == null && tag.getTagTimeRetained() != null) {
                 createTime =
                         DateTimeUtils.toLocalDateTime(
                                 table.fileIO()
@@ -178,10 +231,67 @@ public class FullHistoryCloneValidator {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private Set<Path> mappedPaths(Set<Path> sourcePaths) {
+    private Set<Path> mappedPaths(Set<FullHistoryFileSet.PayloadPath> sourcePaths) {
         return sourcePaths.stream()
-                .map(path -> new Path(pathMapping.rewriteRequired(path.toString())))
+                .map(
+                        payloadPath ->
+                                new Path(
+                                        payloadPath.mappingAnchor() == null
+                                                ? pathMapping.rewriteRequired(
+                                                        payloadPath.path().toString())
+                                                : pathMapping.rewriteRequiredUnder(
+                                                        payloadPath.path().toString(),
+                                                        payloadPath.mappingAnchor().toString())))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private PayloadSummary summarizePayload(FileStoreTable table, boolean rewrite)
+            throws IOException {
+        PayloadSummary summary = new PayloadSummary();
+        new FullHistoryPayloadFileVisitor(table)
+                .visit(
+                        (path, kind, expectedSize, mappingAnchor) -> {
+                            Path summarizedPath =
+                                    rewrite
+                                            ? new Path(
+                                                    mappingAnchor == null
+                                                            ? pathMapping.rewriteRequired(
+                                                                    path.toString())
+                                                            : pathMapping.rewriteRequiredUnder(
+                                                                    path.toString(),
+                                                                    mappingAnchor.toString()))
+                                            : path;
+                            long summarizedSize = expectedSize;
+                            if (!rewrite) {
+                                long actualSize = validatePayloadFile(table, path, expectedSize);
+                                if (summarizedSize < 0) {
+                                    summarizedSize = actualSize;
+                                }
+                            } else if (summarizedSize < 0) {
+                                checkState(
+                                        table.fileIO().exists(path),
+                                        "Source file does not exist: %s",
+                                        path);
+                                summarizedSize = table.fileIO().getFileSize(path);
+                            }
+                            summary.add(kind, summarizedPath, summarizedSize);
+                        });
+        return summary;
+    }
+
+    private long validatePayloadFile(FileStoreTable table, Path path, long expectedSize)
+            throws IOException {
+        checkState(table.fileIO().exists(path), "Target file does not exist: %s", path);
+        long actualSize = table.fileIO().getFileSize(path);
+        if (expectedSize >= 0) {
+            checkState(
+                    actualSize == expectedSize,
+                    "Target payload file %s has size %s but metadata records %s.",
+                    path,
+                    actualSize,
+                    expectedSize);
+        }
+        return actualSize;
     }
 
     private void validatePayloadFiles(FullHistoryFileSet targetFiles) throws IOException {
@@ -211,6 +321,66 @@ public class FullHistoryCloneValidator {
     private void validateAllFilesExist(FullHistoryFileSet targetFiles) throws IOException {
         for (Path file : targetFiles.allFiles()) {
             checkState(targetTable.fileIO().exists(file), "Target file does not exist: %s", file);
+        }
+    }
+
+    private static class PayloadSummary {
+
+        private final PathMultisetDigest dataFiles = new PathMultisetDigest();
+        private final PathMultisetDigest indexFiles = new PathMultisetDigest();
+
+        private void add(FullHistoryCopyPlan.FileKind kind, Path path, long expectedSize) {
+            if (kind == FullHistoryCopyPlan.FileKind.DATA) {
+                dataFiles.add(path, expectedSize);
+            } else if (kind == FullHistoryCopyPlan.FileKind.INDEX) {
+                indexFiles.add(path, expectedSize);
+            }
+        }
+    }
+
+    /** Order-independent digest so final validation does not retain every payload path. */
+    private static class PathMultisetDigest {
+
+        private final MessageDigest sha256;
+        private final byte[] sum = new byte[32];
+        private long count;
+
+        private PathMultisetDigest() {
+            try {
+                sha256 = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("SHA-256 is not available.", e);
+            }
+        }
+
+        private void add(Path path, long expectedSize) {
+            sha256.reset();
+            sha256.update(path.toString().getBytes(StandardCharsets.UTF_8));
+            for (int shift = Long.SIZE - Byte.SIZE; shift >= 0; shift -= Byte.SIZE) {
+                sha256.update((byte) (expectedSize >>> shift));
+            }
+            byte[] hash = sha256.digest();
+            int carry = 0;
+            for (int i = sum.length - 1; i >= 0; i--) {
+                int value = (sum[i] & 0xff) + (hash[i] & 0xff) + carry;
+                sum[i] = (byte) value;
+                carry = value >>> 8;
+            }
+            count++;
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (!(object instanceof PathMultisetDigest)) {
+                return false;
+            }
+            PathMultisetDigest that = (PathMultisetDigest) object;
+            return count == that.count && Arrays.equals(sum, that.sum);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * Long.hashCode(count) + Arrays.hashCode(sum);
         }
     }
 
