@@ -21,7 +21,6 @@ package org.apache.parquet.filter2.predicate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -55,8 +54,15 @@ import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.Operators.DoubleColumn;
 import org.apache.parquet.filter2.predicate.Operators.FloatColumn;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.Type;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -65,16 +71,20 @@ import java.util.Set;
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
 public class ParquetFilters {
 
-    private static final ConvertFilterToParquet CONVERTER = new ConvertFilterToParquet();
-
     private ParquetFilters() {}
 
     public static FilterCompat.Filter convert(List<Predicate> predicates) {
+        return convert(predicates, null, true);
+    }
+
+    public static FilterCompat.Filter convert(
+            List<Predicate> predicates, MessageType fileSchema, boolean caseSensitive) {
+        ConvertFilterToParquet converter = new ConvertFilterToParquet(fileSchema, caseSensitive);
         FilterPredicate result = null;
         if (predicates != null) {
             for (Predicate predicate : predicates) {
                 try {
-                    FilterPredicate parquetFilter = predicate.visit(CONVERTER);
+                    FilterPredicate parquetFilter = predicate.visit(converter);
                     if (result == null) {
                         result = parquetFilter;
                     } else {
@@ -90,6 +100,14 @@ public class ParquetFilters {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static class ConvertFilterToParquet implements FunctionVisitor<FilterPredicate> {
+
+        private final MessageType fileSchema;
+        private final boolean caseSensitive;
+
+        private ConvertFilterToParquet(MessageType fileSchema, boolean caseSensitive) {
+            this.fileSchema = fileSchema;
+            this.caseSensitive = caseSensitive;
+        }
 
         @Override
         public FilterPredicate visitIsNotNull(FieldRef fieldRef) {
@@ -115,38 +133,35 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitLessThan(FieldRef fieldRef, Object literal) {
-            return new Operators.Lt(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+            return new Operators.Lt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
             return new Operators.GtEq(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitNotEqual(FieldRef fieldRef, Object literal) {
             return new Operators.NotEq(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitLessOrEqual(FieldRef fieldRef, Object literal) {
             return new Operators.LtEq(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitEqual(FieldRef fieldRef, Object literal) {
-            return new Operators.Eq(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+            return new Operators.Eq(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitGreaterThan(FieldRef fieldRef, Object literal) {
-            return new Operators.Gt(
-                    toParquetColumn(fieldRef), toParquetObject(literal, fieldRef.type()));
+            return new Operators.Gt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
@@ -190,22 +205,25 @@ public class ParquetFilters {
         @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
             Operators.Column<?> column = toParquetColumn(fieldRef);
-            org.apache.paimon.types.DataType type = fieldRef.type();
             if (column instanceof Operators.LongColumn) {
                 return FilterApi.in(
-                        (Operators.LongColumn) column, convertSets(literals, Long.class, type));
+                        (Operators.LongColumn) column, convertSets(literals, Long.class, fieldRef));
             } else if (column instanceof Operators.IntColumn) {
                 return FilterApi.in(
-                        (Operators.IntColumn) column, convertSets(literals, Integer.class, type));
+                        (Operators.IntColumn) column,
+                        convertSets(literals, Integer.class, fieldRef));
             } else if (column instanceof Operators.DoubleColumn) {
                 return FilterApi.in(
-                        (Operators.DoubleColumn) column, convertSets(literals, Double.class, type));
+                        (Operators.DoubleColumn) column,
+                        convertSets(literals, Double.class, fieldRef));
             } else if (column instanceof Operators.FloatColumn) {
                 return FilterApi.in(
-                        (Operators.FloatColumn) column, convertSets(literals, Float.class, type));
+                        (Operators.FloatColumn) column,
+                        convertSets(literals, Float.class, fieldRef));
             } else if (column instanceof Operators.BinaryColumn) {
                 return FilterApi.in(
-                        (Operators.BinaryColumn) column, convertSets(literals, Binary.class, type));
+                        (Operators.BinaryColumn) column,
+                        convertSets(literals, Binary.class, fieldRef));
             }
 
             throw new UnsupportedOperationException();
@@ -214,22 +232,25 @@ public class ParquetFilters {
         @Override
         public FilterPredicate visitNotIn(FieldRef fieldRef, List<Object> literals) {
             Operators.Column<?> column = toParquetColumn(fieldRef);
-            org.apache.paimon.types.DataType type = fieldRef.type();
             if (column instanceof Operators.LongColumn) {
                 return FilterApi.notIn(
-                        (Operators.LongColumn) column, convertSets(literals, Long.class, type));
+                        (Operators.LongColumn) column, convertSets(literals, Long.class, fieldRef));
             } else if (column instanceof Operators.IntColumn) {
                 return FilterApi.notIn(
-                        (Operators.IntColumn) column, convertSets(literals, Integer.class, type));
+                        (Operators.IntColumn) column,
+                        convertSets(literals, Integer.class, fieldRef));
             } else if (column instanceof Operators.DoubleColumn) {
                 return FilterApi.notIn(
-                        (Operators.DoubleColumn) column, convertSets(literals, Double.class, type));
+                        (Operators.DoubleColumn) column,
+                        convertSets(literals, Double.class, fieldRef));
             } else if (column instanceof Operators.FloatColumn) {
                 return FilterApi.notIn(
-                        (Operators.FloatColumn) column, convertSets(literals, Float.class, type));
+                        (Operators.FloatColumn) column,
+                        convertSets(literals, Float.class, fieldRef));
             } else if (column instanceof Operators.BinaryColumn) {
                 return FilterApi.notIn(
-                        (Operators.BinaryColumn) column, convertSets(literals, Binary.class, type));
+                        (Operators.BinaryColumn) column,
+                        convertSets(literals, Binary.class, fieldRef));
             }
 
             throw new UnsupportedOperationException();
@@ -239,20 +260,131 @@ public class ParquetFilters {
         public FilterPredicate visitNonFieldLeaf(LeafPredicate predicate) {
             throw new UnsupportedOperationException();
         }
-    }
 
-    private static <T> Set<T> convertSets(
-            List<Object> values, Class<T> kclass, org.apache.paimon.types.DataType type) {
-        Set<T> converted = new HashSet<>();
-        for (Object value : values) {
-            Comparable<?> cmp = toParquetObject(value, type);
-            if (kclass.isInstance(cmp)) {
-                converted.add((T) cmp);
-            } else {
-                throw new UnsupportedOperationException();
+        private <T> Set<T> convertSets(List<Object> values, Class<T> kclass, FieldRef fieldRef) {
+            Set<T> converted = new HashSet<>();
+            for (Object value : values) {
+                Comparable<?> cmp = toParquetObject(value, fieldRef);
+                if (kclass.isInstance(cmp)) {
+                    converted.add((T) cmp);
+                } else {
+                    throw new UnsupportedOperationException();
+                }
+            }
+            return converted;
+        }
+
+        private Operators.Column<?> toParquetColumn(FieldRef fieldRef) {
+            if (!(fieldRef.type() instanceof DecimalType)) {
+                return fieldRef.type().accept(new ConvertToColumnTypeVisitor(fieldRef.name()));
+            }
+
+            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef);
+            switch (primitiveType.getPrimitiveTypeName()) {
+                case INT32:
+                    return FilterApi.intColumn(fieldRef.name());
+                case INT64:
+                    return FilterApi.longColumn(fieldRef.name());
+                case BINARY:
+                case FIXED_LEN_BYTE_ARRAY:
+                    return FilterApi.binaryColumn(fieldRef.name());
+                default:
+                    throw new UnsupportedOperationException();
             }
         }
-        return converted;
+
+        private Comparable<?> toParquetObject(Object value, FieldRef fieldRef) {
+            if (!(fieldRef.type() instanceof DecimalType)) {
+                return ParquetFilters.toParquetObject(value, fieldRef.type());
+            }
+            if (value == null) {
+                return null;
+            }
+            if (!(value instanceof Decimal)) {
+                throw new UnsupportedOperationException();
+            }
+
+            DecimalType decimalType = (DecimalType) fieldRef.type();
+            Decimal decimal = normalizeDecimal((Decimal) value, decimalType);
+            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef);
+            switch (primitiveType.getPrimitiveTypeName()) {
+                case INT32:
+                    long intValue = toUnscaledLong(decimal);
+                    if (intValue < Integer.MIN_VALUE || intValue > Integer.MAX_VALUE) {
+                        throw new UnsupportedOperationException();
+                    }
+                    return (int) intValue;
+                case INT64:
+                    return toUnscaledLong(decimal);
+                case BINARY:
+                    return Binary.fromConstantByteArray(decimal.toUnscaledBytes());
+                case FIXED_LEN_BYTE_ARRAY:
+                    return decimalToBinary(decimal, primitiveType.getTypeLength());
+                default:
+                    throw new UnsupportedOperationException();
+            }
+        }
+
+        private PrimitiveType decimalPrimitiveType(FieldRef fieldRef) {
+            if (fileSchema == null) {
+                throw new UnsupportedOperationException();
+            }
+
+            Type matched = null;
+            for (Type field : fileSchema.getFields()) {
+                boolean nameMatches =
+                        caseSensitive
+                                ? field.getName().equals(fieldRef.name())
+                                : field.getName().equalsIgnoreCase(fieldRef.name());
+                if (nameMatches) {
+                    if (matched != null) {
+                        throw new UnsupportedOperationException();
+                    }
+                    matched = field;
+                }
+            }
+            if (matched == null || !matched.isPrimitive()) {
+                throw new UnsupportedOperationException();
+            }
+
+            PrimitiveType primitiveType = matched.asPrimitiveType();
+            LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
+            if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
+                throw new UnsupportedOperationException();
+            }
+
+            DecimalLogicalTypeAnnotation decimalLogicalType =
+                    (DecimalLogicalTypeAnnotation) logicalType;
+            if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
+                throw new UnsupportedOperationException();
+            }
+            return primitiveType;
+        }
+
+        private static Decimal normalizeDecimal(Decimal decimal, DecimalType fieldType) {
+            try {
+                BigDecimal normalized =
+                        decimal.toBigDecimal()
+                                .setScale(fieldType.getScale(), RoundingMode.UNNECESSARY);
+                Decimal result =
+                        Decimal.fromBigDecimal(
+                                normalized, fieldType.getPrecision(), fieldType.getScale());
+                if (result == null) {
+                    throw new UnsupportedOperationException();
+                }
+                return result;
+            } catch (ArithmeticException e) {
+                throw new UnsupportedOperationException(e);
+            }
+        }
+
+        private static long toUnscaledLong(Decimal decimal) {
+            try {
+                return decimal.toUnscaledLong();
+            } catch (ArithmeticException e) {
+                throw new UnsupportedOperationException(e);
+            }
+        }
     }
 
     private static int getTimestampPrecision(org.apache.paimon.types.DataType type) {
@@ -262,10 +394,6 @@ public class ParquetFilters {
             return ((LocalZonedTimestampType) type).getPrecision();
         }
         throw new IllegalArgumentException("Not a timestamp type: " + type);
-    }
-
-    private static Operators.Column<?> toParquetColumn(FieldRef fieldRef) {
-        return fieldRef.type().accept(new ConvertToColumnTypeVisitor(fieldRef.name()));
     }
 
     private static Comparable<?> toParquetObject(
@@ -288,15 +416,7 @@ public class ParquetFilters {
         } else if (value instanceof byte[]) {
             return Binary.fromReusedByteArray((byte[]) value);
         } else if (value instanceof Decimal) {
-            Decimal decimal = (Decimal) value;
-            int precision = ((DecimalType) type).getPrecision();
-            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                return (int) decimal.toUnscaledLong();
-            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-                return decimal.toUnscaledLong();
-            } else {
-                return decimalToBinary(decimal, precision);
-            }
+            throw new UnsupportedOperationException();
         } else if (value instanceof Timestamp) {
             Timestamp timestamp = (Timestamp) value;
             int precision = getTimestampPrecision(type);
@@ -314,9 +434,11 @@ public class ParquetFilters {
         throw new UnsupportedOperationException();
     }
 
-    private static Binary decimalToBinary(Decimal decimal, int precision) {
-        int numBytes = ParquetSchemaConverter.computeMinBytesForDecimalPrecision(precision);
+    private static Binary decimalToBinary(Decimal decimal, int numBytes) {
         byte[] unscaledBytes = decimal.toUnscaledBytes();
+        if (unscaledBytes.length > numBytes) {
+            throw new UnsupportedOperationException();
+        }
         if (unscaledBytes.length == numBytes) {
             return Binary.fromConstantByteArray(unscaledBytes);
         }
@@ -408,14 +530,7 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(DecimalType decimalType) {
-            int precision = decimalType.getPrecision();
-            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                return FilterApi.intColumn(name);
-            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-                return FilterApi.longColumn(name);
-            } else {
-                return FilterApi.binaryColumn(name);
-            }
+            throw new UnsupportedOperationException();
         }
 
         @Override

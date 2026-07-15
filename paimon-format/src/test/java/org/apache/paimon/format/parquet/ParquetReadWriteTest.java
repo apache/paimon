@@ -498,8 +498,14 @@ public class ParquetReadWriteTest {
         int number = new Random().nextInt(1000) + 100;
         Path path = createDecimalFile(number, folder, 10);
 
+        PredicateBuilder builder = new PredicateBuilder(DECIMAL_TYPE);
+        Decimal filterValue = Decimal.fromBigDecimal(new BigDecimal("1234567.67"), 9, 2);
         ParquetReaderFactory format =
-                new ParquetReaderFactory(new Options(), DECIMAL_TYPE, 500, FilterCompat.NOOP);
+                ParquetReaderFactory.create(
+                        new Options(),
+                        DECIMAL_TYPE,
+                        500,
+                        Collections.singletonList(builder.equal(2, filterValue)));
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
@@ -507,6 +513,7 @@ public class ParquetReadWriteTest {
         List<InternalRow> results = new ArrayList<>(number);
         InternalRowSerializer internalRowSerializer = new InternalRowSerializer(DECIMAL_TYPE);
         reader.forEachRemaining(row -> results.add(internalRowSerializer.copy(row)));
+        assertThat(results).hasSize(number);
 
         BigDecimal decimalValue0 = new BigDecimal("123.67");
         BigDecimal decimalValue1 = new BigDecimal("12345.67");

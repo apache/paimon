@@ -32,6 +32,7 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -44,7 +45,9 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
@@ -84,6 +87,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final int batchSize;
     private final boolean caseSensitive;
     @Nullable private final FilterCompat.Filter filter;
+    @Nullable private final List<Predicate> predicates;
 
     /**
      * Cache: fileSchema -> requestedSchema.
@@ -100,11 +104,26 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
+        this(conf, readType, batchSize, filter, null);
+    }
+
+    public static ParquetReaderFactory create(
+            Options conf, RowType readType, int batchSize, @Nullable List<Predicate> predicates) {
+        return new ParquetReaderFactory(conf, readType, batchSize, null, predicates);
+    }
+
+    private ParquetReaderFactory(
+            Options conf,
+            RowType readType,
+            int batchSize,
+            @Nullable FilterCompat.Filter filter,
+            @Nullable List<Predicate> predicates) {
         this.conf = conf;
         this.readType = readType;
         this.batchSize = batchSize;
         this.caseSensitive = conf.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
         this.filter = filter;
+        this.predicates = predicates;
     }
 
     @VisibleForTesting
@@ -115,17 +134,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        ParquetReadOptions.Builder builder =
-                ParquetUtil.getParquetReadOptionsBuilder(conf)
-                        .withRecordFilter(filter)
-                        .withRange(0, context.fileSize());
-
-        ParquetFileReader reader =
-                new ParquetFileReader(
-                        ParquetInputFile.fromPath(
-                                context.fileIO(), context.filePath(), context.fileSize()),
-                        builder.build(),
-                        context.selection());
+        ParquetFileReader reader = createParquetFileReader(context);
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         ShreddingReadPlan readPlan =
                 ShreddingReadPlanFactories.createReadPlan(
@@ -168,6 +177,40 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return readPlan.isIdentity()
                 ? parquetReader
                 : new ShreddingFormatReader(parquetReader, readPlan);
+    }
+
+    private ParquetFileReader createParquetFileReader(FormatReaderFactory.Context context)
+            throws IOException {
+        ParquetInputFile inputFile =
+                ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
+        ParquetReadOptions footerReadOptions =
+                ParquetUtil.getParquetReadOptionsBuilder(conf)
+                        .withRange(0, context.fileSize())
+                        .build();
+        ParquetInputStream inputStream = inputFile.newStream();
+        try {
+            ParquetMetadata footer =
+                    ParquetFileReader.readFooter(inputFile, footerReadOptions, inputStream);
+            MessageType fileSchema = footer.getFileMetaData().getSchema();
+            FilterCompat.Filter actualFilter =
+                    predicates == null
+                            ? filter
+                            : ParquetFilters.convert(predicates, fileSchema, caseSensitive);
+            ParquetReadOptions readOptions =
+                    ParquetUtil.getParquetReadOptionsBuilder(conf)
+                            .withRecordFilter(actualFilter)
+                            .withRange(0, context.fileSize())
+                            .build();
+            return new ParquetFileReader(
+                    inputFile, footer, readOptions, inputStream, context.selection());
+        } catch (IOException | RuntimeException | Error e) {
+            try {
+                inputStream.close();
+            } catch (IOException closeException) {
+                e.addSuppressed(closeException);
+            }
+            throw e;
+        }
     }
 
     private RequestedSchema getOrCreateRequestedSchema(MessageType fileSchema) {

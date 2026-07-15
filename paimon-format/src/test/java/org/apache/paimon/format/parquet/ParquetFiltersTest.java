@@ -49,6 +49,7 @@ import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import org.apache.parquet.schema.Types;
@@ -292,6 +293,8 @@ class ParquetFiltersTest {
         // precision <= 9 uses INT32
         int precision = 9;
         int scale = 2;
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.INT32, 0, precision, scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -304,14 +307,18 @@ class ParquetFiltersTest {
         Decimal value = Decimal.fromBigDecimal(new BigDecimal("123.45"), precision, scale);
         int expectedIntVal = (int) value.toUnscaledLong(); // 12345
 
-        test(builder.isNull(0), "eq(decimal1, null)", true);
-        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
-        test(builder.equal(0, value), "eq(decimal1, " + expectedIntVal + ")", true);
-        test(builder.notEqual(0, value), "noteq(decimal1, " + expectedIntVal + ")", true);
-        test(builder.lessThan(0, value), "lt(decimal1, " + expectedIntVal + ")", true);
-        test(builder.lessOrEqual(0, value), "lteq(decimal1, " + expectedIntVal + ")", true);
-        test(builder.greaterThan(0, value), "gt(decimal1, " + expectedIntVal + ")", true);
-        test(builder.greaterOrEqual(0, value), "gteq(decimal1, " + expectedIntVal + ")", true);
+        test(schema, builder.isNull(0), "eq(decimal1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(schema, builder.equal(0, value), "eq(decimal1, " + expectedIntVal + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(decimal1, " + expectedIntVal + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(decimal1, " + expectedIntVal + ")", true);
+        test(schema, builder.lessOrEqual(0, value), "lteq(decimal1, " + expectedIntVal + ")", true);
+        test(schema, builder.greaterThan(0, value), "gt(decimal1, " + expectedIntVal + ")", true);
+        test(
+                schema,
+                builder.greaterOrEqual(0, value),
+                "gteq(decimal1, " + expectedIntVal + ")",
+                true);
     }
 
     @Test
@@ -319,6 +326,8 @@ class ParquetFiltersTest {
         // 9 < precision <= 18 uses INT64
         int precision = 18;
         int scale = 4;
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.INT64, 0, precision, scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -332,14 +341,22 @@ class ParquetFiltersTest {
                 Decimal.fromBigDecimal(new BigDecimal("12345678901234.5678"), precision, scale);
         long expectedLongVal = value.toUnscaledLong();
 
-        test(builder.isNull(0), "eq(decimal1, null)", true);
-        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
-        test(builder.equal(0, value), "eq(decimal1, " + expectedLongVal + ")", true);
-        test(builder.notEqual(0, value), "noteq(decimal1, " + expectedLongVal + ")", true);
-        test(builder.lessThan(0, value), "lt(decimal1, " + expectedLongVal + ")", true);
-        test(builder.lessOrEqual(0, value), "lteq(decimal1, " + expectedLongVal + ")", true);
-        test(builder.greaterThan(0, value), "gt(decimal1, " + expectedLongVal + ")", true);
-        test(builder.greaterOrEqual(0, value), "gteq(decimal1, " + expectedLongVal + ")", true);
+        test(schema, builder.isNull(0), "eq(decimal1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(schema, builder.equal(0, value), "eq(decimal1, " + expectedLongVal + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(decimal1, " + expectedLongVal + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(decimal1, " + expectedLongVal + ")", true);
+        test(
+                schema,
+                builder.lessOrEqual(0, value),
+                "lteq(decimal1, " + expectedLongVal + ")",
+                true);
+        test(schema, builder.greaterThan(0, value), "gt(decimal1, " + expectedLongVal + ")", true);
+        test(
+                schema,
+                builder.greaterOrEqual(0, value),
+                "gteq(decimal1, " + expectedLongVal + ")",
+                true);
     }
 
     @Test
@@ -348,6 +365,13 @@ class ParquetFiltersTest {
         int fieldPrecision = 20;
         int literalPrecision = 8;
         int scale = 0;
+        MessageType schema =
+                decimalSchema(
+                        "decimal1",
+                        PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                        9,
+                        fieldPrecision,
+                        scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -378,25 +402,30 @@ class ParquetFiltersTest {
                             (byte) 0xD5
                         });
 
-        test(builder.isNull(0), "eq(decimal1, null)", true);
-        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(schema, builder.isNull(0), "eq(decimal1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(decimal1, null)", true);
         test(
+                schema,
                 builder.equal(0, positive),
                 FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
+                schema,
                 builder.notEqual(0, positive),
                 FilterApi.notEq(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
+                schema,
                 builder.lessThan(0, positive),
                 FilterApi.lt(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
+                schema,
                 builder.greaterThan(0, positive),
                 FilterApi.gt(FilterApi.binaryColumn("decimal1"), expectedPositive),
                 true);
         test(
+                schema,
                 builder.equal(0, negative),
                 FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedNegative),
                 true);
@@ -406,6 +435,7 @@ class ParquetFiltersTest {
                         new BigDecimal("99999999999999999999"), fieldPrecision, scale);
         assertThat(fullWidth.toUnscaledBytes()).hasSize(9);
         test(
+                schema,
                 builder.equal(0, fullWidth),
                 FilterApi.eq(
                         FilterApi.binaryColumn("decimal1"),
@@ -417,6 +447,9 @@ class ParquetFiltersTest {
     public void testDecimalBinaryMaxPrecision() {
         int precision = 38;
         int scale = 10;
+        MessageType schema =
+                decimalSchema(
+                        "decimal1", PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY, 16, precision, scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -450,6 +483,7 @@ class ParquetFiltersTest {
                         });
 
         test(
+                schema,
                 builder.equal(0, value),
                 FilterApi.eq(FilterApi.binaryColumn("decimal1"), expected),
                 true);
@@ -459,6 +493,13 @@ class ParquetFiltersTest {
     public void testInFilterDecimalBinary() {
         int fieldPrecision = 20;
         int scale = 0;
+        MessageType schema =
+                decimalSchema(
+                        "decimal1",
+                        PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                        9,
+                        fieldPrecision,
+                        scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -489,10 +530,12 @@ class ParquetFiltersTest {
                         .collect(Collectors.toSet());
 
         test(
+                schema,
                 builder.in(0, literals),
                 FilterApi.in(FilterApi.binaryColumn("decimal1"), expected),
                 true);
         test(
+                schema,
                 builder.notIn(0, literals),
                 FilterApi.notIn(FilterApi.binaryColumn("decimal1"), expected),
                 true);
@@ -551,6 +594,8 @@ class ParquetFiltersTest {
                         .length(9)
                         .as(LogicalTypeAnnotation.decimalType(scale, fieldPrecision))
                         .named("decimal1");
+        MessageType schema =
+                new MessageType("paimon_schema", Collections.singletonList(primitiveType));
         EncodingStats encodingStats =
                 new EncodingStats.Builder()
                         .addDictEncoding(Encoding.PLAIN)
@@ -574,28 +619,142 @@ class ParquetFiltersTest {
 
         assertThat(
                         DictionaryFilter.canDrop(
-                                convert(builder.equal(0, positive)),
+                                convert(schema, builder.equal(0, positive)),
                                 Collections.singletonList(metadata),
                                 dictionaries))
                 .isFalse();
         assertThat(
                         DictionaryFilter.canDrop(
-                                convert(builder.equal(0, negative)),
+                                convert(schema, builder.equal(0, negative)),
                                 Collections.singletonList(metadata),
                                 dictionaries))
                 .isFalse();
         assertThat(
                         DictionaryFilter.canDrop(
-                                convert(builder.equal(0, missing)),
+                                convert(schema, builder.equal(0, missing)),
                                 Collections.singletonList(metadata),
                                 dictionaries))
                 .isTrue();
     }
 
     @Test
+    public void testDecimalWithoutFileSchema() {
+        int precision = 20;
+        int scale = 0;
+        PredicateBuilder builder = decimalPredicateBuilder(precision, scale);
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("10000939"), precision, scale);
+
+        test(builder.equal(0, value), "", false);
+    }
+
+    @Test
+    public void testDecimalLiteralOutsideFieldDomain() {
+        int fieldPrecision = 9;
+        int scale = 0;
+        PredicateBuilder builder = decimalPredicateBuilder(fieldPrecision, scale);
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("4294967297"), 10, scale);
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.INT32, 0, fieldPrecision, scale);
+
+        test(schema, builder.equal(0, value), "", false);
+    }
+
+    @Test
+    public void testDecimalLiteralWiderThanPhysicalWidth() {
+        int fieldPrecision = 20;
+        int scale = 0;
+        PredicateBuilder builder = decimalPredicateBuilder(fieldPrecision, scale);
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("3000000000"), 10, scale);
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY, 4, 9, scale);
+
+        test(schema, builder.equal(0, value), "", false);
+    }
+
+    @Test
+    public void testDecimalLiteralWiderThanFieldDomain() {
+        int fieldPrecision = 20;
+        int scale = 0;
+        PredicateBuilder builder = decimalPredicateBuilder(fieldPrecision, scale);
+        Decimal value =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("99999999999999999999999999999999999999"), 38, scale);
+        MessageType schema =
+                decimalSchema(
+                        "decimal1",
+                        PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                        9,
+                        fieldPrecision,
+                        scale);
+
+        test(schema, builder.equal(0, value), "", false);
+    }
+
+    @Test
+    public void testDecimalScaleNormalization() {
+        int fieldPrecision = 20;
+        int fieldScale = 2;
+        PredicateBuilder builder = decimalPredicateBuilder(fieldPrecision, fieldScale);
+        MessageType schema =
+                decimalSchema(
+                        "decimal1",
+                        PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                        9,
+                        fieldPrecision,
+                        fieldScale);
+        Decimal exact = Decimal.fromBigDecimal(new BigDecimal("100"), 3, 0);
+        Decimal inexact = Decimal.fromBigDecimal(new BigDecimal("100.001"), 6, 3);
+        Binary expected =
+                Binary.fromConstantByteArray(new byte[] {0, 0, 0, 0, 0, 0, 0, 0x27, 0x10});
+
+        test(
+                schema,
+                builder.equal(0, exact),
+                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expected),
+                true);
+        test(schema, builder.equal(0, inexact), "", false);
+    }
+
+    @Test
+    public void testDecimalPhysicalTypes() {
+        int precision = 9;
+        int scale = 2;
+        PredicateBuilder builder = decimalPredicateBuilder(precision, scale);
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("12.34"), precision, scale);
+
+        test(
+                decimalSchema("decimal1", PrimitiveTypeName.INT32, 0, precision, scale),
+                builder.equal(0, value),
+                FilterApi.eq(FilterApi.intColumn("decimal1"), 1234),
+                true);
+        test(
+                decimalSchema("decimal1", PrimitiveTypeName.INT64, 0, precision, scale),
+                builder.equal(0, value),
+                FilterApi.eq(FilterApi.longColumn("decimal1"), 1234L),
+                true);
+        test(
+                decimalSchema("decimal1", PrimitiveTypeName.BINARY, 0, precision, scale),
+                builder.equal(0, value),
+                FilterApi.eq(
+                        FilterApi.binaryColumn("decimal1"),
+                        Binary.fromConstantByteArray(new byte[] {0x04, (byte) 0xD2})),
+                true);
+        test(
+                decimalSchema(
+                        "decimal1", PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY, 4, precision, scale),
+                builder.equal(0, value),
+                FilterApi.eq(
+                        FilterApi.binaryColumn("decimal1"),
+                        Binary.fromConstantByteArray(new byte[] {0, 0, 0x04, (byte) 0xD2})),
+                true);
+    }
+
+    @Test
     public void testInFilterDecimal32Bit() {
         int precision = 9;
         int scale = 2;
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.INT32, 0, precision, scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -611,6 +770,7 @@ class ParquetFiltersTest {
 
         // For less than 21 elements, it expands to or(eq, eq, eq)
         test(
+                schema,
                 builder.in(0, Arrays.asList(v1, v2, v3)),
                 "or(or(eq(decimal1, "
                         + (int) v1.toUnscaledLong()
@@ -622,6 +782,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(0, Arrays.asList(v1, v2, v3)),
                 "and(and(noteq(decimal1, "
                         + (int) v1.toUnscaledLong()
@@ -637,6 +798,8 @@ class ParquetFiltersTest {
     public void testInFilterDecimal64Bit() {
         int precision = 18;
         int scale = 4;
+        MessageType schema =
+                decimalSchema("decimal1", PrimitiveTypeName.INT64, 0, precision, scale);
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -652,6 +815,7 @@ class ParquetFiltersTest {
 
         // For less than 21 elements, it expands to or(eq, eq, eq)
         test(
+                schema,
                 builder.in(0, Arrays.asList(v1, v2, v3)),
                 "or(or(eq(decimal1, "
                         + v1.toUnscaledLong()
@@ -663,6 +827,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(0, Arrays.asList(v1, v2, v3)),
                 "and(and(noteq(decimal1, "
                         + v1.toUnscaledLong()
@@ -842,6 +1007,61 @@ class ParquetFiltersTest {
                         + micros3
                         + "))",
                 true);
+    }
+
+    private void test(
+            MessageType schema,
+            Predicate predicate,
+            FilterPredicate parquetPredicate,
+            boolean canPushDown) {
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);
+        if (canPushDown) {
+            FilterPredicateCompat compat = (FilterPredicateCompat) filter;
+            assertThat(compat.getFilterPredicate()).isEqualTo(parquetPredicate);
+        } else {
+            assertThat(filter).isEqualTo(FilterCompat.NOOP);
+        }
+    }
+
+    private FilterPredicate convert(MessageType schema, Predicate predicate) {
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);
+        return ((FilterPredicateCompat) filter).getFilterPredicate();
+    }
+
+    private void test(
+            MessageType schema, Predicate predicate, String expected, boolean canPushDown) {
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);
+        if (canPushDown) {
+            FilterPredicateCompat compat = (FilterPredicateCompat) filter;
+            assertThat(compat.getFilterPredicate().toString()).isEqualTo(expected);
+        } else {
+            assertThat(filter).isEqualTo(FilterCompat.NOOP);
+        }
+    }
+
+    private static PredicateBuilder decimalPredicateBuilder(int precision, int scale) {
+        return new PredicateBuilder(
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "decimal1", new DecimalType(precision, scale)))));
+    }
+
+    private static MessageType decimalSchema(
+            String fieldName,
+            PrimitiveTypeName physicalType,
+            int fixedLength,
+            int precision,
+            int scale) {
+        Types.PrimitiveBuilder<PrimitiveType> builder = Types.required(physicalType);
+        if (physicalType == PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+            builder.length(fixedLength);
+        }
+        PrimitiveType type =
+                builder.as(LogicalTypeAnnotation.decimalType(scale, precision)).named(fieldName);
+        return new MessageType("paimon_schema", Collections.singletonList(type));
     }
 
     private void test(Predicate predicate, FilterPredicate parquetPredicate, boolean canPushDown) {
