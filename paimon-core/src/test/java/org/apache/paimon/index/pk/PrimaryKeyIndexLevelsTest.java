@@ -31,91 +31,94 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyIndexLevels}. */
 class PrimaryKeyIndexLevelsTest {
 
     @Test
-    void testPicksSimilarLogicalUnitsAtFanout() {
+    void testPlansCompleteMissingDataLevel() {
         PrimaryKeyIndexLevels<TestUnit> levels =
-                new PrimaryKeyIndexLevels<>(3, 0.2, TestUnit::id, TestUnit::sources);
-        DataFileMeta dataA = dataFile("data-a", 30);
-        DataFileMeta dataB = dataFile("data-b", 40);
-        DataFileMeta dataC = dataFile("data-c", 50);
-        TestUnit unitA = unit("unit-a", dataA);
-        TestUnit unitB = unit("unit-b", dataB);
-        TestUnit unitC = unit("unit-c", dataC);
-        Map<String, DataFileMeta> active = active(dataA, dataB, dataC);
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        DataFileMeta dataB = dataFile("data-b", 20, 2);
+        DataFileMeta dataA = dataFile("data-a", 10, 2);
 
         PrimaryKeyIndexLevels.Plan<TestUnit> plan =
-                levels.pick(Arrays.asList(unitC, unitA, unitB), active).get();
+                levels.pick(Collections.emptyList(), active(dataB, dataA)).get();
 
-        assertThat(plan.inputUnits()).containsExactly(unitA, unitB, unitC);
-        assertThat(plan.sourceFiles()).containsExactly(dataA, dataB, dataC);
+        assertThat(plan.dataLevel()).isEqualTo(2);
+        assertThat(plan.inputUnits()).isEmpty();
+        assertThat(plan.sourceFiles()).containsExactly(dataA, dataB);
     }
 
     @Test
-    void testPicksUnitAtStaleRatioThreshold() {
+    void testValidatesPlanAgainstCurrentCompleteLevel() {
         PrimaryKeyIndexLevels<TestUnit> levels =
-                new PrimaryKeyIndexLevels<>(5, 0.4, TestUnit::id, TestUnit::sources);
-        DataFileMeta retired = dataFile("retired", 40);
-        DataFileMeta activeData = dataFile("active", 60);
-        TestUnit unit = unit("unit", retired, activeData);
-
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        DataFileMeta dataA = dataFile("data-a", 10, 2);
         PrimaryKeyIndexLevels.Plan<TestUnit> plan =
-                levels.pick(Collections.singletonList(unit), active(activeData)).get();
+                levels.pick(Collections.emptyList(), active(dataA)).get();
 
-        assertThat(plan.inputUnits()).containsExactly(unit);
-        assertThat(plan.sourceFiles()).containsExactly(activeData);
+        assertThat(levels.isCurrent(plan, active(dataA))).isTrue();
+        assertThat(levels.isCurrent(plan, active(dataA, dataFile("data-b", 20, 2)))).isFalse();
     }
 
     @Test
-    void testPicksUnitWithHighestStaleRatio() {
+    void testRebuildsMismatchedCompleteLevel() {
         PrimaryKeyIndexLevels<TestUnit> levels =
-                new PrimaryKeyIndexLevels<>(5, 0.2, TestUnit::id, TestUnit::sources);
-        DataFileMeta activeA = dataFile("active-a", 50);
-        DataFileMeta activeB = dataFile("active-b", 20);
-        TestUnit halfStale = unit("unit-a", dataFile("retired-a", 50), activeA);
-        TestUnit mostlyStale = unit("unit-b", dataFile("retired-b", 80), activeB);
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        DataFileMeta dataA = dataFile("data-a", 30, 2);
+        DataFileMeta dataB = dataFile("data-b", 40, 2);
+        TestUnit partial = unit("partial", 2, dataA);
 
         PrimaryKeyIndexLevels.Plan<TestUnit> plan =
-                levels.pick(Arrays.asList(halfStale, mostlyStale), active(activeA, activeB)).get();
+                levels.pick(Collections.singletonList(partial), active(dataA, dataB)).get();
 
-        assertThat(plan.inputUnits()).containsExactly(mostlyStale);
+        assertThat(plan.dataLevel()).isEqualTo(2);
+        assertThat(plan.inputUnits()).containsExactly(partial);
+        assertThat(plan.sourceFiles()).containsExactly(dataA, dataB);
     }
 
     @Test
-    void testBreaksEqualStaleRatioByIdentity() {
+    void testDropsLevelWithoutActiveData() {
         PrimaryKeyIndexLevels<TestUnit> levels =
-                new PrimaryKeyIndexLevels<>(5, 0.2, TestUnit::id, TestUnit::sources);
-        TestUnit unitA = unit("unit-a", dataFile("retired-a", 10));
-        TestUnit unitB = unit("unit-b", dataFile("retired-b", 10));
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        TestUnit retired = unit("retired", 3, dataFile("data-a", 40, 3));
 
         PrimaryKeyIndexLevels.Plan<TestUnit> plan =
-                levels.pick(Arrays.asList(unitB, unitA), Collections.emptyMap()).get();
+                levels.pick(Collections.singletonList(retired), Collections.emptyMap()).get();
 
-        assertThat(plan.inputUnits()).containsExactly(unitA);
+        assertThat(plan.dataLevel()).isEqualTo(3);
+        assertThat(plan.inputUnits()).containsExactly(retired);
         assertThat(plan.sourceFiles()).isEmpty();
     }
 
     @Test
-    void testSaturatesFanoutSizeComparison() {
+    void testExactLevelsNeedNoWork() {
         PrimaryKeyIndexLevels<TestUnit> levels =
-                new PrimaryKeyIndexLevels<>(2, 1.0, TestUnit::id, TestUnit::sources);
-        DataFileMeta smaller = dataFile("data-a", Long.MAX_VALUE / 2 + 1);
-        DataFileMeta larger = dataFile("data-b", Long.MAX_VALUE - 1);
-        TestUnit unitA = unit("unit-a", smaller);
-        TestUnit unitB = unit("unit-b", larger);
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        DataFileMeta dataA = dataFile("data-a", 50, 2);
+        TestUnit current = unit("current", 2, dataA);
 
-        PrimaryKeyIndexLevels.Plan<TestUnit> plan =
-                levels.pick(Arrays.asList(unitB, unitA), active(smaller, larger)).get();
-
-        assertThat(plan.inputUnits()).containsExactly(unitA, unitB);
+        assertThat(levels.pick(Collections.singletonList(current), active(dataA))).isEmpty();
     }
 
-    private static TestUnit unit(String id, DataFileMeta... files) {
+    @Test
+    void testRejectsDuplicateUnitsForOneDataLevel() {
+        PrimaryKeyIndexLevels<TestUnit> levels =
+                new PrimaryKeyIndexLevels<>(TestUnit::dataLevel, TestUnit::sources);
+        DataFileMeta dataA = dataFile("data-a", 10, 2);
+        TestUnit unitA = unit("unit-a", 2, dataA);
+        TestUnit unitB = unit("unit-b", 2, dataA);
+
+        assertThatThrownBy(() -> levels.pick(Arrays.asList(unitA, unitB), active(dataA)))
+                .hasMessageContaining("data level 2");
+    }
+
+    private static TestUnit unit(String id, int dataLevel, DataFileMeta... files) {
         return new TestUnit(
                 id,
+                dataLevel,
                 Arrays.stream(files)
                         .map(
                                 file ->
@@ -133,35 +136,42 @@ class PrimaryKeyIndexLevelsTest {
     }
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
+        return dataFile(fileName, rowCount, 1);
+    }
+
+    private static DataFileMeta dataFile(String fileName, long rowCount, int level) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(level);
     }
 
     private static final class TestUnit {
 
         private final String id;
+        private final int dataLevel;
         private final List<PrimaryKeyIndexSourceFile> sources;
 
-        private TestUnit(String id, List<PrimaryKeyIndexSourceFile> sources) {
+        private TestUnit(String id, int dataLevel, List<PrimaryKeyIndexSourceFile> sources) {
             this.id = id;
+            this.dataLevel = dataLevel;
             this.sources = sources;
         }
 
-        private String id() {
-            return id;
+        private int dataLevel() {
+            return dataLevel;
         }
 
         private List<PrimaryKeyIndexSourceFile> sources() {

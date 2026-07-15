@@ -255,26 +255,27 @@ class PrimaryKeySortedIndexBatchScanTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(1);
     }
 
     private static IndexFileMeta payload(String fileName, String sourceName, long sourceRowCount) {
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
-                                new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount))
+                                1, new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount))
                         .serialize();
         return new IndexFileMeta(
                 BTreeGlobalIndexerFactory.IDENTIFIER,

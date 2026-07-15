@@ -33,9 +33,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PrimaryKeyIndexSourceMetaTest {
 
     @Test
+    void testDataLevelRoundTrip() {
+        PrimaryKeyIndexSourceMeta metadata =
+                new PrimaryKeyIndexSourceMeta(3, new PrimaryKeyIndexSourceFile("data-1", 10));
+
+        PrimaryKeyIndexSourceMeta restored =
+                PrimaryKeyIndexSourceMeta.deserialize(metadata.serialize());
+
+        assertThat(restored.dataLevel()).isEqualTo(3);
+        assertThat(restored.sourceFiles()).isEqualTo(metadata.sourceFiles());
+    }
+
+    @Test
+    void testRejectsNonPositiveDataLevel() {
+        assertThatThrownBy(
+                        () ->
+                                new PrimaryKeyIndexSourceMeta(
+                                        0, new PrimaryKeyIndexSourceFile("data-1", 10)))
+                .hasMessageContaining("data level must be positive");
+    }
+
+    @Test
     void testMultipleSourceRoundTrip() {
         PrimaryKeyIndexSourceMeta metadata =
                 new PrimaryKeyIndexSourceMeta(
+                        1,
                         Arrays.asList(
                                 new PrimaryKeyIndexSourceFile("data-1", 10),
                                 new PrimaryKeyIndexSourceFile("data-2", 20)));
@@ -51,7 +73,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testSingleSourceRoundTrip() {
         PrimaryKeyIndexSourceMeta metadata =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile("data-1", 0));
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 0));
 
         PrimaryKeyIndexSourceMeta restored =
                 PrimaryKeyIndexSourceMeta.deserialize(metadata.serialize());
@@ -68,18 +90,19 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testRejectsUnsupportedVersion() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(64);
-        output.writeInt(2);
+        output.writeInt(1);
         output.writeInt(1);
         output.writeUTF("data-1");
         output.writeLong(1);
 
         assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(output.getCopyOfBuffer()))
-                .hasMessageContaining("Unsupported index source version: 2");
+                .hasMessageContaining("Unsupported index source version: 1");
     }
 
     @Test
     void testRejectsSourceCountBeforeAllocation() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(8);
+        output.writeInt(2);
         output.writeInt(1);
         output.writeInt(Integer.MAX_VALUE);
 
@@ -92,6 +115,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testRejectsTruncatedAndTrailingMetadata() throws Exception {
         DataOutputSerializer truncated = new DataOutputSerializer(64);
+        truncated.writeInt(2);
         truncated.writeInt(1);
         truncated.writeInt(1);
         truncated.writeUTF("data-1");
@@ -99,6 +123,7 @@ class PrimaryKeyIndexSourceMetaTest {
                 .hasMessageContaining("Failed to deserialize index source metadata");
 
         DataOutputSerializer trailing = new DataOutputSerializer(64);
+        trailing.writeInt(2);
         trailing.writeInt(1);
         trailing.writeInt(1);
         trailing.writeUTF("data-1");
@@ -111,7 +136,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testReadsFromIndexFile() {
         PrimaryKeyIndexSourceMeta metadata =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile("data-1", 5));
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 5));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "btree",

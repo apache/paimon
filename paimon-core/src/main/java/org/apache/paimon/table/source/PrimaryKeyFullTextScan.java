@@ -193,8 +193,9 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
                 continue;
             }
             PkFullTextBucketIndexState state =
-                    PkFullTextBucketIndexState.fromActivePayloads(
+                    PkFullTextBucketIndexState.fromActiveDataFiles(
                             textFieldId,
+                            bucket.dataFiles(),
                             payloads.getOrDefault(entry.getKey(), Collections.emptyList()));
             Set<String> activeSources = bucket.dataFileNames();
             Map<String, IndexFileMeta> currentPayloads = new LinkedHashMap<>();

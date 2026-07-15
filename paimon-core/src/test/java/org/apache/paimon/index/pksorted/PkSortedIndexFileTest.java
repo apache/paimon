@@ -101,6 +101,7 @@ class PkSortedIndexFileTest {
 
             IndexFileMeta payload =
                     indexFile.build(
+                            1,
                             Collections.singletonList(source),
                             field(),
                             indexType,
@@ -135,6 +136,7 @@ class PkSortedIndexFileTest {
 
         IndexFileMeta payload =
                 indexFile.build(
+                        1,
                         sources,
                         field(),
                         "btree",
@@ -196,6 +198,7 @@ class PkSortedIndexFileTest {
         assertThatThrownBy(
                         () ->
                                 indexFile.build(
+                                        1,
                                         Collections.singletonList(
                                                 new PrimaryKeyIndexSourceFile("data-file", 2)),
                                         field(),
@@ -246,6 +249,7 @@ class PkSortedIndexFileTest {
         assertThatThrownBy(
                         () ->
                                 indexFile.build(
+                                        1,
                                         Collections.singletonList(
                                                 new PrimaryKeyIndexSourceFile("data-file", 1)),
                                         field(),
