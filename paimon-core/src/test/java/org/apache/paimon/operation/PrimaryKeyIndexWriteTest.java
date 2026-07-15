@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
@@ -122,9 +124,18 @@ class PrimaryKeyIndexWriteTest {
         AbstractFileStoreWrite.WriterContainer<KeyValue> container =
                 write.createWriterContainer(generator.getPartition(record), 1);
 
-        assertThat(readField(container.primaryKeyIndexMaintainer, "vectorMaintainer")).isNotNull();
+        Object vectorMaintainer =
+                readField(container.primaryKeyIndexMaintainer, "vectorMaintainer");
+        assertThat(vectorMaintainer).isNotNull();
         assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
                 .hasSize(4);
+
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(1);
+        container.deletionVectorsMaintainer.deletionVectors().put("data-file", deletionVector);
+        DeletionVector.Factory deletionVectorFactory =
+                (DeletionVector.Factory) readField(vectorMaintainer, "deletionVectorFactory");
+        assertThat(deletionVectorFactory.create("data-file").get()).isSameAs(deletionVector);
         write.close();
     }
 
