@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -47,8 +48,8 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
         this.blobAsDescriptor = blobAsDescriptor;
     }
 
-    protected final @Nullable SeekableInputStream inputStream() {
-        return in;
+    protected final SeekableInputStream inputStream() {
+        return Preconditions.checkNotNull(in, "Input stream must be available for blob reading.");
     }
 
     protected final boolean blobAsDescriptor() {
@@ -56,14 +57,15 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
     }
 
     protected final Blob readBlob(long position, long length) {
-        if (in != null && !blobAsDescriptor) {
-            return Blob.fromData(readInlineBlob(position, length));
+        if (blobAsDescriptor) {
+            return Blob.fromFile(fileIO, filePath, position, length);
         }
-        return Blob.fromFile(fileIO, filePath, position, length);
+        return Blob.fromData(readInlineBlob(position, length));
     }
 
     protected final byte[] readInlineBlob(long position, long length) {
         byte[] blobData = new byte[(int) length];
+        SeekableInputStream in = inputStream();
         try {
             in.seek(position);
             IOUtils.readFully(in, blobData);

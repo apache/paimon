@@ -168,22 +168,19 @@ public class BlobFileFormat extends FileFormat {
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
-            SeekableInputStream in = null;
-            boolean elementReaderOwnsInputStream = false;
+            SeekableInputStream in = fileIO.newInputStream(filePath);
+            BlobFileMeta fileMeta;
             try {
-                in = fileIO.newInputStream(filePath);
-                BlobFileMeta fileMeta =
-                        new BlobFileMeta(in, context.fileSize(), context.selection());
-                BlobElementSerializer.Reader elementReader =
-                        elementSerializer.createReader(fileIO, filePath, in, blobAsDescriptor);
-                elementReaderOwnsInputStream = elementReader.requiresInputStream();
-                return new BlobFormatReader(
-                        filePath, fileMeta, fieldCount, blobIndex, elementReader);
-            } finally {
-                if (!elementReaderOwnsInputStream) {
-                    IOUtils.closeQuietly(in);
-                }
+                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+            } catch (Exception e) {
+                IOUtils.closeQuietly(in);
+                throw e;
             }
+
+            BlobElementSerializer.Reader elementReader =
+                    BlobElementSerializer.createReader(
+                            elementSerializer, fileIO, filePath, in, blobAsDescriptor);
+            return new BlobFormatReader(filePath, fileMeta, fieldCount, blobIndex, elementReader);
         }
 
         private static int findBlobFieldIndex(RowType rowType) {

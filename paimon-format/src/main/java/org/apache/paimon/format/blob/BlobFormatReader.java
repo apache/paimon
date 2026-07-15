@@ -56,8 +56,12 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 fileMeta,
                 fieldCount,
                 blobIndex,
-                BlobElementSerializerFactory.create(blobFieldType)
-                        .createReader(fileIO, filePath, in, blobAsDescriptor));
+                BlobElementSerializer.createReader(
+                        BlobElementSerializerFactory.create(blobFieldType),
+                        fileIO,
+                        filePath,
+                        in,
+                        blobAsDescriptor));
     }
 
     BlobFormatReader(

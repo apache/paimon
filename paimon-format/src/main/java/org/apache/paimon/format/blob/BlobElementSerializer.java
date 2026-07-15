@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -43,11 +44,31 @@ interface BlobElementSerializer {
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize);
 
+    boolean requiresReadInputStream(boolean blobAsDescriptor);
+
+    /** Creates a reader which owns and closes the input stream when non-null. */
     Reader createReader(
             FileIO fileIO,
             Path filePath,
             @Nullable SeekableInputStream in,
             boolean blobAsDescriptor);
+
+    /** Helper method to close InputStream early if element reader doesn't need it. */
+    static BlobElementSerializer.Reader createReader(
+            BlobElementSerializer elementSerializer,
+            FileIO fileIO,
+            Path filePath,
+            @Nullable SeekableInputStream in,
+            boolean blobAsDescriptor) {
+        boolean requiresInputStream = elementSerializer.requiresReadInputStream(blobAsDescriptor);
+
+        if (!requiresInputStream) {
+            IOUtils.closeQuietly(in);
+            in = null;
+        }
+
+        return elementSerializer.createReader(fileIO, filePath, in, blobAsDescriptor);
+    }
 
     /** Writer used for the lifetime of one output file. */
     interface Writer {
@@ -63,7 +84,5 @@ interface BlobElementSerializer {
         Object placeholder();
 
         Object read(long payloadPosition, long payloadLength);
-
-        boolean requiresInputStream();
     }
 }

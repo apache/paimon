@@ -73,6 +73,11 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
     }
 
     @Override
+    public boolean requiresReadInputStream(boolean blobAsDescriptor) {
+        return true;
+    }
+
+    @Override
     public BlobElementSerializer.Reader createReader(
             FileIO fileIO,
             Path filePath,
@@ -170,9 +175,6 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
         @Override
         public Object read(long payloadPosition, long payloadLength) {
             SeekableInputStream in = inputStream();
-            if (in == null) {
-                throw new IllegalStateException("Input stream must be available for ARRAY<BLOB>.");
-            }
             if (payloadPosition < 0
                     || payloadLength < MIN_PAYLOAD_LENGTH
                     || payloadPosition > Long.MAX_VALUE - payloadLength) {
@@ -276,11 +278,6 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        }
-
-        @Override
-        public boolean requiresInputStream() {
-            return true;
         }
 
         @Override

@@ -56,6 +56,11 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
     }
 
     @Override
+    public boolean requiresReadInputStream(boolean blobAsDescriptor) {
+        return !blobAsDescriptor;
+    }
+
+    @Override
     public BlobElementSerializer.Reader createReader(
             FileIO fileIO,
             Path filePath,
@@ -131,11 +136,6 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
         @Override
         public Object read(long payloadPosition, long payloadLength) {
             return readBlob(payloadPosition, payloadLength);
-        }
-
-        @Override
-        public boolean requiresInputStream() {
-            return !blobAsDescriptor();
         }
 
         @Override

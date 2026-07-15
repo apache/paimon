@@ -90,6 +90,121 @@ public class BlobFileFormatTest {
     }
 
     @Test
+    public void testRawDescriptorReaderDoesNotOwnInputStream() throws IOException {
+        BlobFileFormat format = new BlobFileFormat(true);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(GenericRow.of(new BlobData("blob".getBytes())));
+            writer.close();
+        }
+
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+        TrackingSeekableInputStream trackingInputStream;
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
+            trackingInputStream = trackingFileIO.lastInputStream;
+            assertThat(trackingInputStream).isNotNull();
+            assertThat(trackingInputStream.closeCount).isOne();
+            assertThat(reader.readBatch().next().getBlob(0)).isInstanceOf(BlobRef.class);
+            assertThat(trackingInputStream.closeCount).isOne();
+        }
+        assertThat(trackingInputStream.closeCount).isOne();
+    }
+
+    @Test
+    public void testPublicRawDescriptorReaderDoesNotOwnInputStream() throws IOException {
+        BlobFileFormat format = new BlobFileFormat(true);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(GenericRow.of(new BlobData("blob".getBytes())));
+            writer.close();
+        }
+
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        TrackingSeekableInputStream trackingInputStream =
+                (TrackingSeekableInputStream) trackingFileIO.newInputStream(file);
+        BlobFileMeta fileMeta =
+                new BlobFileMeta(trackingInputStream, trackingFileIO.getFileSize(file), null);
+        try (BlobFormatReader reader =
+                new BlobFormatReader(
+                        trackingFileIO,
+                        file,
+                        fileMeta,
+                        trackingInputStream,
+                        1,
+                        0,
+                        DataTypes.BLOB(),
+                        true)) {
+            assertThat(trackingInputStream.closeCount).isOne();
+            assertThat(reader.readBatch().next().getBlob(0)).isInstanceOf(BlobRef.class);
+        }
+        assertThat(trackingInputStream.closeCount).isOne();
+    }
+
+    @Test
+    public void testArrayDescriptorReaderOwnsInputStream() throws IOException {
+        BlobFileFormat format = new BlobFileFormat(true);
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(
+                    GenericRow.of(
+                            new GenericArray(new Object[] {new BlobData("blob".getBytes())})));
+            writer.close();
+        }
+
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+        TrackingSeekableInputStream trackingInputStream;
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
+            trackingInputStream = trackingFileIO.lastInputStream;
+            assertThat(trackingInputStream.closeCount).isZero();
+            assertThat(reader.readBatch().next().getArray(0).getBlob(0))
+                    .isInstanceOf(BlobRef.class);
+            assertThat(trackingInputStream.closeCount).isZero();
+        }
+        assertThat(trackingInputStream.closeCount).isOne();
+    }
+
+    @Test
+    public void testElementSerializerReadInputStreamRequirements() {
+        BlobElementSerializer raw = new RawBlobElementSerializer();
+        assertThat(raw.requiresReadInputStream(false)).isTrue();
+        assertThat(raw.requiresReadInputStream(true)).isFalse();
+
+        BlobElementSerializer array = new ArrayBlobElementSerializer();
+        assertThat(array.requiresReadInputStream(false)).isTrue();
+        assertThat(array.requiresReadInputStream(true)).isTrue();
+
+        BlobElementSerializer map = new MapBlobElementSerializer(DataTypes.STRING());
+        assertThat(map.requiresReadInputStream(false)).isTrue();
+        assertThat(map.requiresReadInputStream(true)).isTrue();
+    }
+
+    @Test
+    public void testReaderCreationFailureClosesInputStream() throws IOException {
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            out.write(1);
+        }
+
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        BlobFileFormat format = new BlobFileFormat(true);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+
+        assertThatThrownBy(() -> readerFactory.createReader(context));
+        assertThat(trackingFileIO.lastInputStream.closeCount).isOne();
+    }
+
+    @Test
     public void testArrayBlobAsDescriptor() throws IOException {
         innerTestArray(true);
     }
@@ -791,6 +906,53 @@ public class BlobFileFormatTest {
             }
         }
         result.add(bytes);
+    }
+
+    private static class TrackingLocalFileIO extends LocalFileIO {
+
+        private TrackingSeekableInputStream lastInputStream;
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            this.lastInputStream = new TrackingSeekableInputStream(super.newInputStream(path));
+            return lastInputStream;
+        }
+    }
+
+    private static class TrackingSeekableInputStream extends SeekableInputStream {
+
+        private final SeekableInputStream delegate;
+        private int closeCount;
+
+        private TrackingSeekableInputStream(SeekableInputStream delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void seek(long desired) throws IOException {
+            delegate.seek(desired);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return delegate.getPos();
+        }
+
+        @Override
+        public int read() throws IOException {
+            return delegate.read();
+        }
+
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            return delegate.read(bytes, offset, length);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closeCount++;
+            delegate.close();
+        }
     }
 
     private interface ArrayPayloadCorruptor {
