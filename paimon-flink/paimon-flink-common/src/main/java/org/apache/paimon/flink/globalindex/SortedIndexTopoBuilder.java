@@ -66,6 +66,8 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -100,7 +102,8 @@ public class SortedIndexTopoBuilder {
             FileStoreTable table,
             List<String> indexColumns,
             PartitionPredicate partitionPredicate,
-            Options userOptions)
+            Options userOptions,
+            @Nullable String commitUser)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
@@ -203,7 +206,7 @@ public class SortedIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest));
+            commit(table, allStreams.get(0).union(rest), commitUser);
             return true;
         }
 
@@ -224,7 +227,8 @@ public class SortedIndexTopoBuilder {
                 table,
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
-                userOptions)) {
+                userOptions,
+                null)) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         }
     }
@@ -322,12 +326,15 @@ public class SortedIndexTopoBuilder {
         return new RowType(readType.isNullable(), fields);
     }
 
-    private static void commit(FileStoreTable table, DataStream<Committable> written) {
+    private static void commit(
+            FileStoreTable table, DataStream<Committable> written, @Nullable String commitUser) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
                         true,
-                        "SortedIndexCommitter-" + UUID.randomUUID(),
+                        commitUser == null
+                                ? "SortedIndexCommitter-" + UUID.randomUUID()
+                                : commitUser,
                         context ->
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),
