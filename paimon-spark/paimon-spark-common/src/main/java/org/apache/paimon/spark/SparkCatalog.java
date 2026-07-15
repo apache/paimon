@@ -28,6 +28,8 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
+import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTReadVia;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.FormatTableCatalog;
@@ -798,9 +800,18 @@ public class SparkCatalog extends SparkBaseCatalog
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
         try {
-            org.apache.paimon.catalog.Identifier tblIdent =
-                    withBranchFromOptions(
-                            catalogName, toIdentifier(ident, catalogName), extraOptions);
+            org.apache.paimon.catalog.Identifier tblIdent = toIdentifier(ident, catalogName);
+            if (Boolean.parseBoolean(
+                    catalog.options()
+                            .getOrDefault(RESTCatalogOptions.READ_VIA_ENABLED.key(), "false"))) {
+                RESTReadVia readVia = RESTReadVia.parse(tblIdent);
+                tblIdent = withBranchFromOptions(catalogName, readVia.identifier(), extraOptions);
+                if (readVia.readVia().isPresent()) {
+                    tblIdent = RESTReadVia.withReadVia(tblIdent, readVia.readVia().get());
+                }
+            } else {
+                tblIdent = withBranchFromOptions(catalogName, tblIdent, extraOptions);
+            }
             org.apache.paimon.table.Table table =
                     copyWithSQLConf(
                             catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);

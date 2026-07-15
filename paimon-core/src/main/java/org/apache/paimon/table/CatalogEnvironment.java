@@ -30,6 +30,8 @@ import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTReadVia;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
 import org.apache.paimon.utils.SnapshotLoader;
@@ -47,6 +49,7 @@ public class CatalogEnvironment implements Serializable {
     private static final long serialVersionUID = 2L;
 
     @Nullable private final Identifier identifier;
+    @Nullable private final Identifier readVia;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final CatalogLockFactory lockFactory;
@@ -64,7 +67,30 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this(
+                identifier,
+                null,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification);
+    }
+
+    public CatalogEnvironment(
+            @Nullable Identifier identifier,
+            @Nullable Identifier readVia,
+            @Nullable String uuid,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification) {
         this.identifier = identifier;
+        this.readVia = readVia;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
@@ -81,6 +107,31 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public Identifier identifier() {
         return identifier;
+    }
+
+    public Optional<Identifier> readVia() {
+        return Optional.ofNullable(readVia);
+    }
+
+    @Nullable
+    public Identifier readIdentifier() {
+        return identifier == null || readVia == null
+                ? identifier
+                : RESTReadVia.withReadVia(identifier, readVia);
+    }
+
+    @Nullable
+    public Identifier readRoot() {
+        return readVia == null ? identifier : readVia;
+    }
+
+    @Nullable
+    public Identifier readRootForReferences() {
+        if (catalogContext == null
+                || !catalogContext.options().get(RESTCatalogOptions.READ_VIA_ENABLED)) {
+            return null;
+        }
+        return readRoot();
     }
 
     @Nullable
@@ -173,7 +224,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader == null) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, readIdentifier(), identifier);
     }
 
     @Nullable
@@ -199,6 +250,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
+                readVia,
                 uuid,
                 catalogLoader,
                 lockFactory,
@@ -214,7 +266,7 @@ public class CatalogEnvironment implements Serializable {
         }
         return select -> {
             try (Catalog catalog = catalogLoader.load()) {
-                return catalog.authTableQuery(identifier, select);
+                return catalog.authTableQuery(readIdentifier(), select);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTReadVia;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -215,6 +217,63 @@ class CachingCatalogTest extends CatalogTestBase {
             releaseLoad.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void testCacheReadViaTableInsteadOfTreatingItAsSystemTable() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        Options options = new Options();
+        options.set(RESTCatalogOptions.READ_VIA_ENABLED, true);
+        CachingCatalog catalog = new CachingCatalog(wrapped, options);
+        Identifier marked =
+                RESTReadVia.withReadVia(
+                        Identifier.create("db", "tbl"), Identifier.create("db", "view"));
+        Table table = Mockito.mock(Table.class);
+        when(wrapped.getTable(marked)).thenReturn(table);
+
+        assertThat(catalog.getTable(marked)).isSameAs(table);
+        assertThat(catalog.getTable(marked)).isSameAs(table);
+        Mockito.verify(wrapped, Mockito.times(1)).getTable(marked);
+    }
+
+    @Test
+    public void testCacheReadViaTableByTargetAndRoot() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        Options options = new Options();
+        options.set(RESTCatalogOptions.READ_VIA_ENABLED, true);
+        CachingCatalog catalog = new CachingCatalog(wrapped, options);
+        Identifier target = Identifier.create("db", "tbl");
+        Identifier viaView1 = RESTReadVia.withReadVia(target, Identifier.create("db", "view1"));
+        Identifier viaView2 = RESTReadVia.withReadVia(target, Identifier.create("db", "view2"));
+        Table table1 = Mockito.mock(Table.class);
+        Table table2 = Mockito.mock(Table.class);
+        when(wrapped.getTable(viaView1)).thenReturn(table1);
+        when(wrapped.getTable(viaView2)).thenReturn(table2);
+
+        assertThat(catalog.getTable(viaView1)).isSameAs(table1);
+        assertThat(catalog.getTable(viaView2)).isSameAs(table2);
+        assertThat(catalog.getTable(viaView1)).isSameAs(table1);
+        assertThat(catalog.getTable(viaView2)).isSameAs(table2);
+        Mockito.verify(wrapped, Mockito.times(1)).getTable(viaView1);
+        Mockito.verify(wrapped, Mockito.times(1)).getTable(viaView2);
+    }
+
+    @Test
+    public void testInvalidateReadViaSystemTableWithBaseTable() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        Options options = new Options();
+        options.set(RESTCatalogOptions.READ_VIA_ENABLED, true);
+        CachingCatalog catalog = new CachingCatalog(wrapped, options);
+        Identifier table = Identifier.create("db", "tbl");
+        Identifier markedSystemTable =
+                RESTReadVia.withReadVia(
+                        Identifier.create("db", "tbl$files"), Identifier.create("db", "view"));
+        when(wrapped.getTable(markedSystemTable)).thenReturn(Mockito.mock(Table.class));
+
+        catalog.getTable(markedSystemTable);
+        catalog.invalidateTable(table);
+
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(markedSystemTable);
     }
 
     @Test

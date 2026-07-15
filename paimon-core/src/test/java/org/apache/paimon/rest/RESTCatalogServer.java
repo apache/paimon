@@ -206,6 +206,8 @@ public class RESTCatalogServer {
     private final ResourcePaths resourcePaths;
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
+    private final List<Identifier> receivedTableIdentifiers =
+            Collections.synchronizedList(new ArrayList<>());
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -462,13 +464,19 @@ public class RESTCatalogServer {
                                 resources.length >= 5
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.TAGS.equals(resources[3]);
-                        Identifier identifier =
+                        Identifier requestIdentifier =
                                 resources.length >= 3
                                                 && !"rename".equals(resources[2])
                                                 && !"commit".equals(resources[2])
                                         ? Identifier.create(
                                                 databaseName, RESTUtil.decodeString(resources[2]))
                                         : null;
+                        Identifier identifier = requestIdentifier;
+                        if (requestIdentifier != null
+                                && ResourcePaths.TABLES.equals(resources[1])) {
+                            receivedTableIdentifiers.add(requestIdentifier);
+                            identifier = RESTReadVia.parse(requestIdentifier).identifier();
+                        }
                         if (identifier != null && ResourcePaths.TABLES.equals(resources[1])) {
                             if (!identifier.isSystemTable()
                                     && !tableMetadataStore.containsKey(identifier.getFullName())) {
@@ -2880,5 +2888,13 @@ public class RESTCatalogServer {
 
     public void clearReceivedHeaders() {
         receivedHeaders.clear();
+    }
+
+    public List<Identifier> getReceivedTableIdentifiers() {
+        return receivedTableIdentifiers;
+    }
+
+    public void clearReceivedTableIdentifiers() {
+        receivedTableIdentifiers.clear();
     }
 }

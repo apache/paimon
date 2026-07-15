@@ -113,6 +113,13 @@ public class RESTCatalogOptions {
                                     + "'openapi' (for DlfNext/2026-01-18). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
+    public static final ConfigOption<Boolean> READ_VIA_ENABLED =
+            ConfigOptions.key("read-via.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to propagate the outermost View or table as authorization context when reading referenced tables.");
+
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
             ConfigOptions.key("io-cache.enabled")
                     .booleanType()

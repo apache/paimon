@@ -293,6 +293,31 @@ public class CatalogUtils {
             @Nullable CatalogContext catalogContext,
             boolean isRestCatalog)
             throws Catalog.TableNotExistException {
+        return loadTable(
+                catalog,
+                identifier,
+                internalFileIO,
+                externalFileIO,
+                metadataLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                null,
+                isRestCatalog);
+    }
+
+    public static Table loadTable(
+            Catalog catalog,
+            Identifier identifier,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
+            TableMetadata.Loader metadataLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            @Nullable Identifier readVia,
+            boolean isRestCatalog)
+            throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
         }
@@ -331,6 +356,7 @@ public class CatalogUtils {
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
                         tableIdentifier,
+                        readVia,
                         metadata.uuid(),
                         isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
                         isRestCatalog ? null : lockFactory,

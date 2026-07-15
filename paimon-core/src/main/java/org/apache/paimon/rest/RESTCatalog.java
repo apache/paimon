@@ -101,6 +101,7 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    private final boolean readViaEnabled;
     protected final Map<String, String> tableDefaultOptions;
     private final @Nullable LocalCacheManager cacheManager;
 
@@ -117,6 +118,7 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.readViaEnabled = api.options().get(RESTCatalogOptions.READ_VIA_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
         this.cacheManager = CachingFileIO.createCacheManager(this.context);
     }
@@ -355,6 +357,21 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
+        if (readViaEnabled) {
+            RESTReadVia readVia = RESTReadVia.parse(identifier);
+            Identifier tableIdentifier = readVia.identifier();
+            return CatalogUtils.loadTable(
+                    this,
+                    tableIdentifier,
+                    path -> fileIOForData(path, identifier),
+                    this::fileIOFromOptions,
+                    i -> loadTableMetadata(i, readVia.readVia().orElse(null)),
+                    null,
+                    null,
+                    context,
+                    readVia.readVia().orElse(null),
+                    true);
+        }
         return CatalogUtils.loadTable(
                 this,
                 identifier,
@@ -506,6 +523,11 @@ public class RESTCatalog implements Catalog {
     }
 
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        return loadTableMetadata(identifier, null);
+    }
+
+    private TableMetadata loadTableMetadata(Identifier identifier, @Nullable Identifier readVia)
+            throws TableNotExistException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table
         Identifier loadTableIdentifier =
@@ -515,6 +537,9 @@ public class RESTCatalog implements Catalog {
                                 identifier.getTableName(),
                                 identifier.getBranchName())
                         : identifier;
+        if (readVia != null) {
+            loadTableIdentifier = RESTReadVia.withReadVia(loadTableIdentifier, readVia);
+        }
 
         GetTableResponse response;
         try {
@@ -662,7 +687,9 @@ public class RESTCatalog implements Catalog {
     @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
-        checkNotSystemTable(identifier, "authTable");
+        checkNotSystemTable(
+                readViaEnabled ? RESTReadVia.parse(identifier).identifier() : identifier,
+                "authTable");
         try {
             AuthTableQueryResponse response = api.authTableQuery(identifier, select);
             return new TableQueryAuthResult(response.filter(), response.columnMasking());

@@ -45,6 +45,7 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -212,6 +213,69 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertEquals(
                 restCatalog.getTable(identifier).options().get(catalogConfigInServerKey),
                 "default-value");
+    }
+
+    @Test
+    void testGetTableWithReadVia() throws Exception {
+        RESTCatalog catalog =
+                initCatalog(
+                        false,
+                        Collections.singletonMap(
+                                RESTCatalogOptions.READ_VIA_ENABLED.key(), "true"));
+        Identifier tableIdentifier = Identifier.create("db_table", "my_table");
+        Identifier viewIdentifier = Identifier.create("db_view", "my_view");
+        Identifier readIdentifier = RESTReadVia.withReadVia(tableIdentifier, viewIdentifier);
+        catalog.createDatabase(tableIdentifier.getDatabaseName(), true);
+        catalog.createTable(tableIdentifier, DEFAULT_TABLE_SCHEMA, false);
+        restCatalogServer.clearReceivedTableIdentifiers();
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(readIdentifier);
+
+        assertThat(restCatalogServer.getReceivedTableIdentifiers()).containsExactly(readIdentifier);
+        assertThat(table.catalogEnvironment().identifier()).isEqualTo(tableIdentifier);
+        assertThat(table.catalogEnvironment().readVia()).contains(viewIdentifier);
+    }
+
+    @Test
+    void testReadOperationsWithReadVia() throws Exception {
+        RESTCatalog catalog =
+                initCatalog(
+                        false,
+                        Collections.singletonMap(
+                                RESTCatalogOptions.READ_VIA_ENABLED.key(), "true"));
+        Identifier tableIdentifier = Identifier.create("db_table", "my_table");
+        Identifier readIdentifier =
+                RESTReadVia.withReadVia(tableIdentifier, Identifier.create("db_view", "my_view"));
+        catalog.createDatabase(tableIdentifier.getDatabaseName(), true);
+        catalog.createTable(tableIdentifier, DEFAULT_TABLE_SCHEMA, false);
+        restCatalogServer.clearReceivedTableIdentifiers();
+
+        assertThat(catalog.loadSnapshot(readIdentifier)).isEmpty();
+        assertThat(catalog.loadSnapshot(readIdentifier, "LATEST")).isEmpty();
+        catalog.authTableQuery(readIdentifier, null);
+
+        assertThat(restCatalogServer.getReceivedTableIdentifiers())
+                .containsExactly(readIdentifier, readIdentifier, readIdentifier);
+    }
+
+    @Test
+    void testDataTokenWithReadVia() throws Exception {
+        RESTCatalog catalog =
+                initCatalog(
+                        true,
+                        Collections.singletonMap(
+                                RESTCatalogOptions.READ_VIA_ENABLED.key(), "true"));
+        Identifier tableIdentifier = Identifier.create("db_table", "my_table");
+        Identifier readIdentifier =
+                RESTReadVia.withReadVia(tableIdentifier, Identifier.create("db_view", "my_view"));
+        catalog.createDatabase(tableIdentifier.getDatabaseName(), true);
+        catalog.createTable(tableIdentifier, DEFAULT_TABLE_SCHEMA, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(readIdentifier);
+        restCatalogServer.clearReceivedTableIdentifiers();
+
+        ((RESTTokenFileIO) table.fileIO()).validToken();
+
+        assertThat(restCatalogServer.getReceivedTableIdentifiers()).containsExactly(readIdentifier);
     }
 
     @Test

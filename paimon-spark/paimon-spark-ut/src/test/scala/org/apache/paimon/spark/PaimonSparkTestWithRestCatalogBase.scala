@@ -32,7 +32,7 @@ import java.util.UUID
 
 class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
 
-  private var restCatalogServer: RESTCatalogServer = _
+  protected var restCatalogServer: RESTCatalogServer = _
   private var serverUrl: String = _
   protected var warehouse: String = _
   private val initToken = "init_token"

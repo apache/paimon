@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.rest.RESTReadVia;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.SnapshotLoader;
@@ -33,17 +34,24 @@ import java.util.Optional;
 public class SnapshotLoaderImpl implements SnapshotLoader {
 
     private final CatalogLoader catalogLoader;
-    private final Identifier identifier;
+    private final Identifier readIdentifier;
+    private final Identifier mutationIdentifier;
 
     public SnapshotLoaderImpl(CatalogLoader catalogLoader, Identifier identifier) {
+        this(catalogLoader, identifier, identifier);
+    }
+
+    public SnapshotLoaderImpl(
+            CatalogLoader catalogLoader, Identifier readIdentifier, Identifier mutationIdentifier) {
         this.catalogLoader = catalogLoader;
-        this.identifier = identifier;
+        this.readIdentifier = readIdentifier;
+        this.mutationIdentifier = mutationIdentifier;
     }
 
     @Override
     public Optional<Snapshot> load() throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            return catalog.loadSnapshot(identifier).map(TableSnapshot::snapshot);
+            return catalog.loadSnapshot(readIdentifier).map(TableSnapshot::snapshot);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -54,7 +62,7 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     @Override
     public void rollback(Instant instant) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackTo(identifier, instant);
+            catalog.rollbackTo(mutationIdentifier, instant);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -66,6 +74,21 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     public SnapshotLoader copyWithBranch(String branch) {
         return new SnapshotLoaderImpl(
                 catalogLoader,
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch));
+                copyWithBranch(readIdentifier, branch),
+                copyWithBranch(mutationIdentifier, branch));
+    }
+
+    private static Identifier copyWithBranch(Identifier identifier, String branch) {
+        RESTReadVia parsed = RESTReadVia.parse(identifier);
+        Identifier base = parsed.identifier();
+        Identifier copied =
+                new Identifier(
+                        base.getDatabaseName(),
+                        base.getTableName(),
+                        branch,
+                        base.getSystemTableName());
+        return parsed.readVia()
+                .map(readVia -> RESTReadVia.withReadVia(copied, readVia))
+                .orElse(copied);
     }
 }

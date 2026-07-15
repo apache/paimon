@@ -25,6 +25,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTReadVia;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -243,6 +245,11 @@ public class CachingCatalog extends DelegateCatalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
+        if (options.get(RESTCatalogOptions.READ_VIA_ENABLED)
+                && RESTReadVia.parse(identifier).readVia().isPresent()) {
+            return getCachedTable(identifier);
+        }
+
         // For system table, do not cache it directly. Instead, cache the origin table and then wrap
         // it to generate the system table.
         if (identifier.isSystemTable()) {
@@ -263,6 +270,10 @@ public class CachingCatalog extends DelegateCatalog {
             return table;
         }
 
+        return getCachedTable(identifier);
+    }
+
+    private Table getCachedTable(Identifier identifier) throws TableNotExistException {
         try {
             return tableCache.get(identifier, this::loadTable);
         } catch (TableLoadingException e) {
@@ -361,8 +372,12 @@ public class CachingCatalog extends DelegateCatalog {
         }
         // clear all branches of this table
         for (Identifier i : tableCache.asMap().keySet()) {
-            if (identifier.getTableName().equals(i.getTableName())
-                    && identifier.getDatabaseName().equals(i.getDatabaseName())) {
+            Identifier cachedIdentifier =
+                    options.get(RESTCatalogOptions.READ_VIA_ENABLED)
+                            ? RESTReadVia.parse(i).identifier()
+                            : i;
+            if (identifier.getTableName().equals(cachedIdentifier.getTableName())
+                    && identifier.getDatabaseName().equals(cachedIdentifier.getDatabaseName())) {
                 tableCache.invalidate(i);
             }
         }

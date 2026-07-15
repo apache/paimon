@@ -214,12 +214,21 @@ public class RESTTokenFileIO implements FileIO {
             apiInstance = new RESTApi(catalogContext.options(), false);
         }
         Identifier tableIdentifier = identifier;
-        if (identifier.isSystemTable()) {
+        Identifier readVia = null;
+        if (catalogContext.options().get(RESTCatalogOptions.READ_VIA_ENABLED)) {
+            RESTReadVia parsed = RESTReadVia.parse(identifier);
+            tableIdentifier = parsed.identifier();
+            readVia = parsed.readVia().orElse(null);
+        }
+        if (tableIdentifier.isSystemTable()) {
             tableIdentifier =
                     new Identifier(
-                            identifier.getDatabaseName(),
-                            identifier.getTableName(),
-                            identifier.getBranchName());
+                            tableIdentifier.getDatabaseName(),
+                            tableIdentifier.getTableName(),
+                            tableIdentifier.getBranchName());
+        }
+        if (readVia != null) {
+            tableIdentifier = RESTReadVia.withReadVia(tableIdentifier, readVia);
         }
         GetTableTokenResponse response = apiInstance.loadTableToken(tableIdentifier);
         LOG.info(
