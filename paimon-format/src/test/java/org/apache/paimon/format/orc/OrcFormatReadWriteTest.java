@@ -57,6 +57,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** An orc {@link FormatReadWriteTest}. */
 public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
+    @Test
+    public void testArrayBlobDescriptors() throws Exception {
+        testArrayBlobDescriptorRoundTrip();
+    }
+
     private final FileFormat legacyFormat =
             new OrcFileFormat(
                     new FileFormatFactory.FormatContext(

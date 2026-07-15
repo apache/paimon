@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -28,6 +29,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
@@ -59,10 +61,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int blobIndex;
     private final int fieldCount;
     private final int rowIdIndex;
     private final int seqNumIndex;
+    private final Object blobPlaceholder;
+    private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
 
     BlobFallbackRecordReader(
@@ -73,10 +76,12 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             RowType readRowType,
             int blobIndex)
             throws IOException {
-        this.blobIndex = blobIndex;
         this.fieldCount = readRowType.getFieldCount();
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
+        this.blobGetter =
+                InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
         checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
         long firstRowId = Long.MAX_VALUE;
@@ -217,7 +222,13 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     }
 
     private boolean isPlaceHolder(InternalRow row) {
-        return !row.isNullAt(blobIndex) && row.getBlob(blobIndex) == BlobPlaceholder.INSTANCE;
+        return blobGetter.getFieldOrNull(row) == blobPlaceholder;
+    }
+
+    private static Object blobPlaceholder(RowType rowType, int blobIndex) {
+        return rowType.getTypeAt(blobIndex).getTypeRoot() == DataTypeRoot.ARRAY
+                ? BlobArrayPlaceholder.INSTANCE
+                : BlobPlaceholder.INSTANCE;
     }
 
     @Override

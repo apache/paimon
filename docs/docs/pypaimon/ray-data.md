@@ -211,7 +211,9 @@ write_paimon(
 **HASH_FIXED pre-clustering:**
 
 HASH_FIXED rows are always assigned to the correct Paimon bucket by
-the writer. Pre-clustering is only a file-count optimization.
+the writer. For append-only tables, pre-clustering is only a file-count
+optimization. Primary-key tables additionally require one writer per
+`(partition_keys..., bucket)` group to generate ordered sequence numbers.
 
 By default, `write_paimon` writes append-only HASH_FIXED tables
 without pre-clustering. This avoids Ray `groupby().map_groups()`
@@ -220,9 +222,9 @@ node.
 
 HASH_FIXED primary-key tables reject the default/off mode. Direct Ray
 writes can send the same bucket to multiple writer tasks, and those
-writers can allocate overlapping sequence numbers. Use the explicit
-`map_groups` mode until a bounded pre-clustering strategy preserves
-per-bucket sequence ordering.
+writers can allocate overlapping sequence numbers. The explicit
+`map_groups` mode avoids this by running one writer for each complete
+`(partition_keys..., bucket)` group.
 
 If every `(partition_keys..., bucket)` group fits in memory on a
 single Ray node, you can opt in to the legacy small-file optimization:
@@ -237,11 +239,12 @@ write_paimon(
 ```
 
 `hash_fixed_precluster="map_groups"` groups rows by
-`(partition_keys..., bucket)` before writing so each group lands in a
-single Ray task. This can reduce file count and keeps HASH_FIXED
-primary-key sequence generation per bucket in one writer task, but it
-inherits Ray's `map_groups()` memory bound. Large append-only buckets
-or hot append-only partitions should use the default mode or
+`(partition_keys..., bucket)`. For primary-key tables, the Paimon writer
+runs inside that `map_groups()` task and returns serialized commit
+messages for the driver to commit. Ray output block splitting therefore
+cannot create multiple writers for the same group. The mode inherits
+Ray's `map_groups()` memory bound. Large append-only buckets or hot
+append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
 For non-HASH_FIXED append-only tables, the dataset is written as-is.
@@ -258,15 +261,18 @@ overlapping buckets or sequence numbers for those modes.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`.
 - `overwrite`: if `True`, overwrite existing data in the table.
 - `concurrency`: optional max number of Ray write tasks to run concurrently.
+  For HASH_FIXED primary-key `map_groups` writes, this limits the group
+  writer tasks.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in write tasks
-  (e.g. `{"num_cpus": 2}`).
+  (e.g. `{"num_cpus": 2}`). For HASH_FIXED primary-key `map_groups`
+  writes, these options apply to the group writer tasks.
 - `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
   `"off"` write append-only HASH_FIXED tables directly and reject
   HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
-  small-file optimization for HASH_FIXED primary-key tables and requires
-  each `(partition_keys..., bucket)` group to fit in memory on one Ray
-  node. This option does not enable Ray writes for HASH_DYNAMIC or
-  CROSS_PARTITION primary-key tables.
+  small-file optimization for append-only tables and runs one writer per
+  HASH_FIXED primary-key group. Each `(partition_keys..., bucket)` group
+  must fit in memory on one Ray node. This option does not enable Ray
+  writes for HASH_DYNAMIC or CROSS_PARTITION primary-key tables.
 
 ### `TableWrite.write_ray()` (lower-level)
 

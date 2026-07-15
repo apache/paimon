@@ -19,13 +19,18 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
+import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -211,6 +216,60 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     .containsExactly(new Range(100L, 100L));
             assertThat(scanner.unindexedRows(predicate).results().toRangeList())
                     .containsExactly(new Range(500L, 999L));
+        }
+    }
+
+    @Test
+    public void testSourceBackedIndexIsExcludedFromGlobalRowIdScan() throws Exception {
+        write(10L);
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        IndexFileMeta sourceBacked =
+                new IndexFileMeta(
+                        "btree",
+                        "source-backed-index",
+                        0,
+                        10,
+                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                        null);
+
+        assertThat(GlobalIndexScanner.create(table, Collections.singletonList(sourceBacked)))
+                .isEmpty();
+
+        GlobalIndexCoverage coverage =
+                new GlobalIndexCoverage(
+                        table,
+                        table.snapshotManager().latestSnapshot(),
+                        PartitionPredicate.ALWAYS_TRUE,
+                        Collections.singletonList(sourceBacked));
+        assertThat(coverage.unindexedRanges(1)).containsExactly(new Range(0, 9));
+    }
+
+    @Test
+    public void testOrdinaryAndSourceBackedBTreeIndexesCanCoexist() throws Exception {
+        write(10L);
+        createIndex("f1");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<IndexFileMeta> mixedIndexes =
+                table.store().newIndexFileHandler().scan(snapshot, "btree").stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toCollection(ArrayList::new));
+        mixedIndexes.add(
+                new IndexFileMeta(
+                        "btree",
+                        "source-backed-index",
+                        0,
+                        10,
+                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                        null));
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
+
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, mixedIndexes).orElseThrow(AssertionError::new)) {
+            assertThat(scanner.scan(predicate).get().results().toRangeList())
+                    .containsExactly(new Range(7, 7));
         }
     }
 

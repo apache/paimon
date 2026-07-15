@@ -21,6 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
+from pypaimon.schema.data_types import is_blob_type
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -244,7 +245,7 @@ class ScanQuery:
     def _all_blob_columns(self) -> List[str]:
         return [
             field.name for field in self._table.fields
-            if getattr(field.type, "type", None) == "BLOB"
+            if is_blob_type(field.type)
         ]
 
     def _resolve_blob_columns(self, columns) -> List[str]:

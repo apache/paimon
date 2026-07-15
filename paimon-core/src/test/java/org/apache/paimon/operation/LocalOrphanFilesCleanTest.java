@@ -22,6 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
@@ -150,6 +151,29 @@ public class LocalOrphanFilesCleanTest {
     @Test
     public void testNormallyRemoving() throws Throwable {
         normallyRemoving(tablePath);
+    }
+
+    @Test
+    public void testKeepManagedBlobPack() throws Exception {
+        commit(Collections.singletonList(TestPojo.next()));
+
+        Path part1 = listSubDirs(tablePath, p -> p.getName().contains("=")).get(0);
+        Path part2 = listSubDirs(part1, p -> p.getName().contains("=")).get(0);
+        Path bucket = listSubDirs(part2, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)).get(0);
+        Path managedBlob =
+                new Path(bucket, "orphan" + ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        Path ordinaryOrphan = new Path(bucket, "orphan.avro");
+        fileIO.newOutputStream(managedBlob, false).close();
+        fileIO.newOutputStream(ordinaryOrphan, false).close();
+
+        LocalOrphanFilesClean cleaner =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = cleaner.clean().getDeletedFilesPath();
+
+        assertThat(fileIO.exists(managedBlob)).isTrue();
+        assertThat(fileIO.exists(ordinaryOrphan)).isFalse();
+        assertThat(deleted).doesNotContain(managedBlob);
     }
 
     public void normallyRemoving(Path dataPath) throws Throwable {

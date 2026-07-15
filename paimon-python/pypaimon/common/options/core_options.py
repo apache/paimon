@@ -99,6 +99,34 @@ class GlobalIndexSearchMode(str, Enum):
 
 class CoreOptions:
     """Core options for Paimon tables."""
+
+    # Options that define the table's structure/identity and cannot be changed
+    # once the table has snapshots. Mirrors the @Immutable annotated options in
+    # the Java org.apache.paimon.CoreOptions (IMMUTABLE_OPTIONS).
+    IMMUTABLE_OPTIONS: frozenset = frozenset([
+        "type",
+        "bucket-key",
+        "bucket-function.type",
+        "data-file.path-directory",
+        "merge-engine",
+        "sequence.snapshot-ordering",
+        "aggregation.remove-record-on-delete",
+        "partial-update.remove-record-on-delete",
+        "partial-update.remove-record-on-sequence-group",
+        "rowkind.field",
+        "primary-key",
+        "partition",
+        "dynamic-bucket.initial-buckets",
+        "force-lookup",
+        "row-tracking.enabled",
+        "data-evolution.enabled",
+        "index-file-in-data-file-dir",
+        "blob-field",
+        "blob-descriptor-field",
+        "blob-view-field",
+        "pk-clustering-override",
+    ])
+
     # File format constants
     FILE_FORMAT_ORC: str = "orc"
     FILE_FORMAT_AVRO: str = "avro"
@@ -132,7 +160,7 @@ class CoreOptions:
     TYPE: ConfigOption[str] = (
         ConfigOptions.key("type")
         .string_type()
-        .default_value("primary-key")
+        .default_value("table")
         .with_description("Specify what type of table this is.")
     )
 

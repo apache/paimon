@@ -25,6 +25,7 @@ import pyarrow as pa
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.schema.data_types import is_blob_file_field
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import row_values_to_arrow_table
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
@@ -240,12 +241,7 @@ class FileStoreWrite:
 
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
-        for field in self.table.table_schema.fields:
-            if hasattr(field.type, 'type') and field.type.type == 'BLOB':
-                return True
-            elif hasattr(field.type, '__class__') and 'blob' in field.type.__class__.__name__.lower():
-                return True
-        return False
+        return any(is_blob_file_field(field) for field in self.table.table_schema.fields)
 
     def _has_vector_columns(self) -> bool:
         from pypaimon.schema.data_types import VectorType

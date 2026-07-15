@@ -32,6 +32,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -40,9 +41,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link GlobalIndexEvaluator}. */
 class GlobalIndexEvaluatorTest {
@@ -567,6 +570,79 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testIsNullAndIsNotNullSameFieldIsEmptyNotPruned() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        // A reader where IS NULL matches the null rows {3,7} and IS NOT NULL matches the
+        // complementary non-null rows {1,2,4,5}. "a IS NULL AND a IS NOT NULL" must be the
+        // intersection (empty). The old prune treated IS NULL as a constraining sibling and
+        // dropped IS NOT NULL, wrongly yielding the null rows {3,7}.
+        GlobalIndexReader nullAwareReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(
+                            FieldRef fieldRef) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(3, 7)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(
+                            FieldRef fieldRef) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 2, 4, 5)));
+                    }
+                };
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType, fieldId -> Collections.singletonList(nullAwareReader));
+
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = PredicateBuilder.and(builder.isNull(0), builder.isNotNull(0));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().results().isEmpty()).isTrue();
+        evaluator.close();
+    }
+
+    @Test
+    void testRedundantIsNotNullStillPrunedWithNullRejectingSibling() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+        AtomicBoolean isNotNullVisited = new AtomicBoolean();
+
+        // "a = 42 AND a IS NOT NULL": a = 42 is null-rejecting, so IS NOT NULL is redundant and
+        // pruned. An unsupported Optional.empty() child is ignored by AND evaluation, so the
+        // result alone cannot prove pruning; record whether the visitor is invoked.
+        GlobalIndexReader equalOnlyReader =
+                new StubGlobalIndexReader(resultOf(1, 2, 3)) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(
+                            FieldRef fieldRef) {
+                        isNotNullVisited.set(true);
+                        // Simulate a reader that cannot serve IS NOT NULL.
+                        return CompletableFuture.completedFuture(Optional.empty());
+                    }
+                };
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType, fieldId -> Collections.singletonList(equalOnlyReader));
+
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = PredicateBuilder.and(builder.equal(0, 42), builder.isNotNull(0));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
+        assertThat(isNotNullVisited).isFalse();
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
@@ -576,6 +652,33 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isEmpty();
         evaluator.close();
+    }
+
+    @Test
+    void testUnionReaderClosesRemainingReadersAfterFailure() {
+        AtomicBoolean secondClosed = new AtomicBoolean();
+        GlobalIndexReader failingReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public void close() throws IOException {
+                        throw new IOException("expected close failure");
+                    }
+                };
+        GlobalIndexReader secondReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public void close() {
+                        secondClosed.set(true);
+                    }
+                };
+
+        UnionGlobalIndexReader union =
+                new UnionGlobalIndexReader(Arrays.asList(failingReader, secondReader));
+
+        assertThatThrownBy(union::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("expected close failure");
+        assertThat(secondClosed).isTrue();
     }
 
     private static void assertBitmapContainsExactly(
@@ -677,6 +780,6 @@ class GlobalIndexEvaluatorTest {
         }
 
         @Override
-        public void close() {}
+        public void close() throws IOException {}
     }
 }

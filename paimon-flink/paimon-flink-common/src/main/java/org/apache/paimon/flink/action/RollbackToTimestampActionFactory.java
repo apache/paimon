@@ -52,7 +52,7 @@ public class RollbackToTimestampActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rollback_to \\\n"
+                "  rollback_to_timestamp \\\n"
                         + "--warehouse <warehouse_path> \\\n"
                         + "--database <database_name> \\\n"
                         + "--table <table_name> \\\n"

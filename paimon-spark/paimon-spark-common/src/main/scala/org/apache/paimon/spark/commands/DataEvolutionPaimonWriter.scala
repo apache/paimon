@@ -24,8 +24,7 @@ import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, 
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.types.DataType
-import org.apache.paimon.types.DataTypeRoot.BLOB
+import org.apache.paimon.types.BlobType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
@@ -59,7 +58,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     val rawBlobPlaceholderMarkerIndexes = writeType.getFields.asScala.flatMap {
       field =>
         if (
-          field.`type`().is(BLOB) &&
+          BlobType.isBlobFileField(field.`type`()) &&
           !blobInlineFields.exists(inlineField => resolver(inlineField, field.name()))
         ) {
           val markerColumn = rawBlobPlaceholderMarkerColumns.getOrElse(

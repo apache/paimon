@@ -292,12 +292,12 @@ def write_paimon(
     """Write a Ray Dataset to a Paimon table.
 
     HASH_FIXED rows are assigned to the correct bucket by the Paimon
-    writer. Optional pre-clustering is only a file-count optimization.
-    The legacy ``map_groups`` pre-clustering mode materializes each
-    ``(partition_keys..., bucket)`` group on one Ray node and should
-    only be used when every group fits in memory. HASH_DYNAMIC and
-    CROSS_PARTITION primary-key Ray writes are rejected because Ray
-    write tasks create independent Paimon writers.
+    writer. For primary-key tables, ``map_groups`` writes each complete
+    ``(partition_keys..., bucket)`` group in one Ray task and returns
+    commit messages to the driver. It should only be used when every
+    group fits in memory. HASH_DYNAMIC and CROSS_PARTITION primary-key
+    Ray writes are rejected because Ray write tasks create independent
+    Paimon writers.
 
     Args:
         dataset: The Ray Dataset to write.
@@ -309,26 +309,22 @@ def write_paimon(
         hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
             and ``"off"`` write append-only HASH_FIXED tables directly
             and reject HASH_FIXED primary-key tables. ``"map_groups"``
-            preserves the legacy small-file optimization and its single
-            group memory bound for HASH_FIXED primary-key tables.
+            writes each HASH_FIXED primary-key group in one task and
+            preserves the legacy single-group memory bound.
     """
     _require_ray_data()
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
-    from pypaimon.ray.shuffle import maybe_apply_repartition
-    from pypaimon.write.ray_datasink import PaimonDatasink
+    from pypaimon.write.ray_datasink import write_paimon_dataset
 
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    dataset = maybe_apply_repartition(dataset, table, hash_fixed_precluster)
-
-    datasink = PaimonDatasink(table, overwrite=overwrite)
-
-    write_kwargs = {}
-    if ray_remote_args is not None:
-        write_kwargs["ray_remote_args"] = ray_remote_args
-    if concurrency is not None:
-        write_kwargs["concurrency"] = concurrency
-
-    dataset.write_datasink(datasink, **write_kwargs)
+    write_paimon_dataset(
+        dataset,
+        table,
+        overwrite=overwrite,
+        concurrency=concurrency,
+        ray_remote_args=ray_remote_args,
+        hash_fixed_precluster=hash_fixed_precluster,
+    )

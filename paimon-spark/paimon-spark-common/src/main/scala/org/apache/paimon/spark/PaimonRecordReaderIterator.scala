@@ -20,8 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.globalindex.IndexedSplitRecordReader
-import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIterator}
+import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIterator, ScoreRecordReader}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -49,7 +48,7 @@ case class PaimonRecordReaderIterator(
   private val needMetadata = metadataColumns.nonEmpty
   private val needPathAndIndexMetadata =
     metadataColumns.exists(c => PATH_AND_INDEX_META_COLUMNS.contains(c.name))
-  private val needVectorSearchMetadata = reader.isInstanceOf[IndexedSplitRecordReader] &&
+  private val needVectorSearchMetadata = reader.isInstanceOf[ScoreRecordReader[_]] &&
     metadataColumns.exists(c => VECTOR_SEARCH_META_COLUMN_NAMES.contains(c.name))
 
   Preconditions.checkArgument(

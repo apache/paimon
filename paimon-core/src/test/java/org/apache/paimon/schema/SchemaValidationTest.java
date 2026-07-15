@@ -147,13 +147,15 @@ class SchemaValidationTest {
 
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
-                .hasMessage("Data evolution config must enabled for table with BLOB type column.");
+                .hasMessage(
+                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
 
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
-                .hasMessage("The BLOB type column can not be part of partition keys.");
+                .hasMessage(
+                        "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
 
         assertThatThrownBy(
                         () -> {
@@ -167,7 +169,175 @@ class SchemaValidationTest {
                                             options,
                                             ""));
                         })
-                .hasMessage("Table with BLOB type column must have other normal columns.");
+                .hasMessage(
+                        "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
+    }
+
+    @Test
+    public void testPrimaryKeyArrayBlobField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payloads");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyArrayBlobManagedByType() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobFileField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyInlineBlobDoesNotTriggerManagedRestrictions() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "payload");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobViewCoexistsWithManagedBlob() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()),
+                        new DataField(2, "view", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+        options.put(CoreOptions.BLOB_VIEW_FIELD.key(), "view");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobRejectsUnsupportedSemantics() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                options, singletonList("payload"), emptyList())))
+                .hasMessage("Managed BLOB fields cannot be primary keys: [payload].");
+
+        Map<String, String> sequenceOptions = new HashMap<>(options);
+        sequenceOptions.put(CoreOptions.SEQUENCE_FIELD.key(), "payload");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                sequenceOptions, singletonList("id"), emptyList())))
+                .hasMessage("Managed BLOB fields cannot be sequence fields: [payload].");
+
+        Map<String, String> mergeOptions = new HashMap<>(options);
+        mergeOptions.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                mergeOptions, singletonList("id"), emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables only support the deduplicate merge engine.");
+
+        Map<String, String> changelogOptions = new HashMap<>(options);
+        changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                changelogOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+
+        Map<String, String> externalPathOptions = new HashMap<>(options);
+        externalPathOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file:///tmp/data");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                externalPathOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables do not support 'data-file.external-paths'.");
+
+        Map<String, String> clusteringOptions = new HashMap<>(options);
+        clusteringOptions.put(CoreOptions.PK_CLUSTERING_OVERRIDE.key(), "true");
+        clusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "id");
+        clusteringOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                clusteringOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables do not support 'pk-clustering-override'.");
+    }
+
+    private TableSchema primaryKeyBlobSchema(
+            Map<String, String> options, List<String> primaryKeys, List<String> partitionKeys) {
+        return new TableSchema(
+                1,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB())),
+                10,
+                partitionKeys,
+                primaryKeys,
+                options,
+                "");
     }
 
     @Test

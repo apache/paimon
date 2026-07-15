@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -25,6 +26,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -48,6 +51,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected DataField vectorColumn;
     protected float[] vector;
     protected Map<String, String> options = new HashMap<>();
+    @Nullable private Snapshot pinnedSnapshot;
 
     public VectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -124,13 +128,35 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorScan(
+                    table,
+                    vectorColumn.id(),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    partitionFilter,
+                    filter,
+                    pinnedSnapshot);
+        }
+        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
     public VectorRead newVectorRead() {
         checkNotNull(vector, "vector must be set via withVector()");
-        return new VectorReadImpl(
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options, filter);
+        }
+        return new DataEvolutionVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);
+    }
+
+    protected boolean isPrimaryKeyVectorSearch() {
+        return vectorColumn != null
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+    }
+
+    VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+        this.pinnedSnapshot = snapshot;
+        return this;
     }
 }

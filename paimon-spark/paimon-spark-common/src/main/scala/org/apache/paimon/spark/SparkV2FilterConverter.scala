@@ -49,8 +49,11 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case EQUAL_TO =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            // TODO deal with isNaN
-            builder.equal(transform, literal)
+            if (isNaN(literal)) {
+              builder.isNaN(transform)
+            } else {
+              builder.equal(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -235,5 +238,11 @@ object SparkV2FilterConverter extends Logging {
   private val STRING_CONTAINS = "CONTAINS"
   private val ALWAYS_TRUE = "ALWAYS_TRUE"
   private val ALWAYS_FALSE = "ALWAYS_FALSE"
+
+  private def isNaN(value: Object): Boolean = value match {
+    case f: java.lang.Float => f.isNaN
+    case d: java.lang.Double => d.isNaN
+    case _ => false
+  }
 
 }

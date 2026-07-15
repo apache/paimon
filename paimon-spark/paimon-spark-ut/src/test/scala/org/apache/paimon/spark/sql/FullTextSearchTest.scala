@@ -68,6 +68,52 @@ class FullTextSearchTest extends PaimonSparkTestBase {
 
   // ========== Index Read/Search Tests ==========
 
+  test("primary-key full-text search uses physical splits and exposes scores") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id',
+                  |  'bucket' = '1',
+                  |  'deletion-vectors.enabled' = 'true',
+                  |  'pk-full-text.index.columns' = 'content')
+                  |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (0, 'lake format')")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 'paimon full text search'),
+                  |  (2, 'apache paimon storage')
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      val compactedFiles = spark.sql("SELECT level FROM `T$files`").collect()
+      assert(compactedFiles.exists(_.getInt(0) > 0))
+      val payloads = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "full-text")
+      assert(payloads.nonEmpty)
+
+      val rows = spark
+        .sql("""
+               |SELECT id, __paimon_search_score
+               |FROM full_text_search(
+               |  'T',
+               |  'content',
+               |  '{"match":{"column":"content","terms":"paimon"}}',
+               |  10)
+               |ORDER BY id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.map(_.getInt(0)).toSeq == Seq(1, 2))
+      assert(rows.forall(row => !row.isNullAt(1) && row.getFloat(1) > 0.0f))
+    }
+  }
+
   test("full-text search - basic search") {
     withTable("T") {
       spark.sql("""

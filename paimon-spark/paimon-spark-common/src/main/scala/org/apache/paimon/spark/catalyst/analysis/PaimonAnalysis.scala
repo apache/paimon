@@ -78,6 +78,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
         d
 
+      case SetTableLocation(ResolvedTable(_, _, _: SparkTable, _), _, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
       case r: ReplaceColumns if r.resolved && isPaimonTable(r.table) =>
         // Spark rewrites REPLACE COLUMNS into a batch that drops every existing column and re-adds
         // the new set. Re-adding columns assigns brand-new field ids while existing data files keep

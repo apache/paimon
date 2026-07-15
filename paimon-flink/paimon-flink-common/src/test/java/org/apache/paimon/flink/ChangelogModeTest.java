@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -90,9 +91,33 @@ public class ChangelogModeTest {
     }
 
     @Test
+    public void testKeyOnlyDeletesEnabled() throws Exception {
+        Options options = new Options();
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // keyOnlyDeletes is a no-op on Flink 1.x and set on Flink 2.1+, so build the expected
+        // mode through the same adapter the sink uses.
+        ChangelogMode.Builder expectSink =
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE);
+        ChangelogModeUtils.enableKeyOnlyDeletes(expectSink);
+        test(options, ChangelogMode.upsert(), expectSink.build());
+    }
+
+    @Test
     public void testInputChangelogProducer() throws Exception {
         Options options = new Options();
         options.set(CHANGELOG_PRODUCER, INPUT);
+        test(options, ChangelogMode.all(), ChangelogMode.all());
+    }
+
+    @Test
+    public void testKeyOnlyDeletesIgnoredWithInputChangelogProducer() throws Exception {
+        Options options = new Options();
+        options.set(CHANGELOG_PRODUCER, INPUT);
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // The input changelog producer forces ChangelogMode.all(), so key-only deletes is ignored.
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 

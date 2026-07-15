@@ -27,7 +27,7 @@ import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, Paim
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{DataTableBatchScan, InnerTableScan, Split}
+import org.apache.paimon.table.source.{InnerTableScan, Split}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper

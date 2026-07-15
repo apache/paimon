@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{BucketedDvMaintainer, BucketedDvMaintainerTest, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.FileStoreTable
@@ -44,7 +45,29 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   import testImplicits._
 
-  private def runAndCheckSplitScan(query: String): Unit = {
+  /**
+   * Runs a DELETE/UPDATE/MERGE and asserts it went through a deletion-vector-aware row-level path.
+   *
+   * There are two such paths and this check is agnostic to which one the target table uses:
+   *   - the V1 deletion-vector copy-on-write path, whose read is a [[PaimonSplitScan]] carrying
+   *     row-id metadata columns (used when `write.use-v2-write=false`, or for bucketed
+   *     deletion-vector append tables); and
+   *   - the V2 delta path ([[org.apache.paimon.spark.rowops.PaimonSparkDeltaOperation]] /
+   *     `WriteDelta`) for unaware-bucket deletion-vector append tables when `write.use-v2-write` is
+   *     enabled, which reads through a regular pushdown scan and therefore produces no
+   *     `PaimonSplitScan`.
+   *
+   * The routing decision is taken from [[SparkTable.supportsV2DeltaOps]], the single source of
+   * truth for the delta gating conditions, so the split-scan assertion is skipped exactly when the
+   * production code would pick the delta path. Without this the suite fails when run with
+   * `spark.paimon.write.use-v2-write=true`, because the delta path never yields a split scan.
+   */
+  private def runAndCheckSplitScan(query: String, target: FileStoreTable): Unit = {
+    if (SparkTable.supportsV2DeltaOps(SparkTable.of(target))) {
+      spark.sql(query).collect()
+      return
+    }
+
     val batchScans = new ArrayBuffer[(DataSourceV2Relation, BatchScanExec)]()
     val listener = new QueryExecutionListener {
       override def onFailure(f: String, qe: QueryExecution, e: Exception): Unit = {}
@@ -119,21 +142,24 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           val table = loadTable("target")
           val dvMaintainerFactory =
             BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
-          runAndCheckSplitScan(s"""
-                                  |MERGE INTO target
-                                  |USING source
-                                  |ON target.a = source.a
-                                  |WHEN MATCHED AND target.a = 5 THEN
-                                  |UPDATE SET b = source.b + target.b
-                                  |WHEN MATCHED AND source.c > 'c2' THEN
-                                  |UPDATE SET *
-                                  |WHEN MATCHED THEN
-                                  |DELETE
-                                  |WHEN NOT MATCHED AND c > 'c9' THEN
-                                  |INSERT (a, b, c) VALUES (a, b * 1.1, c)
-                                  |WHEN NOT MATCHED THEN
-                                  |INSERT *
-                                  |""".stripMargin)
+          runAndCheckSplitScan(
+            s"""
+               |MERGE INTO target
+               |USING source
+               |ON target.a = source.a
+               |WHEN MATCHED AND target.a = 5 THEN
+               |UPDATE SET b = source.b + target.b
+               |WHEN MATCHED AND source.c > 'c2' THEN
+               |UPDATE SET *
+               |WHEN MATCHED THEN
+               |DELETE
+               |WHEN NOT MATCHED AND c > 'c9' THEN
+               |INSERT (a, b, c) VALUES (a, b * 1.1, c)
+               |WHEN NOT MATCHED THEN
+               |INSERT *
+               |""".stripMargin,
+            table
+          )
 
           checkAnswer(
             spark.sql("SELECT * FROM target ORDER BY a, b"),
@@ -175,7 +201,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1")
+          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Nil)
@@ -195,12 +221,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
-          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
+          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a_2") :: Row(2, "b_2") :: Row(3, "c_2") :: Row(4, "d") :: Row(5, "e_2") :: Nil)
 
-          runAndCheckSplitScan("UPDATE T SET name = '_all'")
+          runAndCheckSplitScan("UPDATE T SET name = '_all'", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
@@ -248,7 +274,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1")
+          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(2, "b_2", "2024") :: Row(3, "c", "2025") :: Row(
@@ -269,7 +295,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond2 = "pt = '2025'"
           val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
-          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
+          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(2, "b_2", "2024") :: Row(3, "c_2", "2025") :: Row(
@@ -333,7 +359,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1", table)
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Nil)
           val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(1, deletionVectors2.size)
@@ -351,7 +377,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
-          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2", table)
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(2, "bb") :: Row(4, "d") :: Nil)
 
           spark.sql("CALL sys.compact('T')")
@@ -398,7 +424,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(3, "c", "2025") :: Row(4, "d", "2025") :: Nil)
@@ -412,7 +438,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val cond2 = "id = 3"
           val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
-          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2", table)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)

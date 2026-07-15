@@ -29,6 +29,9 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
@@ -92,6 +95,7 @@ import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFa
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
@@ -212,6 +216,7 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
 
@@ -349,6 +354,11 @@ public class SchemaValidation {
         checkArgument(
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
+
+        validatePrimaryKeyIndexColumns(options);
+        validatePrimaryKeySortedIndexes(schema, options);
+        validatePrimaryKeyVectorIndex(schema, options);
+        validatePrimaryKeyFullTextIndex(schema, options);
 
         validateMergeFunctionFactory(schema);
 
@@ -883,6 +893,235 @@ public class SchemaValidation {
         }
     }
 
+    private static void validatePrimaryKeyVectorIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyVectorIndexEnabled()) {
+            return;
+        }
+
+        List<String> indexColumns = options.primaryKeyVectorIndexColumns();
+        checkArgument(
+                new HashSet<>(indexColumns).size() == indexColumns.size(),
+                "pk-vector.index.columns must not contain duplicate columns, but is %s.",
+                indexColumns);
+        checkArgument(
+                indexColumns.size() == 1,
+                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        String indexType = options.primaryKeyVectorIndexType(indexColumn);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "pk-vector.index.columns must contain a non-empty column.");
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexType),
+                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
+                indexColumn);
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key vector index requires a primary-key table.");
+        checkArgument(
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
+                "Primary-key vector index requires deletion-vectors.enabled = true.");
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
+                options.mergeEngine());
+        checkArgument(
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key vector index requires fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key vector index does not support pk-clustering-override.");
+        options.primaryKeyVectorIndexOptions(indexColumn);
+
+        DataField vectorField =
+                schema.fields().stream()
+                        .filter(field -> field.name().equals(indexColumn))
+                        .findFirst()
+                        .orElse(null);
+        checkArgument(
+                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
+                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
+                indexColumn);
+        checkArgument(
+                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
+                        == DataTypeRoot.FLOAT,
+                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
+                indexColumn);
+        checkArgument(
+                Arrays.asList("l2", "cosine", "inner_product")
+                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
+                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                indexColumn,
+                options.primaryKeyVectorDistanceMetric(indexColumn));
+    }
+
+    private static void validatePrimaryKeyFullTextIndex(TableSchema schema, CoreOptions options) {
+        if (!options.primaryKeyFullTextIndexEnabled()) {
+            return;
+        }
+
+        List<String> indexColumns = options.primaryKeyFullTextIndexColumns();
+        checkArgument(
+                indexColumns.size() == 1,
+                "%s must contain exactly one column in the first release, but is %s.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumns);
+        String indexColumn = indexColumns.get(0);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                "%s must contain a non-empty column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key full-text index requires a primary-key table.");
+        checkArgument(
+                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
+                "Primary-key full-text index requires deletion-vectors.enabled = true.");
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
+        checkArgument(
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key full-text index requires fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key full-text index does not support pk-clustering-override.");
+        checkArgument(
+                schema.nameToFieldMap().containsKey(indexColumn),
+                "%s entry '%s' must reference an existing column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumn);
+        DataTypeRoot typeRoot = schema.nameToFieldMap().get(indexColumn).type().getTypeRoot();
+        checkArgument(
+                typeRoot == DataTypeRoot.CHAR || typeRoot == DataTypeRoot.VARCHAR,
+                "%s entry '%s' must reference a CHAR/VARCHAR/STRING column.",
+                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
+                indexColumn);
+        options.primaryKeyFullTextIndexOptions(indexColumn);
+    }
+
+    private static void validatePrimaryKeyIndexColumns(CoreOptions options) {
+        List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
+        List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
+        List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
+                fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
+
+        Set<String> indexedColumns = new HashSet<>();
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
+
+        Set<String> compactedIndexColumns = new HashSet<>();
+        compactedIndexColumns.addAll(vectorColumns);
+        compactedIndexColumns.addAll(btreeColumns);
+        compactedIndexColumns.addAll(bitmapColumns);
+        compactedIndexColumns.addAll(fullTextColumns);
+        for (String column : compactedIndexColumns) {
+            String fanoutKey = CoreOptions.primaryKeyIndexCompactionLevelFanoutKey(column);
+            checkArgument(
+                    options.primaryKeyIndexCompactionLevelFanout(column) > 1,
+                    "%s must be greater than 1.",
+                    fanoutKey);
+            String staleRatioKey =
+                    CoreOptions.primaryKeyIndexCompactionStaleRatioThresholdKey(column);
+            double staleRatio = options.primaryKeyIndexCompactionStaleRatioThreshold(column);
+            checkArgument(
+                    staleRatio > 0 && staleRatio <= 1, "%s must be in (0, 1].", staleRatioKey);
+        }
+    }
+
+    private static void validateNoDuplicatePrimaryKeyIndexColumns(
+            List<String> columns, String optionKey) {
+        checkArgument(
+                new HashSet<>(columns).size() == columns.size(),
+                "%s must not contain duplicate columns, but is %s.",
+                optionKey,
+                columns);
+    }
+
+    private static void validateUniquePrimaryKeyIndexColumns(
+            Set<String> indexedColumns, List<String> columns) {
+        for (String column : columns) {
+            checkArgument(
+                    indexedColumns.add(column),
+                    "Column '%s' can own at most one primary-key index.",
+                    column);
+        }
+    }
+
+    private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
+        if (options.primaryKeyBTreeIndexColumns().isEmpty()
+                && options.primaryKeyBitmapIndexColumns().isEmpty()) {
+            return;
+        }
+
+        checkArgument(
+                options.deletionVectorsEnabled(),
+                "Primary-key BTree and Bitmap indexes require deletion-vectors.enabled = true.");
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Primary-key BTree and Bitmap indexes require a primary-key table.");
+        checkArgument(
+                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Primary-key BTree and Bitmap indexes require fixed or postpone bucket mode "
+                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
+                options.bucket());
+        checkArgument(
+                !options.deletionVectorsMergeOnRead(),
+                "Primary-key BTree and Bitmap indexes require deletion-vectors.merge-on-read = false.");
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key BTree and Bitmap indexes do not support pk-clustering-override.");
+
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyBTreeIndexColumns(),
+                CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyBitmapIndexColumns(),
+                CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+
+        Map<String, DataField> fields = schema.nameToFieldMap();
+        for (String column : options.primaryKeyBTreeIndexColumns()) {
+            GlobalIndexer.create(
+                    BTreeGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyBTreeIndexOptions(column));
+        }
+        for (String column : options.primaryKeyBitmapIndexColumns()) {
+            GlobalIndexer.create(
+                    BitmapGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyBitmapIndexOptions(column));
+        }
+    }
+
+    private static void validatePrimaryKeySortedIndexColumns(
+            TableSchema schema, List<String> columns, String optionKey) {
+        for (String column : columns) {
+            checkArgument(
+                    schema.fieldNames().contains(column),
+                    "%s entry '%s' must reference an existing column.",
+                    optionKey,
+                    column);
+        }
+    }
+
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
         List<String> sequenceField = options.sequenceField();
         if (!sequenceField.isEmpty()) {
@@ -1024,19 +1263,22 @@ public class SchemaValidation {
         List<DataField> fields = schema.fields();
         List<String> blobNames =
                 fields.stream()
-                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .filter(field -> isBlobFileField(field.type()))
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
-            checkArgument(
-                    options.dataEvolutionEnabled(),
-                    "Data evolution config must enabled for table with BLOB type column.");
+            boolean primaryKeyManagedBlob = !schema.primaryKeys().isEmpty();
+            if (!primaryKeyManagedBlob) {
+                checkArgument(
+                        options.dataEvolutionEnabled(),
+                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+            }
             checkArgument(
                     fields.size() > blobNames.size(),
-                    "Table with BLOB type column must have other normal columns.");
+                    "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
-                    "The BLOB type column can not be part of partition keys.");
+                    "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
@@ -1060,7 +1302,7 @@ public class SchemaValidation {
     private static void validateBlobFields(RowType rowType, CoreOptions options) {
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .filter(field -> isBlobFileField(field.type()))
                         .map(DataField::name)
                         .collect(Collectors.toCollection(HashSet::new));
         Set<String> configured =
@@ -1069,7 +1311,7 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field or ARRAY<BLOB> field in table schema.",
                     field,
                     CoreOptions.BLOB_FIELD.key());
         }
@@ -1085,9 +1327,11 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field in table schema. "
+                            + "ARRAY<BLOB> is only supported by '%s'.",
                     field,
-                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                    CoreOptions.BLOB_FIELD.key());
         }
         return configured;
     }
@@ -1103,9 +1347,11 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB field in table schema. "
+                            + "ARRAY<BLOB> is only supported by '%s'.",
                     field,
-                    CoreOptions.BLOB_VIEW_FIELD.key());
+                    CoreOptions.BLOB_VIEW_FIELD.key(),
+                    CoreOptions.BLOB_FIELD.key());
             checkArgument(
                     !blobDescriptorFields.contains(field),
                     "Field '%s' in '%s' can not also be in '%s'.",
@@ -1114,6 +1360,61 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
+    }
+
+    private static void validatePrimaryKeyBlobConfiguration(
+            TableSchema schema, CoreOptions options) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        if (managedBlobFields.isEmpty()) {
+            return;
+        }
+
+        List<String> primaryKeyBlobFields =
+                managedBlobFields.stream()
+                        .filter(schema.primaryKeys()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                primaryKeyBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be primary keys: %s.",
+                primaryKeyBlobFields);
+
+        List<String> bucketKeyBlobFields =
+                managedBlobFields.stream()
+                        .filter(schema.bucketKeys()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                bucketKeyBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be bucket keys: %s.",
+                bucketKeyBlobFields);
+
+        List<String> sequenceBlobFields =
+                managedBlobFields.stream()
+                        .filter(options.sequenceField()::contains)
+                        .collect(Collectors.toList());
+        checkArgument(
+                sequenceBlobFields.isEmpty(),
+                "Managed BLOB fields cannot be sequence fields: %s.",
+                sequenceBlobFields);
+
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                "Primary-key managed BLOB tables only support the deduplicate merge engine.");
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE,
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+        checkArgument(
+                options.dataFileExternalPaths() == null,
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {

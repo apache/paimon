@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -60,6 +61,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='picture')",
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
                 "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pic1,pic2')",
+                "CREATE TABLE IF NOT EXISTS array_blob_table (id INT, data STRING, pictures ARRAY<BYTES>) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pictures')",
                 "CREATE TABLE IF NOT EXISTS mixed_blob_table"
                         + " (id INT, data STRING, raw_pic BYTES, desc_pic BYTES)"
                         + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
@@ -95,6 +97,147 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(new byte[] {89, 69}));
         assertThat(batchSql("SELECT file_path FROM `multiple_blob_table$files`").size())
                 .isEqualTo(3);
+    }
+
+    @Test
+    public void testArrayBlobField() throws Exception {
+        org.apache.paimon.types.ArrayType arrayType =
+                (org.apache.paimon.types.ArrayType)
+                        paimonTable("array_blob_table").rowType().getTypeAt(2);
+        assertThat(arrayType.getElementType().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(
+                                        1,
+                                        "paimon",
+                                        new byte[][] {
+                                            new byte[] {72, 101, 108, 108, 111},
+                                            null,
+                                            new byte[] {89, 69}
+                                        }),
+                                Row.of(2, "one", new byte[][] {new byte[] {65, 66, 67}}),
+                                Row.of(3, "null-array", null)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE array_blob_source "
+                                        + "(id INT, data STRING, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+        batchSql("INSERT INTO array_blob_table SELECT * FROM array_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures[1], pictures[2], pictures[3] "
+                                        + "FROM array_blob_table ORDER BY id"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}),
+                        Row.of(2, 1, new byte[] {65, 66, 67}, null, null),
+                        Row.of(3, null, null, null, null));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) > 0 FROM `array_blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(true));
+    }
+
+    @Test
+    public void testPrimaryKeyArrayBlobField() throws Exception {
+        batchSql(
+                "CREATE TABLE pk_array_blob_table ("
+                        + "id INT, pictures ARRAY<BYTES>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED) "
+                        + "WITH ('bucket'='1', 'blob-field'='pictures')");
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(
+                                        1,
+                                        new byte[][] {
+                                            new byte[] {72, 101, 108, 108, 111},
+                                            null,
+                                            new byte[] {89, 69}
+                                        })));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_array_blob_source "
+                                        + "(id INT, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+
+        batchSql("INSERT INTO pk_array_blob_table SELECT * FROM pk_array_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures[1], pictures[2], pictures[3] "
+                                        + "FROM pk_array_blob_table"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}));
+    }
+
+    @Test
+    public void testArrayBlobFieldWithDescriptorElements() throws Exception {
+        byte[] blobData = new byte[1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/external_array_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                        "CREATE TABLE array_blob_descriptor_table "
+                                + "(id INT, data STRING, pictures ARRAY<BYTES>) "
+                                + "WITH ('row-tracking.enabled'='true', "
+                                + "'data-evolution.enabled'='true', "
+                                + "'blob-field'='pictures', "
+                                + "'blob-as-descriptor'='true')")
+                .await();
+        batchSql(
+                "INSERT INTO array_blob_descriptor_table VALUES "
+                        + "(1, 'paimon', ARRAY[sys.path_to_descriptor('"
+                        + uri
+                        + "'), X'5945'])");
+
+        Row descriptorRow =
+                batchSql("SELECT pictures[1], pictures[2] " + "FROM array_blob_descriptor_table")
+                        .get(0);
+        BlobDescriptor firstDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(0));
+        BlobDescriptor secondDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(1));
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        CatalogContext catalogContext = CatalogContext.create(options);
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
+        Blob firstBlob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(firstDescriptor.uri()), firstDescriptor);
+        Blob secondBlob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(secondDescriptor.uri()), secondDescriptor);
+        assertThat(firstBlob.toData()).isEqualTo(blobData);
+        assertThat(secondBlob.toData()).isEqualTo(new byte[] {89, 69});
+
+        batchSql("ALTER TABLE array_blob_descriptor_table SET ('blob-as-descriptor'='false')");
+        assertThat(
+                        batchSql(
+                                "SELECT pictures[1], pictures[2] "
+                                        + "FROM array_blob_descriptor_table"))
+                .containsExactly(Row.of(blobData, new byte[] {89, 69}));
     }
 
     @Test
@@ -419,6 +562,27 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "blob_descriptor_without_blob_field", "blob-descriptor-field");
         assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(
                 "blob_view_without_blob_field", "blob-view-field");
+    }
+
+    @Test
+    public void testBlobInlineFieldRejectsArrayBlob() {
+        assertArrayBlobInlineFieldRejected(
+                "array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'");
+        assertArrayBlobInlineFieldRejected(
+                "array_blob_view_reject", "'blob-view-field'='pictures'");
+    }
+
+    private void assertArrayBlobInlineFieldRejected(String tableName, String blobOptions) {
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                String.format(
+                                                        "CREATE TABLE %s (id INT, pictures ARRAY<BYTES>)"
+                                                                + " WITH ('row-tracking.enabled'='true',"
+                                                                + " 'data-evolution.enabled'='true', %s)",
+                                                        tableName, blobOptions))
+                                        .await())
+                .hasRootCauseMessage("ARRAY<BLOB> is only supported by 'blob-field'.");
     }
 
     private void assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(

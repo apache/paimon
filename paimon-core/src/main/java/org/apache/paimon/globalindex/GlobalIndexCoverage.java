@@ -64,6 +64,9 @@ public class GlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (meta.sourceMeta() != null) {
+                continue;
+            }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             addCoverage(meta.indexFieldId(), range);
             if (meta.extraFieldIds() != null) {

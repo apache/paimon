@@ -19,10 +19,13 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -31,9 +34,12 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,12 +47,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BlobFileFormat}. */
 public class BlobFileFormatTest {
@@ -72,6 +81,84 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
+    }
+
+    @Test
+    public void testArrayBlobAsDescriptor() throws IOException {
+        innerTestArray(true);
+    }
+
+    @Test
+    public void testReadArrayBlobInlineBytes() throws IOException {
+        innerTestArray(false);
+    }
+
+    @Test
+    public void testWriteArrayBlobPlaceholderWithProjectedRow() throws IOException {
+        BlobFileFormat format = new BlobFileFormat();
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+            ProjectedRow projectedRow = ProjectedRow.from(new int[] {1});
+            formatWriter.addElement(
+                    projectedRow.replaceRow(GenericRow.of(0, BlobArrayPlaceholder.INSTANCE)));
+            formatWriter.close();
+        }
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        List<InternalRow> rows = new ArrayList<>();
+        readerFactory.createReader(context).forEachRemaining(rows::add);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getArray(0)).isSameAs(BlobArrayPlaceholder.INSTANCE);
+    }
+
+    @Test
+    public void testRejectUnsupportedArrayBlobPayloadVersion() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + Integer.BYTES] = 0,
+                "Unsupported ARRAY<BLOB> payload version");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobElementCount() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> {
+                    int countPosition = position + Integer.BYTES + 1;
+                    Arrays.fill(bytes, countPosition, countPosition + Integer.BYTES, (byte) 0xff);
+                },
+                "Invalid ARRAY<BLOB> element count");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobIndexLength() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> {
+                    int indexLengthPosition = position + length - Integer.BYTES;
+                    Arrays.fill(
+                            bytes,
+                            indexLengthPosition,
+                            indexLengthPosition + Integer.BYTES,
+                            (byte) 0xff);
+                },
+                "Invalid ARRAY<BLOB> element index length");
+    }
+
+    @Test
+    public void testRejectInvalidArrayBlobElementLength() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + length - Integer.BYTES - 1] = 3,
+                "Invalid ARRAY<BLOB> element length");
+    }
+
+    @Test
+    public void testRejectArrayBlobElementLengthMismatch() throws IOException {
+        assertMalformedArrayPayload(
+                (bytes, position, length) -> bytes[position + length - Integer.BYTES - 1] = 4,
+                "element lengths exceed the payload data length");
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {
@@ -146,6 +233,43 @@ public class BlobFileFormatTest {
         assertThat(result.get(0)).isSameAs(BlobPlaceholder.INSTANCE);
     }
 
+    private void assertMalformedArrayPayload(
+            ArrayPayloadCorruptor corruptor, String expectedMessage) throws IOException {
+        BlobFileFormat format = new BlobFileFormat();
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(
+                    GenericRow.of(new GenericArray(new Object[] {new BlobData("a".getBytes())})));
+            writer.close();
+        }
+
+        int payloadPosition;
+        int payloadLength;
+        try (SeekableInputStream input = fileIO.newInputStream(file)) {
+            BlobFileMeta fileMeta = new BlobFileMeta(input, fileIO.getFileSize(file), null);
+            payloadPosition = Math.toIntExact(fileMeta.blobOffset(0) + Integer.BYTES);
+            payloadLength = Math.toIntExact(fileMeta.blobLength(0) - 16);
+        }
+
+        java.nio.file.Path localFile = Paths.get(file.toUri());
+        byte[] bytes = Files.readAllBytes(localFile);
+        corruptor.corrupt(bytes, payloadPosition, payloadLength);
+        Files.write(localFile, bytes);
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        assertThatThrownBy(
+                        () -> {
+                            try (FileRecordReader<InternalRow> reader =
+                                    readerFactory.createReader(context)) {
+                                reader.forEachRemaining(ignored -> {});
+                            }
+                        })
+                .hasMessageContaining(expectedMessage);
+    }
+
     @Test
     public void testReadWithProjectedRowTypeContainingExtraFields() throws IOException {
         BlobFileFormat format = new BlobFileFormat(false);
@@ -183,5 +307,87 @@ public class BlobFileFormatTest {
         }
         assertThat(rows.get(0).getBlob(1).toData()).isEqualTo("hello".getBytes());
         assertThat(rows.get(1).getBlob(1).toData()).isEqualTo("world".getBytes());
+    }
+
+    private void innerTestArray(boolean blobAsDescriptor) throws IOException {
+        BlobFileFormat format = new BlobFileFormat(blobAsDescriptor);
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+
+        GenericArray first =
+                new GenericArray(
+                        new Object[] {
+                            new BlobData("hello".getBytes()), null, new BlobData("world".getBytes())
+                        });
+        GenericArray empty = new GenericArray(new Object[0]);
+        List<Object> arrays = Arrays.asList(first, null, BlobArrayPlaceholder.INSTANCE, empty);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+            for (Object array : arrays) {
+                formatWriter.addElement(GenericRow.of(array));
+            }
+            formatWriter.close();
+        }
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        List<Object> result = new ArrayList<>();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(
+                        row -> {
+                            if (row.isNullAt(0)) {
+                                result.add(null);
+                            } else {
+                                addArrayBlobResult(row, blobAsDescriptor, result);
+                            }
+                        });
+
+        assertThat(result).hasSize(4);
+        assertThat((byte[]) ((Object[]) result.get(0))[0]).isEqualTo("hello".getBytes());
+        assertThat(((Object[]) result.get(0))[1]).isNull();
+        assertThat((byte[]) ((Object[]) result.get(0))[2]).isEqualTo("world".getBytes());
+        assertThat(result.get(1)).isNull();
+        assertThat(result.get(2)).isSameAs(BlobArrayPlaceholder.INSTANCE);
+        assertThat((Object[]) result.get(3)).isEmpty();
+
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(0);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        result.clear();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(row -> result.add(row.getArray(0).getBlob(0).toData()));
+        assertThat(result).hasSize(1);
+        assertThat((byte[]) result.get(0)).isEqualTo("hello".getBytes());
+    }
+
+    private static void addArrayBlobResult(
+            InternalRow row, boolean blobAsDescriptor, List<Object> result) {
+        InternalArray array = row.getArray(0);
+        if (array == BlobArrayPlaceholder.INSTANCE) {
+            result.add(BlobArrayPlaceholder.INSTANCE);
+            return;
+        }
+        Object[] bytes = new Object[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                bytes[i] = null;
+            } else {
+                Blob blob = array.getBlob(i);
+                if (blobAsDescriptor) {
+                    assertThat(blob).isInstanceOf(BlobRef.class);
+                } else {
+                    assertThat(blob).isInstanceOf(BlobData.class);
+                }
+                bytes[i] = blob.toData();
+            }
+        }
+        result.add(bytes);
+    }
+
+    private interface ArrayPayloadCorruptor {
+        void corrupt(byte[] bytes, int position, int length);
     }
 }

@@ -30,6 +30,9 @@ import java.util.List;
 
 /** A {@link PluginLoader} to load cosn. */
 public class COSNLoader implements FileIOLoader {
+
+    private static final long serialVersionUID = 1L;
+
     private static final String COSN_JAR = "paimon-plugin-cosn";
     private static final String COSN_CLASS = "org.apache.paimon.cosn.COSNFileIO";
     // Singleton lazy initialization
