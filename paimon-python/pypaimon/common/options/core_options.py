@@ -1380,24 +1380,6 @@ class CoreOptions:
             .default_value(False)
         )
 
-    def field_listagg_delimiter(self, field_name: str) -> str:
-        return self.options.get(
-            ConfigOptions.key(
-                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.LIST_AGG_DELIMITER}'
-            )
-            .string_type()
-            .default_value(',')
-        )
-
-    def field_collect_distinct(self, field_name: str) -> bool:
-        return self.options.get(
-            ConfigOptions.key(
-                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.DISTINCT}'
-            )
-            .boolean_type()
-            .default_value(False)
-        )
-
     def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
         key_string = self.options.get(
             ConfigOptions.key(
