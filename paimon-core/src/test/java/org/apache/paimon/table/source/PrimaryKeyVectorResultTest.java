@@ -52,9 +52,13 @@ class PrimaryKeyVectorResultTest {
                         new PrimaryKeyVectorRead.Candidate(
                                 BinaryRow.EMPTY_ROW, 0, "data-1", 2, 4F));
 
-        List<IndexedSplit> splits = new PrimaryKeyVectorResult(plan, candidates, "l2").splits();
+        PrimaryKeyVectorResult result = new PrimaryKeyVectorResult(plan, candidates, "l2");
+        List<IndexedSplit> splits = result.splits();
 
         assertThat(splits).hasSize(1);
+        assertThat(result.positions())
+                .extracting(PrimaryKeySearchPosition::score)
+                .containsExactly(1F / (1F + 0.1F), 1F / (1F + 1F), 1F / (1F + 4F));
         IndexedSplit split = splits.get(0);
         assertThat(split.dataSplit().snapshotId()).isEqualTo(11);
         assertThat(split.dataSplit().dataFiles()).containsExactly(dataFile);
