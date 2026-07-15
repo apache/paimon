@@ -50,22 +50,22 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextScan}. */
-public class FullTextScanImpl implements FullTextScan {
+public class DataEvolutionFullTextScan implements FullTextScan {
 
     private final FileStoreTable table;
     private final PartitionPredicate partitionFilter;
     private final List<DataField> textColumns;
 
-    public FullTextScanImpl(FileStoreTable table, DataField textColumn) {
+    public DataEvolutionFullTextScan(FileStoreTable table, DataField textColumn) {
         this(table, null, textColumn);
     }
 
-    public FullTextScanImpl(
+    public DataEvolutionFullTextScan(
             FileStoreTable table, PartitionPredicate partitionFilter, DataField textColumn) {
         this(table, partitionFilter, Collections.singletonList(textColumn));
     }
 
-    public FullTextScanImpl(
+    public DataEvolutionFullTextScan(
             FileStoreTable table, PartitionPredicate partitionFilter, List<DataField> textColumns) {
         this.table = table;
         this.partitionFilter = partitionFilter;
@@ -94,7 +94,7 @@ public class FullTextScanImpl implements FullTextScan {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
                         return false;
                     }
                     return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
@@ -216,7 +216,7 @@ public class FullTextScanImpl implements FullTextScan {
             List<Long> sortedBoundaries = new ArrayList<>(boundaries);
             Map<IndexRangeCandidate, List<Range>> assigned = new LinkedHashMap<>();
             TreeSet<IndexRangeCandidate> active =
-                    new TreeSet<>(FullTextScanImpl::compareCandidates);
+                    new TreeSet<>(DataEvolutionFullTextScan::compareCandidates);
             for (int i = 0; i < sortedBoundaries.size(); i++) {
                 long from = sortedBoundaries.get(i);
                 List<IndexRangeCandidate> ending = endingAt.get(from);
