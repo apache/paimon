@@ -94,7 +94,7 @@ public class FullTextScanImpl implements FullTextScan {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
                         return false;
                     }
                     return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()

@@ -34,6 +34,8 @@ import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
@@ -744,6 +746,25 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testOrdinaryFullTextScanSkipsSourceBackedPrimaryKeyArchive() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        buildAndCommitSourceBackedIndex(table, documents);
+
+        FullTextScan.Plan plan =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("Paimon"))
+                        .withLimit(2)
+                        .newFullTextScan()
+                        .scan();
+
+        assertThat(plan.splits()).isEmpty();
+    }
+
+    @Test
     public void testFullTextSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -898,6 +919,66 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         0,
                         null,
                         dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void buildAndCommitSourceBackedIndex(FileStoreTable table, String[] documents)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                                textField,
+                                options);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(documents[i], i);
+        }
+
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, documents.length - 1),
+                        Collections.singletonList(textField),
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        writer.finish());
+        byte[] sourceMeta =
+                new PrimaryKeyIndexSourceMeta(
+                                new PrimaryKeyIndexSourceFile("data-file", documents.length),
+                                "fingerprint")
+                        .serialize();
+        List<IndexFileMeta> sourceBackedFiles = new ArrayList<>();
+        for (IndexFileMeta indexFile : indexFiles) {
+            GlobalIndexMeta meta = indexFile.globalIndexMeta();
+            sourceBackedFiles.add(
+                    new IndexFileMeta(
+                            indexFile.indexType(),
+                            indexFile.fileName(),
+                            indexFile.fileSize(),
+                            indexFile.rowCount(),
+                            new GlobalIndexMeta(
+                                    meta.rowRangeStart(),
+                                    meta.rowRangeEnd(),
+                                    meta.indexFieldId(),
+                                    meta.extraFieldIds(),
+                                    meta.indexMeta(),
+                                    sourceMeta),
+                            indexFile.externalPath()));
+        }
+
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(sourceBackedFiles),
                         CompactIncrement.emptyIncrement());
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
