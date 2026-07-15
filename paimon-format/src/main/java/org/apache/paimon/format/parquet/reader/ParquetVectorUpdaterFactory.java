@@ -147,12 +147,24 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(TinyIntType tinyIntType) {
-            return c -> new ByteUpdater();
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT64) {
+                    return new ByteFromLongUpdater();
+                }
+                return new ByteUpdater();
+            };
         }
 
         @Override
         public UpdaterFactory visit(SmallIntType smallIntType) {
-            return c -> new ShortUpdater();
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT64) {
+                    return new ShortFromLongUpdater();
+                }
+                return new ShortUpdater();
+            };
         }
 
         @Override
@@ -417,6 +429,41 @@ public class ParquetVectorUpdaterFactory {
         }
     }
 
+    private static class ByteFromLongUpdater implements ParquetVectorUpdater<WritableByteVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableByteVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                values.setByte(offset + i, (byte) Math.toIntExact(valuesReader.readLong()));
+            }
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipLongs(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableByteVector values, VectorizedValuesReader valuesReader) {
+            values.setByte(offset, (byte) Math.toIntExact(valuesReader.readLong()));
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableByteVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setByte(
+                    offset,
+                    (byte) Math.toIntExact(dictionary.decodeToLong(dictionaryIds.getInt(offset))));
+        }
+    }
+
     private static class ShortUpdater implements ParquetVectorUpdater<WritableShortVector> {
         @Override
         public void readValues(
@@ -447,6 +494,41 @@ public class ParquetVectorUpdaterFactory {
             values.setShort(
                     offset,
                     (short) dictionary.decodeToInt(((HeapIntVector) dictionaryIds).getInt(offset)));
+        }
+    }
+
+    private static class ShortFromLongUpdater implements ParquetVectorUpdater<WritableShortVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableShortVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                values.setShort(offset + i, (short) Math.toIntExact(valuesReader.readLong()));
+            }
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipLongs(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableShortVector values, VectorizedValuesReader valuesReader) {
+            values.setShort(offset, (short) Math.toIntExact(valuesReader.readLong()));
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableShortVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setShort(
+                    offset,
+                    (short) Math.toIntExact(dictionary.decodeToLong(dictionaryIds.getInt(offset))));
         }
     }
 
