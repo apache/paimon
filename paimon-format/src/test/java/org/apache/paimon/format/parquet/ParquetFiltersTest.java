@@ -68,7 +68,7 @@ class ParquetFiltersTest {
 
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
-                "or(or(eq(long1, 1), eq(long1, 2)), eq(long1, 3))",
+                "or(eq(long1, 1), or(eq(long1, 2), eq(long1, 3)))",
                 true);
 
         test(builder.between(0, 1L, 3L), "and(gteq(long1, 1), lteq(long1, 3))", true);
@@ -92,7 +92,7 @@ class ParquetFiltersTest {
 
         test(
                 builder.in(0, Arrays.asList("1", "2", "3")),
-                "or(or(eq(string1, Binary{\"1\"}), eq(string1, Binary{\"2\"})), eq(string1, Binary{\"3\"}))",
+                "or(eq(string1, Binary{\"1\"}), or(eq(string1, Binary{\"2\"}), eq(string1, Binary{\"3\"})))",
                 true);
         test(
                 builder.notIn(0, Arrays.asList("1", "2", "3")),
@@ -380,16 +380,15 @@ class ParquetFiltersTest {
         Decimal v2 = Decimal.fromBigDecimal(new BigDecimal("200.00"), precision, scale);
         Decimal v3 = Decimal.fromBigDecimal(new BigDecimal("300.00"), precision, scale);
 
-        // For less than 21 elements, it expands to or(eq, eq, eq)
         test(
                 builder.in(0, Arrays.asList(v1, v2, v3)),
-                "or(or(eq(decimal1, "
+                "or(eq(decimal1, "
                         + (int) v1.toUnscaledLong()
-                        + "), eq(decimal1, "
+                        + "), or(eq(decimal1, "
                         + (int) v2.toUnscaledLong()
-                        + ")), eq(decimal1, "
+                        + "), eq(decimal1, "
                         + (int) v3.toUnscaledLong()
-                        + "))",
+                        + ")))",
                 true);
 
         test(
@@ -421,16 +420,15 @@ class ParquetFiltersTest {
         Decimal v2 = Decimal.fromBigDecimal(new BigDecimal("20000000000.0000"), precision, scale);
         Decimal v3 = Decimal.fromBigDecimal(new BigDecimal("30000000000.0000"), precision, scale);
 
-        // For less than 21 elements, it expands to or(eq, eq, eq)
         test(
                 builder.in(0, Arrays.asList(v1, v2, v3)),
-                "or(or(eq(decimal1, "
+                "or(eq(decimal1, "
                         + v1.toUnscaledLong()
-                        + "), eq(decimal1, "
+                        + "), or(eq(decimal1, "
                         + v2.toUnscaledLong()
-                        + ")), eq(decimal1, "
+                        + "), eq(decimal1, "
                         + v3.toUnscaledLong()
-                        + "))",
+                        + ")))",
                 true);
 
         test(
@@ -554,13 +552,13 @@ class ParquetFiltersTest {
 
         test(
                 builder.in(0, Arrays.asList(v1, v2, v3)),
-                "or(or(eq(ts1, "
+                "or(eq(ts1, "
                         + v1.getMillisecond()
-                        + "), eq(ts1, "
+                        + "), or(eq(ts1, "
                         + v2.getMillisecond()
-                        + ")), eq(ts1, "
+                        + "), eq(ts1, "
                         + v3.getMillisecond()
-                        + "))",
+                        + ")))",
                 true);
 
         test(
@@ -594,13 +592,13 @@ class ParquetFiltersTest {
 
         test(
                 builder.in(0, Arrays.asList(v1, v2, v3)),
-                "or(or(eq(ts1, "
+                "or(eq(ts1, "
                         + micros1
-                        + "), eq(ts1, "
+                        + "), or(eq(ts1, "
                         + micros2
-                        + ")), eq(ts1, "
+                        + "), eq(ts1, "
                         + micros3
-                        + "))",
+                        + ")))",
                 true);
 
         test(
