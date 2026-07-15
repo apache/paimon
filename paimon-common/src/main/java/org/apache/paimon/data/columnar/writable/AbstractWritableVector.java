@@ -31,6 +31,10 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     private static final long serialVersionUID = 1L;
 
+    static final int MAX_ROUNDED_ARRAY_LENGTH = Integer.MAX_VALUE - 15;
+    static final int DEFAULT_HUGE_VECTOR_THRESHOLD = 1 << 20;
+    static final double DEFAULT_HUGE_VECTOR_RESERVE_RATIO = 1.2;
+
     // If the whole column vector has no nulls, this is true, otherwise false.
     protected boolean noNulls = true;
 
@@ -41,6 +45,8 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     protected int capacity;
 
+    private final int initialCapacity;
+
     /**
      * The Dictionary for this column. If it's not null, will be used to decode the value in get().
      */
@@ -48,6 +54,7 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     public AbstractWritableVector(int capacity) {
         this.capacity = capacity;
+        this.initialCapacity = capacity;
     }
 
     /** Update the dictionary. */
@@ -91,8 +98,10 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     @Override
     public void reset() {
-        // To reduce copy, Ww don't result the capacity to initial capacity here. Which means the
-        // capacity will be the same as expand.
+        // Keep normal expanded capacity for reuse, but do not hold very large arrays forever.
+        if (capacity > DEFAULT_HUGE_VECTOR_THRESHOLD) {
+            capacity = initialCapacity;
+        }
         noNulls = true;
         isAllNull = false;
         elementsAppended = 0;
@@ -103,7 +112,7 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
         if (requiredCapacity < 0) {
             throw new IllegalArgumentException("Invalid capacity: " + requiredCapacity);
         } else if (requiredCapacity > capacity) {
-            int newCapacity = (int) Math.min(Integer.MAX_VALUE, requiredCapacity * 2L);
+            int newCapacity = calculateNewCapacity(requiredCapacity);
             if (requiredCapacity <= newCapacity) {
                 try {
                     reserveInternal(newCapacity);
@@ -113,10 +122,18 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
                 }
             } else {
                 throw new UnsupportedOperationException(
-                        "Cannot allocate :" + newCapacity + " elements");
+                        "Cannot allocate " + requiredCapacity + " elements");
             }
             capacity = newCapacity;
         }
+    }
+
+    static int calculateNewCapacity(int requiredCapacity) {
+        long newCapacity =
+                requiredCapacity < DEFAULT_HUGE_VECTOR_THRESHOLD
+                        ? requiredCapacity * 2L
+                        : (long) (requiredCapacity * DEFAULT_HUGE_VECTOR_RESERVE_RATIO);
+        return (int) Math.min(MAX_ROUNDED_ARRAY_LENGTH, newCapacity);
     }
 
     protected abstract void reserveInternal(int newCapacity);
