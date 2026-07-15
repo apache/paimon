@@ -31,8 +31,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link Blob}. */
 public class BlobTest {
@@ -97,6 +99,24 @@ public class BlobTest {
         assertThat(inputStream.readCalls).isEqualTo(1);
         assertThat(inputStream.maxRequestedBytes).isEqualTo(data.length - 2);
         assertThat(inputStream.closed).isTrue();
+    }
+
+    @Test
+    public void testBlobRefRejectsTooLargeLengthBeforeOpeningStream() {
+        AtomicBoolean streamOpened = new AtomicBoolean();
+        UriReader uriReader =
+                uri -> {
+                    streamOpened.set(true);
+                    return new ByteArraySeekableStream(new byte[0]);
+                };
+        long length = (long) Integer.MAX_VALUE - 7;
+        Blob blob = Blob.fromDescriptor(uriReader, new BlobDescriptor("test", 0, length));
+
+        assertThatThrownBy(blob::toData)
+                .isInstanceOf(RuntimeException.class)
+                .hasCauseInstanceOf(IOException.class)
+                .hasMessageContaining("Blob is too large to materialize as byte[]");
+        assertThat(streamOpened).isFalse();
     }
 
     private static class TrackingSeekableInputStream extends ByteArraySeekableStream {
