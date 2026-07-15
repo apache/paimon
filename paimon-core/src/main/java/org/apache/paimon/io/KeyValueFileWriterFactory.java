@@ -107,6 +107,10 @@ public class KeyValueFileWriterFactory {
         return valueType;
     }
 
+    public boolean hasBlobExternalizer() {
+        return blobExternalizer != null;
+    }
+
     public InternalRow externalizeBlob(RowKind valueKind, InternalRow value) throws IOException {
         return blobExternalizer == null ? value : blobExternalizer.externalize(valueKind, value);
     }

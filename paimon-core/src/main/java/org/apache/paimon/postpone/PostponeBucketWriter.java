@@ -101,17 +101,20 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     @Override
     public void write(KeyValue record) throws Exception {
-        InternalRow value = writerFactory.externalizeBlob(record.valueKind(), record.value());
-        KeyValue externalizedRecord =
-                value == record.value()
-                        ? record
-                        : new KeyValue()
+        KeyValue externalizedRecord = record;
+        if (writerFactory.hasBlobExternalizer()) {
+            InternalRow value = writerFactory.externalizeBlob(record.valueKind(), record.value());
+            if (value != record.value()) {
+                externalizedRecord =
+                        new KeyValue()
                                 .replace(
                                         record.key(),
                                         record.sequenceNumber(),
                                         record.valueKind(),
                                         value)
                                 .setLevel(record.level());
+            }
+        }
         validateRetract(externalizedRecord);
         boolean success = sinkWriter.write(externalizedRecord);
         if (!success) {
