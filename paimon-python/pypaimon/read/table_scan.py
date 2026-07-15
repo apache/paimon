@@ -24,7 +24,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
-from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result, wrap_plan_with_auth
+from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
 
@@ -58,10 +58,9 @@ class TableScan:
         return wrap_plan_with_auth(auth_result, plan)
 
     def plan_for_write(self) -> Plan:
-        plan = self.plan()
-        if any(isinstance(s, QueryAuthSplit) for s in plan.splits()):
+        if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
-        return plan
+        return self.file_scanner.scan()
 
     def __auth_query(self):
         return resolve_auth_result(self._query_auth_fn, self._read_type)

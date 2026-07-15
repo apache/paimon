@@ -25,6 +25,8 @@ from pypaimon.common.predicate_json_parser import (
     extract_referenced_fields,
     parse_predicate_to_batch_filter,
 )
+from pypaimon.read.plan import Plan
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
 
 
@@ -37,11 +39,12 @@ class TableQueryAuthResult:
             if column_masking else column_masking
         )
 
-    def convert_plan(self, plan):
-        from pypaimon.read.query_auth_split import QueryAuthSplit
-        from pypaimon.read.plan import Plan
+    @property
+    def has_restrictions(self):
+        return bool(self.filter) or bool(self.column_masking)
 
-        if not self.filter and not self.column_masking:
+    def convert_plan(self, plan):
+        if not self.has_restrictions:
             return plan
         auth_splits = [QueryAuthSplit(split, self) for split in plan.splits()]
         return Plan(auth_splits, snapshot_id=plan.snapshot_id)

@@ -75,11 +75,24 @@ class _FakeTable:
 
 
 class _FakeScan:
-    def __init__(self, plan, identifier=None):
+    def __init__(self, plan, identifier=None, auth_result=None):
         self._plan = plan
         self.table = _FakeTable(identifier)
+        self.file_scanner = _FakeFileScanner(plan)
+        self._auth_result = auth_result
 
     def plan(self):
+        return self._plan
+
+    def _TableScan__auth_query(self):
+        return self._auth_result
+
+
+class _FakeFileScanner:
+    def __init__(self, plan):
+        self._plan = plan
+
+    def scan(self):
         return self._plan
 
 
@@ -113,11 +126,27 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
 
+    def test_no_auth_has_no_restrictions(self):
+        result = TableQueryAuthResult(None, None)
+        self.assertFalse(result.has_restrictions)
+
     def test_empty_filter_and_masking_returns_original(self):
         result = TableQueryAuthResult([], {})
         plan = _FakePlan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
+
+    def test_empty_filter_and_masking_has_no_restrictions(self):
+        result = TableQueryAuthResult([], {})
+        self.assertFalse(result.has_restrictions)
+
+    def test_filter_has_restrictions(self):
+        result = TableQueryAuthResult([_simple_filter_json()], None)
+        self.assertTrue(result.has_restrictions)
+
+    def test_masking_has_restrictions(self):
+        result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
+        self.assertTrue(result.has_restrictions)
 
     def test_blank_filter_entries_are_skipped(self):
         result = TableQueryAuthResult(["", None], None)
@@ -334,7 +363,7 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         plain_plan = _FakePlan([_FakeSplit()], snapshot_id=5)
-        scan = _FakeScan(plain_plan)
+        scan = _FakeScan(plain_plan, auth_result=None)
         result = TableScan.plan_for_write(scan)
         self.assertIs(result, plain_plan)
 
@@ -342,8 +371,8 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        wrapped_plan = _FakePlan([QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
-        scan = _FakeScan(wrapped_plan)
+        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
 
@@ -351,20 +380,63 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
-        wrapped_plan = _FakePlan([QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
-        scan = _FakeScan(wrapped_plan)
+        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
 
-    def test_mixed_splits_any_restricted_raises(self):
+    def test_empty_table_with_auth_still_raises(self):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        wrapped_plan = _FakePlan(
-            [_FakeSplit(), QueryAuthSplit(_FakeSplit(), auth)], snapshot_id=5)
-        scan = _FakeScan(wrapped_plan)
+        empty_plan = _FakePlan([], snapshot_id=5)
+        scan = _FakeScan(empty_plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
+
+    def test_no_restrictions_allows_write(self):
+        from pypaimon.read.table_scan import TableScan
+
+        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        scan = _FakeScan(plan, auth_result=None)
+        result = TableScan.plan_for_write(scan)
+        self.assertIs(result, plan)
+
+
+class TestResolveAuthResult(unittest.TestCase):
+
+    def test_none_fn_returns_none(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        self.assertIsNone(resolve_auth_result(None, None))
+
+    def test_no_restrictions_returns_none(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        fn = lambda select: TableQueryAuthResult(None, None)
+        self.assertIsNone(resolve_auth_result(fn, None))
+
+    def test_empty_filter_returns_none(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        fn = lambda select: TableQueryAuthResult([], {})
+        self.assertIsNone(resolve_auth_result(fn, None))
+
+    def test_blank_filter_stripped_returns_none(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        fn = lambda select: TableQueryAuthResult(["", None], None)
+        self.assertIsNone(resolve_auth_result(fn, None))
+
+    def test_with_filter_returns_result(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        fn = lambda select: TableQueryAuthResult([_simple_filter_json()], None)
+        result = resolve_auth_result(fn, None)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.has_restrictions)
+
+    def test_with_masking_returns_result(self):
+        from pypaimon.read.query_auth_split import resolve_auth_result
+        fn = lambda select: TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
+        result = resolve_auth_result(fn, None)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.has_restrictions)
 
 
 class TestCoreOptionsQueryAuth(unittest.TestCase):

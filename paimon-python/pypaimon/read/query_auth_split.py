@@ -68,7 +68,10 @@ def resolve_auth_result(query_auth_fn, read_type):
     if query_auth_fn is None:
         return None
     select = [f.name for f in read_type] if read_type else None
-    return query_auth_fn(select)
+    result = query_auth_fn(select)
+    if result is None or not result.has_restrictions:
+        return None
+    return result
 
 
 def wrap_plan_with_auth(auth_result, plan):
