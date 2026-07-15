@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -53,13 +54,14 @@ public class PrimaryKeyVectorScan implements VectorScan {
     private final String indexType;
     @Nullable private final PartitionPredicate partitionFilter;
     @Nullable private final Predicate filter;
+    @Nullable private final Snapshot pinnedSnapshot;
 
     public PrimaryKeyVectorScan(
             FileStoreTable table,
             int vectorFieldId,
             String indexType,
             @Nullable PartitionPredicate partitionFilter) {
-        this(table, vectorFieldId, indexType, partitionFilter, null);
+        this(table, vectorFieldId, indexType, partitionFilter, null, null);
     }
 
     public PrimaryKeyVectorScan(
@@ -68,11 +70,22 @@ public class PrimaryKeyVectorScan implements VectorScan {
             String indexType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
+        this(table, vectorFieldId, indexType, partitionFilter, filter, null);
+    }
+
+    PrimaryKeyVectorScan(
+            FileStoreTable table,
+            int vectorFieldId,
+            String indexType,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            @Nullable Snapshot pinnedSnapshot) {
         this.table = table;
         this.vectorFieldId = vectorFieldId;
         this.indexType = indexType;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
+        this.pinnedSnapshot = pinnedSnapshot;
     }
 
     @Override
@@ -85,8 +98,9 @@ public class PrimaryKeyVectorScan implements VectorScan {
                         || (table.coreOptions().deletionVectorsEnabled()
                                 && !table.coreOptions().deletionVectorsMergeOnRead()),
                 "Primary-key vector pre-filter requires deletion vectors without merge-on-read.");
-        SnapshotReader snapshotReader = table.newSnapshotReader().keepStats();
-        DataTableScan dataScan = table.newScan(ignored -> snapshotReader);
+        FileStoreTable scanTable = scanTable();
+        SnapshotReader snapshotReader = scanTable.newSnapshotReader().keepStats();
+        DataTableScan dataScan = scanTable.newScan(ignored -> snapshotReader);
         checkArgument(
                 dataScan instanceof PrimaryKeyBatchScan,
                 "Primary-key vector search requires a primary-key batch scan.");
@@ -108,8 +122,16 @@ public class PrimaryKeyVectorScan implements VectorScan {
         if (snapshotPlan.snapshotId() == null) {
             return new Plan(0, Collections.emptyList());
         }
-        Snapshot snapshot = snapshotReader.snapshotManager().snapshot(snapshotPlan.snapshotId());
+        Snapshot snapshot =
+                pinnedSnapshot == null
+                        ? snapshotReader.snapshotManager().snapshot(snapshotPlan.snapshotId())
+                        : pinnedSnapshot;
         checkArgument(snapshot != null, "Primary-key vector snapshot does not exist.");
+        checkArgument(
+                snapshot.id() == snapshotPlan.snapshotId(),
+                "Primary-key vector plan snapshot %s does not match pinned snapshot %s.",
+                snapshotPlan.snapshotId(),
+                snapshot.id());
 
         IndexFileHandler indexFileHandler = snapshotReader.indexFileHandler();
         checkArgument(indexFileHandler != null, "Primary-key vector index handler is unavailable.");
@@ -125,6 +147,17 @@ public class PrimaryKeyVectorScan implements VectorScan {
                                         && (partitionFilter == null
                                                 || partitionFilter.test(entry.partition())));
         return plan(snapshot.id(), snapshotPlan.splits(), vectorIndexEntries);
+    }
+
+    private FileStoreTable scanTable() {
+        if (pinnedSnapshot == null) {
+            return table;
+        }
+        return (FileStoreTable)
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                String.valueOf(pinnedSnapshot.id())));
     }
 
     static Plan plan(

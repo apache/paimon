@@ -97,8 +97,7 @@ class PrimaryKeyVectorPositionReaderTest {
                         () -> rawRead,
                         mock(TableSchema.class));
 
-        assertThat(tableRead.createReader(split))
-                .isInstanceOf(PrimaryKeyVectorPositionReader.class);
+        assertThat(tableRead.createReader(split)).isInstanceOf(PrimaryKeyIndexPositionReader.class);
         verify(rawRead, never()).createReader(split);
     }
 
