@@ -42,14 +42,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public static final byte VERSION = 1;
     public static final int MAGIC_NUMBER = 1481511375;
     public static final byte[] MAGIC_NUMBER_BYTES = intToLittleEndian(MAGIC_NUMBER);
-    public static final byte ARRAY_VERSION = ArrayBlobElementSerializer.VERSION;
-    public static final int ARRAY_MAGIC_NUMBER = ArrayBlobElementSerializer.MAGIC_NUMBER;
-    public static final byte[] ARRAY_MAGIC_NUMBER_BYTES =
-            ArrayBlobElementSerializer.MAGIC_NUMBER_BYTES;
     public static final long NULL_LENGTH = -1L;
     public static final long PLACE_HOLDER_LENGTH = -2L;
-    public static final long ARRAY_NULL_ELEMENT_LENGTH =
-            ArrayBlobElementSerializer.NULL_ELEMENT_LENGTH;
     public static final int DEFAULT_COPY_BUFFER_SIZE = 4 * 1024;
 
     private final PositionOutputStream out;
