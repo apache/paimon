@@ -34,6 +34,7 @@ import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BooleanType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -268,7 +269,13 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.IS_FALSE,
                                 Arrays.asList(boolRefExpr),
                                 DataTypes.BOOLEAN()),
-                        BUILDER.equal(3, false)));
+                        BUILDER.equal(3, false)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.IS_NOT_TRUE,
+                                Arrays.asList(boolRefExpr),
+                                DataTypes.BOOLEAN()),
+                        PredicateBuilder.or(BUILDER.isNull(3), BUILDER.equal(3, false))));
     }
 
     @MethodSource("provideLikeExpressions")
@@ -436,6 +443,19 @@ public class PredicateConverterTest {
                         rowCountList4,
                         statsList4,
                         expectedForStats4));
+    }
+
+    @Test
+    public void testIsNotTrueNullSemantics() {
+        // "x IS NOT TRUE" must be true for both FALSE and NULL, matching SQL's three-valued
+        // logic, unlike a plain NotEqual(x, TRUE) which returns false for NULL rows.
+        CallExpression expr =
+                call(BuiltInFunctionDefinitions.IS_NOT_TRUE, field(0, DataTypes.BOOLEAN()));
+        Predicate predicate = expr.accept(new PredicateConverter(RowType.of(new BooleanType())));
+
+        assertThat(predicate.test(GenericRow.of(true))).isFalse();
+        assertThat(predicate.test(GenericRow.of(false))).isTrue();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isTrue();
     }
 
     @Test
@@ -805,6 +825,189 @@ public class PredicateConverterTest {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         assertThatThrownBy(() -> field(0, structType).accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for convertSimilarToLike
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void testConvertSimilarToLike() {
+        // '%' stays as '%' (SQL LIKE wildcard)
+        assertThat(convertSimilarToLike("abc%", null)).isEqualTo("abc%");
+        // '_' stays as '_' (SQL LIKE wildcard)
+        assertThat(convertSimilarToLike("a_c", null)).isEqualTo("a_c");
+        // Literal characters pass through unchanged
+        assertThat(convertSimilarToLike("hello", null)).isEqualTo("hello");
+        // '.' is just a literal dot in SIMILAR TO — kept as-is in the LIKE output
+        assertThat(convertSimilarToLike("3.14", null)).isEqualTo("3.14");
+        // Backslash in pattern is doubled so downstream Like sees it as a literal '\'
+        assertThat(convertSimilarToLike("a\\b", null)).isEqualTo("a\\\\b");
+        // Empty pattern returns empty
+        assertThat(convertSimilarToLike("", null)).isEqualTo("");
+
+        // --- SIMILAR TO-only features must throw UnsupportedExpression ---
+        assertThatThrownBy(() -> convertSimilarToLike("a|b", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> convertSimilarToLike("(a|b)%", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> convertSimilarToLike("a+", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> convertSimilarToLike("[a-z]", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        // '{m,n}' quantifiers are SIMILAR TO-only syntax (e.g. 'a{2}' means 'aa') and must not
+        // pass through as literal LIKE characters.
+        assertThatThrownBy(() -> convertSimilarToLike("a{2}", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> convertSimilarToLike("a{2,3}", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // --- Escape-character tests (using '=' as the escape char) ---
+        // '=_' -> escaped underscore: output '\_' so Like treats '_' as literal
+        assertThat(convertSimilarToLike("a=_b", "=")).isEqualTo("a\\_b");
+        // '=%' -> escaped percent: output '\%' so Like treats '%' as literal
+        assertThat(convertSimilarToLike("a=%b", "=")).isEqualTo("a\\%b");
+        // '==' -> literal '=' (the escape char)
+        assertThat(convertSimilarToLike("a==b", "=")).isEqualTo("a=b");
+        // Trailing escape char alone must throw
+        assertThatThrownBy(() -> convertSimilarToLike("a=", "="))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        // Unknown escape sequence (e.g. '=a') must throw
+        assertThatThrownBy(() -> convertSimilarToLike("a=b", "="))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    /** Invokes the private {@code convertSimilarToLike} via reflection. */
+    private static String convertSimilarToLike(String sqlPattern, String escape) {
+        try {
+            java.lang.reflect.Method m =
+                    PredicateConverter.class.getDeclaredMethod(
+                            "convertSimilarToLike", String.class, String.class);
+            m.setAccessible(true);
+            return (String) m.invoke(new PredicateConverter(BUILDER), sqlPattern, escape);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            throw new RuntimeException(cause);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for the SIMILAR (SIMILAR TO) branch in visit(CallExpression)
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void testSimilarExpressionBasic() {
+        // 'abc%' SIMILAR TO: any string starting with 'abc'
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        CallExpression expr =
+                call(
+                        BuiltInFunctionDefinitions.SIMILAR,
+                        field(0, STRING()),
+                        literal("abc%", STRING()));
+        Predicate predicate = expr.accept(converter);
+
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("abc")))).isTrue();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("abcdef")))).isTrue();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("ab")))).isFalse();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("ABC")))).isFalse();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testSimilarExpressionUnderscore() {
+        // 'a_c' SIMILAR TO: exactly 3 chars starting with 'a', ending with 'c'
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        CallExpression expr =
+                call(
+                        BuiltInFunctionDefinitions.SIMILAR,
+                        field(0, STRING()),
+                        literal("a_c", STRING()));
+        Predicate predicate = expr.accept(converter);
+
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("abc")))).isTrue();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("axc")))).isTrue();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("ac")))).isFalse();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("abbc")))).isFalse();
+    }
+
+    @Test
+    public void testSimilarExpressionAlternation() {
+        // '(cat|dog)%' uses SIMILAR TO-only syntax -> UnsupportedExpression
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.SIMILAR,
+                                                field(0, STRING()),
+                                                literal("(cat|dog)%", STRING()))
+                                        .accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testSimilarExpressionCharacterClass() {
+        // '[a-z]+' uses SIMILAR TO-only syntax -> UnsupportedExpression
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.SIMILAR,
+                                                field(0, STRING()),
+                                                literal("[a-z]+", STRING()))
+                                        .accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testSimilarExpressionQuantifier() {
+        // 'a{2}' uses the SIMILAR TO-only {m,n} quantifier syntax (equivalent to 'aa') and must
+        // not be pushed down as a literal LIKE pattern matching 'a{2}'.
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.SIMILAR,
+                                                field(0, STRING()),
+                                                literal("a{2}", STRING()))
+                                        .accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testSimilarExpressionEscapedWildcards() {
+        // 'a=%b' SIMILAR TO with escape '=': literal 'a%b' (% is not a wildcard)
+        // convertSimilarToLike converts this to 'a\%b', which Like then processes as 'a' + literal
+        // '%' + 'b'
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        CallExpression expr =
+                call(
+                        BuiltInFunctionDefinitions.SIMILAR,
+                        field(0, STRING()),
+                        literal("a=%b", STRING()),
+                        literal("=", STRING()));
+        Predicate predicate = expr.accept(converter);
+
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("a%b")))).isTrue();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("axb")))).isFalse();
+        assertThat(predicate.test(GenericRow.of(BinaryString.fromString("ab")))).isFalse();
+    }
+
+    @Test
+    public void testSimilarExpressionNonStringTypeThrows() {
+        // SIMILAR on a non-string column must throw UnsupportedExpression
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.SIMILAR,
+                                                field(0, DataTypes.INT()),
+                                                literal(5))
+                                        .accept(new PredicateConverter(RowType.of(new IntType()))))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 

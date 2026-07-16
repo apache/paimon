@@ -194,9 +194,55 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             FieldReferenceExpression fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
             return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.FALSE);
+        } else if (func == BuiltInFunctionDefinitions.NOT) {
+            // NOT predicate - negate the inner predicate
+            Predicate innerPredicate = children.get(0).accept(this);
+            return innerPredicate.negate().orElseThrow(UnsupportedExpression::new);
+        } else if (func == BuiltInFunctionDefinitions.IS_NOT_TRUE) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            int fieldIndex = builder.indexOf(fieldRefExpr.getName());
+            // "x IS NOT TRUE" is true for both FALSE and NULL, unlike NotEqual which returns
+            // false when the field value is null.
+            return PredicateBuilder.or(
+                    builder.isNull(fieldIndex), builder.equal(fieldIndex, Boolean.FALSE));
+        } else if (func == BuiltInFunctionDefinitions.NOT_BETWEEN) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            return builder.between(
+                            builder.indexOf(fieldRefExpr.getName()),
+                            children.get(1),
+                            children.get(2))
+                    .negate()
+                    .orElseThrow(UnsupportedExpression::new);
+        } else if (func == BuiltInFunctionDefinitions.SIMILAR) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            if (fieldRefExpr
+                    .getOutputDataType()
+                    .getLogicalType()
+                    .getTypeRoot()
+                    .getFamilies()
+                    .contains(LogicalTypeFamily.CHARACTER_STRING)) {
+                String sqlPattern =
+                        Objects.requireNonNull(
+                                        extractLiteral(
+                                                fieldRefExpr.getOutputDataType(), children.get(1)))
+                                .toString();
+                String escape =
+                        children.size() <= 2
+                                ? null
+                                : Objects.requireNonNull(
+                                                extractLiteral(
+                                                        fieldRefExpr.getOutputDataType(),
+                                                        children.get(2)))
+                                        .toString();
+                String likePattern = convertSimilarToLike(sqlPattern, escape);
+                return builder.like(
+                        builder.indexOf(fieldRefExpr.getName()),
+                        BinaryString.fromString(likePattern));
+            }
         }
-
-        // TODO is_xxx, between_xxx, similar, in, not_in, not?
 
         throw new UnsupportedExpression();
     }
@@ -289,6 +335,87 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             default:
                 return false;
         }
+    }
+
+    /**
+     * Converts a SQL SIMILAR TO pattern to an equivalent SQL LIKE pattern so that it can be
+     * evaluated by {@link PredicateBuilder#like}.
+     *
+     * <p>The conversion handles only the subset of SIMILAR TO syntax that maps directly to SQL
+     * LIKE:
+     *
+     * <ul>
+     *   <li>{@code %} (any-string wildcard) is preserved as-is.
+     *   <li>{@code _} (single-character wildcard) is preserved as-is.
+     *   <li>Escape sequences: {@code escape + '_'} and {@code escape + '%'} become their literal
+     *       equivalents, emitted as {@code \ + char} so that the downstream {@link Like} function
+     *       (which uses {@code \} as its default escape) treats them as literals. {@code escape +
+     *       escape} becomes a literal escape character.
+     * </ul>
+     *
+     * <p>SIMILAR TO-only features (character classes {@code [...]}, alternation {@code |},
+     * quantifiers {@code *}, {@code +}, {@code ?}, {@code {m,n}}, and grouping {@code ()}) are not
+     * supported and will cause an {@link UnsupportedExpression} to be thrown.
+     *
+     * @param sqlPattern the SIMILAR TO pattern string
+     * @param escape the escape character string (single char), or {@code null} for no escaping
+     * @return an equivalent SQL LIKE pattern (using {@code \} as the escape character)
+     * @throws UnsupportedExpression if the pattern uses SIMILAR TO-only features
+     */
+    private String convertSimilarToLike(String sqlPattern, String escape) {
+        if (sqlPattern == null || sqlPattern.isEmpty()) {
+            return sqlPattern;
+        }
+
+        // Sentinel 0 means no escape character is defined.
+        char escapeChar = (escape != null && !escape.isEmpty()) ? escape.charAt(0) : 0;
+        // The output LIKE pattern will always use '\' as its escape char, because that is what
+        // Like.sqlToRegexLike uses by default.
+        final char outputEscape = '\\';
+
+        StringBuilder like = new StringBuilder();
+
+        for (int i = 0; i < sqlPattern.length(); i++) {
+            char c = sqlPattern.charAt(i);
+
+            if (escapeChar != 0 && c == escapeChar) {
+                // Escape sequence
+                if (i + 1 >= sqlPattern.length()) {
+                    throw new UnsupportedExpression();
+                }
+                char next = sqlPattern.charAt(i + 1);
+                if (next == '_' || next == '%') {
+                    // Escaped wildcard -> literal in the LIKE output.
+                    // Emit as outputEscape + wildcard so Like treats it as a literal.
+                    like.append(outputEscape).append(next);
+                } else if (next == escapeChar) {
+                    // Escaped escape char -> emit as a literal character.
+                    // If the escape char itself is special to LIKE (% or _), escape it; otherwise
+                    // emit it as-is since Like only special-cases % and _.
+                    like.append(escapeChar);
+                } else {
+                    // Unknown escape sequence - not supported
+                    throw new UnsupportedExpression();
+                }
+                i++;
+            } else if (c == '%' || c == '_') {
+                // SIMILAR TO wildcards are the same as SQL LIKE wildcards
+                like.append(c);
+            } else if (c == '[' || c == '|' || c == '(' || c == ')' || c == '*' || c == '+'
+                    || c == '?' || c == '{' || c == '}') {
+                // SIMILAR TO-only features (including {m,n} quantifiers): not representable in
+                // SQL LIKE
+                throw new UnsupportedExpression();
+            } else if (c == outputEscape) {
+                // A literal backslash in the pattern needs to be escaped in the output,
+                // since the output escape char is '\'.
+                like.append(outputEscape).append(outputEscape);
+            } else {
+                like.append(c);
+            }
+        }
+
+        return like.toString();
     }
 
     @Override
