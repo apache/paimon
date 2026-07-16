@@ -105,6 +105,7 @@ import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -1040,6 +1041,43 @@ public class HiveCatalog extends AbstractCatalog {
             clients().execute(client -> client.createTable(hiveTable));
         } catch (Exception e) {
             // we don't need to delete directories since HMS will roll back db and fs if failed.
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
+    public void createObjectTable(Identifier identifier, Schema schema) {
+        Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
+        Path location = pair.getLeft();
+        boolean externalTable = pair.getRight();
+        schema.options().putIfAbsent(PATH.key(), location.toString());
+        Schema objectSchema = buildObjectTableSchema(schema);
+        TableSchema newSchema = TableSchema.create(0, objectSchema);
+
+        try {
+            // Create schema directory and write schema file via SchemaManager.commit()
+            FileIO tableFileIO = fileIO(location);
+            tableFileIO.mkdirs(location);
+            boolean committed =
+                    runWithLock(
+                            identifier,
+                            () -> schemaManager(identifier, location).commit(newSchema));
+            if (!committed) {
+                throw new RuntimeException(
+                        "Failed to commit schema for object table " + identifier);
+            }
+
+            // Create HMS table
+            Table hiveTable = createHiveTable(identifier, newSchema, location, externalTable);
+            clients().execute(client -> client.createTable(hiveTable));
+        } catch (Exception e) {
+            if (!externalTable) {
+                try {
+                    fileIO(location).deleteDirectoryQuietly(location);
+                } catch (Exception ee) {
+                    LOG.error("Delete directory[{}] fail for table {}", location, identifier, ee);
+                }
+            }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }

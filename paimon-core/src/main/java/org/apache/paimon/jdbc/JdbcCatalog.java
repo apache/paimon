@@ -420,10 +420,65 @@ public class JdbcCatalog extends AbstractCatalog {
                 }
                 break;
             case OBJECT_TABLE:
-                throw new UnsupportedOperationException(
+                try {
+                    runWithLock(
+                            identifier,
+                            () -> {
+                                if (!validateTableNotExists(identifier, ignoreIfExists)) {
+                                    return null;
+                                }
+                                createObjectTable(identifier, schema);
+                                return null;
+                            });
+                } catch (TableAlreadyExistException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            "Failed to create table " + identifier.getFullName(), e);
+                }
+                break;
+        }
+    }
+
+    @Override
+    public void createObjectTable(Identifier identifier, Schema schema) {
+        try {
+            Path tablePath = getTableLocation(identifier);
+            schema.options().putIfAbsent(PATH.key(), tablePath.toString());
+            Schema objectSchema = buildObjectTableSchema(schema);
+            fileIO.mkdirs(tablePath);
+
+            // Write schema file via SchemaManager.commit()
+            SchemaManager schemaManager = getSchemaManager(identifier);
+            TableSchema tableSchema = TableSchema.create(0, objectSchema);
+            if (!schemaManager.commit(tableSchema)) {
+                throw new RuntimeException(
+                        "Failed to commit schema for object table " + identifier);
+            }
+
+            // Register table in JDBC catalog
+            if (!JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
+                fileIO.deleteDirectoryQuietly(tablePath);
+                throw new RuntimeException(
                         String.format(
-                                "Catalog %s cannot support object tables.",
-                                this.getClass().getName()));
+                                "Failed to create table %s in catalog %s",
+                                identifier.getFullName(), catalogKey));
+            }
+            if (syncTableProperties()) {
+                JdbcUtils.insertTableProperties(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        collectTableProperties(tableSchema));
+            }
+            LOG.debug("Successfully created object table: {}", identifier);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }
 
@@ -665,6 +720,16 @@ public class JdbcCatalog extends AbstractCatalog {
         }
     }
 
+    /**
+     * Use {@code putIfAbsent} because a JDBC catalog stores the schema file at the warehouse
+     * default path while an object table's PATH option may point to a different user-specified data
+     * directory. Overwriting would wrongly redirect the object table to the schema directory.
+     */
+    @Override
+    protected void putPathOption(TableSchema schema, Path tablePath) {
+        schema.options().putIfAbsent(PATH.key(), tablePath.toString());
+    }
+
     @Override
     protected TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         assertMainBranch(identifier);
@@ -876,7 +941,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private void validateCustomTablePath(Map<String, String> tableOptions) {
-        if (!allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
+        TableType tableType = Options.fromMap(tableOptions).get(TYPE);
+        boolean isObjectTable = tableType == TableType.OBJECT_TABLE;
+        if (!isObjectTable && !allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
             throw new UnsupportedOperationException(
                     String.format(
                             "The current catalog %s does not support specifying the table path when creating a table.",
