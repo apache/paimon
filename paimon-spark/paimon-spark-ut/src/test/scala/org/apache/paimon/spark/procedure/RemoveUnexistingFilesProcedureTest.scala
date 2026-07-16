@@ -26,6 +26,7 @@ import java.util.UUID
 class RemoveUnexistingFilesProcedureTest extends PaimonSparkTestBase {
 
   test("Paimon procedure: remove unexisting files on empty table") {
+    spark.sql("CREATE DATABASE IF NOT EXISTS mydb")
     spark.sql("CREATE TABLE mydb.t_empty (id INT) USING paimon")
 
     checkAnswer(
@@ -61,6 +62,7 @@ class RemoveUnexistingFilesProcedureTest extends PaimonSparkTestBase {
 
     val actual = new Array[Int](numPartitions)
     val pattern = "pt=(\\d+?)/".r
+    spark.sql("CREATE DATABASE IF NOT EXISTS mydb")
     spark.sql(s"USE mydb")
     spark
       .sql(s"CALL sys.remove_unexisting_files(table => '$tableName', dry_run => true)")
