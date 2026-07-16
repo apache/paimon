@@ -349,7 +349,7 @@ def _create_readers(
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
-    ``VectorSearchReadImpl._pre_filter`` return ``None`` and the vector search
+    ``DataEvolutionVectorRead._pre_filter`` return ``None`` and the vector search
     would then return unfiltered results that violate the user predicate.
     """
     if index_type_metas is None:

@@ -50,7 +50,7 @@ class VectorSearchScan(ABC):
         pass
 
 
-class VectorSearchScanImpl(VectorSearchScan):
+class DataEvolutionVectorScan(VectorSearchScan):
     """Implementation for VectorSearchScan."""
 
     def __init__(
