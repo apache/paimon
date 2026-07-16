@@ -27,7 +27,8 @@ from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextR
 from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
 from pypaimon.table.source.primary_key_vector_read import (
     PrimaryKeyVectorRead, _include_row_ids)
-from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
+from pypaimon.table.source.primary_key_vector_scan import (
+    PrimaryKeyVectorScan, _should_read_source)
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition)
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
@@ -145,6 +146,17 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
 
         # first[2] maps to payload row 2; second[0,1] map to rows 4 and 5.
         self.assertEqual([2, 4, 5], list(include))
+
+    def test_pk_index_source_policy_matches_java(self):
+        compact = SimpleNamespace(file_source=1, level=1)
+        append = SimpleNamespace(file_source=0, level=1)
+        level_zero = SimpleNamespace(file_source=1, level=0)
+        legacy = SimpleNamespace(file_source=None, level=1)
+
+        self.assertTrue(_should_read_source(compact))
+        self.assertFalse(_should_read_source(append))
+        self.assertFalse(_should_read_source(level_zero))
+        self.assertFalse(_should_read_source(legacy))
 
 
 if __name__ == "__main__":

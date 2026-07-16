@@ -24,8 +24,11 @@ from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourc
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.source.vector_search_scan import VectorSearchScan, VectorSearchScanPlan
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.range import Range
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,13 @@ class PrimaryKeyVectorScan(VectorSearchScan):
                     data_split.files[0].file_name: tuple(split.row_ranges())}))
             elif isinstance(split, DataSplit):
                 source_splits.append((split, {}))
+
+        if self._filter is not None:
+            source_splits = [
+                (split, _residual_row_ranges(
+                    self._table, self._filter, split, ranges))
+                for split, ranges in source_splits
+            ]
 
         index_type = self._index_type
         if index_type is None:
@@ -126,7 +136,8 @@ def _bucket_splits(source_splits, entries):
 
     result = []
     for split in combined.values():
-        active = {data_file.file_name: data_file for data_file in split.files}
+        active = {data_file.file_name: data_file for data_file in split.files
+                  if _should_read_source(data_file)}
         current = []
         covered = set()
         for payload in payloads_by_bucket.get(
@@ -149,6 +160,53 @@ def _bucket_splits(source_splits, entries):
         result.append(PrimaryKeyVectorSearchSplit(
             split, tuple(current), tuple(name for name in active if name not in covered),
             dict(ranges_by_bucket.get(key, {}))))
+    return result
+
+
+def _should_read_source(data_file):
+    # FileSource.COMPACT = 1. Match Java PrimaryKeyIndexSourcePolicy.
+    return data_file.file_source == 1 and data_file.level > 0
+
+
+def _residual_row_ranges(table, predicate, split, candidate_ranges):
+    """Evaluate the residual predicate on physical rows before ANN search."""
+    result = {}
+    reader = table.new_read_builder().new_read()
+    fields = list(table.fields)
+    deletions = split.data_deletion_files or []
+    for index, data_file in enumerate(split.files):
+        ranges = candidate_ranges.get(data_file.file_name)
+        if ranges is not None and not ranges:
+            result[data_file.file_name] = tuple()
+            continue
+        deletion_file = deletions[index] if index < len(deletions) else None
+        deleted = set()
+        if deletion_file is not None:
+            deleted = set(DeletionVector.read(
+                table.file_io, deletion_file).bit_map())
+        positions = [
+            position for position in range(data_file.row_count)
+            if position not in deleted
+            and (ranges is None or any(r.contains(position) for r in ranges))
+        ]
+        single = DataSplit(
+            [data_file], split.partition, split.bucket, True,
+            [deletion_file] if deletion_file is not None else None)
+        read_split = IndexedSplit(single, list(ranges), None) \
+            if ranges is not None else single
+        arrow = reader.to_arrow([read_split])
+        rows = arrow.to_pylist()
+        if len(rows) != len(positions):
+            raise ValueError(
+                "Residual filter row count does not match physical positions.")
+        matched = [
+            position for position, row in zip(positions, rows)
+            if predicate.test(GenericRow(
+                [row[field.name] for field in fields], fields))
+        ]
+        result[data_file.file_name] = tuple(
+            Range.sort_and_merge_overlap(
+                [Range(position, position) for position in matched], True))
     return result
 
 

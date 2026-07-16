@@ -17,6 +17,7 @@
 
 import json
 import os
+import sys
 import tarfile
 
 import pytest
@@ -32,7 +33,10 @@ GOLDEN_ARCHIVE = os.path.join(
 def catalog(tmp_path_factory):
     warehouse = tmp_path_factory.mktemp("pk_global_index_golden")
     with tarfile.open(GOLDEN_ARCHIVE, "r:gz") as archive:
-        archive.extractall(warehouse)
+        if sys.version_info >= (3, 12):
+            archive.extractall(warehouse, filter="data")
+        else:
+            archive.extractall(warehouse)
     return CatalogFactory.create({"warehouse": str(warehouse)})
 
 
@@ -76,6 +80,16 @@ def test_java_primary_key_vector_index(catalog):
               .execute_local())
     rows = _read_search_result(table, result)
     assert sorted(rows.column("id").to_pylist()) == [1, 2]
+
+    predicate = table.new_read_builder().new_predicate_builder().equal("id", 3)
+    filtered = (table.new_vector_search_builder()
+                .with_vector_column("embedding")
+                .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                .with_filter(predicate)
+                .with_limit(2)
+                .execute_local())
+    filtered_rows = _read_search_result(table, filtered)
+    assert filtered_rows.column("id").to_pylist() == [3]
 
 
 def test_java_primary_key_full_text_index(catalog):
