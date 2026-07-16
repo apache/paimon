@@ -166,13 +166,8 @@ public class FormatTableScan implements InnerTableScan {
                 } else {
                     splits.addAll(createSplits(fileIO, new Path(table.location()), null));
                 }
-                if (limit != null) {
-                    if (limit <= 0) {
-                        return new ArrayList<>();
-                    }
-                    if (splits.size() > limit) {
-                        return splits.subList(0, limit);
-                    }
+                if (limit != null && limit <= 0) {
+                    return new ArrayList<>();
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);

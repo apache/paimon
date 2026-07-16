@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.json.JsonOptions;
@@ -31,8 +32,11 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,7 +59,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -736,6 +743,36 @@ public class FormatTableScanTest {
             List<Split> splits = scan.plan().splits();
             assertThat(splits).hasSize(5);
         }
+    }
+
+    @TestTemplate
+    void testPositiveLimitDoesNotPruneUnknownRowCountSplits() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path headerOnlyFile = new Path(tableLocation, "00-header-only.csv");
+        Path dataFile = new Path(tableLocation, "01-data.csv");
+        fileIO.mkdirs(tableLocation);
+        fileIO.writeFile(headerOnlyFile, "id,name\n", false);
+        fileIO.writeFile(dataFile, "id,name\n42,later\n", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(FILE_FORMAT.key(), "csv");
+        options.put(CsvOptions.INCLUDE_HEADER.key(), "true");
+        options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "32b");
+        options.put(SOURCE_SPLIT_OPEN_FILE_COST.key(), "32b");
+        FormatTable formatTable =
+                createFormatTableWithOptions(tableLocation, FormatTable.Format.CSV, options);
+        assertThat(formatTable.newReadBuilder().newScan().plan().splits()).hasSize(2);
+
+        ReadBuilder readBuilder = formatTable.newReadBuilder().withLimit(1);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(
+                    row -> rows.add(row.getInt(0) + "," + row.getString(1).toString()));
+        }
+
+        assertThat(rows).containsExactly("42,later");
     }
 
     @TestTemplate
