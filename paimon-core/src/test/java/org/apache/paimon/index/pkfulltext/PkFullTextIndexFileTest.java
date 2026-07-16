@@ -94,7 +94,7 @@ class PkFullTextIndexFileTest {
         assertThat(archive.globalIndexMeta().indexFieldId()).isEqualTo(7);
         DataInputDeserializer sourceInput =
                 new DataInputDeserializer(archive.globalIndexMeta().sourceMeta());
-        assertThat(sourceInput.readInt()).isEqualTo(2);
+        assertThat(sourceInput.readInt()).isEqualTo(1);
         PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(archive);
         assertThat(sourceMeta.dataLevel()).isEqualTo(3);
         assertThat(sourceMeta.sourceFile().fileName()).isEqualTo("data-1");
