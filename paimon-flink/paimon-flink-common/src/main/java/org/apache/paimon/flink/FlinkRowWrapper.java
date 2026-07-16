@@ -105,8 +105,36 @@ public class FlinkRowWrapper implements InternalRow {
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure,
             Set<Integer> blobFields) {
+        this(
+                row,
+                new UriReaderFactory(catalogContext),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields);
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
+        return new FlinkRowWrapper(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields);
+    }
+
+    private FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
         this.row = row;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFields = blobFields;

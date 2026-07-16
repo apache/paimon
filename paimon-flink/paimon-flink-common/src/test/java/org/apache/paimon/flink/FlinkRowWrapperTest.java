@@ -21,7 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -84,6 +86,39 @@ public class FlinkRowWrapperTest {
 
         assertThat(wrapper.isNullAt(0)).isFalse();
         assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testReadBlobWithProvidedUriReaderFactory() throws Exception {
+        byte[] bytes = new byte[] {1, 2, 3};
+        java.nio.file.Path blobFile = tempPath.resolve("provided-file-io.blob");
+        Files.write(blobFile, bytes);
+        String blobUri = "isolated://" + blobFile;
+
+        Options options = new Options();
+        options.set(IsolatedDirectoryFileIO.ROOT_DIR, "isolated://" + tempPath);
+        IsolatedDirectoryFileIO fileIO = new IsolatedDirectoryFileIO();
+        fileIO.configure(CatalogContext.create(options));
+        UriReaderFactory readerFactory = UriReaderFactory.fromFileIO(fileIO);
+
+        FlinkRowWrapper wrapper =
+                FlinkRowWrapper.fromUriReaderFactory(
+                        descriptorRow(blobUri, bytes.length),
+                        readerFactory,
+                        false,
+                        false,
+                        Collections.singleton(0));
+
+        assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testNullCatalogContextConstructorRemainsUnambiguous() {
+        FlinkRowWrapper wrapper =
+                new FlinkRowWrapper(
+                        GenericRowData.of(1), null, false, false, Collections.emptySet());
+
+        assertThat(wrapper.getInt(0)).isEqualTo(1);
     }
 
     @Test

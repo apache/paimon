@@ -19,21 +19,29 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.data.SparkInternalRow;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.AbstractMap;
@@ -51,6 +59,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkInternalRow}. */
 public class SparkInternalRowTest {
+
+    @TempDir java.nio.file.Path tempPath;
 
     @Test
     public void test() {
@@ -127,6 +137,34 @@ public class SparkInternalRowTest {
                                 SparkInternalRow.create(ALL_TYPES).replace(sparkRowData));
         assertThat(sparkRowToString(sparkRow)).isEqualTo(expected);
         TimeZone.setDefault(tz);
+    }
+
+    @Test
+    public void testReadBlobWithProvidedUriReaderFactory() throws Exception {
+        byte[] bytes = new byte[] {1, 2, 3};
+        java.nio.file.Path blobFile = tempPath.resolve("blob");
+        Files.write(blobFile, bytes);
+        byte[] descriptor =
+                new BlobDescriptor(blobFile.toUri().toString(), 0, bytes.length).serialize();
+        StructType schema = new StructType().add("blob", DataTypes.BinaryType);
+
+        SparkInternalRowWrapper wrapper =
+                SparkInternalRowWrapper.fromUriReaderFactory(
+                                schema,
+                                1,
+                                schema,
+                                UriReaderFactory.fromFileIO(LocalFileIO.create()))
+                        .replace(new GenericInternalRow(new Object[] {descriptor}));
+
+        assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testNullCatalogContextConstructorRemainsUnambiguous() {
+        SparkInternalRowWrapper wrapper =
+                new SparkInternalRowWrapper(new StructType(), 0, null, null);
+
+        assertThat(wrapper).isNotNull();
     }
 
     private String sparkRowToString(org.apache.spark.sql.Row row) {

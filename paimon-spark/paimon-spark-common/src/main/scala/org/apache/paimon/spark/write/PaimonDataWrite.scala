@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
@@ -37,7 +37,7 @@ case class PaimonDataWrite(
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
     batchId: Option[Long],
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends abstractInnerTableDataWrite[Row]
   with InnerTableV1DataWrite {
@@ -57,7 +57,7 @@ case class PaimonDataWrite(
   }
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, uriReaderFactory)
   }
 
   def write(row: Row): Unit = {

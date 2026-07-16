@@ -35,12 +35,27 @@ import java.util.concurrent.ConcurrentHashMap;
 /** A factory to create and cache {@link UriReader}. */
 public class UriReaderFactory implements Serializable {
 
-    private final CatalogContext context;
+    private static final long serialVersionUID = -8477284718943635074L;
+
+    @Nullable private final CatalogContext context;
+    @Nullable private final FileIO fileIO;
     private transient Map<UriKey, UriReader> readers;
 
-    public UriReaderFactory(CatalogContext context) {
+    public UriReaderFactory(@Nullable CatalogContext context) {
         this.context = context;
+        this.fileIO = null;
         this.readers = new ConcurrentHashMap<>();
+    }
+
+    private UriReaderFactory(FileIO fileIO) {
+        this.context = null;
+        this.fileIO = Objects.requireNonNull(fileIO);
+        this.readers = new ConcurrentHashMap<>();
+    }
+
+    /** Creates a factory which uses the provided {@link FileIO} for non-HTTP URIs. */
+    public static UriReaderFactory fromFileIO(FileIO fileIO) {
+        return new UriReaderFactory(fileIO);
     }
 
     public UriReader create(String input) {
@@ -70,9 +85,13 @@ public class UriReaderFactory implements Serializable {
             return UriReader.fromHttp();
         }
 
-        try {
-            FileIO fileIO = FileIO.get(new Path(uri), context);
+        if (fileIO != null) {
             return UriReader.fromFile(fileIO);
+        }
+
+        try {
+            FileIO createdFileIO = FileIO.get(new Path(uri), Objects.requireNonNull(context));
+            return UriReader.fromFile(createdFileIO);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

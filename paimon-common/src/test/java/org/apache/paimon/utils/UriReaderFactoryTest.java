@@ -19,6 +19,9 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.IsolatedDirectoryFileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.UriReader.FileUriReader;
 import org.apache.paimon.utils.UriReader.HttpUriReader;
@@ -78,6 +81,27 @@ public class UriReaderFactoryTest {
     public void testCreateFileUriReader() {
         UriReader reader = factory.create("file:///path/to/file.txt");
         assertThat(reader).isInstanceOf(FileUriReader.class);
+    }
+
+    @Test
+    public void testCreateReaderFromProvidedFileIO() throws Exception {
+        java.nio.file.Path file = tempPath.resolve("file.txt");
+        Files.write(file, new byte[] {1, 2});
+
+        Options options = new Options();
+        options.set(IsolatedDirectoryFileIO.ROOT_DIR, new Path(tempPath.toUri()).toString());
+        IsolatedDirectoryFileIO fileIO = new IsolatedDirectoryFileIO();
+        fileIO.configure(CatalogContext.create(options));
+
+        UriReaderFactory fileIOFactory =
+                InstantiationUtil.clone(UriReaderFactory.fromFileIO(fileIO));
+        try (SeekableInputStream inputStream =
+                fileIOFactory
+                        .create(file.toUri().toString())
+                        .newInputStream(file.toUri().toString())) {
+            assertThat(inputStream.read()).isEqualTo(1);
+            assertThat(inputStream.read()).isEqualTo(2);
+        }
     }
 
     @Test

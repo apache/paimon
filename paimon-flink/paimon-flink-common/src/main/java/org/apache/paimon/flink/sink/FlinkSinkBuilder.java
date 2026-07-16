@@ -33,12 +33,13 @@ import org.apache.paimon.flink.sink.partition.StatisticsOrRecordChannelComputer;
 import org.apache.paimon.flink.sink.partition.StatisticsOrRecordTypeInfo;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.utils.BlobDescriptorUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -213,16 +214,13 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        CatalogContext contextForDescriptor =
-                BlobDescriptorUtils.getCatalogContext(
-                        table.catalogEnvironment().catalogContext(),
-                        table.coreOptions().toConfiguration());
+        UriReaderFactory readerFactoryForDescriptor = BlobDescriptorReaderFactory.create(table);
 
         DataStream<InternalRow> input =
-                mapToInternalRow(
+                mapToInternalRowWithUriReaderFactory(
                         this.input,
                         table.rowType(),
-                        contextForDescriptor,
+                        readerFactoryForDescriptor,
                         table.coreOptions().blobWriteNullOnMissingFile(),
                         table.coreOptions().blobWriteNullOnFetchFailure());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -274,6 +272,20 @@ public class FlinkSinkBuilder {
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure) {
+        return mapToInternalRowWithUriReaderFactory(
+                input,
+                rowType,
+                new UriReaderFactory(catalogContext),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure);
+    }
+
+    private static DataStream<InternalRow> mapToInternalRowWithUriReaderFactory(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
         Set<Integer> blobFields =
                 checkBlobDescriptorExists
                         ? FlinkRowWrapper.blobFieldIndexes(rowType)
@@ -282,9 +294,9 @@ public class FlinkSinkBuilder {
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
                                         r ->
-                                                new FlinkRowWrapper(
+                                                FlinkRowWrapper.fromUriReaderFactory(
                                                         r,
-                                                        catalogContext,
+                                                        uriReaderFactory,
                                                         checkBlobDescriptorExists,
                                                         writeNullOnFetchFailure,
                                                         blobFields))
