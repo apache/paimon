@@ -48,8 +48,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
 /**
  * Implementation for {@link TableQuery} which looks up records directly from data files.
@@ -57,6 +57,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * <p>This query pushes primary key predicates down to the file format reader and does not build or
  * cache local lookup files. Callers are responsible for keeping the data file view up to date with
  * {@link #refreshFiles(BinaryRow, int, List, List)}.
+ *
+ * <p>For tables which do not enable lookup, this query only supports the deduplicate merge engine
+ * without sequence fields. Deletion vectors are not supported.
  */
 public class DataFileTableQuery implements TableQuery {
 
@@ -74,6 +77,23 @@ public class DataFileTableQuery implements TableQuery {
     public DataFileTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new ConcurrentHashMap<>();
+
+        if (options.deletionVectorsEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Data file table query does not support deletion vectors.");
+        }
+        if (!options.needLookup() && options.mergeEngine() != DEDUPLICATE) {
+            throw new UnsupportedOperationException(
+                    "Data file table query only supports deduplicate merge engine when lookup is "
+                            + "disabled, but merge engine is: "
+                            + options.mergeEngine());
+        }
+        if (options.mergeEngine() == DEDUPLICATE && !options.sequenceField().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Data file table query does not support sequence fields for deduplicate merge "
+                            + "engine, but sequence fields are: "
+                            + options.sequenceField());
+        }
 
         FileStore<?> tableStore = table.store();
         if (!(tableStore instanceof KeyValueFileStore)) {
@@ -106,16 +126,17 @@ public class DataFileTableQuery implements TableQuery {
                 tableView
                         .computeIfAbsent(partition, k -> new ConcurrentHashMap<>())
                         .computeIfAbsent(bucket, k -> new BucketQueryState());
-        state.lock.writeLock().lock();
-        try {
+        synchronized (state) {
             if (state.levels == null) {
                 // Initial phase: ignore beforeFiles as they represent deletions from previous state
                 state.levels = new Levels(keyComparator, dataFiles, options.numLevels());
             } else {
-                state.levels.update(beforeFiles, dataFiles);
+                // Publish a new immutable view so that lookups do not hold locks during file IO.
+                Levels levels =
+                        new Levels(keyComparator, state.levels.allFiles(), options.numLevels());
+                levels.update(beforeFiles, dataFiles);
+                state.levels = levels;
             }
-        } finally {
-            state.lock.writeLock().unlock();
         }
     }
 
@@ -131,22 +152,18 @@ public class DataFileTableQuery implements TableQuery {
             return null;
         }
 
-        state.lock.readLock().lock();
-        try {
-            if (state.levels == null) {
-                return null;
-            }
-
-            KeyValue kv = lookup(partition, bucket, state.levels, key);
-            if (kv == null
-                    || kv.valueKind().isRetract()
-                    || (rowFilter != null && !rowFilter.test(kv.value()))) {
-                return null;
-            }
-            return kv.value();
-        } finally {
-            state.lock.readLock().unlock();
+        Levels levels = state.levels;
+        if (levels == null) {
+            return null;
         }
+
+        KeyValue kv = lookup(partition, bucket, levels, key);
+        if (kv == null
+                || kv.valueKind().isRetract()
+                || (rowFilter != null && !rowFilter.test(kv.value()))) {
+            return null;
+        }
+        return kv.value();
     }
 
     @Nullable
@@ -248,8 +265,6 @@ public class DataFileTableQuery implements TableQuery {
 
     private static class BucketQueryState {
 
-        private final ReadWriteLock lock = new ReentrantReadWriteLock();
-
-        @Nullable private Levels levels;
+        @Nullable private volatile Levels levels;
     }
 }

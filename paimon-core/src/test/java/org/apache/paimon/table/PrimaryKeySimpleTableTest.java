@@ -2337,15 +2337,12 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages);
 
-        DataFileTableQuery query =
-                table.newDataFileTableQuery().withValueProjection(new int[] {2, 1, 0});
+        DataFileTableQuery query = table.newDataFileTableQuery().withValueProjection(new int[] {2});
         refreshDataFileTableQuery(query, commitMessages);
 
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         assertThat(value.getLong(0)).isEqualTo(100L);
-        assertThat(value.getInt(1)).isEqualTo(10);
-        assertThat(value.getInt(2)).isEqualTo(1);
         assertThat(query.lookup(row(1), 0, row(30))).isNull();
 
         query.withRowFilter(row -> row.getLong(0) >= 200L);
@@ -2372,6 +2369,32 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         query.close();
         write.close();
         commit.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"partial-update", "sequence-field", "deletion-vectors"})
+    public void testDataFileTableQueryUnsupportedOptions(String unsupportedOption)
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            switch (unsupportedOption) {
+                                case "partial-update":
+                                    options.set(MERGE_ENGINE, PARTIAL_UPDATE);
+                                    break;
+                                case "sequence-field":
+                                    options.set(CoreOptions.SEQUENCE_FIELD, "b");
+                                    break;
+                                case "deletion-vectors":
+                                    options.set(DELETION_VECTORS_ENABLED, true);
+                                    break;
+                                default:
+                                    throw new IllegalArgumentException(unsupportedOption);
+                            }
+                        });
+
+        assertThatThrownBy(table::newDataFileTableQuery)
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
@@ -2631,6 +2654,20 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
+
+        DataFileTableQuery query = table.newDataFileTableQuery().withValueProjection(new int[] {2});
+        for (Split split : splits) {
+            DataSplit dataSplit = (DataSplit) split;
+            query.refreshFiles(
+                    dataSplit.partition(),
+                    dataSplit.bucket(),
+                    Collections.emptyList(),
+                    dataSplit.dataFiles());
+        }
+        InternalRow value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(value.getLong(0)).isEqualTo(100L);
+        query.close();
     }
 
     @Test
