@@ -254,17 +254,38 @@ public class FileSystemWriteRestoreTest {
         assertThat(restored.dataFiles()).isNotEmpty();
     }
 
+    @Test
+    public void testWriteRejectsBucketMismatchWhenPerPartitionCountDisabled() throws Exception {
+        FileStoreTable table = createPartitionedPkTable(4, false);
+        commitOneRow(table, 1, 1);
+        commitOneRow(table, 1, 2);
+
+        int nonEmptyBucket = findNonEmptyBucket(table, 1, 4);
+
+        FileStoreTable rescaledTable = withBucket(table, 2);
+
+        try (InnerTableWrite write = rescaledTable.newWrite(UUID.randomUUID().toString())) {
+            assertThatThrownBy(() -> write.write(GenericRow.of(1, 1, 1L), nonEmptyBucket))
+                    .hasMessageContaining("a new bucket num 2")
+                    .hasMessageContaining("the previous bucket num is 4");
+        }
+    }
+
     // ------------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------------
 
     private FileStoreTable createPartitionedPkTable(int bucket) throws Exception {
+        return createPartitionedPkTable(bucket, true);
+    }
+
+    private FileStoreTable createPartitionedPkTable(int bucket, boolean perPartitionCountEnabled)
+            throws Exception {
         Path path = new Path(tempDir.toString());
         Options options = new Options();
         options.set(CoreOptions.PATH, path.toString());
         options.set(CoreOptions.BUCKET, bucket);
-        // These tests exercise per-partition bucket resolution, which is opt-in.
-        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, perPartitionCountEnabled);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

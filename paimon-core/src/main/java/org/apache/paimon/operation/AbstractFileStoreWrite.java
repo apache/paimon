@@ -621,7 +621,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             totalBuckets = restoredTotalBuckets;
         }
         if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            if (partitionType.getFieldCount() > 0) {
+            if (partitionType.getFieldCount() > 0 && options.bucketPerPartitionCountEnabled()) {
                 // For partitioned tables, allow per-partition bucket counts.
                 // The partition's existing bucket count takes precedence over the
                 // table-level default. This supports rescale operations where different
