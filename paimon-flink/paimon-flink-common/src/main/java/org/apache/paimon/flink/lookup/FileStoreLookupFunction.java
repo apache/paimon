@@ -143,14 +143,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         .mapToObj(i -> rowType.getFieldNames().get(i))
                         .collect(Collectors.toList());
 
-        this.projectFieldsGetters =
-                IntStream.range(0, projection.length)
-                        .mapToObj(
-                                i ->
-                                        InternalRow.createFieldGetter(
-                                                rowType.getTypeAt(projection[i]), i))
-                        .collect(Collectors.toList());
-
         // add primary keys
         for (String field : table.primaryKeys()) {
             if (!projectFields.contains(field)) {
@@ -162,6 +154,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
         RowType projectedType = rowType.project(projectFields);
+        this.projectFieldsGetters =
+                IntStream.range(0, projectedType.getFieldCount())
+                        .mapToObj(i -> InternalRow.createFieldGetter(projectedType.getTypeAt(i), i))
+                        .collect(Collectors.toList());
         this.blobFields =
                 IntStream.range(0, projectedType.getFieldCount())
                         .filter(i -> BlobType.isBlobFileField(projectedType.getTypeAt(i)))
@@ -340,12 +336,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "matched rows in lookup table, size:{}, rows:{}",
-                    lookupResults.size(),
-                    lookupResults.stream()
-                            .map(row -> logRow(projectFieldsGetters, row))
-                            .collect(Collectors.toList()));
+            try {
+                LOG.debug(
+                        "matched rows in lookup table, size:{}, rows:{}",
+                        lookupResults.size(),
+                        lookupResults.stream()
+                                .map(row -> logRow(projectFieldsGetters, row))
+                                .collect(Collectors.toList()));
+            } catch (Exception e) {
+                LOG.debug("Failed to log matched rows in lookup table.", e);
+            }
         }
 
         return rows;
