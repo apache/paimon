@@ -51,7 +51,7 @@ class FullTextRead(ABC):
         pass
 
 
-class FullTextReadImpl(FullTextRead):
+class DataEvolutionFullTextRead(FullTextRead):
     """Implementation for FullTextRead."""
 
     def __init__(

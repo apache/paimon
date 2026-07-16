@@ -22,8 +22,8 @@ from typing import Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.table.source.full_text_read import FullTextRead, FullTextReadImpl
-from pypaimon.table.source.full_text_scan import FullTextScan, FullTextScanImpl
+from pypaimon.table.source.full_text_read import FullTextRead, DataEvolutionFullTextRead
+from pypaimon.table.source.full_text_scan import FullTextScan, DataEvolutionFullTextScan
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.pk.primary_key_index_definition import PrimaryKeyIndexFamily
@@ -123,7 +123,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
             return PrimaryKeyFullTextScan(
                 self._table, definition, partition_filter=self._partition_filter)
-        return FullTextScanImpl(
+        return DataEvolutionFullTextScan(
             self._table,
             self._text_columns(),
             partition_filter=self._partition_filter,
@@ -138,7 +138,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             return PrimaryKeyFullTextRead(
                 self._table, self._limit, self._text_columns(), self._query,
                 definition=definition, partition_filter=self._partition_filter)
-        return FullTextReadImpl(
+        return DataEvolutionFullTextRead(
             self._table,
             self._limit,
             self._text_columns(),

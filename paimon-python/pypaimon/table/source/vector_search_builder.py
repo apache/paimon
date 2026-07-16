@@ -20,8 +20,8 @@
 from abc import ABC, abstractmethod
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
-from pypaimon.table.source.vector_search_scan import VectorSearchScanImpl
+from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 
@@ -213,7 +213,7 @@ class AbstractVectorSearchBuilderImpl:
         # type: () -> VectorSearchScan
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        scan_class = VectorSearchScanImpl
+        scan_class = DataEvolutionVectorScan
         if self._is_primary_key_vector_search():
             from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
             scan_class = PrimaryKeyVectorScan
@@ -252,7 +252,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
-        read_class = VectorSearchReadImpl
+        read_class = DataEvolutionVectorRead
         if self._is_primary_key_vector_search():
             from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
             read_class = PrimaryKeyVectorRead

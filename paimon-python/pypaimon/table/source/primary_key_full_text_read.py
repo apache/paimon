@@ -19,7 +19,7 @@ from concurrent.futures import wait
 
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
 from pypaimon.table.source.full_text_read import (
-    FullTextReadImpl, _search_raw_full_text)
+    DataEvolutionFullTextRead, _search_raw_full_text)
 from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScanPlan
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition, _partition_bytes)
@@ -30,7 +30,7 @@ from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 
 
-class PrimaryKeyFullTextRead(FullTextReadImpl):
+class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
     """Search PK full-text payloads and localize hits to data-file positions."""
 
     def __init__(self, table, limit, text_column, query, definition,

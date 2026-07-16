@@ -444,7 +444,7 @@ class AbstractVectorSearchReadImpl:
         return factor
 
 
-class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
+class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
     """Implementation for VectorSearchRead."""
 
     def __init__(self, table, limit, vector_column, query_vector, filter_=None,

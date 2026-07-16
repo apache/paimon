@@ -21,7 +21,7 @@ from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourc
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition, _partition_bytes)
 from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
-from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_read import (
     _check_vector_dimension, _compute_score, _raw_search_metric, _to_vector_list)
 from pypaimon.read.split import DataSplit
@@ -29,7 +29,7 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 
 
-class PrimaryKeyVectorRead(VectorSearchReadImpl):
+class PrimaryKeyVectorRead(DataEvolutionVectorRead):
     """Search PK vector payloads and localize payload row ids to data files."""
 
     def read_plan(self, plan):
