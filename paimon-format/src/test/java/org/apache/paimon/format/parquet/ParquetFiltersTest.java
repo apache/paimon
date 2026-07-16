@@ -20,9 +20,6 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
@@ -63,7 +60,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -75,28 +71,29 @@ class ParquetFiltersTest {
 
     @Test
     public void testLong() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "long1", new BigIntType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
-        test(builder.isNull(0), "eq(long1, null)", true);
+        test(schema, builder.isNull(0), "eq(long1, null)", true);
 
-        test(builder.isNotNull(0), "noteq(long1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(long1, null)", true);
 
-        test(builder.lessThan(0, 5L), "lt(long1, 5)", true);
+        test(schema, builder.lessThan(0, 5L), "lt(long1, 5)", true);
 
-        test(builder.greaterThan(0, 5L), "gt(long1, 5)", true);
+        test(schema, builder.greaterThan(0, 5L), "gt(long1, 5)", true);
 
         test(
+                schema,
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 "or(or(eq(long1, 1), eq(long1, 2)), eq(long1, 3))",
                 true);
 
-        test(builder.between(0, 1L, 3L), "and(gteq(long1, 1), lteq(long1, 3))", true);
+        test(schema, builder.between(0, 1L, 3L), "and(gteq(long1, 1), lteq(long1, 3))", true);
 
         test(
+                schema,
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 "and(and(noteq(long1, 1), noteq(long1, 2)), noteq(long1, 3))",
                 true);
@@ -104,20 +101,22 @@ class ParquetFiltersTest {
 
     @Test
     public void testString() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "string1", new VarCharType()))));
-        test(builder.isNull(0), "eq(string1, null)", true);
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        test(schema, builder.isNull(0), "eq(string1, null)", true);
 
-        test(builder.isNotNull(0), "noteq(string1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(string1, null)", true);
 
         test(
+                schema,
                 builder.in(0, Arrays.asList("1", "2", "3")),
                 "or(or(eq(string1, Binary{\"1\"}), eq(string1, Binary{\"2\"})), eq(string1, Binary{\"3\"}))",
                 true);
         test(
+                schema,
                 builder.notIn(0, Arrays.asList("1", "2", "3")),
                 "and(and(noteq(string1, Binary{\"1\"}), noteq(string1, Binary{\"2\"})), noteq(string1, Binary{\"3\"}))",
                 true);
@@ -125,12 +124,12 @@ class ParquetFiltersTest {
 
     @Test
     public void testInFilterLong() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "col1", new BigIntType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "col1", new BigIntType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
         test(
+                schema,
                 builder.in(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
                 FilterApi.in(
                         FilterApi.longColumn("col1"),
@@ -138,6 +137,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
                 FilterApi.notIn(
                         FilterApi.longColumn("col1"),
@@ -147,12 +147,12 @@ class ParquetFiltersTest {
 
     @Test
     public void testInFilterDouble() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "col1", new DoubleType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "col1", new DoubleType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
         test(
+                schema,
                 builder.in(
                         0,
                         LongStream.range(1L, 22L)
@@ -168,6 +168,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(
                         0,
                         LongStream.range(1L, 22L)
@@ -185,12 +186,12 @@ class ParquetFiltersTest {
 
     @Test
     public void testInFilterString() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "col1", new VarCharType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "col1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
         test(
+                schema,
                 builder.in(
                         0,
                         LongStream.range(1L, 22L)
@@ -206,6 +207,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(
                         0,
                         LongStream.range(1L, 22L)
@@ -223,16 +225,14 @@ class ParquetFiltersTest {
 
     @Test
     public void testIsNaNDouble() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "d1", new DoubleType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "d1", new DoubleType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Predicate predicate = builder.isNaN(0);
         FilterCompat.Filter filter =
-                ParquetFilters.convert(
-                        Collections.singletonList(predicate), messageType(predicate), true);
+                ParquetFilters.convert(Collections.singletonList(predicate), schema, true);
         FilterPredicateCompat compat = (FilterPredicateCompat) filter;
         assertThat(compat.getFilterPredicate().toString())
                 .contains(
@@ -241,16 +241,14 @@ class ParquetFiltersTest {
 
     @Test
     public void testIsNaNFloat() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "f1", new FloatType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "f1", new FloatType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Predicate predicate = builder.isNaN(0);
         FilterCompat.Filter filter =
-                ParquetFilters.convert(
-                        Collections.singletonList(predicate), messageType(predicate), true);
+                ParquetFilters.convert(Collections.singletonList(predicate), schema, true);
         FilterPredicateCompat compat = (FilterPredicateCompat) filter;
         assertThat(compat.getFilterPredicate().toString())
                 .contains(
@@ -259,13 +257,13 @@ class ParquetFiltersTest {
 
     @Test
     public void testInFilterFloat() {
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "col1", new FloatType()))));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "col1", new FloatType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         test(
+                schema,
                 builder.in(
                         0,
                         LongStream.range(1L, 22L)
@@ -281,6 +279,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(
                         0,
                         LongStream.range(1L, 22L)
@@ -841,110 +840,110 @@ class ParquetFiltersTest {
     public void testTimestampMillis() {
         // precision <= 3 uses milliseconds (INT64)
         int precision = 3;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "ts1", new TimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new TimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200000L); // 2024-01-01 00:00:00
         long expectedMillis = value.getMillisecond();
 
-        test(builder.isNull(0), "eq(ts1, null)", true);
-        test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
-        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.isNull(0), "eq(ts1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(schema, builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMillis + ")", true);
     }
 
     @Test
     public void testTimestampMicros() {
         // 3 < precision <= 6 uses microseconds (INT64)
         int precision = 6;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "ts1", new TimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new TimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000); // with nanos
         long expectedMicros = value.getMillisecond() * 1000 + value.getNanoOfMillisecond() / 1000;
 
-        test(builder.isNull(0), "eq(ts1, null)", true);
-        test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
-        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMicros + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
-        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.isNull(0), "eq(ts1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(schema, builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMicros + ")", true);
     }
 
     @Test
     public void testLocalZonedTimestampMillis() {
         // precision <= 3 uses milliseconds (INT64)
         int precision = 3;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "ts1",
-                                                new LocalZonedTimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new LocalZonedTimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
         long expectedMillis = value.getMillisecond();
 
-        test(builder.isNull(0), "eq(ts1, null)", true);
-        test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.isNull(0), "eq(ts1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(schema, builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
+        test(schema, builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
     }
 
     @Test
     public void testLocalZonedTimestampMicros() {
         // 3 < precision <= 6 uses microseconds (INT64)
         int precision = 6;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "ts1",
-                                                new LocalZonedTimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new LocalZonedTimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000);
         long expectedMicros = value.getMillisecond() * 1000 + value.getNanoOfMillisecond() / 1000;
 
-        test(builder.isNull(0), "eq(ts1, null)", true);
-        test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.isNull(0), "eq(ts1, null)", true);
+        test(schema, builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(schema, builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(schema, builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
     }
 
     @Test
     public void testInFilterTimestampMillis() {
         int precision = 3;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "ts1", new TimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new TimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp v1 = Timestamp.fromEpochMillis(1704067200000L);
         Timestamp v2 = Timestamp.fromEpochMillis(1704153600000L);
         Timestamp v3 = Timestamp.fromEpochMillis(1704240000000L);
 
         test(
+                schema,
                 builder.in(0, Arrays.asList(v1, v2, v3)),
                 "or(or(eq(ts1, "
                         + v1.getMillisecond()
@@ -956,6 +955,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(0, Arrays.asList(v1, v2, v3)),
                 "and(and(noteq(ts1, "
                         + v1.getMillisecond()
@@ -970,11 +970,12 @@ class ParquetFiltersTest {
     @Test
     public void testInFilterTimestampMicros() {
         int precision = 6;
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        new RowType(
-                                Collections.singletonList(
-                                        new DataField(0, "ts1", new TimestampType(precision)))));
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "ts1", new TimestampType(precision))));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Timestamp v1 = Timestamp.fromEpochMillis(1704067200000L, 123000);
         Timestamp v2 = Timestamp.fromEpochMillis(1704153600000L, 456000);
@@ -985,6 +986,7 @@ class ParquetFiltersTest {
         long micros3 = v3.getMillisecond() * 1000 + v3.getNanoOfMillisecond() / 1000;
 
         test(
+                schema,
                 builder.in(0, Arrays.asList(v1, v2, v3)),
                 "or(or(eq(ts1, "
                         + micros1
@@ -996,6 +998,7 @@ class ParquetFiltersTest {
                 true);
 
         test(
+                schema,
                 builder.notIn(0, Arrays.asList(v1, v2, v3)),
                 "and(and(noteq(ts1, "
                         + micros1
@@ -1060,56 +1063,5 @@ class ParquetFiltersTest {
         PrimitiveType type =
                 builder.as(LogicalTypeAnnotation.decimalType(scale, precision)).named(fieldName);
         return new MessageType("paimon_schema", Collections.singletonList(type));
-    }
-
-    private void test(Predicate predicate, FilterPredicate parquetPredicate, boolean canPushDown) {
-        FilterCompat.Filter filter =
-                ParquetFilters.convert(
-                        PredicateBuilder.splitAnd(predicate), messageType(predicate), true);
-        if (canPushDown) {
-            FilterPredicateCompat compat = (FilterPredicateCompat) filter;
-            assertThat(compat.getFilterPredicate()).isEqualTo(parquetPredicate);
-        } else {
-            assertThat(filter).isEqualTo(FilterCompat.NOOP);
-        }
-    }
-
-    private void test(Predicate predicate, String expected, boolean canPushDown) {
-        FilterCompat.Filter filter =
-                ParquetFilters.convert(
-                        PredicateBuilder.splitAnd(predicate), messageType(predicate), true);
-        if (canPushDown) {
-            FilterPredicateCompat compat = (FilterPredicateCompat) filter;
-            assertThat(compat.getFilterPredicate().toString()).isEqualTo(expected);
-        } else {
-            assertThat(filter).isEqualTo(FilterCompat.NOOP);
-        }
-    }
-
-    private static MessageType messageType(Predicate predicate) {
-        FieldRef fieldRef = fieldRef(predicate);
-        RowType rowType =
-                new RowType(
-                        Collections.singletonList(
-                                new DataField(fieldRef.index(), fieldRef.name(), fieldRef.type())));
-        return ParquetSchemaConverter.convertToParquetMessageType(rowType);
-    }
-
-    private static FieldRef fieldRef(Predicate predicate) {
-        return findFieldRef(predicate)
-                .orElseThrow(() -> new IllegalArgumentException("Predicate has no field"));
-    }
-
-    private static Optional<FieldRef> findFieldRef(Predicate predicate) {
-        if (predicate instanceof LeafPredicate) {
-            return ((LeafPredicate) predicate).fieldRefOptional();
-        }
-        for (Predicate child : ((CompoundPredicate) predicate).children()) {
-            Optional<FieldRef> fieldRef = findFieldRef(child);
-            if (fieldRef.isPresent()) {
-                return fieldRef;
-            }
-        }
-        return Optional.empty();
     }
 }
