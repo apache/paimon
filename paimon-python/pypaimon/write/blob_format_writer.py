@@ -16,8 +16,12 @@
 # under the License.
 
 import struct
-import zlib
 from typing import BinaryIO, List, Optional
+
+try:
+    from isal import isal_zlib as crc_backend
+except ImportError:
+    import zlib as crc_backend
 
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_file_type
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
@@ -182,7 +186,7 @@ class BlobFormatWriter:
         return blob_pos, self.position - blob_pos, crc32
 
     def _write_with_crc(self, data: bytes, crc32: int) -> int:
-        crc32 = zlib.crc32(data, crc32)
+        crc32 = crc_backend.crc32(data, crc32)
         self.output_stream.write(data)
         self.position += len(data)
         return crc32
