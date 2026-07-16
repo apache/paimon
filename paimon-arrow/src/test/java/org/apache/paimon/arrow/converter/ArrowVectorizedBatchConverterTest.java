@@ -24,12 +24,15 @@ import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarVec;
 import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapFloatVector;
+import org.apache.paimon.data.columnar.heap.HeapIntVector;
+import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.reader.VectorizedRecordIterator;
@@ -37,8 +40,12 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.MapVector;
+import org.apache.arrow.vector.complex.StructVector;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -48,6 +55,125 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ArrowVectorizedBatchConverter}. */
 public class ArrowVectorizedBatchConverterTest {
+
+    @Test
+    public void testAllNullColumnVectorForComplexTypes() {
+        RowType rowType =
+                RowType.of(
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()),
+                        DataTypes.ARRAY(DataTypes.INT()),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                DataTypes.FIELD(1, "b", DataTypes.STRING())),
+                        DataTypes.ARRAY(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()),
+                        DataTypes.VARIANT());
+
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+            ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
+            int rows = 2;
+            int[] pickedInColumn = new int[] {3, 1, 4};
+
+            for (ArrowFieldWriter fieldWriter : fieldWriters) {
+                fieldWriter.reset();
+                fieldWriter.write(AllNullColumnVector.INSTANCE, pickedInColumn, 1, rows);
+            }
+            vsr.setRowCount(rows);
+
+            for (FieldVector fieldVector : vsr.getFieldVectors()) {
+                assertThat(fieldVector.getValueCount()).isEqualTo(rows);
+                assertThat(fieldVector.isNull(0)).isTrue();
+                assertThat(fieldVector.isNull(1)).isTrue();
+            }
+
+            MapVector mapVector = (MapVector) vsr.getVector(0);
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+
+            ListVector arrayVector = (ListVector) vsr.getVector(1);
+            assertThat(arrayVector.getDataVector().getValueCount()).isZero();
+
+            StructVector rowVector = (StructVector) vsr.getVector(2);
+            assertThat(rowVector.getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isEqualTo(rows));
+
+            ListVector nestedArrayVector = (ListVector) vsr.getVector(3);
+            assertThat(nestedArrayVector.getDataVector().getValueCount()).isZero();
+
+            FixedSizeListVector vector = (FixedSizeListVector) vsr.getVector(4);
+            assertThat(vector.getDataVector().getValueCount()).isEqualTo(rows * 3);
+
+            StructVector variantVector = (StructVector) vsr.getVector(5);
+            assertThat(variantVector.getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isEqualTo(rows));
+
+            arrayVector.validateFull();
+            rowVector.validateFull();
+            variantVector.validateFull();
+        }
+    }
+
+    @Test
+    public void testAllNullMapColumnVectorAfterNonNullBatch() {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+            ArrowFieldWriter fieldWriter = ArrowUtils.createArrowFieldWriters(vsr, rowType)[0];
+
+            HeapIntVector keys = new HeapIntVector(2);
+            HeapIntVector values = new HeapIntVector(2);
+            keys.setInt(0, 1);
+            keys.setInt(1, 2);
+            values.setInt(0, 10);
+            values.setInt(1, 20);
+            HeapMapVector nonNullVector = new HeapMapVector(2, keys, values);
+            nonNullVector.putOffsetLength(0, 0, 1);
+            nonNullVector.putOffsetLength(1, 1, 1);
+
+            fieldWriter.reset();
+            fieldWriter.write(nonNullVector, null, 0, 2);
+
+            MapVector mapVector = (MapVector) vsr.getVector(0);
+            assertThat(mapVector.isNull(0)).isFalse();
+            assertThat(mapVector.isNull(1)).isFalse();
+            assertThat(mapVector.getDataVector().getValueCount()).isEqualTo(2);
+            mapVector.getDataVector().validateFull();
+
+            fieldWriter.reset();
+            fieldWriter.write(AllNullColumnVector.INSTANCE, null, 0, 3);
+
+            assertThat(mapVector.getValueCount()).isEqualTo(3);
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+            assertThat(mapVector.isNull(2)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
+
+            fieldWriter.reset();
+            fieldWriter.write(nonNullVector, null, 0, 2);
+
+            assertThat(mapVector.isNull(0)).isFalse();
+            assertThat(mapVector.isNull(1)).isFalse();
+            assertThat(mapVector.getDataVector().getValueCount()).isEqualTo(2);
+            mapVector.getDataVector().validateFull();
+        }
+    }
+
+    @Test
+    public void testEmptyBatchDoesNotRequireTypedColumnVector() {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+            ArrowFieldWriter fieldWriter = ArrowUtils.createArrowFieldWriters(vsr, rowType)[0];
+
+            fieldWriter.reset();
+            fieldWriter.write(i -> true, new int[0], 0, 0);
+
+            assertThat(vsr.getVector(0).getValueCount()).isZero();
+        }
+    }
 
     @Test
     public void testVectorColumnWrite() {
