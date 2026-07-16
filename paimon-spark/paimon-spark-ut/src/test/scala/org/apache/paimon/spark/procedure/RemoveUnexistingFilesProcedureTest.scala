@@ -27,13 +27,17 @@ class RemoveUnexistingFilesProcedureTest extends PaimonSparkTestBase {
 
   test("Paimon procedure: remove unexisting files on empty table") {
     spark.sql("CREATE DATABASE IF NOT EXISTS mydb")
-    spark.sql("CREATE TABLE mydb.t_empty (id INT) USING paimon")
+    try {
+      spark.sql("CREATE TABLE mydb.t_empty (id INT) USING paimon")
 
-    checkAnswer(
-      spark.sql("CALL sys.remove_unexisting_files(table => 'mydb.t_empty', dry_run => true)"),
-      Nil)
+      checkAnswer(
+        spark.sql("CALL sys.remove_unexisting_files(table => 'mydb.t_empty', dry_run => true)"),
+        Nil)
 
-    checkAnswer(spark.sql("CALL sys.remove_unexisting_files(table => 'mydb.t_empty')"), Nil)
+      checkAnswer(spark.sql("CALL sys.remove_unexisting_files(table => 'mydb.t_empty')"), Nil)
+    } finally {
+      spark.sql("DROP TABLE IF EXISTS mydb.t_empty")
+    }
   }
 
   test("Paimon procedure: remove unexisting files, bucket = -1") {
