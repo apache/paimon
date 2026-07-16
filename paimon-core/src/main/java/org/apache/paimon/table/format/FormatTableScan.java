@@ -166,6 +166,7 @@ public class FormatTableScan implements InnerTableScan {
                 } else {
                     splits.addAll(createSplits(fileIO, new Path(table.location()), null));
                 }
+                // Keep all splits for a positive limit because FormatDataSplit has no row count.
                 if (limit != null && limit <= 0) {
                     return new ArrayList<>();
                 }
