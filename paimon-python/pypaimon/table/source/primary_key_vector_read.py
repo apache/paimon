@@ -27,6 +27,7 @@ from pypaimon.table.source.vector_search_read import (
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 class PrimaryKeyVectorRead(DataEvolutionVectorRead):
@@ -37,18 +38,21 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
         futures = []
         contexts = []
+        deleted_positions = _deleted_positions(self._table, plan)
         for split in plan.splits():
             for payload in split.payloads:
                 source_meta = PrimaryKeyIndexSourceMeta.from_index_file(payload)
                 row_count = sum(source.row_count for source in source_meta.source_files)
+                include_row_ids = _include_row_ids(
+                    split, source_meta.source_files, deleted_positions)
                 future = self._eval(0, row_count - 1, [payload],
-                                    self._query_vector, self._limit, None)
+                                    self._query_vector, self._limit,
+                                    include_row_ids)
                 futures.append(future)
                 contexts.append((split, source_meta))
         wait(futures)
 
         candidates = []
-        deleted_positions = _deleted_positions(self._table, plan)
         for future, context in zip(futures, contexts):
             result = future.result()
             if result is None:
@@ -151,3 +155,22 @@ def _deleted_positions(table, plan):
 def _allowed(split, file_name, position):
     ranges = split.row_ranges_by_file.get(file_name)
     return ranges is None or any(row_range.contains(position) for row_range in ranges)
+
+
+def _include_row_ids(split, source_files, deleted_positions):
+    """Map live, pre-filtered physical positions to payload-local row ids."""
+    include = RoaringBitmap64()
+    offset = 0
+    filtered = False
+    for source in source_files:
+        deleted = deleted_positions.get(
+            (id(split), source.file_name), set())
+        ranges = split.row_ranges_by_file.get(source.file_name)
+        if deleted or ranges is not None:
+            filtered = True
+        for position in range(source.row_count):
+            if position not in deleted and _allowed(
+                    split, source.file_name, position):
+                include.add(offset + position)
+        offset += source.row_count
+    return include if filtered else None

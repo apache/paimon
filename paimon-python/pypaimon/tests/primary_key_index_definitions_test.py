@@ -25,7 +25,8 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
 from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
+from pypaimon.table.source.primary_key_vector_read import (
+    PrimaryKeyVectorRead, _include_row_ids)
 from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition)
@@ -33,6 +34,7 @@ from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.range import Range
 
 
 class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
@@ -127,6 +129,22 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         self.assertEqual([(1, 2), (4, 4)],
                          [(r.from_, r.to) for r in result.splits[0].row_ranges()])
         self.assertEqual([0.9, 0.8, 0.7], result.splits[0].scores())
+
+    def test_pk_vector_filter_is_applied_before_top_k(self):
+        split = SimpleNamespace(row_ranges_by_file={
+            "first.parquet": (Range(1, 2),),
+            "second.parquet": (Range(0, 1),),
+        })
+        sources = [
+            PrimaryKeyIndexSourceFile("first.parquet", 4),
+            PrimaryKeyIndexSourceFile("second.parquet", 3),
+        ]
+        deleted = {(id(split), "first.parquet"): {1}}
+
+        include = _include_row_ids(split, sources, deleted)
+
+        # first[2] maps to payload row 2; second[0,1] map to rows 4 and 5.
+        self.assertEqual([2, 4, 5], list(include))
 
 
 if __name__ == "__main__":
