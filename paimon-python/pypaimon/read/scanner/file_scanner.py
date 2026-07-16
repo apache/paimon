@@ -310,6 +310,17 @@ class FileScanner:
 
     def scan(self) -> Plan:
         start_ms = time.time() * 1000
+        if self._global_index_result is not None:
+            from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+            if self.table.is_primary_key_table:
+                if not isinstance(self._global_index_result, GlobalIndexSplitResult):
+                    raise ValueError(
+                        "Primary-key scan requires a GlobalIndexSplitResult, but found %s."
+                        % type(self._global_index_result).__name__)
+                return Plan(
+                    list(self._global_index_result.splits),
+                    snapshot_id=self._global_index_result.snapshot_id,
+                )
         # Create appropriate split generator based on table type
         if self.chunk_shuffle is not None:
             self._validate_chunk_shuffle_compat()
@@ -369,6 +380,9 @@ class FileScanner:
         # Generate splits
         splits = split_generator.create_splits(entries)
 
+        if self.table.is_primary_key_table:
+            splits = self._apply_primary_key_sorted_indexes(splits)
+
         splits = self._apply_push_down_limit(splits)
         duration_ms = int(time.time() * 1000 - start_ms)
         logger.info(
@@ -376,6 +390,44 @@ class FileScanner:
             duration_ms, len(entries)
         )
         return Plan(splits, snapshot_id=self._scanned_snapshot_id)
+
+    def _apply_primary_key_sorted_indexes(self, splits):
+        if (not self.table.options.global_index_enabled()
+                or self.predicate is None
+                or self._scanned_snapshot is None
+                or not splits):
+            return splits
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
+        from pypaimon.table.source.primary_key_sorted_index_result import (
+            PrimaryKeySortedIndexResult,
+        )
+        from pypaimon.table.source import primary_key_sorted_index_scan
+
+        definitions = PrimaryKeyIndexDefinitions.create(self.table.table_schema).definitions
+        if not definitions:
+            return splits
+        field_ids = {definition.field_id for definition in definitions}
+        entries = IndexFileHandler(self.table).scan(
+            self._scanned_snapshot,
+            lambda entry: (
+                entry.kind == 0
+                and entry.index_file.global_index_meta is not None
+                and entry.index_file.global_index_meta.source_meta is not None
+                and entry.index_file.global_index_meta.index_field_id in field_ids
+            ),
+        )
+        index_plan = primary_key_sorted_index_scan.plan(
+            self._scanned_snapshot_id, splits, definitions, entries)
+        evaluated = primary_key_sorted_index_scan.evaluate(
+            index_plan,
+            self.table.fields,
+            self.predicate,
+            definitions,
+            primary_key_sorted_index_scan.reader_factory(self.table),
+        )
+        return list(PrimaryKeySortedIndexResult(evaluated).splits)
 
     def _create_data_evolution_split_generator(self):
         row_ranges = None

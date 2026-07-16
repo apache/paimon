@@ -52,6 +52,7 @@ _GLOBAL_INDEX_META_SCHEMA = {
         {"name": "_EXTRA_FIELD_IDS",
          "type": ["null", {"type": "array", "items": "int"}], "default": None},
         {"name": "_INDEX_META", "type": ["null", "bytes"], "default": None},
+        {"name": "_SOURCE_META", "type": ["null", "bytes"], "default": None},
     ],
 }
 
@@ -185,7 +186,9 @@ class IndexManifestFile:
                         row_range_start=global_index_data.get('row_range_start', 0),
                         row_range_end=global_index_data.get('row_range_end', 0),
                         index_field_id=global_index_data.get('index_field_id', 0),
-                        index_meta=global_index_data.get('index_meta')
+                        extra_field_ids=global_index_data.get('extra_field_ids'),
+                        index_meta=global_index_data.get('index_meta'),
+                        source_meta=global_index_data.get('source_meta'),
                     )
 
                 index_file_meta = IndexFileMeta(
@@ -228,7 +231,8 @@ class IndexManifestFile:
             row_range_end=global_index_record.get('_ROW_RANGE_END', 0),
             index_field_id=global_index_record.get('_INDEX_FIELD_ID', 0),
             extra_field_ids=global_index_record.get('_EXTRA_FIELD_IDS'),
-            index_meta=global_index_record.get('_INDEX_META')
+            index_meta=global_index_record.get('_INDEX_META'),
+            source_meta=global_index_record.get('_SOURCE_META'),
         )
 
     def combine_deletes(
@@ -291,6 +295,7 @@ class IndexManifestFile:
                 "_INDEX_FIELD_ID": gim.index_field_id,
                 "_EXTRA_FIELD_IDS": gim.extra_field_ids,
                 "_INDEX_META": gim.index_meta,
+                "_SOURCE_META": gim.source_meta,
             }
         return {
             "_VERSION": _INDEX_ENTRY_VERSION,

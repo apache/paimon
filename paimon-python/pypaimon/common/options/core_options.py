@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import sys
 import warnings
 from datetime import timedelta
@@ -724,6 +725,20 @@ class CoreOptions:
         .with_description("Row count per shard for global index.")
     )
 
+    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-btree.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
+    )
+
+    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-bitmap.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
+    )
+
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -1301,6 +1316,49 @@ class CoreOptions:
 
     def global_index_row_count_per_shard(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+
+    def primary_key_btree_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
+
+    def primary_key_bitmap_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BITMAP_INDEX_COLUMNS)
+
+    def primary_key_btree_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-btree", "btree-index.")
+
+    def primary_key_bitmap_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-bitmap", "bitmap-index.")
+
+    def _primary_key_index_columns(self, option: ConfigOption[str]) -> List[str]:
+        columns = self.options.get(option)
+        if columns is None:
+            return []
+        return [column.strip() for column in columns.split(',')]
+
+    def _primary_key_sorted_index_options(
+            self, column: str, option_family: str, algorithm_prefix: str) -> Options:
+        resolved = dict(self.options.to_map())
+        resolved.pop("sorted-index.records-per-range", None)
+        option_key = "fields.%s.%s.index.options" % (column, option_family)
+        serialized = self.options.to_map().get(option_key)
+        if serialized is None or not str(serialized).strip():
+            return Options(resolved)
+        try:
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+        for key, value in parsed.items():
+            if not key or value is None:
+                raise ValueError("%s contains an invalid option." % option_key)
+            qualified = key if key.startswith((algorithm_prefix, "fields.")) \
+                else algorithm_prefix + key
+            previous = resolved.get(qualified)
+            if previous is not None and previous != value:
+                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+            resolved[qualified] = value
+        return Options(resolved)
 
     def btree_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
