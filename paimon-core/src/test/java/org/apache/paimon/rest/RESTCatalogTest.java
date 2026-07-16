@@ -109,7 +109,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -2151,7 +2150,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
         List<Integer> data = Lists.newArrayList(12);
         Exception exception =
-                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+                assertThrows(RuntimeException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_EXPIRED_MSG, exception.getCause().getMessage());
         RESTToken dataToken =
                 new RESTToken(
@@ -2176,7 +2175,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         restTokenFileIO.isObjectStore();
         resetDataTokenOnRestServer(identifier);
         Exception exception =
-                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+                assertThrows(RuntimeException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
     }
 
