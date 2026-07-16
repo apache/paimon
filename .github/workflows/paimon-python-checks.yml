@@ -204,17 +204,6 @@ jobs:
             build-essential git curl cmake \
             && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Verify dev/requirements.txt on Python 3.7
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.7'
-      - name: Resolve requirements (3.7)
-        run: |
-          cd paimon-python && python -m pip install --upgrade pip
-          TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.7"
-
       - name: Verify dev/requirements.txt on Python 3.8
         uses: actions/setup-python@v5
         with:
@@ -313,3 +302,32 @@ jobs:
           done
         env:
           PYTHONPATH: ${{ github.workspace }}/paimon-python
+
+  # Python 3.7 requirements resolution runs in its own python:3.7-slim container,
+  # because actions/setup-python cannot install 3.7 on ubuntu-latest (24.04). Keeping
+  # it separate also prevents a 3.7 failure from blocking the 3.8-3.13 / Ray checks.
+  requirement_version_compatible_test_py37:
+    runs-on: ubuntu-latest
+    container: "python:3.7-slim"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            build-essential git curl cmake \
+            && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+      - name: Verify Python version
+        run: python --version
+
+      - name: Resolve dev/requirements.txt on Python 3.7
+        shell: bash
+        run: |
+          cd paimon-python
+          python -m pip install --upgrade pip
+          TEMP_DIR=$(mktemp -d)
+          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.7"
