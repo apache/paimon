@@ -75,7 +75,14 @@ class TableWrite:
         self.file_store_write.write_row(partition, bucket, row, values_by_name)
 
     def write_pandas(self, dataframe):
-        pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            # Column-subset write (append-only ``with_write_type``): build the
+            # RecordBatch against the subset schema so the input only needs the
+            # written columns, mirroring the ``write_arrow`` path.
+            pa_schema = self._write_cols_pyarrow_schema(write_cols)
+        else:
+            pa_schema = self.table_pyarrow_schema
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 

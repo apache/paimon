@@ -587,6 +587,71 @@ class TableWriteTest(unittest.TestCase):
         self.assertTrue(str(e.exception).startswith(
             "Input schema isn't consistent with table schema and write cols."))
 
+    def test_write_pandas_respects_write_cols(self):
+        import pandas as pd
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('score', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'default.test_write_pandas_write_cols', schema, False)
+        table = self.catalog.get_table(
+            'default.test_write_pandas_write_cols')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['id', 'name'])
+        table_commit = write_builder.new_commit()
+        # DataFrame only carries the written subset; missing ``score`` is
+        # padded with null on read.
+        table_write.write_pandas(pd.DataFrame({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+        }))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        expected = pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+            'score': [None, None],
+        }, schema=pa_schema)
+        actual = self._read_sorted(table, 'id')
+        self.assertEqual(expected, actual)
+
+    def test_write_pandas_full_columns_unchanged(self):
+        import pandas as pd
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'default.test_write_pandas_full', schema, False)
+        table = self.catalog.get_table('default.test_write_pandas_full')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(pd.DataFrame({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+        }))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        expected = pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+        }, schema=pa_schema)
+        actual = self._read_sorted(table, 'id')
+        self.assertEqual(expected, actual)
+
     def test_validate_schema_allows_binary_family_for_write_cols(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),

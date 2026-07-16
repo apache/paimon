@@ -364,6 +364,44 @@ class ReaderBasicTest(unittest.TestCase):
         expect = pd.DataFrame(self.raw_data)
         pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
 
+    def test_reader_duckDB_parallelism(self):
+        # A dedicated partitioned table with rows across multiple partitions so
+        # scan planning yields >= 2 splits, exercising the real parallel fan-out
+        # path (``_should_run_parallel`` requires parallelism >= 2 AND
+        # splits >= 2).
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_duckdb_parallel', schema, False)
+        table = self.catalog.get_table('default.test_duckdb_parallel')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', 'd', 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p2', 'p3', 'p3'],
+        }, schema=self.pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreaterEqual(len(splits), 2)
+
+        serial = read_builder.new_read().to_duckdb(
+            splits, 'duckdb_serial', parallelism=1)
+        parallel = read_builder.new_read().to_duckdb(
+            splits, 'duckdb_parallel', parallelism=4)
+
+        serial_df = serial.query(
+            "SELECT * FROM duckdb_serial ORDER BY item_id").fetchdf()
+        parallel_df = parallel.query(
+            "SELECT * FROM duckdb_parallel ORDER BY item_id").fetchdf()
+        pd.testing.assert_frame_equal(
+            serial_df.reset_index(drop=True),
+            parallel_df.reset_index(drop=True))
+
     def test_mixed_add_and_delete_entries_compute_stats(self):
         """Test record_count calculation with mixed ADD/DELETE entries in same partition."""
         pa_schema = pa.schema([
