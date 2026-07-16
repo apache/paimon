@@ -854,13 +854,14 @@ class CoreOptions:
     READ_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.parallelism")
         .int_type()
-        .default_value(1)
+        .no_default_value()
         .with_description(
             "Parallelism for reading splits within a single TableRead call. "
-            "The value 1 (default) keeps reads serial. Values >= 2 enable a "
-            "thread pool that reads splits concurrently and assembles the "
-            "result in input order. Has no effect when fewer than 2 splits "
-            "are passed.")
+            "When unset (the default), reads auto-scale to "
+            "min(number of splits, CPU count). Set to 1 to force serial "
+            "reads, or to a specific value >= 1 to cap the thread pool that "
+            "reads splits concurrently and assembles the result in input "
+            "order. Has no effect when fewer than 2 splits are passed.")
     )
 
     ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
@@ -1349,7 +1350,7 @@ class CoreOptions:
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
-    def read_parallelism(self, default=None) -> int:
+    def read_parallelism(self, default=None) -> Optional[int]:
         return self.options.get(CoreOptions.READ_PARALLELISM, default)
 
     def add_column_before_partition(self) -> bool:
