@@ -40,10 +40,12 @@ class PrimaryKeyFullTextScan(FullTextScan):
             partition_filter=self._partition_filter,
             index_type=self._definition.index_type)
         vector_plan = vector_scan.scan()
-        splits = [PrimaryKeyFullTextSearchSplit(
-            split.data_split, split.payloads, split.uncovered_data_files,
-            split.row_ranges_by_file)
-                  for split in vector_plan.splits()]
+        splits = [
+            PrimaryKeyFullTextSearchSplit(
+                split.data_split, split.payloads, split.uncovered_data_files,
+                split.row_ranges_by_file)
+            for split in vector_plan.splits()
+        ]
         return PrimaryKeyFullTextScanPlan(vector_plan.snapshot_id, splits)
 
 

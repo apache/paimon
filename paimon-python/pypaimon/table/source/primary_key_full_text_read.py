@@ -71,11 +71,13 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
                     context[0].data_split.bucket, source.file_name,
                     row_position, score_getter(local_row_id)))
         candidates.extend(self._raw_candidates(plan))
-        candidates.sort(key=lambda position: (-position.score,
-                                               position.partition_bytes,
-                                               position.bucket,
-                                               position.data_file_name,
-                                               position.row_position))
+        candidates.sort(
+            key=lambda position: (
+                -position.score,
+                position.partition_bytes,
+                position.bucket,
+                position.data_file_name,
+                position.row_position))
         return PrimaryKeyScoredResult(
             plan.snapshot_id, [split.data_split for split in plan.splits()],
             candidates[:self._limit])
