@@ -131,8 +131,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             boolean ignorePreviousFiles) {
         DataFilePathFactory dataPathFactory =
                 pathFactory.createDataFilePathFactory(partition, bucket);
-        boolean mapSharedShreddingEnabled =
-                !MapSharedShreddingUtils.detectShreddingColumns(writeType, options).isEmpty();
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -162,8 +160,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.statsDenseStore(),
                 options.dataEvolutionEnabled(),
                 rowSidecarFileFormat(),
-                blobContext,
-                mapSharedShreddingEnabled);
+                blobContext);
     }
 
     @Override

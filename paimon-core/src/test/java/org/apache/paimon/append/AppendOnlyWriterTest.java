@@ -617,57 +617,6 @@ public class AppendOnlyWriterTest {
                                 3));
     }
 
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
-    public void testSharedShreddingMapDoesNotSupportBlob(String fileFormat) throws Exception {
-        RowType writeType =
-                DataTypes.ROW(
-                        DataTypes.FIELD(0, "id", DataTypes.INT()),
-                        DataTypes.FIELD(
-                                1,
-                                "tags",
-                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT())),
-                        DataTypes.FIELD(2, "payload", new BlobType()));
-        Options rawOptions = sharedShreddingOptions("tags", 3);
-        SharedShreddingAppendContext context =
-                createSharedShreddingAppendContext(fileFormat, rawOptions);
-        BlobFileContext blobContext =
-                BlobFileContext.create(writeType, new CoreOptions(rawOptions));
-        assertThat(blobContext).isNotNull();
-
-        AppendOnlyWriter writer =
-                createSharedShreddingAppendWriter(
-                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(), blobContext);
-
-        Assertions.assertThatThrownBy(
-                        () ->
-                                writer.write(
-                                        sharedShreddingLogicalRow(
-                                                1,
-                                                map("a", 10L),
-                                                new BlobData(new byte[] {1, 2, 3}))))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "MAP shared-shredding does not support blob or vector file writes yet.");
-        writer.close();
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
-    public void testSharedShreddingMapDoesNotSupportForceBufferSpill(String fileFormat)
-            throws Exception {
-        RowType writeType = sharedShreddingTagsWriteType();
-        Options rawOptions = sharedShreddingOptions("tags", 3);
-        SharedShreddingAppendContext context =
-                createSharedShreddingAppendContext(fileFormat, rawOptions);
-        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
-
-        Assertions.assertThatThrownBy(writer::toBufferedWriter)
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("MAP shared-shredding does not support force buffer spill");
-        writer.close();
-    }
-
     @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
@@ -998,17 +947,6 @@ public class AppendOnlyWriterTest {
             long schemaId,
             long maxSequenceNumber,
             FileIndexOptions fileIndexOptions) {
-        return createSharedShreddingAppendWriter(
-                writeType, context, schemaId, maxSequenceNumber, fileIndexOptions, null);
-    }
-
-    private AppendOnlyWriter createSharedShreddingAppendWriter(
-            RowType writeType,
-            SharedShreddingAppendContext context,
-            long schemaId,
-            long maxSequenceNumber,
-            FileIndexOptions fileIndexOptions,
-            BlobFileContext blobContext) {
         return new AppendOnlyWriter(
                 context.fileIO,
                 null,
@@ -1037,8 +975,7 @@ public class AppendOnlyWriterTest {
                 false,
                 context.options.dataEvolutionEnabled(),
                 null,
-                blobContext,
-                true);
+                null);
     }
 
     private DataFileMeta writeSharedShreddingFile(AppendOnlyWriter writer, InternalRow... rows)
@@ -1248,8 +1185,7 @@ public class AppendOnlyWriterTest {
                         false,
                         options.dataEvolutionEnabled(),
                         null,
-                        BlobFileContext.create(writeSchema, options),
-                        false);
+                        BlobFileContext.create(writeSchema, options));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
