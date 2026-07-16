@@ -55,11 +55,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -333,6 +335,88 @@ class NetworkClientTest {
     }
 
     /**
+     * Tests that concurrent first requests racing on the initial connect to the same server address
+     * create exactly one connection. The atomic {@code computeIfAbsent} guarantees a single {@link
+     * ServerConnection}, hence a single accepted server channel and no channel leak after shutdown.
+     */
+    @Test
+    void testConcurrentFirstRequestsCreateSingleConnection() throws Exception {
+        AtomicServiceRequestStats stats = new AtomicServiceRequestStats();
+
+        final MessageSerializer<KvRequest, KvResponse> serializer =
+                new MessageSerializer<>(
+                        new KvRequest.KvRequestDeserializer(),
+                        new KvResponse.KvResponseDeserializer());
+
+        final KvResponse expected = KvResponseTest.random();
+
+        ExecutorService executor = null;
+        NetworkClient<KvRequest, KvResponse> client = null;
+        Channel serverChannel = null;
+
+        try {
+            final int numThreads = 8;
+            executor = Executors.newFixedThreadPool(numThreads);
+
+            client = new NetworkClient<>("Test Client", 1, serializer, stats);
+
+            final AtomicInteger acceptedChannels = new AtomicInteger(0);
+            serverChannel =
+                    createServerChannel(
+                            new CountingRespondingChannelHandler(
+                                    serializer, expected, acceptedChannels));
+
+            final InetSocketAddress serverAddress = getServerAddress(serverChannel);
+
+            // Release all threads simultaneously to maximize contention on the initial connect.
+            final CountDownLatch startLatch = new CountDownLatch(1);
+            final NetworkClient<KvRequest, KvResponse> finalClient = client;
+            Callable<CompletableFuture<KvResponse>> queryTask =
+                    () -> {
+                        startLatch.await();
+                        KvRequest request = KvRequestTest.random();
+                        return finalClient.sendRequest(serverAddress, request);
+                    };
+
+            List<Future<CompletableFuture<KvResponse>>> submitted = new ArrayList<>();
+            for (int i = 0; i < numThreads; i++) {
+                submitted.add(executor.submit(queryTask));
+            }
+
+            startLatch.countDown();
+
+            // Wait for all request futures to complete successfully.
+            for (Future<CompletableFuture<KvResponse>> future : submitted) {
+                KvResponse actual = future.get().get();
+                assertThat(actual).isEqualTo(expected);
+            }
+
+            // computeIfAbsent guarantees a single ServerConnection, hence a single accepted
+            // channel.
+            assertThat(acceptedChannels.get()).isEqualTo(1);
+        } finally {
+            if (executor != null) {
+                executor.shutdown();
+            }
+
+            if (serverChannel != null) {
+                serverChannel.close();
+            }
+
+            if (client != null) {
+                try {
+                    client.shutdown().get();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                assertThat(client.isEventGroupShutdown()).isTrue();
+            }
+
+            assertThat(stats.getNumConnections()).withFailMessage("Channel leak").isZero();
+        }
+    }
+
+    /**
      * Tests that a server failure closes the connection and removes it from the established
      * connections.
      */
@@ -555,6 +639,43 @@ class NetworkClientTest {
                 MessageSerializer<KvRequest, KvResponse> serializer, KvResponse response) {
             this.serializer = serializer;
             this.response = response;
+        }
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            ByteBuf buf = (ByteBuf) msg;
+            assertThat(MessageSerializer.deserializeHeader(buf)).isEqualTo(MessageType.REQUEST);
+            long requestId = MessageSerializer.getRequestId(buf);
+            serializer.deserializeRequest(buf);
+
+            buf.release();
+
+            ByteBuf serResponse =
+                    MessageSerializer.serializeResponse(ctx.alloc(), requestId, response);
+
+            ctx.channel().writeAndFlush(serResponse);
+        }
+    }
+
+    @ChannelHandler.Sharable
+    private static final class CountingRespondingChannelHandler
+            extends ChannelInboundHandlerAdapter {
+        private final MessageSerializer<KvRequest, KvResponse> serializer;
+        private final KvResponse response;
+        private final AtomicInteger acceptedChannels;
+
+        private CountingRespondingChannelHandler(
+                MessageSerializer<KvRequest, KvResponse> serializer,
+                KvResponse response,
+                AtomicInteger acceptedChannels) {
+            this.serializer = serializer;
+            this.response = response;
+            this.acceptedChannels = acceptedChannels;
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) {
+            acceptedChannels.incrementAndGet();
         }
 
         @Override
