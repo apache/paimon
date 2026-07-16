@@ -31,6 +31,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.IOUtils;
@@ -177,7 +178,7 @@ public class PkVectorAnnSegmentSearcher {
                 "Vector segment %s has no source metadata.",
                 segment.fileName());
         if (segment.rowCount() == 0) {
-            return Collections.emptyList();
+            return CompletableFuture.completedFuture(Collections.emptyList());
         }
         GlobalIndexer indexer =
                 GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
@@ -225,6 +226,117 @@ public class PkVectorAnnSegmentSearcher {
                                             activeSourceFiles,
                                             rowRangesByFile,
                                             result));
+        } catch (RuntimeException | Error t) {
+            IOUtils.closeQuietly(reader);
+            throw t;
+        }
+    }
+
+    public List<List<PkVectorSearchResult>> searchBatch(
+            IndexFileMeta segment,
+            PrimaryKeyIndexSourceMeta sourceMeta,
+            float[][] queries,
+            int limit,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, List<Range>> rowRangesByFile,
+            Map<String, String> searchOptions) {
+        return searchBatchAsync(
+                        segment,
+                        sourceMeta,
+                        queries,
+                        limit,
+                        deletionVectors,
+                        activeSourceFiles,
+                        rowRangesByFile,
+                        searchOptions)
+                .join();
+    }
+
+    CompletableFuture<List<List<PkVectorSearchResult>>> searchBatchAsync(
+            IndexFileMeta segment,
+            PrimaryKeyIndexSourceMeta sourceMeta,
+            float[][] queries,
+            int limit,
+            Map<String, DeletionVector> deletionVectors,
+            Set<String> activeSourceFiles,
+            Map<String, List<Range>> rowRangesByFile,
+            Map<String, String> searchOptions) {
+        checkArgument(queries != null && queries.length > 0, "Query vectors cannot be empty.");
+        checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
+        GlobalIndexMeta globalIndexMeta = segment.globalIndexMeta();
+        checkArgument(
+                globalIndexMeta != null && globalIndexMeta.sourceMeta() != null,
+                "Vector segment %s has no source metadata.",
+                segment.fileName());
+        if (segment.rowCount() == 0) {
+            List<List<PkVectorSearchResult>> results = new ArrayList<>(queries.length);
+            for (int i = 0; i < queries.length; i++) {
+                results.add(Collections.emptyList());
+            }
+            return CompletableFuture.completedFuture(Collections.unmodifiableList(results));
+        }
+        GlobalIndexer indexer =
+                GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
+        checkArgument(
+                indexer instanceof VectorGlobalIndexer,
+                "Index algorithm %s does not implement VectorGlobalIndexer.",
+                segment.indexType());
+        String readerMetric =
+                VectorSearchMetric.normalize(((VectorGlobalIndexer) indexer).metric());
+        checkArgument(
+                metric.equals(readerMetric),
+                "ANN segment metric %s does not match index reader metric %s.",
+                metric,
+                readerMetric);
+
+        GlobalIndexIOMeta ioMeta =
+                new GlobalIndexIOMeta(
+                        annSegmentFile.path(segment),
+                        segment.fileSize(),
+                        globalIndexMeta.indexMeta());
+        GlobalIndexReader reader =
+                indexer.createReader(
+                        meta -> fileIO.newInputStream(meta.filePath()),
+                        Collections.singletonList(ioMeta),
+                        executor);
+        try {
+            BatchVectorSearch search =
+                    new BatchVectorSearch(queries, limit, vectorField.name(), searchOptions);
+            RoaringNavigableMap64 liveRows =
+                    liveRowPositions(
+                            sourceMeta.sourceFiles(),
+                            activeSourceFiles,
+                            deletionVectors,
+                            rowRangesByFile);
+            if (liveRows != null) {
+                search.withIncludeRowIds(liveRows);
+            }
+            return reader.visitBatchVectorSearch(search)
+                    .whenComplete((ignored, error) -> IOUtils.closeQuietly(reader))
+                    .thenApply(
+                            scoredResults -> {
+                                checkArgument(
+                                        scoredResults.size() == queries.length,
+                                        "ANN segment %s returned %s batch results for %s queries.",
+                                        segment.fileName(),
+                                        scoredResults.size(),
+                                        queries.length);
+                                List<List<PkVectorSearchResult>> results =
+                                        new ArrayList<>(queries.length);
+                                for (Optional<ScoredGlobalIndexResult> scoredResult :
+                                        scoredResults) {
+                                    results.add(
+                                            mapResults(
+                                                    segment,
+                                                    sourceMeta,
+                                                    deletionVectors,
+                                                    activeSourceFiles,
+                                                    rowRangesByFile,
+                                                    scoredResult));
+                                }
+                                return Collections.unmodifiableList(results);
+                            });
         } catch (RuntimeException | Error t) {
             IOUtils.closeQuietly(reader);
             throw t;

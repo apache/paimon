@@ -77,6 +77,32 @@ class PkVectorExactSearcherTest {
                         org.assertj.core.groups.Tuple.tuple("data-file", 0L, 9F));
     }
 
+    @Test
+    void testBatchSearchPreservesQueryOrderAndScansSourceOnce() throws Exception {
+        ArrayReader reader = new ArrayReader(new float[][] {{0, 0}, {2, 0}, {5, 0}});
+
+        List<List<PkVectorSearchResult>> results;
+        try (PkVectorReader ignored = reader) {
+            results =
+                    PkVectorExactSearcher.searchBatch(
+                            "data-file",
+                            reader,
+                            new float[][] {{0, 0}, {5, 0}},
+                            "l2",
+                            1,
+                            position -> false);
+        }
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0))
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(0L);
+        assertThat(results.get(1))
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(2L);
+        assertThat(reader.position).isEqualTo(3);
+    }
+
     private static float distance(String metric) throws IOException {
         try (PkVectorReader reader = new ArrayReader(new float[][] {{1, 0}})) {
             return PkVectorExactSearcher.search(
