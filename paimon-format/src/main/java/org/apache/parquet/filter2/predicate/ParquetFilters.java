@@ -66,16 +66,13 @@ import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
 public class ParquetFilters {
 
     private ParquetFilters() {}
-
-    public static FilterCompat.Filter convert(List<Predicate> predicates) {
-        return convert(predicates, null, true);
-    }
 
     public static FilterCompat.Filter convert(
             List<Predicate> predicates, MessageType fileSchema, boolean caseSensitive) {
@@ -105,7 +102,7 @@ public class ParquetFilters {
         private final boolean caseSensitive;
 
         private ConvertFilterToParquet(MessageType fileSchema, boolean caseSensitive) {
-            this.fileSchema = fileSchema;
+            this.fileSchema = Objects.requireNonNull(fileSchema, "fileSchema");
             this.caseSensitive = caseSensitive;
         }
 
@@ -275,93 +272,70 @@ public class ParquetFilters {
         }
 
         private Operators.Column<?> toParquetColumn(FieldRef fieldRef) {
-            if (!(fieldRef.type() instanceof DecimalType)) {
-                return fieldRef.type().accept(new ConvertToColumnTypeVisitor(fieldRef.name()));
-            }
-
-            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef);
-            switch (primitiveType.getPrimitiveTypeName()) {
-                case INT32:
-                    return FilterApi.intColumn(fieldRef.name());
-                case INT64:
-                    return FilterApi.longColumn(fieldRef.name());
-                case BINARY:
-                case FIXED_LEN_BYTE_ARRAY:
-                    return FilterApi.binaryColumn(fieldRef.name());
-                default:
-                    throw new UnsupportedOperationException();
-            }
+            return fieldRef.type()
+                    .accept(new ConvertToColumnTypeVisitor(fieldRef, fileSchema, caseSensitive));
         }
 
         private Comparable<?> toParquetObject(Object value, FieldRef fieldRef) {
-            if (!(fieldRef.type() instanceof DecimalType)) {
-                return ParquetFilters.toParquetObject(value, fieldRef.type());
-            }
             if (value == null) {
                 return null;
             }
-            if (!(value instanceof Decimal)) {
-                throw new UnsupportedOperationException();
-            }
 
-            DecimalType decimalType = (DecimalType) fieldRef.type();
-            Decimal decimal = normalizeDecimal((Decimal) value, decimalType);
-            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef);
-            switch (primitiveType.getPrimitiveTypeName()) {
-                case INT32:
-                    long intValue = toUnscaledLong(decimal);
-                    if (intValue < Integer.MIN_VALUE || intValue > Integer.MAX_VALUE) {
+            org.apache.paimon.types.DataType type = fieldRef.type();
+            if (type instanceof DecimalType) {
+                DecimalType decimalType = (DecimalType) fieldRef.type();
+                Decimal decimal = normalizeDecimal((Decimal) value, decimalType);
+                PrimitiveType primitiveType =
+                        decimalPrimitiveType(fieldRef, fileSchema, caseSensitive);
+                switch (primitiveType.getPrimitiveTypeName()) {
+                    case INT32:
+                        long intValue = toUnscaledLong(decimal);
+                        if (intValue < Integer.MIN_VALUE || intValue > Integer.MAX_VALUE) {
+                            throw new UnsupportedOperationException();
+                        }
+                        return (int) intValue;
+                    case INT64:
+                        return toUnscaledLong(decimal);
+                    case BINARY:
+                        return Binary.fromConstantByteArray(decimal.toUnscaledBytes());
+                    case FIXED_LEN_BYTE_ARRAY:
+                        return decimalToBinary(decimal, primitiveType.getTypeLength());
+                    default:
                         throw new UnsupportedOperationException();
-                    }
-                    return (int) intValue;
-                case INT64:
-                    return toUnscaledLong(decimal);
-                case BINARY:
-                    return Binary.fromConstantByteArray(decimal.toUnscaledBytes());
-                case FIXED_LEN_BYTE_ARRAY:
-                    return decimalToBinary(decimal, primitiveType.getTypeLength());
-                default:
-                    throw new UnsupportedOperationException();
-            }
-        }
-
-        private PrimitiveType decimalPrimitiveType(FieldRef fieldRef) {
-            if (fileSchema == null) {
-                throw new UnsupportedOperationException();
-            }
-
-            Type matched = null;
-            for (Type field : fileSchema.getFields()) {
-                boolean nameMatches =
-                        caseSensitive
-                                ? field.getName().equals(fieldRef.name())
-                                : field.getName().equalsIgnoreCase(fieldRef.name());
-                if (nameMatches) {
-                    if (matched != null) {
-                        throw new UnsupportedOperationException();
-                    }
-                    matched = field;
                 }
             }
-            if (matched == null || !matched.isPrimitive()) {
+
+            if (value instanceof Number) {
+                if (value instanceof Byte) {
+                    return ((Byte) value).intValue();
+                } else if (value instanceof Short) {
+                    return ((Short) value).intValue();
+                }
+                return (Comparable<?>) value;
+            } else if (value instanceof String) {
+                return Binary.fromString((String) value);
+            } else if (value instanceof BinaryString) {
+                return Binary.fromString(value.toString());
+            } else if (value instanceof byte[]) {
+                return Binary.fromReusedByteArray((byte[]) value);
+            } else if (value instanceof Timestamp) {
+                Timestamp timestamp = (Timestamp) value;
+                int precision = getTimestampPrecision(type);
+                if (precision <= 3) {
+                    // milliseconds
+                    return timestamp.getMillisecond();
+                } else if (precision <= 6) {
+                    // microseconds
+                    return timestamp.toMicros();
+                }
+                // precision > 6 uses INT96, not supported
                 throw new UnsupportedOperationException();
             }
 
-            PrimitiveType primitiveType = matched.asPrimitiveType();
-            LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
-            if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
-                throw new UnsupportedOperationException();
-            }
-
-            DecimalLogicalTypeAnnotation decimalLogicalType =
-                    (DecimalLogicalTypeAnnotation) logicalType;
-            if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
-                throw new UnsupportedOperationException();
-            }
-            return primitiveType;
+            throw new UnsupportedOperationException();
         }
 
-        private static Decimal normalizeDecimal(Decimal decimal, DecimalType fieldType) {
+        private Decimal normalizeDecimal(Decimal decimal, DecimalType fieldType) {
             try {
                 BigDecimal normalized =
                         decimal.toBigDecimal()
@@ -378,13 +352,65 @@ public class ParquetFilters {
             }
         }
 
-        private static long toUnscaledLong(Decimal decimal) {
+        private long toUnscaledLong(Decimal decimal) {
             try {
                 return decimal.toUnscaledLong();
             } catch (ArithmeticException e) {
                 throw new UnsupportedOperationException(e);
             }
         }
+
+        private Binary decimalToBinary(Decimal decimal, int numBytes) {
+            byte[] unscaledBytes = decimal.toUnscaledBytes();
+            if (unscaledBytes.length > numBytes) {
+                throw new UnsupportedOperationException();
+            }
+            if (unscaledBytes.length == numBytes) {
+                return Binary.fromConstantByteArray(unscaledBytes);
+            }
+
+            byte[] paddedBytes = new byte[numBytes];
+            Arrays.fill(paddedBytes, unscaledBytes[0] < 0 ? (byte) -1 : (byte) 0);
+            System.arraycopy(
+                    unscaledBytes,
+                    0,
+                    paddedBytes,
+                    numBytes - unscaledBytes.length,
+                    unscaledBytes.length);
+            return Binary.fromConstantByteArray(paddedBytes);
+        }
+    }
+
+    private static PrimitiveType decimalPrimitiveType(
+            FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
+        Type matched = null;
+        // Paimon predicates currently reference top-level fields only. Nested field
+        // predicates are rejected before reaching the format reader.
+        for (Type field : fileSchema.getFields()) {
+            if (caseSensitive
+                    ? field.getName().equals(fieldRef.name())
+                    : field.getName().equalsIgnoreCase(fieldRef.name())) {
+                matched = field;
+                break;
+            }
+        }
+
+        if (matched == null || !matched.isPrimitive()) {
+            throw new UnsupportedOperationException();
+        }
+
+        PrimitiveType primitiveType = matched.asPrimitiveType();
+        LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
+        if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
+
+        DecimalLogicalTypeAnnotation decimalLogicalType =
+                (DecimalLogicalTypeAnnotation) logicalType;
+        if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
+            throw new UnsupportedOperationException();
+        }
+        return primitiveType;
     }
 
     private static int getTimestampPrecision(org.apache.paimon.types.DataType type) {
@@ -396,71 +422,20 @@ public class ParquetFilters {
         throw new IllegalArgumentException("Not a timestamp type: " + type);
     }
 
-    private static Comparable<?> toParquetObject(
-            Object value, org.apache.paimon.types.DataType type) {
-        if (value == null) {
-            return null;
-        }
-
-        if (value instanceof Number) {
-            if (value instanceof Byte) {
-                return ((Byte) value).intValue();
-            } else if (value instanceof Short) {
-                return ((Short) value).intValue();
-            }
-            return (Comparable<?>) value;
-        } else if (value instanceof String) {
-            return Binary.fromString((String) value);
-        } else if (value instanceof BinaryString) {
-            return Binary.fromString(value.toString());
-        } else if (value instanceof byte[]) {
-            return Binary.fromReusedByteArray((byte[]) value);
-        } else if (value instanceof Decimal) {
-            throw new UnsupportedOperationException();
-        } else if (value instanceof Timestamp) {
-            Timestamp timestamp = (Timestamp) value;
-            int precision = getTimestampPrecision(type);
-            if (precision <= 3) {
-                // milliseconds
-                return timestamp.getMillisecond();
-            } else if (precision <= 6) {
-                // microseconds
-                return timestamp.toMicros();
-            }
-            // precision > 6 uses INT96, not supported
-            throw new UnsupportedOperationException();
-        }
-
-        throw new UnsupportedOperationException();
-    }
-
-    private static Binary decimalToBinary(Decimal decimal, int numBytes) {
-        byte[] unscaledBytes = decimal.toUnscaledBytes();
-        if (unscaledBytes.length > numBytes) {
-            throw new UnsupportedOperationException();
-        }
-        if (unscaledBytes.length == numBytes) {
-            return Binary.fromConstantByteArray(unscaledBytes);
-        }
-
-        byte[] paddedBytes = new byte[numBytes];
-        Arrays.fill(paddedBytes, unscaledBytes[0] < 0 ? (byte) -1 : (byte) 0);
-        System.arraycopy(
-                unscaledBytes,
-                0,
-                paddedBytes,
-                numBytes - unscaledBytes.length,
-                unscaledBytes.length);
-        return Binary.fromConstantByteArray(paddedBytes);
-    }
-
     private static class ConvertToColumnTypeVisitor
             implements DataTypeVisitor<Operators.Column<?>> {
 
+        private final FieldRef fieldRef;
         private final String name;
+        private final MessageType fileSchema;
+        private final boolean caseSensitive;
 
-        public ConvertToColumnTypeVisitor(String name) {
-            this.name = name;
+        public ConvertToColumnTypeVisitor(
+                FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
+            this.fieldRef = fieldRef;
+            this.name = fieldRef.name();
+            this.fileSchema = fileSchema;
+            this.caseSensitive = caseSensitive;
         }
 
         @Override
@@ -530,7 +505,18 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(DecimalType decimalType) {
-            throw new UnsupportedOperationException();
+            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef, fileSchema, caseSensitive);
+            switch (primitiveType.getPrimitiveTypeName()) {
+                case INT32:
+                    return FilterApi.intColumn(fieldRef.name());
+                case INT64:
+                    return FilterApi.longColumn(fieldRef.name());
+                case BINARY:
+                case FIXED_LEN_BYTE_ARRAY:
+                    return FilterApi.binaryColumn(fieldRef.name());
+                default:
+                    throw new UnsupportedOperationException();
+            }
         }
 
         @Override

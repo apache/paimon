@@ -73,7 +73,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return ParquetReaderFactory.create(options, projectedRowType, readBatchSize, filters);
+        return new ParquetReaderFactory(options, projectedRowType, readBatchSize, filters);
     }
 
     @Override

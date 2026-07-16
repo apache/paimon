@@ -20,6 +20,9 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
@@ -60,6 +63,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -225,8 +229,10 @@ class ParquetFiltersTest {
                                 Collections.singletonList(
                                         new DataField(0, "d1", new DoubleType()))));
 
+        Predicate predicate = builder.isNaN(0);
         FilterCompat.Filter filter =
-                ParquetFilters.convert(Collections.singletonList(builder.isNaN(0)));
+                ParquetFilters.convert(
+                        Collections.singletonList(predicate), messageType(predicate), true);
         FilterPredicateCompat compat = (FilterPredicateCompat) filter;
         assertThat(compat.getFilterPredicate().toString())
                 .contains(
@@ -241,8 +247,10 @@ class ParquetFiltersTest {
                                 Collections.singletonList(
                                         new DataField(0, "f1", new FloatType()))));
 
+        Predicate predicate = builder.isNaN(0);
         FilterCompat.Filter filter =
-                ParquetFilters.convert(Collections.singletonList(builder.isNaN(0)));
+                ParquetFilters.convert(
+                        Collections.singletonList(predicate), messageType(predicate), true);
         FilterPredicateCompat compat = (FilterPredicateCompat) filter;
         assertThat(compat.getFilterPredicate().toString())
                 .contains(
@@ -635,16 +643,6 @@ class ParquetFiltersTest {
                                 Collections.singletonList(metadata),
                                 dictionaries))
                 .isTrue();
-    }
-
-    @Test
-    public void testDecimalWithoutFileSchema() {
-        int precision = 20;
-        int scale = 0;
-        PredicateBuilder builder = decimalPredicateBuilder(precision, scale);
-        Decimal value = Decimal.fromBigDecimal(new BigDecimal("10000939"), precision, scale);
-
-        test(builder.equal(0, value), "", false);
     }
 
     @Test
@@ -1065,7 +1063,9 @@ class ParquetFiltersTest {
     }
 
     private void test(Predicate predicate, FilterPredicate parquetPredicate, boolean canPushDown) {
-        FilterCompat.Filter filter = ParquetFilters.convert(PredicateBuilder.splitAnd(predicate));
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        PredicateBuilder.splitAnd(predicate), messageType(predicate), true);
         if (canPushDown) {
             FilterPredicateCompat compat = (FilterPredicateCompat) filter;
             assertThat(compat.getFilterPredicate()).isEqualTo(parquetPredicate);
@@ -1074,18 +1074,42 @@ class ParquetFiltersTest {
         }
     }
 
-    private FilterPredicate convert(Predicate predicate) {
-        FilterCompat.Filter filter = ParquetFilters.convert(PredicateBuilder.splitAnd(predicate));
-        return ((FilterPredicateCompat) filter).getFilterPredicate();
-    }
-
     private void test(Predicate predicate, String expected, boolean canPushDown) {
-        FilterCompat.Filter filter = ParquetFilters.convert(PredicateBuilder.splitAnd(predicate));
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        PredicateBuilder.splitAnd(predicate), messageType(predicate), true);
         if (canPushDown) {
             FilterPredicateCompat compat = (FilterPredicateCompat) filter;
             assertThat(compat.getFilterPredicate().toString()).isEqualTo(expected);
         } else {
             assertThat(filter).isEqualTo(FilterCompat.NOOP);
         }
+    }
+
+    private static MessageType messageType(Predicate predicate) {
+        FieldRef fieldRef = fieldRef(predicate);
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(fieldRef.index(), fieldRef.name(), fieldRef.type())));
+        return ParquetSchemaConverter.convertToParquetMessageType(rowType);
+    }
+
+    private static FieldRef fieldRef(Predicate predicate) {
+        return findFieldRef(predicate)
+                .orElseThrow(() -> new IllegalArgumentException("Predicate has no field"));
+    }
+
+    private static Optional<FieldRef> findFieldRef(Predicate predicate) {
+        if (predicate instanceof LeafPredicate) {
+            return ((LeafPredicate) predicate).fieldRefOptional();
+        }
+        for (Predicate child : ((CompoundPredicate) predicate).children()) {
+            Optional<FieldRef> fieldRef = findFieldRef(child);
+            if (fieldRef.isPresent()) {
+                return fieldRef;
+            }
+        }
+        return Optional.empty();
     }
 }
