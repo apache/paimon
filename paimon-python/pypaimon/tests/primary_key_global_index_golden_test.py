@@ -17,19 +17,23 @@
 
 import json
 import os
+import tarfile
 
 import pytest
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
 
 
-GOLDEN_WAREHOUSE = os.path.join(
-    os.path.dirname(__file__), "resources", "pk_global_index_golden")
+GOLDEN_ARCHIVE = os.path.join(
+    os.path.dirname(__file__), "resources", "pk_global_index_golden.tar.gz")
 
 
 @pytest.fixture(scope="module")
-def catalog():
-    return CatalogFactory.create({"warehouse": GOLDEN_WAREHOUSE})
+def catalog(tmp_path_factory):
+    warehouse = tmp_path_factory.mktemp("pk_global_index_golden")
+    with tarfile.open(GOLDEN_ARCHIVE, "r:gz") as archive:
+        archive.extractall(warehouse)
+    return CatalogFactory.create({"warehouse": str(warehouse)})
 
 
 def _read_search_result(table, result):

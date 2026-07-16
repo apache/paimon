@@ -19,10 +19,8 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -39,7 +37,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -63,9 +60,7 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
@@ -201,76 +196,6 @@ public class JavaPyE2ETest {
         assertThat(indexEntries).hasSize(1);
         assertThat(indexEntries.get(0).indexFile().indexType())
                 .isEqualTo(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
-    }
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testPrimaryKeyVectorGoldenWrite() throws Exception {
-        Path tablePath = new Path(warehouse.toString() + "/default.db/test_pk_vector_golden");
-        LocalFileIO fileIO = LocalFileIO.create();
-        if (fileIO.exists(tablePath)) {
-            fileIO.delete(tablePath, true);
-        }
-
-        int dimension = 4;
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT(), DataTypes.VECTOR(dimension, DataTypes.FLOAT())
-                        },
-                        new String[] {"id", "embedding"});
-        Options options = new Options();
-        options.set(PATH, tablePath.toString());
-        options.set(BUCKET, 1);
-        options.set(DELETION_VECTORS_ENABLED, true);
-        options.setString(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
-        options.setString(
-                "fields.embedding.pk-vector.index.type",
-                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
-        options.setString(
-                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".dimension",
-                String.valueOf(dimension));
-        options.setString(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".metric", "l2");
-        options.setString(IvfFlatVectorGlobalIndexerFactory.IDENTIFIER + ".nlist", "2");
-
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
-                        new Schema(
-                                rowType.getFields(),
-                                Collections.emptyList(),
-                                Collections.singletonList("id"),
-                                options.toMap(),
-                                ""));
-        PrimaryKeyFileStoreTable table =
-                new PrimaryKeyFileStoreTable(
-                        FileIOFinder.find(tablePath),
-                        tablePath,
-                        tableSchema,
-                        CatalogEnvironment.empty());
-
-        float[][] vectors =
-                new float[][] {
-                    {1.0f, 0.0f, 0.0f, 0.0f},
-                    {0.9f, 0.1f, 0.0f, 0.0f},
-                    {0.0f, 1.0f, 0.0f, 0.0f},
-                    {0.0f, 0.0f, 1.0f, 0.0f}
-                };
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.withIOManager(IOManager.create(warehouse.toString()));
-            for (int i = 0; i < vectors.length; i++) {
-                write.write(GenericRow.of(i + 1, BinaryVector.fromPrimitiveArray(vectors[i])));
-            }
-            commit.commit(write.prepareCommit());
-        }
-
-        assertThat(
-                        table.indexManifestFileReader()
-                                .read(table.latestSnapshot().get().indexManifest()))
-                .isNotEmpty()
-                .allMatch(e -> e.indexFile().globalIndexMeta().sourceMeta() != null);
     }
 
     @Test

@@ -537,54 +537,6 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testPrimaryKeyGlobalIndexGoldenWrite() throws Exception {
-        Identifier identifier = identifier("test_pk_global_index_golden");
-        catalog.dropTable(identifier, true);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column("name", DataTypes.STRING())
-                        .column("category", DataTypes.STRING())
-                        .primaryKey("id")
-                        .option(CoreOptions.BUCKET.key(), "1")
-                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name")
-                        .option(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "category")
-                        .option(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "2")
-                        .build();
-        catalog.createTable(identifier, schema, false);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        for (int batch = 0; batch < 3; batch++) {
-            try (BatchTableWrite write = writeBuilder.newWrite();
-                    BatchTableCommit commit = writeBuilder.newCommit()) {
-                write.withIOManager(IOManager.create(warehouse.toString()));
-                int first = batch * 2 + 1;
-                for (int id = first; id < first + 2; id++) {
-                    write.write(
-                            GenericRow.of(
-                                    id,
-                                    BinaryString.fromString("name-" + id),
-                                    BinaryString.fromString(id % 2 == 0 ? "even" : "odd")));
-                }
-                commit.commit(write.prepareCommit());
-            }
-        }
-
-        List<IndexManifestEntry> indexEntries =
-                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest());
-        assertThat(indexEntries)
-                .isNotEmpty()
-                .allMatch(
-                        entry ->
-                                entry.indexFile().globalIndexMeta() != null
-                                        && entry.indexFile().globalIndexMeta().sourceMeta()
-                                                != null);
-    }
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBtreeRawFallbackWrite() throws Exception {
         RowType rowType =
                 RowType.of(

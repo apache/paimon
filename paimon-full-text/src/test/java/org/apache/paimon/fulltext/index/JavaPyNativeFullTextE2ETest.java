@@ -21,7 +21,6 @@ package org.apache.paimon.fulltext.index;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -38,7 +37,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -67,9 +65,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
@@ -143,64 +139,6 @@ public class JavaPyNativeFullTextE2ETest {
                         "中文分词支持更自然的全文检索",
                         "默认英文分词不适合中文语义"),
                 "jieba");
-    }
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testPrimaryKeyFullTextGoldenWrite() throws Exception {
-        Path tablePath = new Path(warehouse.toString() + "/default.db/test_pk_full_text_golden");
-        LocalFileIO fileIO = LocalFileIO.create();
-        if (fileIO.exists(tablePath)) {
-            fileIO.delete(tablePath, true);
-        }
-
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
-                        new String[] {"id", "content"});
-        Options options = new Options();
-        options.set(PATH, tablePath.toString());
-        options.set(BUCKET, 1);
-        options.set(DELETION_VECTORS_ENABLED, true);
-        options.setString("pk-full-text.index.columns", "content");
-        options.setString("num-sorted-run.compaction-trigger", "2");
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
-                        new Schema(
-                                rowType.getFields(),
-                                Collections.emptyList(),
-                                Collections.singletonList("id"),
-                                options.toMap(),
-                                ""));
-        PrimaryKeyFileStoreTable table =
-                new PrimaryKeyFileStoreTable(
-                        FileIOFinder.find(tablePath),
-                        tablePath,
-                        tableSchema,
-                        CatalogEnvironment.empty());
-
-        List<String> contents =
-                Arrays.asList(
-                        "Apache Paimon supports primary key tables",
-                        "Native full text search",
-                        "Paimon global indexes",
-                        "Unrelated document");
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        for (int i = 0; i < contents.size(); i++) {
-            try (BatchTableWrite write = writeBuilder.newWrite();
-                    BatchTableCommit commit = writeBuilder.newCommit()) {
-                write.withIOManager(IOManager.create(warehouse.toString()));
-                write.write(GenericRow.of(i + 1, BinaryString.fromString(contents.get(i))));
-                commit.commit(write.prepareCommit());
-            }
-        }
-
-        assertThat(
-                        table.indexManifestFileReader()
-                                .read(table.latestSnapshot().get().indexManifest()))
-                .isNotEmpty()
-                .allMatch(e -> e.indexFile().globalIndexMeta().sourceMeta() != null);
     }
 
     private void writeTableWithNativeFullTextIndex(
