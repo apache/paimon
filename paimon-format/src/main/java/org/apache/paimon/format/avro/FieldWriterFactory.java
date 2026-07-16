@@ -186,11 +186,6 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         FieldWriter elementWriter = visit(schema.getElementType(), elementType);
         return (container, index, encoder) -> {
             InternalArray array = container.getArray(index);
-            if (encoder instanceof BinaryEncoder) {
-                writeArrayData(array, elementWriter, (BinaryEncoder) encoder);
-                return;
-            }
-
             encoder.writeArrayStart();
             int numElements = array.size();
             encoder.setItemCount(numElements);
@@ -200,37 +195,6 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
             }
             encoder.writeArrayEnd();
         };
-    }
-
-    private void writeArrayData(
-            InternalArray array, FieldWriter elementWriter, BinaryEncoder encoder)
-            throws IOException {
-        encoder.writeArrayStart();
-        encoder.setItemCount(array.size());
-        writeArrayItems(array, 0, array.size(), elementWriter, encoder);
-        encoder.writeArrayEnd();
-    }
-
-    private void writeArrayItems(
-            InternalArray array,
-            int offset,
-            int length,
-            FieldWriter elementWriter,
-            BinaryEncoder encoder)
-            throws IOException {
-        if (length == 0) {
-            return;
-        }
-
-        if (array instanceof AvroBytesArray) {
-            ((AvroBytesArray) array).writeRawElements(encoder, offset, length);
-        } else {
-            // fallback to element by element
-            for (int i = 0; i < length; i++) {
-                encoder.startItem();
-                elementWriter.write(array, offset + i, encoder);
-            }
-        }
     }
 
     @Override
