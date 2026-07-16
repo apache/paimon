@@ -24,6 +24,10 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.table.source.full_text_read import FullTextRead, FullTextReadImpl
 from pypaimon.table.source.full_text_scan import FullTextScan, FullTextScanImpl
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
+from pypaimon.index.pk.primary_key_index_definition import PrimaryKeyIndexFamily
+from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
 
 
 class FullTextSearchBuilder(ABC):
@@ -114,6 +118,11 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
+        definition = self._primary_key_full_text_definition()
+        if definition is not None:
+            from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
+            return PrimaryKeyFullTextScan(
+                self._table, definition, partition_filter=self._partition_filter)
         return FullTextScanImpl(
             self._table,
             self._text_columns(),
@@ -123,6 +132,12 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def new_full_text_read(self) -> FullTextRead:
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
+        definition = self._primary_key_full_text_definition()
+        if definition is not None:
+            from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
+            return PrimaryKeyFullTextRead(
+                self._table, self._limit, self._text_columns(), self._query,
+                definition=definition, partition_filter=self._partition_filter)
         return FullTextReadImpl(
             self._table,
             self._limit,
@@ -141,3 +156,16 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             raise ValueError(
                 f"Text column '{self._field_name}' not found in table schema")
         return [field_dict[self._field_name]]
+
+    def _primary_key_full_text_definition(self):
+        text_column = self._text_columns()[0]
+        core = CoreOptions(Options(dict(self._table.table_schema.options)))
+        if (core.data_evolution_enabled()
+                or not core.primary_key_full_text_index_columns()):
+            return None
+        for definition in PrimaryKeyIndexDefinitions.create(
+                self._table.table_schema).definitions:
+            if (definition.family == PrimaryKeyIndexFamily.FULL_TEXT
+                    and definition.field_id == text_column.id):
+                return definition
+        return None

@@ -31,11 +31,19 @@ class PrimaryKeyIndexDefinitions:
         core = CoreOptions(Options(dict(schema.options)))
         btree = core.primary_key_btree_index_columns()
         bitmap = core.primary_key_bitmap_index_columns()
+        vector = core.primary_key_vector_index_columns()
+        full_text = core.primary_key_full_text_index_columns()
         _validate_columns(btree, CoreOptions.PK_BTREE_INDEX_COLUMNS.key())
         _validate_columns(bitmap, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key())
-        overlap = set(btree).intersection(bitmap)
-        if overlap:
-            raise ValueError("Column '%s' can own at most one primary-key index." % sorted(overlap)[0])
+        _validate_columns(vector, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key())
+        _validate_columns(full_text, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key())
+        families = (btree, bitmap, vector, full_text)
+        owned = set()
+        for columns in families:
+            overlap = owned.intersection(columns)
+            if overlap:
+                raise ValueError("Column '%s' can own at most one primary-key index." % sorted(overlap)[0])
+            owned.update(columns)
 
         definitions = []
         for field in schema.fields:
@@ -49,6 +57,17 @@ class PrimaryKeyIndexDefinitions:
                     field.name, field.id, "bitmap",
                     core.primary_key_bitmap_index_options(field.name),
                     PrimaryKeyIndexFamily.BITMAP))
+            elif field.name in vector:
+                definitions.append(PrimaryKeyIndexDefinition(
+                    field.name, field.id,
+                    core.primary_key_vector_index_type(field.name),
+                    core.primary_key_vector_index_options(field.name),
+                    PrimaryKeyIndexFamily.VECTOR))
+            elif field.name in full_text:
+                definitions.append(PrimaryKeyIndexDefinition(
+                    field.name, field.id, "full-text",
+                    core.primary_key_full_text_index_options(field.name),
+                    PrimaryKeyIndexFamily.FULL_TEXT))
         return PrimaryKeyIndexDefinitions(definitions)
 
 

@@ -23,6 +23,8 @@ from pypaimon.common.options.options import Options
 class PrimaryKeyIndexFamily(str, Enum):
     BTREE = "BTREE"
     BITMAP = "BITMAP"
+    VECTOR = "VECTOR"
+    FULL_TEXT = "FULL_TEXT"
 
 
 @dataclass(frozen=True)
