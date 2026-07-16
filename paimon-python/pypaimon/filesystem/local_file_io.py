@@ -307,9 +307,8 @@ class LocalFileIO(FileIO):
     def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
         try:
-            import sys
             import pyarrow.orc as orc
-            
+
             file_path = self._to_file(path)
             parent = file_path.parent
             if parent and not parent.exists():
@@ -318,7 +317,8 @@ class LocalFileIO(FileIO):
             data = self._cast_time_columns_for_orc(data)
             
             with open(file_path, 'wb') as f:
-                if sys.version_info[:2] == (3, 6):
+                # ORC compression= was added in PyArrow 7.0; 6.x (Python 3.6/3.7) lacks it.
+                if int(pyarrow.__version__.split(".")[0]) < 7:
                     orc.write_table(data, f, **kwargs)
                 else:
                     orc.write_table(data, f, compression=compression, **kwargs)

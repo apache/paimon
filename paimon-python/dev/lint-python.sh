@@ -195,8 +195,9 @@ function pytest_check() {
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
 
-    # 3.6/3.7 run the core subset only; the full suite imports ray/pypaimon_rust/mosaic (no 3.7 wheels).
-    if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
+    # 3.6 uses the minimal py36 subset. 3.7+ run the full suite; modules needing
+    # optional deps with no 3.7 wheels are skipped by tests/conftest.py.
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else

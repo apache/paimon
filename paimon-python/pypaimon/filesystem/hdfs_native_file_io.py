@@ -562,13 +562,13 @@ class HdfsNativeFileIO(FileIO):
     def write_orc(self, path: str, data: pyarrow.Table,
                   compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         try:
-            import sys
             import pyarrow.orc as orc
             data = self._cast_time_columns_for_orc(data)
             with self.new_output_stream(path) as raw_stream:
                 stream = pyarrow.PythonFile(raw_stream, mode='wb')
                 try:
-                    if sys.version_info[:2] == (3, 6):
+                    # ORC compression= was added in PyArrow 7.0; 6.x (Python 3.6/3.7) lacks it.
+                    if int(pyarrow.__version__.split(".")[0]) < 7:
                         orc.write_table(data, stream, **kwargs)
                     else:
                         orc.write_table(
