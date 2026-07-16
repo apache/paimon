@@ -1,0 +1,28 @@
+{
+  "version" : 3,
+  "id" : 0,
+  "fields" : [ {
+    "id" : 0,
+    "name" : "id",
+    "type" : "INT NOT NULL"
+  }, {
+    "id" : 1,
+    "name" : "name",
+    "type" : "STRING"
+  }, {
+    "id" : 2,
+    "name" : "category",
+    "type" : "STRING"
+  } ],
+  "highestFieldId" : 2,
+  "partitionKeys" : [ ],
+  "primaryKeys" : [ "id" ],
+  "options" : {
+    "bucket" : "1",
+    "num-sorted-run.compaction-trigger" : "2",
+    "pk-bitmap.index.columns" : "category",
+    "pk-btree.index.columns" : "name",
+    "deletion-vectors.enabled" : "true"
+  },
+  "timeMillis" : 1784213018193
+}

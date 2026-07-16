@@ -460,26 +460,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         if sys.version_info[:2] >= (3, 7):
             self._test_index_manifest_inherited_after_write()
 
-    def test_read_primary_key_global_index_golden(self):
-        table = self.catalog.get_table(
-            'default.test_pk_global_index_golden')
-
-        name_read = table.new_read_builder()
-        name_read.with_filter(
-            name_read.new_predicate_builder().equal('name', 'name-4'))
-        name_plan = name_read.new_scan().plan()
-        name_result = name_read.new_read().to_arrow(name_plan.splits())
-        self.assertEqual([4], name_result.column('id').to_pylist())
-        self.assertEqual(['name-4'], name_result.column('name').to_pylist())
-
-        category_read = table.new_read_builder()
-        category_read.with_filter(
-            category_read.new_predicate_builder().equal('category', 'odd'))
-        category_result = category_read.new_read().to_arrow(
-            category_read.new_scan().plan().splits())
-        category_result = table_sort_by(category_result, 'id')
-        self.assertEqual([1, 3, 5], category_result.column('id').to_pylist())
-
     def test_read_btree_raw_fallback(self):
         table = self.catalog.get_table('default.test_btree_raw_fallback')
         fast_builder = table.new_read_builder()

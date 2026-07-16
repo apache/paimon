@@ -1,0 +1,25 @@
+{
+  "version" : 3,
+  "id" : 0,
+  "fields" : [ {
+    "id" : 0,
+    "name" : "id",
+    "type" : "INT NOT NULL"
+  }, {
+    "id" : 1,
+    "name" : "content",
+    "type" : "STRING"
+  } ],
+  "highestFieldId" : 1,
+  "partitionKeys" : [ ],
+  "primaryKeys" : [ "id" ],
+  "options" : {
+    "bucket" : "1",
+    "num-sorted-run.compaction-trigger" : "2",
+    "path" : "file:/Users/lijingsong/IdeaProjects/paimon/paimon-python/pypaimon/tests/e2e/warehouse/default.db/test_pk_full_text_golden",
+    "deletion-vectors.enabled" : "true",
+    "pk-full-text.index.columns" : "content"
+  },
+  "comment" : "",
+  "timeMillis" : 1784213607048
+}

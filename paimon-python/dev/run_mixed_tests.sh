@@ -100,7 +100,6 @@ run_batched_java_write_tests() {
     local core_tests="org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable"
     core_tests="${core_tests}+testPKDeletionVectorWrite"
     core_tests="${core_tests}+testBtreeIndexWrite"
-    core_tests="${core_tests}+testPrimaryKeyGlobalIndexGoldenWrite"
     core_tests="${core_tests}+testBtreeRawFallbackWrite"
     core_tests="${core_tests}+testBitmapIndexWrite"
     core_tests="${core_tests}+testCompressedGlobalIndexWrite"
@@ -332,28 +331,6 @@ run_btree_index_test() {
         echo -e "${RED}✗ Python test failed${NC}"
         return 1
     fi
-}
-
-run_primary_key_global_index_golden_test() {
-    echo -e "${YELLOW}=== Running Primary-Key Global Index Golden Test ===${NC}"
-
-    if ! skip_batched_java_write; then
-        cd "$PROJECT_ROOT"
-        if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testPrimaryKeyGlobalIndexGoldenWrite \
-            -pl paimon-core -q -Drun.e2e.tests=true; then
-            echo -e "${RED}✗ Java golden table generation failed${NC}"
-            return 1
-        fi
-    fi
-
-    cd "$PAIMON_PYTHON_DIR"
-    if python -m pytest \
-        java_py_read_write_test.py::JavaPyReadWriteTest::test_read_primary_key_global_index_golden -v; then
-        echo -e "${GREEN}✓ Primary-key golden table read passed${NC}"
-        return 0
-    fi
-    echo -e "${RED}✗ Python primary-key golden table read failed${NC}"
-    return 1
 }
 
 run_btree_raw_fallback_test() {
@@ -1080,7 +1057,6 @@ main() {
     local java_read_result=0
     local pk_dv_result=0
     local btree_index_result=0
-    local primary_key_global_index_golden_result=0
     local btree_raw_fallback_result=0
     local bitmap_index_result=0
     local compressed_global_index_result=0
@@ -1171,10 +1147,6 @@ main() {
     # Run BTree index test (Java write, Python read)
     if ! run_btree_index_test; then
         btree_index_result=1
-    fi
-
-    if ! run_primary_key_global_index_golden_test; then
-        primary_key_global_index_golden_result=1
     fi
 
     echo ""
@@ -1406,12 +1378,6 @@ main() {
         echo -e "${RED}✗ BTree Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
-    if [[ $primary_key_global_index_golden_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Primary-Key Global Index Golden Test: PASSED${NC}"
-    else
-        echo -e "${RED}✗ Primary-Key Global Index Golden Test: FAILED${NC}"
-    fi
-
     if [[ $btree_raw_fallback_result -eq 0 ]]; then
         echo -e "${GREEN}✓ BTree Raw Fallback Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -1561,7 +1527,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $primary_key_global_index_golden_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
