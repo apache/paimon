@@ -52,8 +52,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 
-import static org.apache.paimon.CoreOptions.WRITE_ONLY;
-import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.CoreOptions.*;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -414,6 +413,12 @@ public abstract class FlinkSink<T> implements Serializable {
                 "Could not enable coordinator commit because "
                         + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
                         + " is enabled, which is not supported yet.");
+        // TODO support batch tag create.
+        checkArgument(
+                table.coreOptions().tagCreationMode() != TagCreationMode.BATCH,
+                "Could not enable coordinator commit because "
+                        + TAG_AUTOMATIC_CREATION.key()
+                        + " = batch is not supported yet.");
 
         // TODO concurrent checkpoints are not supported yet.
         checkArgument(
