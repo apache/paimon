@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.ThrowableAssert;
@@ -146,13 +147,15 @@ class SchemaValidationTest {
 
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
-                .hasMessage("Data evolution config must enabled for table with BLOB type column.");
+                .hasMessage(
+                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
 
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
-                .hasMessage("The BLOB type column can not be part of partition keys.");
+                .hasMessage(
+                        "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
 
         assertThatThrownBy(
                         () -> {
@@ -166,7 +169,175 @@ class SchemaValidationTest {
                                             options,
                                             ""));
                         })
-                .hasMessage("Table with BLOB type column must have other normal columns.");
+                .hasMessage(
+                        "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
+    }
+
+    @Test
+    public void testPrimaryKeyArrayBlobField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payloads");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyArrayBlobManagedByType() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payloads", DataTypes.ARRAY(DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobFileField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyInlineBlobDoesNotTriggerManagedRestrictions() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "payload");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobViewCoexistsWithManagedBlob() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()),
+                        new DataField(2, "view", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+        options.put(CoreOptions.BLOB_VIEW_FIELD.key(), "view");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyBlobRejectsUnsupportedSemantics() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                options, singletonList("payload"), emptyList())))
+                .hasMessage("Managed BLOB fields cannot be primary keys: [payload].");
+
+        Map<String, String> sequenceOptions = new HashMap<>(options);
+        sequenceOptions.put(CoreOptions.SEQUENCE_FIELD.key(), "payload");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                sequenceOptions, singletonList("id"), emptyList())))
+                .hasMessage("Managed BLOB fields cannot be sequence fields: [payload].");
+
+        Map<String, String> mergeOptions = new HashMap<>(options);
+        mergeOptions.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                mergeOptions, singletonList("id"), emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables only support the deduplicate merge engine.");
+
+        Map<String, String> changelogOptions = new HashMap<>(options);
+        changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                changelogOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+
+        Map<String, String> externalPathOptions = new HashMap<>(options);
+        externalPathOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file:///tmp/data");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                externalPathOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables do not support 'data-file.external-paths'.");
+
+        Map<String, String> clusteringOptions = new HashMap<>(options);
+        clusteringOptions.put(CoreOptions.PK_CLUSTERING_OVERRIDE.key(), "true");
+        clusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "id");
+        clusteringOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                clusteringOptions,
+                                                singletonList("id"),
+                                                emptyList())))
+                .hasMessage(
+                        "Primary-key managed BLOB tables do not support 'pk-clustering-override'.");
+    }
+
+    private TableSchema primaryKeyBlobSchema(
+            Map<String, String> options, List<String> primaryKeys, List<String> partitionKeys) {
+        return new TableSchema(
+                1,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB())),
+                10,
+                partitionKeys,
+                primaryKeys,
+                options,
+                "");
     }
 
     @Test
@@ -311,6 +482,192 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+    }
+
+    @Test
+    public void testMapSharedShreddingCannotCombineWithUnsupportedTypes() {
+        List<DataField> variantFields = topLevelPayloadFields(DataTypes.VARIANT());
+        String variantMessage =
+                "MAP shared-shredding currently cannot be used with Variant fields.";
+        assertMapSharedShreddingValidationFailed(
+                variantFields, mapSharedShreddingOptions(), variantMessage);
+
+        Map<String, String> inferVariantOptions = mapSharedShreddingOptions();
+        inferVariantOptions.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
+        assertMapSharedShreddingValidationFailed(
+                variantFields, inferVariantOptions, variantMessage);
+
+        Map<String, String> explicitVariantOptions = mapSharedShreddingOptions();
+        explicitVariantOptions.put(CoreOptions.VARIANT_SHREDDING_SCHEMA.key(), "{}");
+        assertMapSharedShreddingValidationFailed(
+                variantFields, explicitVariantOptions, variantMessage);
+
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
+        assertMapSharedShreddingValidationFailed(
+                nestedMapValueFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
+
+        DataType multisetType = DataTypes.MULTISET(DataTypes.INT());
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        assertMapSharedShreddingValidationFailed(
+                nestedMapValueFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
+
+        DataType vectorType = DataTypes.VECTOR(3, DataTypes.FLOAT());
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(vectorType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with VECTOR fields.");
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(vectorType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with VECTOR fields.");
+    }
+
+    @Test
+    public void testMapSharedShreddingFileFormatValidation() {
+        Map<String, String> fileFormatOptions = mapSharedShreddingOptions();
+        fileFormatOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(fileFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but file.format is avro.");
+
+        Map<String, String> levelFormatOptions = mapSharedShreddingOptions();
+        levelFormatOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(levelFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but file.format.per.level.0 is avro.");
+
+        Map<String, String> changelogFormatOptions = mapSharedShreddingOptions();
+        changelogFormatOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                changelogFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but changelog-file.format is avro.");
+
+        Map<String, String> vectorFormatOptions = mapSharedShreddingOptions();
+        vectorFormatOptions.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        vectorFormatOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        vectorFormatOptions.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(vectorFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but vector.file.format is json.");
+    }
+
+    @Test
+    public void testMapSharedShreddingFileCompressionValidation() {
+        Map<String, String> fileCompressionOptions = mapSharedShreddingOptions();
+        fileCompressionOptions.put(CoreOptions.FILE_COMPRESSION.key(), "snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                fileCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but file.compression is snappy.");
+
+        Map<String, String> levelCompressionOptions = mapSharedShreddingOptions();
+        levelCompressionOptions.put(CoreOptions.FILE_COMPRESSION_PER_LEVEL.key(), "0:snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                levelCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but file.compression.per.level.0 is snappy.");
+
+        Map<String, String> changelogCompressionOptions = mapSharedShreddingOptions();
+        changelogCompressionOptions.put(CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), "snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                changelogCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but changelog-file.compression is snappy.");
+
+        for (String compression : Arrays.asList("none", "lz4", "zstd", "ZSTD")) {
+            Map<String, String> supportedOptions = mapSharedShreddingOptions();
+            supportedOptions.put(CoreOptions.FILE_COMPRESSION.key(), compression);
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    validateTableSchema(
+                                            mapSharedShreddingSchema(
+                                                    supportedOptions, emptyList())));
+        }
+    }
+
+    @Test
+    public void testMapSharedShreddingTableModeValidation() {
+        Map<String, String> primaryKeyOptions = mapSharedShreddingOptions();
+        primaryKeyOptions.put(BUCKET.key(), "-1");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently only supports append-only tables.");
+
+        Map<String, String> fixedBucketOptions = mapSharedShreddingOptions();
+        fixedBucketOptions.put(BUCKET.key(), "1");
+        fixedBucketOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+
+        Map<String, String> writeOnlyOptions = mapSharedShreddingOptions();
+        writeOnlyOptions.put(BUCKET.key(), "1");
+        writeOnlyOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
+        writeOnlyOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(writeOnlyOptions, emptyList())));
+    }
+
+    @Test
+    public void testMapSharedShreddingNestedFileIndexValidation() {
+        Map<String, String> options = mapSharedShreddingOptions();
+        options.put("file-index.bloom-filter.columns", "metrics[k]");
+
+        assertThatThrownBy(
+                        () -> validateTableSchema(mapSharedShreddingSchema(options, emptyList())))
+                .hasMessageContaining(
+                        "Column 'metrics' is configured with map.storage-layout=shared-shredding, which does not support nested file index.");
     }
 
     @Test
@@ -1039,6 +1396,60 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    private Map<String, String> mapSharedShreddingOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        return options;
+    }
+
+    private TableSchema mapSharedShreddingSchema(
+            Map<String, String> options, List<String> primaryKeys) {
+        return new TableSchema(
+                1, mapValueFields(DataTypes.INT()), 10, emptyList(), primaryKeys, options, "");
+    }
+
+    private void assertMapSharedShreddingValidationFailed(
+            List<DataField> fields, Map<String, String> options, String message) {
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(message);
+    }
+
+    private List<DataField> mapValueFields(DataType valueType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), valueType)));
+    }
+
+    private List<DataField> nestedMapValueFields(DataType valueType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(
+                        1,
+                        "metrics",
+                        DataTypes.MAP(
+                                DataTypes.STRING(),
+                                DataTypes.ROW(DataTypes.FIELD(0, "payload", valueType)))));
+    }
+
+    private List<DataField> topLevelPayloadFields(DataType payloadType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                new DataField(2, "payload", payloadType));
     }
 
     private TableSchema vectorTypeSchema(

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -69,11 +70,23 @@ public interface SnapshotReader {
 
     FileStorePathFactory pathFactory();
 
+    @Nullable
+    IndexFileHandler indexFileHandler();
+
     SnapshotReader withSnapshot(long snapshotId);
 
     SnapshotReader withSnapshot(Snapshot snapshot);
 
     SnapshotReader withFilter(Predicate predicate);
+
+    /**
+     * Applies a full read-time filter and an optional scan-pruning filter.
+     *
+     * <p>{@code predicate} is used to determine whether the reader has a non-partition filter which
+     * must still be evaluated at read time. {@code pushdownPredicate} is the only predicate used
+     * for scan pruning such as partition, stats, and bucket pruning.
+     */
+    SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate);
 
     SnapshotReader withPartitionFilter(Map<String, String> partitionSpec);
 

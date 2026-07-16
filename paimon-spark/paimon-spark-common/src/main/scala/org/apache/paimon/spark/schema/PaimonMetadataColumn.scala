@@ -32,8 +32,15 @@ case class PaimonMetadataColumn(
     override val dataType: DataType,
     preserveOnDelete: Boolean = true,
     preserveOnUpdate: Boolean = true,
-    preserveOnReinsert: Boolean = false)
+    preserveOnReinsert: Boolean = false,
+    nullable: Boolean = true)
   extends PaimonMetadataColumnBase {
+
+  // Only affects the Spark `MetadataColumn` capability (thus the relation's metadata output and
+  // the delta row ID nullability check). `toStructField` / `toAttribute` stay nullable: V1
+  // commands project these columns through outer joins where the target side can be null, e.g.
+  // the not-matched rows of MERGE INTO.
+  override def isNullable: Boolean = nullable
 
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
@@ -61,6 +68,7 @@ object PaimonMetadataColumn {
   val PATH_AND_INDEX_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
   val PARTITION_AND_BUCKET_META_COLUMNS: Seq[String] = Seq(PARTITION_COLUMN, BUCKET_COLUMN)
   val ROW_TRACKING_META_COLUMNS: Seq[String] = Seq(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN)
+  val VECTOR_SEARCH_META_COLUMN_NAMES: Seq[String] = Seq(ROW_ID_COLUMN, SEARCH_SCORE_COLUMN)
 
   val SUPPORTED_METADATA_COLUMNS: Seq[String] = Seq(
     ROW_INDEX_COLUMN,
@@ -91,6 +99,8 @@ object PaimonMetadataColumn {
       preserveOnUpdate = false)
   val SEARCH_SCORE: PaimonMetadataColumn =
     PaimonMetadataColumn(Integer.MAX_VALUE - 106, SEARCH_SCORE_COLUMN, FloatType)
+
+  val VECTOR_SEARCH_META_COLUMNS: Seq[PaimonMetadataColumn] = Seq(ROW_ID, SEARCH_SCORE)
 
   def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
 

@@ -198,6 +198,60 @@ public class InternalRowUtilsTest {
     }
 
     @Test
+    public void testEqualsMapWithBinaryKeys() {
+        Map<byte[], Integer> map1 = new HashMap<>();
+        map1.put(new byte[] {1, 2}, 1);
+        map1.put(new byte[] {3, 4}, 2);
+        Map<byte[], Integer> map2 = new HashMap<>();
+        map2.put(new byte[] {3, 4}, 2);
+        map2.put(new byte[] {1, 2}, 1);
+
+        assertThat(
+                        InternalRowUtils.equals(
+                                new GenericMap(map1),
+                                new GenericMap(map2),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())))
+                .isTrue();
+        assertThat(
+                        InternalRowUtils.hash(
+                                new GenericMap(map1),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())))
+                .isEqualTo(
+                        InternalRowUtils.hash(
+                                new GenericMap(map2),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())));
+
+        Map<byte[], Integer> map3 = new HashMap<>();
+        map3.put(new byte[] {1, 3}, 1);
+        map3.put(new byte[] {3, 4}, 2);
+        assertThat(
+                        InternalRowUtils.equals(
+                                new GenericMap(map1),
+                                new GenericMap(map3),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())))
+                .isFalse();
+
+        Map<byte[], Integer> map4 = new HashMap<>();
+        map4.put(new byte[] {1, 2}, 1);
+        map4.put(new byte[] {1, 2}, 2);
+        Map<byte[], Integer> map5 = new HashMap<>();
+        map5.put(new byte[] {1, 2}, 1);
+        map5.put(new byte[] {1, 3}, 2);
+        assertThat(
+                        InternalRowUtils.equals(
+                                new GenericMap(map4),
+                                new GenericMap(map5),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())))
+                .isFalse();
+        assertThat(
+                        InternalRowUtils.equals(
+                                new GenericMap(map5),
+                                new GenericMap(map4),
+                                DataTypes.MAP(DataTypes.BINARY(2), DataTypes.INT())))
+                .isFalse();
+    }
+
+    @Test
     public void testCopyVector() {
         RowType rowType =
                 RowType.builder().field("v", DataTypes.VECTOR(3, DataTypes.FLOAT())).build();

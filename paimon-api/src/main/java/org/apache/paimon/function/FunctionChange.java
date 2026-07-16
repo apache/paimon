@@ -299,7 +299,7 @@ public interface FunctionChange extends Serializable {
 
         @Override
         public int hashCode() {
-            return Objects.hash(definition, definition);
+            return Objects.hash(name, definition);
         }
     }
 

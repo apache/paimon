@@ -18,16 +18,54 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
+
+import org.junit.jupiter.api.Test;
 
 import java.util.Random;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IndexManifestEntrySerializer}. */
 public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<IndexManifestEntry> {
+
+    @Test
+    void testReadsGlobalIndexWithoutSourceMeta() {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        IndexManifestEntry entry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta(
+                                "btree",
+                                "index-file",
+                                100,
+                                10,
+                                new GlobalIndexMeta(0, 9, 7, null, new byte[] {1}),
+                                null));
+        GenericRow serialized = (GenericRow) serializer.convertTo(entry);
+        serialized.setField(9, GenericRow.of(0L, 9L, 7, null, new byte[] {1}));
+
+        InternalRow globalIndexRow = serialized.getRow(9, 5);
+        assertThat(globalIndexRow.getFieldCount()).isEqualTo(5);
+        GlobalIndexMeta restored =
+                serializer
+                        .convertFrom(serializer.getVersion(), serialized)
+                        .indexFile()
+                        .globalIndexMeta();
+
+        assertThat(restored.indexMeta()).containsExactly(1);
+        assertThat(restored.sourceMeta()).isNull();
+    }
 
     @Override
     protected ObjectSerializer<IndexManifestEntry> serializer() {

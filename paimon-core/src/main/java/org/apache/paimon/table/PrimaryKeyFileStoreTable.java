@@ -34,9 +34,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.MergeTreeSplitGenerator;
+import org.apache.paimon.table.source.PrimaryKeyBatchScan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowKindFilter;
@@ -149,6 +151,20 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     public InnerTableRead newRead() {
         return new KeyValueTableRead(
                 () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
+    }
+
+    @Override
+    public DataTableScan newScan() {
+        return newScan(FileStoreTable::newSnapshotReader);
+    }
+
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return new PrimaryKeyBatchScan(
+                this,
+                snapshotReaderFactory.create(this),
+                catalogEnvironment.tableQueryAuth(coreOptions()),
+                null);
     }
 
     @Override

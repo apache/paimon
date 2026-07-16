@@ -26,6 +26,12 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -84,10 +90,50 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // scan should scan snapshot 2
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(latest.id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(initSnapshot ? 2 : 1);
+    }
+
+    @Test
+    public void testScanVectorIndexPayloads() throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        Schema schema = Schema.newBuilder().column("f0", DataTypes.INT()).build();
+        catalog.createDatabase("db", false);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+        write(table, GenericRow.of(1));
+
+        PrimaryKeyIndexSourceMeta sourceMeta =
+                new PrimaryKeyIndexSourceMeta(
+                        Collections.singletonList(new PrimaryKeyIndexSourceFile("data", 1)));
+        IndexFileMeta ann =
+                new IndexFileMeta(
+                        "test-vector-ann",
+                        "ann",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 0, null, new byte[0], sourceMeta.serialize()),
+                        null);
+        try (TableCommitImpl commit = table.newCommit("vector-index")) {
+            commit.commit(
+                    100,
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    EMPTY_ROW,
+                                    0,
+                                    1,
+                                    DataIncrement.indexIncrement(Collections.singletonList(ann)),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        ScanCoordinationRequest request =
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, true);
+        ScanCoordinationResponse scan = coordinator.scan(request);
+
+        assertThat(scan.extractVectorIndexPayloads()).containsExactly(ann);
     }
 
     @Test
@@ -129,7 +175,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // scan results remain correct after warming
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(table.latestSnapshot().get().id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(2);
@@ -189,7 +235,8 @@ class TableWriteCoordinatorTest extends TableTestBase {
         // partition's manifest, proving the partition filter is active (and leaving the stale
         // partition state on the shared scan)
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(partitionRow(0)), 0, false, false);
+                new ScanCoordinationRequest(
+                        serializeBinaryRow(partitionRow(0)), 0, false, false, false);
         coordinator.scan(request);
         long filteredCacheBytes = table.getManifestCache().totalCacheBytes();
         assertThat(filteredCacheBytes).isGreaterThan(0);
@@ -316,7 +363,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // Scan bucket=0 (has files): totalBuckets should be 2
         ScanCoordinationRequest requestBucket0 =
-                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 0, false, false, false);
         ScanCoordinationResponse responseBucket0 = coordinator.scan(requestBucket0);
         assertThat(responseBucket0.totalBuckets())
                 .as("bucket=0 (has files) should use per-partition bucket count 2")
@@ -325,7 +372,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // Scan bucket=1 (empty): totalBuckets must be 2, not the table default 32
         ScanCoordinationRequest requestBucket1 =
-                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 1, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 1, false, false, false);
         ScanCoordinationResponse responseBucket1 = coordinator.scan(requestBucket1);
         assertThat(responseBucket1.totalBuckets())
                 .as(

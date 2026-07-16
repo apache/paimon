@@ -32,6 +32,8 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -54,6 +56,13 @@ import java.util.Optional;
  * InternalRow}.
  */
 public interface FileStoreTable extends DataTable {
+
+    /** Factory to create a snapshot reader for the actual table scanned. */
+    @FunctionalInterface
+    interface SnapshotReaderFactory {
+
+        SnapshotReader create(FileStoreTable table);
+    }
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
@@ -102,6 +111,9 @@ public interface FileStoreTable extends DataTable {
     TableSchema schema();
 
     FileStore<?> store();
+
+    /** Creates a scan with a customized snapshot reader. */
+    DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory);
 
     CatalogEnvironment catalogEnvironment();
 

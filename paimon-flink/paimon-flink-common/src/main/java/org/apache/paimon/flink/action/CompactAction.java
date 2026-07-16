@@ -19,12 +19,14 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.AppendTableCompact;
 import org.apache.paimon.flink.compact.DataEvolutionTableCompact;
 import org.apache.paimon.flink.compact.IncrementalClusterCompact;
+import org.apache.paimon.flink.postpone.PostponeBucketCompactOperator;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
@@ -36,7 +38,7 @@ import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.RowDataChannelComputer;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
@@ -45,7 +47,9 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.SchemaBucketFileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
+import org.apache.paimon.table.PostponeUtils.CompactBucket;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
@@ -67,10 +71,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -292,52 +298,56 @@ public class CompactAction extends TableActionBase {
 
         Options options = new Options(table.options());
         int defaultBucketNum = options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+        Optional<Long> targetRowNumPerBucket =
+                options.getOptional(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
+        Optional<Snapshot> optionalSnapshot = table.latestSnapshot();
+        if (!optionalSnapshot.isPresent()) {
+            return buildNothingToCompact(env);
+        }
+        long snapshotId = optionalSnapshot.get().id();
+        Map<BinaryRow, Integer> knownNumBuckets =
+                PostponeUtils.getKnownNumBuckets(table, snapshotId);
+        Map<BinaryRow, Long> postponeRowCounts =
+                targetRowNumPerBucket.isPresent()
+                        ? PostponeUtils.getPostponeRowCounts(table, snapshotId)
+                        : Collections.emptyMap();
 
-        // change bucket to a positive value, so we can scan files from the bucket = -2 directory
-        Map<String, String> bucketOptions = new HashMap<>(table.options());
-        bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(defaultBucketNum));
-        FileStoreTable fileStoreTable = table.copy(table.schema().copy(bucketOptions));
-
-        List<BinaryRow> partitions =
-                fileStoreTable
-                        .newSnapshotReader()
+        List<BinaryRow> postponePartitions =
+                table.newSnapshotReader()
+                        .withSnapshot(snapshotId)
                         .withBucket(BucketMode.POSTPONE_BUCKET)
                         .partitions();
-        if (partitions.isEmpty()) {
-            if (this.forceStartFlinkJob) {
-                env.fromSequence(0, 0)
-                        .name("Nothing to Compact Source")
-                        .sinkTo(new DiscardingSink<>());
-                return true;
-            } else {
-                return false;
-            }
+
+        Map<BinaryRow, List<CompactBucket>> compactBucketsByPartition = new LinkedHashMap<>();
+        for (CompactBucket bucket : PostponeUtils.getLevel0Buckets(table, snapshotId)) {
+            compactBucketsByPartition
+                    .computeIfAbsent(bucket.partition(), ignored -> new ArrayList<>())
+                    .add(bucket);
+        }
+        Set<BinaryRow> affectedPartitions = new LinkedHashSet<>(postponePartitions);
+        affectedPartitions.addAll(compactBucketsByPartition.keySet());
+        if (affectedPartitions.isEmpty()) {
+            return buildNothingToCompact(env);
         }
 
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
-                        fileStoreTable.coreOptions().partitionDefaultName(),
-                        fileStoreTable.store().partitionType(),
-                        fileStoreTable.partitionKeys().toArray(new String[0]),
-                        fileStoreTable.coreOptions().legacyPartitionName());
+                        table.coreOptions().partitionDefaultName(),
+                        table.store().partitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        table.coreOptions().legacyPartitionName());
         String commitUser = CoreOptions.createCommitUser(options);
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
-        for (BinaryRow partition : partitions) {
-            int partitionBucketNum = defaultBucketNum;
-
-            Iterator<ManifestEntry> it =
-                    table.newSnapshotReader()
-                            .withPartitionFilter(Collections.singletonList(partition))
-                            .onlyReadRealBuckets()
-                            .readFileIterator();
-            if (it.hasNext()) {
-                partitionBucketNum = it.next().totalBuckets();
-            }
-
-            bucketOptions = new HashMap<>(table.options());
-            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(partitionBucketNum));
+        for (BinaryRow partition : affectedPartitions) {
+            int bucketNum =
+                    PostponeUtils.determineBucketNum(
+                            partition,
+                            knownNumBuckets,
+                            targetRowNumPerBucket,
+                            postponeRowCounts,
+                            defaultBucketNum);
             FileStoreTable realTable =
-                    new SchemaBucketFileStoreTable(table.copy(table.schema().copy(bucketOptions)));
+                    PostponeUtils.tableForPostponeCompact(table, bucketNum, snapshotId);
 
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(partition);
@@ -346,6 +356,7 @@ public class CompactAction extends TableActionBase {
                             env,
                             realTable,
                             partitionSpec,
+                            snapshotId,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             DataStream<InternalRow> partitioned =
@@ -356,9 +367,29 @@ public class CompactAction extends TableActionBase {
                                     table.catalogEnvironment().catalogContext()),
                             new RowDataChannelComputer(realTable.createRowKeyExtractor()),
                             null);
-            FixedBucketSink sink = new FixedBucketSink(realTable, null);
+            List<CompactBucket> compactBuckets =
+                    compactBucketsByPartition.getOrDefault(partition, Collections.emptyList());
+            DataStream<CompactBucket> partitionedCompactBuckets =
+                    FlinkStreamPartitioner.partition(
+                            env.fromCollection(
+                                            compactBuckets, new JavaTypeInfo<>(CompactBucket.class))
+                                    .name(
+                                            String.format(
+                                                    "Level-0 compact buckets: %s - %s",
+                                                    table.fullName(), partitionSpec))
+                                    .forceNonParallel(),
+                            new CompactBucketChannelComputer(),
+                            partitioned.getParallelism());
             DataStream<Committable> written =
-                    sink.doWrite(partitioned, commitUser, partitioned.getParallelism())
+                    partitioned
+                            .connect(partitionedCompactBuckets)
+                            .transform(
+                                    String.format(
+                                            "Write and compact postpone buckets: %s - %s",
+                                            table.fullName(), partitionSpec),
+                                    new CommittableTypeInfo(),
+                                    new PostponeBucketCompactOperator(
+                                            realTable, commitUser, snapshotId))
                             .forward()
                             .transform(
                                     "Rewrite compact committable",
@@ -368,6 +399,8 @@ public class CompactAction extends TableActionBase {
             dataStreams.add(sourcePair.getRight());
         }
 
+        FileStoreTable fileStoreTable =
+                PostponeUtils.tableForPostponeCompact(table, defaultBucketNum, snapshotId);
         FixedBucketSink sink = new FixedBucketSink(fileStoreTable, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
@@ -375,6 +408,31 @@ public class CompactAction extends TableActionBase {
         }
         sink.doCommit(dataStream, commitUser);
         return true;
+    }
+
+    private boolean buildNothingToCompact(StreamExecutionEnvironment env) {
+        if (this.forceStartFlinkJob) {
+            env.fromSequence(0, 0).name("Nothing to Compact Source").sinkTo(new DiscardingSink<>());
+            return true;
+        }
+        return false;
+    }
+
+    private static class CompactBucketChannelComputer implements ChannelComputer<CompactBucket> {
+
+        private static final long serialVersionUID = 1L;
+
+        private transient int numChannels;
+
+        @Override
+        public void setup(int numChannels) {
+            this.numChannels = numChannels;
+        }
+
+        @Override
+        public int channel(CompactBucket bucket) {
+            return ChannelComputer.select(bucket.partition(), bucket.bucket(), numChannels);
+        }
     }
 
     @Override

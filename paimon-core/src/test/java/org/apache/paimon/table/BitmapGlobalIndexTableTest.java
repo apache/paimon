@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -49,6 +50,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -218,6 +220,7 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                 InternalRow.createFieldGetter(
                         indexField.type(), readRowType.getFieldIndex(indexField.name()));
         int rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
+        List<Pair<Object, Long>> entries = new ArrayList<>();
 
         try (RecordReader<InternalRow> reader =
                         table.newReadBuilder()
@@ -229,9 +232,23 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                 InternalRow row = iterator.next();
                 long rowId = row.getLong(rowIdIndex);
                 if (rowId >= rowRange.from && rowId <= rowRange.to) {
-                    writer.write(fieldGetter.getFieldOrNull(row), rowId - rowRange.from);
+                    entries.add(Pair.of(fieldGetter.getFieldOrNull(row), rowId - rowRange.from));
                 }
             }
+        }
+        Comparator<Object> keyComparator =
+                KeySerializer.create(indexField.type()).createComparator();
+        entries.sort(
+                (left, right) -> {
+                    if (left.getKey() == null) {
+                        return right.getKey() == null ? 0 : -1;
+                    }
+                    return right.getKey() == null
+                            ? 1
+                            : keyComparator.compare(left.getKey(), right.getKey());
+                });
+        for (Pair<Object, Long> entry : entries) {
+            writer.write(entry.getKey(), entry.getValue());
         }
 
         List<ResultEntry> resultEntries = writer.finish();

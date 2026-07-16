@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -37,12 +38,16 @@ public class DataEvolutionCompactDeletionVectorOperator
         extends PrepareCommitOperator<Committable, Committable> {
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
     private final List<Committable> committables;
 
     private DataEvolutionCompactDeletionVectorOperator(
-            StreamOperatorParameters<Committable> parameters, FileStoreTable table) {
+            StreamOperatorParameters<Committable> parameters,
+            FileStoreTable table,
+            Snapshot snapshot) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
+        this.snapshot = snapshot;
         this.committables = new ArrayList<>();
     }
 
@@ -65,8 +70,7 @@ public class DataEvolutionCompactDeletionVectorOperator
             messages.add(committable.commitMessage());
         }
         for (CommitMessage message :
-                new DataEvolutionCompactDeletionVectorRewriter(table)
-                        .rewriteDeletionVectors(messages)) {
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages)) {
             toCommit.add(new Committable(toCommit.get(0).checkpointId(), message));
         }
         return toCommit;
@@ -76,17 +80,19 @@ public class DataEvolutionCompactDeletionVectorOperator
     public static class Factory extends PrepareCommitOperator.Factory<Committable, Committable> {
 
         private final FileStoreTable table;
+        private final Snapshot snapshot;
 
-        public Factory(FileStoreTable table) {
+        public Factory(FileStoreTable table, Snapshot snapshot) {
             super(Options.fromMap(table.options()));
             this.table = table;
+            this.snapshot = snapshot;
         }
 
         @Override
         @SuppressWarnings("unchecked")
         public <T extends StreamOperator<Committable>> T createStreamOperator(
                 StreamOperatorParameters<Committable> parameters) {
-            return (T) new DataEvolutionCompactDeletionVectorOperator(parameters, table);
+            return (T) new DataEvolutionCompactDeletionVectorOperator(parameters, table, snapshot);
         }
 
         @Override

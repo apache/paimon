@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -115,12 +116,14 @@ public class MapSharedShreddingUtils {
             MapSharedShreddingFieldMeta fieldMeta,
             @Nullable String compression,
             Map<String, String> metadata) {
+        String fieldDictCompression = normalizeFieldDictCompression(compression);
         metadata.put(
                 MapShreddingDefine.STORAGE_LAYOUT,
                 MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
         metadata.put(
                 MapSharedShreddingDefine.VERSION,
                 String.valueOf(MapSharedShreddingDefine.CURRENT_VERSION));
+        metadata.put(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, fieldDictCompression);
 
         String fieldDictJson = toJson(new TreeMap<>(fieldMeta.nameToId()));
         metadata.put(
@@ -129,7 +132,9 @@ public class MapSharedShreddingUtils {
         metadata.put(
                 MapSharedShreddingDefine.FIELD_DICT,
                 bytesToString(
-                        compress(fieldDictJson.getBytes(StandardCharsets.UTF_8), compression)));
+                        compress(
+                                fieldDictJson.getBytes(StandardCharsets.UTF_8),
+                                fieldDictCompression)));
         metadata.put(
                 MapSharedShreddingDefine.FIELD_COLUMNS,
                 toJson(sortedFieldColumns(fieldMeta.fieldToColumns())));
@@ -143,6 +148,18 @@ public class MapSharedShreddingUtils {
 
     public static MapSharedShreddingFieldMeta deserializeMetadata(
             @Nullable Map<String, String> metadata, @Nullable String compression) {
+        return deserializeMetadata(metadata, compression, true);
+    }
+
+    public static MapSharedShreddingFieldMeta deserializeMetadata(
+            @Nullable Map<String, String> metadata) {
+        return deserializeMetadata(metadata, null, false);
+    }
+
+    private static MapSharedShreddingFieldMeta deserializeMetadata(
+            @Nullable Map<String, String> metadata,
+            @Nullable String fallbackCompression,
+            boolean useFallbackCompression) {
         if (!hasShreddingMetadata(metadata)) {
             throw new IllegalArgumentException(
                     "metadata is null or storage layout is not shared-shredding");
@@ -158,6 +175,13 @@ public class MapSharedShreddingUtils {
 
         int originalLength =
                 requiredInt(metadata, MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE);
+        String compression =
+                normalizeFieldDictCompression(
+                        metadata.getOrDefault(
+                                MapSharedShreddingDefine.FIELD_DICT_COMPRESSION,
+                                useFallbackCompression
+                                        ? fallbackCompression
+                                        : MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION));
         byte[] fieldDictBytes =
                 decompress(
                         stringToBytes(requiredValue(metadata, MapSharedShreddingDefine.FIELD_DICT)),
@@ -270,6 +294,25 @@ public class MapSharedShreddingUtils {
 
     private static boolean isNoCompression(@Nullable String compression) {
         return compression == null || "none".equalsIgnoreCase(compression);
+    }
+
+    public static String normalizeFieldDictCompression(@Nullable String compression) {
+        if (compression == null) {
+            return MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION;
+        }
+
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "none":
+            case "lz4":
+            case "zstd":
+                return normalized;
+            default:
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but is "
+                                + compression
+                                + ".");
+        }
     }
 
     private static String bytesToString(byte[] bytes) {

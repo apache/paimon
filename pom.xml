@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.5-SNAPSHOT</version>
+    <version>2.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -80,7 +80,7 @@ under the License.
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2025-09-16T01:56:37Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-07-07T08:24:16Z</project.build.outputTimestamp>
         <paimon.shade.version>0.8.0</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
@@ -517,6 +517,21 @@ under the License.
             </modules>
             <activation>
                 <jdk>11</jdk>
+            </activation>
+        </profile>
+
+        <profile>
+            <!-- paimon-eslib depends on Java-11 eslib-api/eslib-core (Lucene 9.12), so it must be
+                 built with JDK 11+. The [11,) range activates on JDK 11/17/21; a bare
+                 <jdk>11</jdk> is a prefix match that only fires on JDK 11, silently skipping the
+                 module (no compile, no test) on 17/21. The default JDK-8 build still skips it, so
+                 the RequireJavaVersion enforcer rule is not tripped. -->
+            <id>paimon-eslib</id>
+            <modules>
+                <module>paimon-eslib</module>
+            </modules>
+            <activation>
+                <jdk>[11,)</jdk>
             </activation>
         </profile>
 

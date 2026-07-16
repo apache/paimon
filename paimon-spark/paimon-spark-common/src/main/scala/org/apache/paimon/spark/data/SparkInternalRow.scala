@@ -27,6 +27,8 @@ import scala.collection.mutable
 
 abstract class SparkInternalRow extends InternalRow {
   def replace(row: org.apache.paimon.data.InternalRow): SparkInternalRow
+
+  def withBlobAsDescriptor(blobAsDescriptor: Boolean): SparkInternalRow
 }
 
 object SparkInternalRow {
@@ -40,7 +42,7 @@ object SparkInternalRow {
     if (blobs.nonEmpty) {
       SparkShimLoader.shim.createSparkInternalRowWithBlob(rowType, blobs, blobAsDescriptor)
     } else {
-      SparkShimLoader.shim.createSparkInternalRow(rowType)
+      SparkShimLoader.shim.createSparkInternalRow(rowType).withBlobAsDescriptor(blobAsDescriptor)
     }
   }
 

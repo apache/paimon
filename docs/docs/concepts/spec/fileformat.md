@@ -849,13 +849,33 @@ BLOB files use the `.blob` extension and have the following structure:
 +------------------+
 ```
 
+Each physical BLOB file stores one logical field. The field can be either `BLOB` or
+`ARRAY<BLOB>`. For `ARRAY<BLOB>`, the variable-length data area in an entry uses the
+following nested payload:
+
+```
++----------------------+-----------------------------------------------+
+| Array Magic Number   | 4 bytes (1094861634, Little Endian)           |
+| Array Version        | 1 byte                                        |
+| Element Count        | 4 bytes (Little Endian)                       |
+| Element Data         | Concatenated bytes of all non-null elements   |
+| Element Length Index | Delta-Varint compressed element lengths       |
+| Index Length         | 4 bytes (Little Endian)                       |
++----------------------+-----------------------------------------------+
+```
+
+An element length of `-1` represents a null array element. At the outer file index
+level, `-1` represents a null field and `-2` represents a field placeholder used by
+data evolution. An empty array is encoded with an element count of zero and an empty
+element index; it is distinct from a null array.
+
 Key features:
 - **CRC32 Checksums**: Each blob entry has a CRC32 checksum for data integrity verification
 - **Indexed Access**: The index at the end enables efficient random access to any blob in the file
 - **Delta-Varint Compression**: The index uses delta-varint compression for space efficiency
 
 Limitations:
-1. BLOB format only supports a single BLOB type column per file.
+1. BLOB format only supports a single `BLOB` or `ARRAY<BLOB>` field per physical file.
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 

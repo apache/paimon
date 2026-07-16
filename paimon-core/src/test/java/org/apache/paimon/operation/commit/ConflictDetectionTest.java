@@ -585,6 +585,64 @@ class ConflictDetectionTest {
         assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, null)).isEmpty();
     }
 
+    @Test
+    void testCheckRowIdRangeConflictsReportsDedicatedFileSpanningDataFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, 0L, 2L),
+                                createFileEntryWithRowId("f2", ADD, 2L, 2L)),
+                        Collections.singletonList(createFileEntryWithRowId("p1.blob", ADD, 0L, 4L)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get())
+                .hasMessageContaining("dedicated file")
+                .hasMessageContaining("p1.blob")
+                .hasMessageContaining("spans multiple data file ranges")
+                .hasMessageContaining("f1")
+                .hasMessageContaining("f2");
+    }
+
+    @Test
+    void testCheckRowIdRangeConflictsAllowsAdjacentDataFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, 0L, 2L),
+                                createFileEntryWithRowId("f2", ADD, 2L, 2L)),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdRangeConflictsAllowsDedicatedFileCoveredByOneDataFile() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(createFileEntryWithRowId("f1", ADD, 0L, 4L)),
+                        Collections.singletonList(createFileEntryWithRowId("p1.blob", ADD, 1L, 2L)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isEmpty();
+    }
+
     private SimpleFileEntry createFileEntryWithRowId(
             String fileName, FileKind kind, long firstRowId, long rowCount) {
         return createFileEntryWithRowId(fileName, kind, EMPTY_ROW, 0, firstRowId, rowCount);

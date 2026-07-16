@@ -24,12 +24,15 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewStruct;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
@@ -82,6 +85,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactTask.TaskType.BLOB;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
@@ -153,6 +157,99 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testArrayBlobField() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.ARRAY(DataTypes.BLOB()));
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] blob1 = "blob-1".getBytes();
+        byte[] blob2 = "blob-2".getBytes();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(
+                                0,
+                                new GenericArray(
+                                        new Object[] {
+                                            new BlobData(blob0), null, new BlobData(blob1)
+                                        })),
+                        GenericRow.of(1, null),
+                        GenericRow.of(2, new GenericArray(new Object[] {new BlobData(blob2)}))));
+
+        FileStoreTable table = getTableDefault();
+        List<DataFileMeta> filesMetas =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
+                DataEvolutionSplitRead.splitFieldBunches(filesMetas, file -> table.rowType());
+        assertThat(fieldGroups.size()).isEqualTo(2);
+        assertThat(countFilesWithSuffix(table.fileIO(), table.location(), ".blob")).isEqualTo(1);
+
+        assertArrayBlobRows(blob0, blob1, null, blob2);
+
+        byte[] updatedBlob1 = "updated-blob-1".getBytes();
+        RowType blobWriteType = table.schema().logicalRowType().project("f1");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobArrayPlaceholder.INSTANCE));
+            write.write(GenericRow.of(new GenericArray(new Object[] {new BlobData(updatedBlob1)})));
+            write.write(GenericRow.of(BlobArrayPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+
+        assertArrayBlobRows(blob0, blob1, updatedBlob1, blob2);
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
+
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        assertArrayBlobRows(blob0, blob1, updatedBlob1, blob2);
+    }
+
+    private void assertArrayBlobRows(byte[] blob0, byte[] blob1, byte[] updatedBlob1, byte[] blob2)
+            throws Exception {
+        Map<Integer, InternalArray> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getArray(1)));
+
+        assertThat(actual.size()).isEqualTo(3);
+        InternalArray first = actual.get(0);
+        assertThat(first.size()).isEqualTo(3);
+        assertThat(first.getBlob(0).toData()).isEqualTo(blob0);
+        assertThat(first.isNullAt(1)).isTrue();
+        assertThat(first.getBlob(2).toData()).isEqualTo(blob1);
+
+        if (updatedBlob1 == null) {
+            assertThat(actual.get(1)).isNull();
+        } else {
+            InternalArray second = actual.get(1);
+            assertThat(second.size()).isEqualTo(1);
+            assertThat(second.getBlob(0).toData()).isEqualTo(updatedBlob1);
+        }
+
+        InternalArray third = actual.get(2);
+        assertThat(third.size()).isEqualTo(1);
+        assertThat(third.getBlob(0).toData()).isEqualTo(blob2);
+    }
+
+    @Test
     public void testUpdateBlobColumn() throws Exception {
         createTableDefault();
 
@@ -218,9 +315,10 @@ public class BlobTableTest extends TableTestBase {
         }
 
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
@@ -490,6 +588,41 @@ public class BlobTableTest extends TableTestBase {
                 "blob_view_without_blob_field", CoreOptions.BLOB_VIEW_FIELD.key());
     }
 
+    @Test
+    public void testBlobInlineFieldRejectsArrayBlob() {
+        assertArrayBlobInlineOptionRejected(CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        assertArrayBlobInlineOptionRejected(CoreOptions.BLOB_VIEW_FIELD.key());
+    }
+
+    private void assertArrayBlobInlineOptionRejected(String optionKey) {
+        assertThatThrownBy(
+                        () -> {
+                            Schema.Builder schemaBuilder = Schema.newBuilder();
+                            schemaBuilder.column("f0", DataTypes.INT());
+                            schemaBuilder.column("f1", DataTypes.ARRAY(DataTypes.BLOB()));
+                            schemaBuilder.column("f2", DataTypes.BLOB());
+                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            schemaBuilder.option(optionKey, "f1");
+                            catalog.createTable(
+                                    identifier(
+                                            "array_blob_inline_reject_"
+                                                    + optionKey
+                                                            .replace('-', '_')
+                                                            .replace('.', '_')),
+                                    schemaBuilder.build(),
+                                    true);
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Field 'f1' in '"
+                                + optionKey
+                                + "' must be a BLOB field in table schema. ARRAY<BLOB> is only supported by '"
+                                + CoreOptions.BLOB_FIELD.key()
+                                + "'.");
+    }
+
     private void assertCreateBlobInlineFieldWithoutBlobField(String tableName, String optionKey)
             throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
@@ -568,7 +701,8 @@ public class BlobTableTest extends TableTestBase {
         // Step 4: compact blob table using DataEvolutionCompactCoordinator
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -626,7 +760,8 @@ public class BlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -696,7 +831,8 @@ public class BlobTableTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -745,7 +881,8 @@ public class BlobTableTest extends TableTestBase {
         // Step 4: compact merges files into the same split
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
         List<CommitMessage> compactMessages = new ArrayList<>();
@@ -1152,9 +1289,10 @@ public class BlobTableTest extends TableTestBase {
 
         // Run blob compaction
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, true, false);
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
 
         List<CommitMessage> compactMessages = new ArrayList<>();
         for (DataEvolutionCompactTask task : tasks) {
@@ -1173,14 +1311,16 @@ public class BlobTableTest extends TableTestBase {
 
         // Verify no more blob compaction tasks needed
         table = getTableDefault();
-        coordinator = new DataEvolutionCompactCoordinator(table, true, false);
+        coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
         List<DataEvolutionCompactTask> tasks2;
         try {
             tasks2 = coordinator.plan();
         } catch (EndOfScanException e) {
             tasks2 = Collections.emptyList();
         }
-        assertThat(tasks2.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isFalse();
+        assertThat(tasks2.stream().anyMatch(task -> task.type() == BLOB)).isFalse();
     }
 
     @Test

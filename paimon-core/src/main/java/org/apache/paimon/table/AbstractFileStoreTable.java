@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -46,8 +45,6 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.WriteSelector;
-import org.apache.paimon.table.source.DataTableBatchScan;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -292,26 +289,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public DataTableScan newScan() {
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        tableSchema,
-                        schemaManager(),
-                        coreOptions(),
-                        newSnapshotReader(),
-                        catalogEnvironment.tableQueryAuth(coreOptions()));
-        Integer scanBucket = coreOptions().scanBucket();
-        if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
-            scan.withBucket(scanBucket);
-        }
-        if (coreOptions().dataEvolutionEnabled()) {
-            return new DataEvolutionBatchScan(this, scan);
-        }
-        return scan;
-    }
-
-    @Override
     public StreamDataTableScan newStreamScan() {
         DataTableStreamScan scan =
                 new DataTableStreamScan(
@@ -325,7 +302,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         !tableSchema.primaryKeys().isEmpty());
         Integer scanBucket = coreOptions().scanBucket();
         if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
             scan.withBucket(scanBucket);
         }
         return scan;

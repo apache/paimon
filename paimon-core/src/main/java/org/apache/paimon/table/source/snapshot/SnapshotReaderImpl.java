@@ -24,7 +24,6 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -179,6 +178,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public IndexFileHandler indexFileHandler() {
+        return indexFileHandler;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
         scan.withSnapshot(snapshotId);
         return this;
@@ -233,17 +237,31 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withFilter(Predicate predicate) {
+        return withFilter(predicate, predicate);
+    }
+
+    @Override
+    public SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate) {
         Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                 splitPartitionPredicatesAndDataPredicates(
                         predicate, tableSchema.logicalRowType(), tableSchema.partitionKeys());
-        if (pair.getLeft().isPresent()) {
-            scan.withPartitionFilter(pair.getLeft().get());
-        }
         if (!pair.getRight().isEmpty()) {
             this.hasNonPartitionFilter = true;
-            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
-        scan.withCompleteFilter(predicate);
+
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pushdownPair =
+                splitPartitionPredicatesAndDataPredicates(
+                        pushdownPredicate,
+                        tableSchema.logicalRowType(),
+                        tableSchema.partitionKeys());
+        if (pushdownPair.getLeft().isPresent()) {
+            scan.withPartitionFilter(pushdownPair.getLeft().get());
+        }
+        if (!pushdownPair.getRight().isEmpty()) {
+            this.hasNonPartitionFilter = true;
+            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pushdownPair.getRight()));
+        }
+        scan.withCompleteFilter(pushdownPredicate);
         return this;
     }
 
@@ -679,7 +697,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     Pair<BinaryRow, Integer> partitionBucket = entry;
                     if (remainingBuckets.contains(entry)) {
                         Map<String, DeletionFile> deletionFiles =
-                                toDeletionFiles(partitionBucket, indexFileMetas);
+                                indexFileHandler
+                                        .dvIndex(
+                                                partitionBucket.getLeft(),
+                                                partitionBucket.getRight())
+                                        .toDeletionFiles(indexFileMetas);
                         result.put(partitionBucket, deletionFiles);
                         if (dvMetaCache != null) {
                             dvMetaCache.put(
@@ -694,7 +716,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 partitionBucket.getLeft(),
                                 partitionBucket.getRight(),
                                 deletionFileNumber(indexFileMetas),
-                                () -> toDeletionFiles(partitionBucket, indexFileMetas));
+                                () ->
+                                        indexFileHandler
+                                                .dvIndex(
+                                                        partitionBucket.getLeft(),
+                                                        partitionBucket.getRight())
+                                                .toDeletionFiles(indexFileMetas));
                     }
                 });
         return result;
@@ -709,29 +736,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return count;
-    }
-
-    private Map<String, DeletionFile> toDeletionFiles(
-            Pair<BinaryRow, Integer> partitionBucket, List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
-        DeletionVectorsIndexFile dvIndex =
-                indexFileHandler.dvIndex(partitionBucket.getLeft(), partitionBucket.getRight());
-        for (IndexFileMeta indexFile : fileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
-            String dvFilePath = dvIndex.path(indexFile).toString();
-            if (dvRanges != null && !dvRanges.isEmpty()) {
-                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
-                    deletionFiles.put(
-                            dvMeta.dataFileName(),
-                            new DeletionFile(
-                                    dvFilePath,
-                                    dvMeta.offset(),
-                                    dvMeta.length(),
-                                    dvMeta.cardinality()));
-                }
-            }
-        }
-        return deletionFiles;
     }
 
     /**

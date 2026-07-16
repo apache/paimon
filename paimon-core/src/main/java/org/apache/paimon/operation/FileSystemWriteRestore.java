@@ -28,6 +28,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -39,15 +41,35 @@ public class FileSystemWriteRestore implements WriteRestore {
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
     private final PartitionBucketMapping partitionBucketMapping;
+    private final @Nullable Long snapshotId;
 
     public FileSystemWriteRestore(
             CoreOptions options,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             IndexFileHandler indexFileHandler) {
+        this(options, snapshotManager, scan, indexFileHandler, null);
+    }
+
+    public FileSystemWriteRestore(
+            CoreOptions options,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            IndexFileHandler indexFileHandler,
+            long snapshotId) {
+        this(options, snapshotManager, scan, indexFileHandler, Long.valueOf(snapshotId));
+    }
+
+    private FileSystemWriteRestore(
+            CoreOptions options,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            IndexFileHandler indexFileHandler,
+            @Nullable Long snapshotId) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFileHandler = indexFileHandler;
+        this.snapshotId = snapshotId;
         if (options.manifestDeleteFileDropStats()) {
             if (this.scan != null) {
                 this.scan.dropStats();
@@ -72,10 +94,14 @@ public class FileSystemWriteRestore implements WriteRestore {
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
-            boolean scanDeleteVectorsIndex) {
+            boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads) {
         // NOTE: don't use snapshotManager.latestSnapshot() here,
         // because we don't want to flood the catalog with high concurrency
-        Snapshot snapshot = snapshotManager.latestSnapshotFromFileSystem();
+        Snapshot snapshot =
+                snapshotId == null
+                        ? snapshotManager.latestSnapshotFromFileSystem()
+                        : snapshotManager.snapshot(snapshotId);
         if (snapshot == null) {
             return RestoreFiles.empty();
         }
@@ -99,7 +125,17 @@ public class FileSystemWriteRestore implements WriteRestore {
                     indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
         }
 
+        List<IndexFileMeta> sourceIndexPayloads = null;
+        if (scanSourceIndexPayloads) {
+            sourceIndexPayloads = indexFileHandler.scanSourceIndexes(snapshot, partition, bucket);
+        }
+
         return new RestoreFiles(
-                snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
+                snapshot,
+                totalBuckets,
+                restoreFiles,
+                dynamicBucketIndex,
+                deleteVectorsIndex,
+                sourceIndexPayloads);
     }
 }

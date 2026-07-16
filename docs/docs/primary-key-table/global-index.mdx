@@ -1,0 +1,529 @@
+---
+title: "Primary-Key Indexes"
+sidebar_position: 9
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Primary-Key Indexes
+
+Primary-key tables can maintain Vector, Full Text, BTree, and Bitmap indexes together with compact
+data files. These indexes are bucket-local and source-backed: every index group records its source data
+files and maps matches back to physical row positions. Deletion vectors are applied when indexed
+rows are read, so updates and deletes remain exact.
+
+Primary-key indexes differ from indexes created with `create_global_index`. A regular
+[Global Index](../multimodal-table/global-index) addresses table-wide row IDs and is built
+independently for a Data Evolution table. A primary-key index follows the write and compaction
+lifecycle of a primary-key table and addresses rows inside its compact data files.
+
+## Choose an Index
+
+<Tabs groupId="primary-key-index-family">
+
+<TabItem value="btree" label="BTree">
+
+Use BTree for selective scalar predicates such as equality, `IN`, comparisons, ranges, and null
+checks. Normal Flink, Spark, and Java batch scans apply it automatically; no index-specific query
+API is required.
+
+See [BTree Index](../multimodal-table/global-index/btree) for the built-in format and supported
+data types.
+
+</TabItem>
+
+<TabItem value="bitmap" label="Bitmap">
+
+Use Bitmap for enum-like dimensions, tags, and other columns where compressed bitmaps can evaluate
+equality, `IN`, null checks, complement predicates, and supported string predicates efficiently.
+Normal batch scans apply it automatically.
+
+See [Bitmap Index](../multimodal-table/global-index/bitmap) for predicate and format details.
+
+</TabItem>
+
+<TabItem value="vector" label="Vector">
+
+Use Vector for approximate nearest-neighbor (ANN) Top-K search on embeddings that are updated with
+the primary-key table. The index implementation and distance metric are configured per field, and
+search is exposed through Spark SQL, a Flink procedure, and the Java API.
+
+For an append-only or Data Evolution table whose vector index is built independently, see
+[Global Vector Index](../multimodal-table/global-index/vector).
+
+</TabItem>
+
+<TabItem value="full-text" label="Full Text">
+
+Use Full Text for native ranked search on `CHAR`, `VARCHAR`, or `STRING` content that can be
+updated or deleted with the primary-key table. The fixed `full-text` implementation is selected
+automatically. Search is exposed through Spark SQL, a Flink procedure, and the Java API.
+
+For an append-only or Data Evolution table whose full-text index is built independently, see
+[Global Index](../multimodal-table/global-index).
+
+</TabItem>
+
+</Tabs>
+
+Different columns in one table can use different index families. One column can occur in at most
+one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`, and
+`pk-bitmap.index.columns`.
+
+## Requirements
+
+All primary-key indexes require:
+
+- A primary-key table in fixed-bucket mode (`bucket > 0`) or postpone-bucket mode
+  (`bucket = -2`).
+- `pk-clustering-override = false`.
+- An indexed column supported by the selected index implementation.
+
+Dynamic-bucket tables, append-only tables, compound indexes, and custom index families are not
+supported by this configuration.
+
+<Tabs groupId="primary-key-index-requirements">
+
+<TabItem value="scalar" label="BTree and Bitmap">
+
+BTree and Bitmap additionally require:
+
+- `deletion-vectors.enabled = true`.
+- `deletion-vectors.merge-on-read = false`.
+- A supported scalar column type.
+
+Each entry creates an independent single-column index. Multiple BTree and Bitmap columns are
+supported as long as a column is not listed by another primary-key index family.
+
+</TabItem>
+
+<TabItem value="vector" label="Vector">
+
+Vector additionally requires:
+
+- A `VECTOR` column whose element type is `FLOAT`.
+- A merge engine of `deduplicate`, `partial-update`, `aggregation`, or `first-row`.
+- `deletion-vectors.enabled = true`, except for `first-row`, where it must be `false`.
+- The configured ANN implementation on every writer and reader classpath.
+
+Exactly one vector column is currently supported per table.
+
+</TabItem>
+
+<TabItem value="full-text" label="Full Text">
+
+Full Text additionally requires:
+
+- A `CHAR`, `VARCHAR`, or `STRING` column.
+- A merge engine of `deduplicate`, `partial-update`, `aggregation`, or `first-row`.
+- `deletion-vectors.enabled = true`, except for `first-row`, where it must be `false`.
+- `deletion-vectors.merge-on-read = false`.
+- The `paimon-full-text` module and its native implementation on every writer, compactor, and
+  reader classpath.
+
+Exactly one full-text column is currently supported per table.
+
+</TabItem>
+
+</Tabs>
+
+## Create a Table
+
+The following table uses all four families on different columns: Vector for `embedding`, Full
+Text for `content`, BTree for `amount`, and Bitmap for `status`.
+
+<Tabs groupId="primary-key-index-create-table">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE TABLE items (
+    id BIGINT,
+    status STRING,
+    amount DECIMAL(12, 2),
+    content STRING,
+    embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'pk-vector.index.columns' = 'embedding',
+    'fields.embedding.pk-vector.index.type' = 'ivf-flat',
+    'fields.embedding.pk-vector.distance.metric' = 'cosine',
+    'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
+    'pk-full-text.index.columns' = 'content',
+    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
+    'pk-btree.index.columns' = 'amount',
+    'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
+    'pk-bitmap.index.columns' = 'status',
+    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}'
+);
+```
+
+The vector comment directive converts the SQL `ARRAY<FLOAT>` column to Paimon's fixed-length
+`VECTOR<FLOAT>` type. Java API users can define it directly with
+`DataTypes.VECTOR(3, DataTypes.FLOAT())`.
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+CREATE TABLE items (
+    id BIGINT,
+    status STRING,
+    amount DECIMAL(12, 2),
+    content STRING,
+    embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3'
+) USING paimon
+TBLPROPERTIES (
+    'primary-key' = 'id',
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'pk-vector.index.columns' = 'embedding',
+    'fields.embedding.pk-vector.index.type' = 'ivf-flat',
+    'fields.embedding.pk-vector.distance.metric' = 'cosine',
+    'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
+    'pk-full-text.index.columns' = 'content',
+    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
+    'pk-btree.index.columns' = 'amount',
+    'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
+    'pk-bitmap.index.columns' = 'status',
+    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}'
+);
+```
+
+</TabItem>
+
+</Tabs>
+
+Duplicate, empty, unknown, unsupported, or cross-family duplicate columns are rejected during
+schema validation.
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `pk-vector.index.columns` | Not set | Vector column to index. Exactly one vector column is currently supported. |
+| `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-hnsw-flat`, `ivf-hnsw-sq`, or `lumina`. |
+| `fields.<column>.pk-vector.distance.metric` | `inner_product` | Distance metric: `l2`, `cosine`, or `inner_product`. |
+| `fields.<column>.pk-vector.index.options` | Not set | JSON object containing build options for the selected ANN implementation. |
+| `pk-full-text.index.columns` | Not set | Character column to index. Exactly one full-text column is currently supported. |
+| `fields.<column>.pk-full-text.index.options` | Not set | JSON object containing native analyzer options. Unqualified keys are scoped to `full-text`. |
+| `pk-btree.index.columns` | Not set | Comma-separated columns which own independent BTree indexes. |
+| `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
+| `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
+| `fields.<column>.pk-bitmap.index.options` | Not set | JSON object containing Bitmap build options. Unqualified keys are scoped to `bitmap-index`. |
+| `fields.<column>.pk-index.compaction.level-fanout` | `5` | Number of similarly sized index groups which triggers a rebuild and maximum row-count ratio within one size tier. Shared by all four families. Must be greater than `1`. |
+| `fields.<column>.pk-index.compaction.stale-ratio-threshold` | `0.2` | Ratio of rows from inactive source files which triggers a rebuild. Shared by all four families. Must be in `(0, 1]`. |
+| `global-index.search-mode` | `fast` | Search mode for primary-key Vector and Full Text queries. `fast` searches indexed data only, so uncovered files are omitted. For Vector, `full` and `detail` search uncovered files exactly. Primary-key Full Text supports only `fast`. |
+
+For algorithm-specific options, see the corresponding
+[BTree](../multimodal-table/global-index/btree),
+[Bitmap](../multimodal-table/global-index/bitmap), or
+[Vector](../multimodal-table/global-index/vector) index page. Full-text analyzer options are listed
+in the [`paimon-full-text` README](https://github.com/apache/paimon/blob/master/paimon-full-text/README.md).
+
+## Maintenance and Coverage
+
+Paimon builds primary-key indexes from complete `COMPACT` data files above Level 0. An index group
+stores the source file names and row counts required to map index results back to physical rows.
+Data-file and index-file changes are committed in the same snapshot.
+
+New Level-0 `APPEND` files are not index sources. They remain uncovered until physical data
+compaction produces an eligible output. A metadata-only level upgrade keeps its `APPEND` source
+and therefore remains uncovered as well.
+
+For a postpone-bucket table, foreground writes can land in bucket `-2` or in pending Level-0 files
+inside real buckets. These rows become visible after batch compaction publishes them to real
+buckets. Indexes are created when that process physically rewrites the rows into eligible compact
+output; simply assigning or upgrading a pending file does not make it an index source.
+
+### Index LSM Maintenance
+
+Each indexed column maintains its own immutable index groups. Maintenance uses the shared
+field-scoped compaction options:
+
+- When at least `level-fanout` similarly sized groups exist, Paimon rebuilds them into a larger
+  group. The largest selected group can contain at most `level-fanout` times the rows of the
+  smallest group.
+- When the ratio of rows belonging to inactive source files reaches
+  `stale-ratio-threshold`, Paimon rebuilds the affected group from its remaining active sources.
+- A rebuild atomically replaces its input groups after the new group is complete.
+
+Index construction can execute asynchronously inside the writer. A writer which waits for
+compaction also waits for active index maintenance; a non-blocking writer can complete maintenance
+in a later commit. Coverage can therefore be temporarily partial.
+
+Coverage behavior depends on the index family and search mode. `global-index.search-mode` defaults
+to `fast`. For primary-key Vector and Full Text queries, `fast` searches only data covered by an
+active index group. Uncovered files are not searched, so partial coverage can make results
+incomplete.
+
+- BTree and Bitmap scans always read uncovered files through the ordinary data path. Partial
+  coverage affects their acceleration, not result completeness. The original scalar predicate and
+  deletion vectors are applied after index pruning.
+- Vector search in `full` or `detail` mode evaluates files without an active ANN group exactly and
+  merges those results with ANN candidates. In the default `fast` mode, those files are omitted.
+
+Primary-key Full Text currently supports only `global-index.search-mode = fast`. It searches
+persistent archives and ignores uncovered files; `full` and `detail` are rejected because a
+merge-aware logical-row fallback is not implemented. Consequently, newly appended Level-0 rows
+become full-text searchable only after compaction publishes an eligible data file and archive.
+
+## BTree and Bitmap Queries
+
+BTree and Bitmap indexes are applied automatically to snapshot-scoped batch scans. They can
+accelerate equality, `IN`, null checks, comparisons and ranges, complement predicates, and
+supported string predicates.
+
+Paimon combines indexed scalar results as follows:
+
+- For `AND`, any usable indexed child can narrow a source file; unindexed children remain residual
+  filters.
+- For `OR`, index positions are used only when every branch can be evaluated safely. Otherwise,
+  the source file is scanned normally.
+
+Planning uses the data and index manifests from the selected snapshot. If an index group is
+missing, incomplete, unreadable, corrupt, or returns an invalid physical position, the affected
+source file falls back to the ordinary data path.
+
+## Vector Search
+
+A vector search captures one table snapshot, searches active ANN groups in the selected buckets,
+and merges their candidates into a global Top-K. Candidates are materialized from source data
+files by physical row position. Deletion vectors remove stale versions and deleted rows.
+
+<Tabs groupId="primary-key-vector-search-api">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+Use the `vector_search` table-valued function. Spark exposes the ANN score through the
+`__paimon_search_score` metadata column.
+
+```sql
+SELECT id, status, __paimon_search_score
+FROM vector_search(
+    'items',
+    'embedding',
+    array(0.1f, 0.2f, 0.3f),
+    10,
+    map('ivf.nprobe', '32')
+);
+```
+
+The query dimension must match the indexed vector dimension. Partition predicates are applied
+before ANN search. When `spark.paimon.vector-search.distribute.enabled` is `true`, Spark can
+distribute sufficiently large groups of bucket-local searches and merge task-local Top-K results
+on the driver.
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Flink exposes vector search as a procedure and returns JSON-serialized rows. Use `projection` to
+avoid reading columns which are not needed.
+
+```sql
+CALL sys.vector_search(
+    `table` => 'default.items',
+    vector_column => 'embedding',
+    query_vector => '0.1,0.2,0.3',
+    top_k => 10,
+    projection => 'id,status',
+    options => 'ivf.nprobe=32'
+);
+```
+
+</TabItem>
+
+<TabItem value="java-api" label="Java API">
+
+```java
+GlobalIndexResult result = table.newVectorSearchBuilder()
+        .withVectorColumn("embedding")
+        .withVector(queryVector)
+        .withLimit(10)
+        .withOption("ivf.nprobe", "32")
+        .executeLocal();
+
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> consume(row));
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+### Exact Rerank
+
+Primary-key vector search can retrieve additional ANN candidates and rerank them with the original
+vectors. For example, this table option retrieves up to four times the requested Top-K before
+computing exact distances:
+
+```sql
+'fields.embedding.ivf-flat.refine_factor' = '4'
+```
+
+`refine_factor`, `refine-factor`, `rerank_factor`, and `rerank-factor` are accepted. Query options
+override table options, and field/index prefixes take precedence over less-specific prefixes. The
+factor must be a positive integer. A factor of `1` performs exact reranking without retrieving
+additional candidates.
+
+Only ANN candidates can win the rerank, so a larger factor can improve recall but does not
+guarantee the exact global Top-K. It also increases ANN work and data-file I/O. In `full` or
+`detail` mode, uncovered files are searched exactly and merged separately with the ANN candidates;
+the default `fast` mode does not search them.
+
+## Full-Text Search
+
+A primary-key full-text search captures one table snapshot, searches active archives in the
+selected buckets, applies deletion vectors, and merges native relevance scores into a global
+Top-K. The score is preserved as `__paimon_search_score`; it is not rewritten by RRF unless the
+full-text route is later combined by Hybrid search.
+
+<Tabs groupId="primary-key-full-text-search-api">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+SELECT id, content, __paimon_search_score
+FROM full_text_search(
+    'items',
+    'content',
+    '{"match":{"column":"content","terms":"paimon lake"}}',
+    10
+)
+ORDER BY __paimon_search_score DESC;
+```
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Flink returns JSON-serialized rows. Add `__paimon_search_score` to `projection` when the native
+relevance score is required. `top_k` must be between 1 and 10,000.
+
+```sql
+CALL sys.full_text_search(
+    `table` => 'default.items',
+    `column` => 'content',
+    query => '{"match":{"column":"content","terms":"paimon lake"}}',
+    top_k => 10,
+    projection => 'id,content,__paimon_search_score'
+);
+```
+
+</TabItem>
+
+<TabItem value="java-api" label="Java API">
+
+```java
+GlobalIndexResult result = table.newFullTextSearchBuilder()
+        .withQuery("content", queryJson)
+        .withLimit(10)
+        .executeLocal();
+
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> consume(row));
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+Partition predicates can prune buckets before ranking. Arbitrary row predicates cannot be pushed
+into a full-text Top-K route.
+
+## Hybrid Search
+
+Spark `hybrid_search` can fuse primary-key Vector and Full Text routes by physical data-file
+position. Hybrid captures one snapshot for all physical routes, rejects a mix of physical and
+global row-ID routes, and deduplicates their source files before reading rows. Supported rankers
+are `rrf`, `weighted_score`, and `mrr`; route weights must be finite and positive.
+
+```sql
+SELECT id, __paimon_search_score
+FROM hybrid_search(
+    'items',
+    array(named_struct(
+        'field', 'embedding',
+        'query_vector', array(0.1f, 0.2f, 0.3f),
+        'limit', 20,
+        'weight', 1.0f,
+        'options', map())),
+    array(named_struct(
+        'column', 'content',
+        'query', '{"match":{"column":"content","terms":"paimon lake"}}',
+        'limit', 20,
+        'weight', 1.0f,
+        'options', map())),
+    10,
+    'rrf'
+)
+ORDER BY __paimon_search_score DESC;
+```
+
+## Merge-Engine Behavior
+
+Vector and Full Text maintenance follow the table's merge engine:
+
+- `deduplicate`: an update indexes the latest row and the deletion vector hides the replaced
+  physical row. A delete removes the old row from both search indexes through the deletion vector.
+- `partial-update`: the vector index is built from the lookup-completed compact-output row.
+- `aggregation`: the vector index is built from the aggregated compact-output row.
+- `first-row`: the retained first row is indexed. Deletion vectors must be disabled because later
+  rows with the same primary key are ignored rather than deleting the retained row.
+
+Full Text indexes the lookup-completed, aggregated, or retained compact-output text using the
+same rules. Null text consumes a physical row ordinal but is not added to the native term index.
+
+## Schema Evolution
+
+An indexed column cannot be renamed, dropped, or have its type changed while its definition is
+present. Treat index column lists, field-scoped implementation settings, and build options as part
+of the index definition. To change the family or incompatible build options of an indexed column,
+create a table with the desired definition and migrate the data.
+
+## Limitations
+
+- BTree and Bitmap definitions are single-column indexes.
+- Exactly one vector index column is currently supported per table.
+- Exactly one full-text index column is currently supported per table.
+- Only `FLOAT` vectors are supported.
+- Indexes are built from eligible compact output, not directly from Level-0 appends.
+- Index acceleration and vector search are snapshot-scoped batch operations; continuous streaming
+  and lateral Vector or Full Text search are not supported.
+- Flink vector search returns rows but does not expose the ANN score as a separate column.
+- FAST is the default search mode and excludes uncovered files from primary-key Vector and Full
+  Text results. Vector supports exact fallback for uncovered files in FULL and DETAIL modes;
+  primary-key Full Text supports only FAST until compaction creates persistent archives.
+- Full Text routes support partition pruning but not arbitrary row predicates before Top-K.
+- Hybrid search cannot mix source-backed physical routes with global row-ID routes.
+- Online replacement between two definitions on the same column is not supported.

@@ -120,31 +120,26 @@ class TableWrite:
             hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
                 and ``"off"`` write append-only HASH_FIXED tables directly
                 and reject HASH_FIXED primary-key tables. ``"map_groups"``
-                preserves the legacy small-file optimization and its single
-                group memory bound for HASH_FIXED primary-key tables.
+                writes each HASH_FIXED primary-key group in one task and
+                preserves the legacy single-group memory bound.
             static_partition: Optional partition spec to overwrite. When set,
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        from pypaimon.ray.shuffle import maybe_apply_repartition
-        from pypaimon.write.ray_datasink import PaimonDatasink
-
-        dataset = maybe_apply_repartition(
-            dataset, self.table, hash_fixed_precluster)
+        from pypaimon.write.ray_datasink import write_paimon_dataset
 
         overwrite_partition = self.static_partition
         if static_partition is not None:
             overwrite_partition = static_partition
 
-        datasink = PaimonDatasink(
+        write_paimon_dataset(
+            dataset,
             self.table,
             overwrite=overwrite,
             static_partition=overwrite_partition,
-        )
-        dataset.write_datasink(
-            datasink,
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
+            hash_fixed_precluster=hash_fixed_precluster,
         )
 
     def close(self):
@@ -154,23 +149,39 @@ class TableWrite:
         self.file_store_write.abort()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if data_schema == self.table_pyarrow_schema:
+        if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
             return
-        if data_schema.names == self.file_store_write.write_cols:
-            return
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names == self.table_pyarrow_schema.names:
-            compatible = True
-            for i in range(len(data_schema)):
-                input_type = data_schema.field(i).type
-                table_type = self.table_pyarrow_schema.field(i).type
-                if input_type != table_type:
-                    if self._is_binary_family(input_type) and self._is_binary_family(table_type):
-                        continue
-                    compatible = False
-                    break
-            if compatible:
+
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            write_cols_schema = self._write_cols_pyarrow_schema(write_cols)
+            if self._is_compatible_pyarrow_schema(data_schema, write_cols_schema):
                 return
+
+        self._raise_inconsistent_schema(data_schema)
+
+    def _is_compatible_pyarrow_schema(
+            self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
+        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
+        if data_schema.names != expected_schema.names:
+            return False
+        for i in range(len(data_schema)):
+            input_type = data_schema.field(i).type
+            expected_type = expected_schema.field(i).type
+            if input_type == expected_type:
+                continue
+            if self._is_binary_family(input_type) and self._is_binary_family(expected_type):
+                continue
+            return False
+        return True
+
+    def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
+        table_fields = {
+            field.name: field for field in self.table_pyarrow_schema
+        }
+        return pa.schema([table_fields[col] for col in write_cols])
+
+    def _raise_inconsistent_schema(self, data_schema: pa.Schema):
         raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
                          f"Input schema is: {data_schema} "
                          f"Table schema is: {self.table_pyarrow_schema} "

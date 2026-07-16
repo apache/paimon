@@ -37,7 +37,8 @@ public interface WriteRestore {
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
-            boolean scanDeleteVectorsIndex);
+            boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads);
 
     /**
      * Resolves the {@code totalBuckets} for a (partition, bucket) pair given the manifest entries

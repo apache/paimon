@@ -84,6 +84,13 @@ you need to run a compaction job.
 See `compact` [procedure](../flink/procedures).
 The bucket number for the partitions compacted for the first time
 is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
+You can also configure `postpone.target-row-num-per-bucket` to calculate the bucket number
+from the row count of the files in the postpone bucket directory.
+The calculated bucket number is `ceil(row_count / postpone.target-row-num-per-bucket)`,
+and is at least `1`.
+When this option is configured, it takes precedence over `postpone.default-bucket-num`
+for partitions compacted for the first time.
+Partitions that already have real bucket files keep their existing bucket number.
 
 Finally, when you feel that the bucket number of some partition is too small,
 you can also run a rescale job.

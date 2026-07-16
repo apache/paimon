@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -67,6 +68,8 @@ public class DataConverter {
                 return fromPaimon((InternalMap) o, type);
             case ROW:
                 return fromPaimon((InternalRow) o, (RowType) type);
+            case BLOB:
+                return ((Blob) o).toData();
             default:
                 return o;
         }
@@ -94,7 +97,12 @@ public class DataConverter {
     }
 
     public static ArrayData fromPaimon(InternalArray array, ArrayType arrayType) {
-        return fromPaimonArrayElementType(array, arrayType.getElementType());
+        return fromPaimon(array, arrayType, false);
+    }
+
+    public static ArrayData fromPaimon(
+            InternalArray array, ArrayType arrayType, boolean blobAsDescriptor) {
+        return fromPaimonArrayElementType(array, arrayType.getElementType(), blobAsDescriptor);
     }
 
     public static ArrayData fromPaimon(InternalVector vector, VectorType vectorType) {
@@ -104,11 +112,16 @@ public class DataConverter {
                             "Vector length mismatch. Expected %d but was %d.",
                             vectorType.getLength(), vector.size()));
         }
-        return fromPaimonArrayElementType(vector, vectorType.getElementType());
+        return fromPaimonArrayElementType(vector, vectorType.getElementType(), false);
     }
 
     private static ArrayData fromPaimonArrayElementType(InternalArray array, DataType elementType) {
-        return SparkArrayData.create(elementType).replace(array);
+        return fromPaimonArrayElementType(array, elementType, false);
+    }
+
+    private static ArrayData fromPaimonArrayElementType(
+            InternalArray array, DataType elementType, boolean blobAsDescriptor) {
+        return SparkArrayData.create(elementType, blobAsDescriptor).replace(array);
     }
 
     public static MapData fromPaimon(InternalMap map, DataType mapType) {

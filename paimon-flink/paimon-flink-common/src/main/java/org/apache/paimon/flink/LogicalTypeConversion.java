@@ -46,11 +46,35 @@ public class LogicalTypeConversion {
         return dataType.accept(DataTypeToLogicalType.INSTANCE);
     }
 
-    public static BlobType toBlobType(LogicalType logicalType) {
+    public static DataType toBlobType(LogicalType logicalType) {
+        return toBlobType(logicalType, true);
+    }
+
+    public static DataType toBlobType(LogicalType logicalType, boolean allowArray) {
+        if (logicalType instanceof org.apache.flink.table.types.logical.ArrayType) {
+            checkArgument(
+                    allowArray,
+                    "ARRAY<BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
+            LogicalType elementType =
+                    ((org.apache.flink.table.types.logical.ArrayType) logicalType).getElementType();
+            checkArgument(
+                    isBinaryType(elementType),
+                    "Expected BinaryType, VarBinaryType or ArrayType with BinaryType or "
+                            + "VarBinaryType element, but got: "
+                            + logicalType);
+            return new org.apache.paimon.types.ArrayType(
+                    logicalType.isNullable(), new BlobType(elementType.isNullable()));
+        }
         checkArgument(
-                logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
-                "Expected BinaryType or VarBinaryType, but got: " + logicalType);
-        return new BlobType();
+                isBinaryType(logicalType),
+                "Expected BinaryType, VarBinaryType or ArrayType with BinaryType or "
+                        + "VarBinaryType element, but got: "
+                        + logicalType);
+        return new BlobType(logicalType.isNullable());
+    }
+
+    private static boolean isBinaryType(LogicalType logicalType) {
+        return logicalType instanceof BinaryType || logicalType instanceof VarBinaryType;
     }
 
     public static VectorType toVectorType(

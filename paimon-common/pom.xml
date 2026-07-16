@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.5-SNAPSHOT</version>
+        <version>2.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-common</artifactId>
@@ -300,6 +300,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.antlr:antlr4-runtime</include>
+                                    <include>io.airlift:aircompressor</include>
                                     <include>org.codehaus.janino:*</include>
                                     <include>it.unimi.dsi:fastutil</include>
                                     <include>org.roaringbitmap:RoaringBitmap</include>

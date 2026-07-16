@@ -34,6 +34,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -961,6 +962,58 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testAbortIndexFiles() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.INDEX_FILE_IN_DATA_FILE_DIR.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+        IndexPathFactory indexPathFactory = store.pathFactory().indexFileFactory(partition, 0);
+
+        Path dataNewPath = indexPathFactory.newPath();
+        IndexFileMeta dataNew = createIndexFile(store, dataNewPath, false);
+        Path compactNewPath = new Path(tempDir.resolve("external-new-index").toUri());
+        IndexFileMeta compactNew = createIndexFile(store, compactNewPath, true);
+        Path dataDeletedPath = indexPathFactory.newPath();
+        IndexFileMeta dataDeleted = createIndexFile(store, dataDeletedPath, false);
+        Path compactDeletedPath = indexPathFactory.newPath();
+        IndexFileMeta compactDeleted = createIndexFile(store, compactDeletedPath, false);
+
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(dataNew),
+                                Collections.singletonList(dataDeleted)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(compactNew),
+                                Collections.singletonList(compactDeleted)));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(Collections.singletonList(commitMessage));
+        }
+
+        assertThat(store.fileIO().exists(dataNewPath)).isFalse();
+        assertThat(store.fileIO().exists(compactNewPath)).isFalse();
+        assertThat(store.fileIO().exists(dataDeletedPath)).isTrue();
+        assertThat(store.fileIO().exists(compactDeletedPath)).isTrue();
+    }
+
+    private static IndexFileMeta createIndexFile(
+            TestAppendFileStore store, Path path, boolean external) throws Exception {
+        store.fileIO().newOutputStream(path, false).close();
+        return new IndexFileMeta(
+                HASH_INDEX, path.getName(), 0, 0, null, external ? path.toString() : null, null);
+    }
+
+    @Test
     public void testRollbackToAsLatestFileLevelDeleteIsVisibleToStreaming() throws Exception {
         // Contrast with the DV-only case: when a rollback removes whole data files, the delete is
         // file-level (FileKind.DELETE) and IS visible to streaming readers, no DV needed.
@@ -1130,6 +1183,51 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testRtasAppendAfterTruncateResetsInheritedIndexAndStats() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        store.commitData(generateDataList(1), s -> partition, kv -> 0);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "stale-index", 0, 0), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 1L, 1L, 1L, 0L, 8L, 8L));
+        Statistics fakeStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 1L, 100L, fakeColStatsMap);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        }
+
+        try (FileStoreCommitImpl truncateCommit = store.newCommit()) {
+            truncateCommit.withOperation(Snapshot.Operation.TRUNCATE);
+            truncateCommit.truncateTable(1L);
+        }
+
+        List<KeyValue> replacement = generateDataList(1);
+        store.commitDataImpl(
+                replacement,
+                s -> partition,
+                kv -> 0,
+                false,
+                null,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> {
+                    commit.withOperation(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+                    commit.commit(committable, false);
+                });
+
+        Snapshot rtasSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(rtasSnapshot.operation()).isEqualTo(Snapshot.Operation.REPLACE_TABLE_AS_SELECT);
+        assertThat(rtasSnapshot.indexManifest()).isNull();
+        assertThat(rtasSnapshot.statistics()).isNull();
     }
 
     @Test

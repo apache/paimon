@@ -77,14 +77,14 @@ public class NativeVectorGlobalIndexTest {
             options.setInteger("ivf-flat.dimension", 2);
             options.setString("ivf-flat.metric", "l2");
             options.setInteger("ivf-flat.nlist", 1);
-            try (org.apache.paimon.index.vector.VectorIndexWriter ignored =
-                    new org.apache.paimon.index.vector.VectorIndexWriter(
+            try (org.apache.paimon.index.vector.VectorIndexTrainer ignored =
+                    org.apache.paimon.index.vector.VectorIndexTrainer.create(
                             NativeVectorGlobalIndexerFactory.nativeOptions(
                                     new ArrayType(new FloatType()),
                                     options,
                                     IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
                                     "vec"))) {
-                // Closed immediately; constructing the writer is enough to validate JNI loading.
+                // Closed immediately; constructing the trainer is enough to validate JNI loading.
             }
             return true;
         } catch (Throwable t) {
@@ -178,6 +178,52 @@ public class NativeVectorGlobalIndexTest {
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).isEmpty();
+    }
+
+    @Test
+    public void testTrainingVectorCountUsesConfiguredSampleRatio() {
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 1.0))
+                .isEqualTo(10_000);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 0.25))
+                .isEqualTo(2_500);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(3L, 0.01)).isEqualTo(1);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(0L, 0.25)).isEqualTo(0);
+
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 1.1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("less than or equal to 1");
+    }
+
+    @Test
+    public void testSampleIndexSequenceIsUniform() {
+        assertThat(
+                        new long[] {
+                            NativeVectorGlobalIndexWriter.sampleIndex(0, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(1, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(2, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(3, 10, 4)
+                        })
+                .containsExactly(0L, 2L, 5L, 7L);
+    }
+
+    @Test
+    public void testVectorBatchSizeProtectsSingleJavaArrayAllocation() {
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 128)).isEqualTo(4096);
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(10000, 128)).isEqualTo(10000);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                4096, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                10000, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positive integer");
     }
 
     @Test

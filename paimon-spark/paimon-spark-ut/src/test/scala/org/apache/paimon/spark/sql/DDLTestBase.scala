@@ -135,6 +135,21 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: alter table set location is not supported") {
+    withTempDir {
+      newLocation =>
+        withTable("paimon_tbl") {
+          sql("CREATE TABLE paimon_tbl (id int)")
+
+          val error = intercept[Exception] {
+            sql(s"ALTER TABLE paimon_tbl SET LOCATION '${newLocation.getCanonicalPath}'")
+          }.getMessage
+
+          assert(error.contains("ALTER TABLE ... SET LOCATION is not supported for Paimon tables."))
+        }
+    }
+  }
+
   test("Paimon DDL: create table like with paimon SparkCatalog") {
     assume(gteqSpark3_4)
     withTable("source_tbl", "target_tbl") {
@@ -403,6 +418,63 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           sql(s"SELECT id, data FROM t VERSION AS OF $oldSnapshotId"),
           Seq((1L, "old")).toDF())
       }
+    }
+  }
+
+  test(
+    "Paimon DDL: CREATE OR REPLACE TABLE AS SELECT reads latest rows after incompatible nested type replace") {
+    assume(gteqSpark3_4)
+    withTable("src", "t") {
+      sql("""
+            |CREATE TABLE src (
+            |  id BIGINT,
+            |  payload DOUBLE,
+            |  name_a STRING,
+            |  name_b STRING
+            |)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO src VALUES
+            |  (1, 1.1D, 'a', 'x'),
+            |  (2, 2.2D, 'b', 'y')
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS SELECT * FROM src
+            |""".stripMargin)
+
+      sql("""
+            |CREATE OR REPLACE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS
+            |SELECT
+            |  id,
+            |  named_struct(
+            |    'items_before', array(name_a),
+            |    'items_after', array(name_b)
+            |  ) AS payload,
+            |  name_a,
+            |  name_b
+            |FROM src
+            |""".stripMargin)
+
+      Assertions.assertEquals("struct", spark.table("t").schema("payload").dataType.typeName)
+
+      checkAnswer(
+        sql("""
+              |SELECT id, payload.items_before, payload.items_after, name_a, name_b
+              |FROM t
+              |WHERE name_a = 'a'
+              |LIMIT 1
+              |""".stripMargin),
+        Row(1L, Seq("a"), Seq("x"), "a", "x") :: Nil
+      )
     }
   }
 

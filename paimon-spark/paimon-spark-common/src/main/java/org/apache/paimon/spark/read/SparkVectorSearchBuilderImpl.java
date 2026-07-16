@@ -23,8 +23,8 @@ import org.apache.paimon.table.source.VectorRead;
 import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 
 /**
- * Spark-aware {@link VectorSearchBuilderImpl} which produces a {@link SparkVectorReadImpl} so the
- * per-split vector index evaluation is dispatched through Spark instead of the local thread pool.
+ * Spark-aware {@link VectorSearchBuilderImpl} which produces Spark-specific vector readers so
+ * data-evolution splits and primary-key bucket groups can be evaluated across the Spark cluster.
  *
  * <p>Single-vector only; batch search has no Spark-dispatched path yet (TODO).
  */
@@ -38,7 +38,11 @@ public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 
     @Override
     public VectorRead newVectorRead() {
-        return new SparkVectorReadImpl(
+        if (isPrimaryKeyVectorSearch()) {
+            return new SparkPrimaryKeyVectorRead(
+                    table, vectorColumn, vector, limit, options, filter);
+        }
+        return new SparkDataEvolutionVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 }

@@ -41,6 +41,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -135,6 +136,34 @@ public class VariantShreddingReadTest {
         List<InternalRow> result4 = readRows(format, readType4);
         assertThat(result4.get(0).getRow(0, 1).isNullAt(0)).isTrue();
         assertThat(result4.get(1).getRow(0, 1).isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testReadOldFileWithVariantAndMissingAddedColumn() throws Exception {
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"age\",\"type\":\"INT\"}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")),
+                GenericRow.of(GenericVariant.fromJson("{\"age\":25}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "v", DataTypes.VARIANT()),
+                        DataTypes.FIELD(1, "added", DataTypes.INT()));
+        List<InternalRow> result = readRows(format, readType);
+
+        assertThat(result.get(0).getVariant(0).toJson())
+                .isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
+        assertThat(result.get(0).isNullAt(1)).isTrue();
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"age\":25}");
+        assertThat(result.get(1).isNullAt(1)).isTrue();
     }
 
     @ParameterizedTest

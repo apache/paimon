@@ -125,7 +125,15 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorScan(
+                    table,
+                    vectorColumn.id(),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    partitionFilter,
+                    filter);
+        }
+        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
@@ -137,7 +145,16 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
         for (float[] vector : vectors) {
             checkNotNull(vector, "Search vector element cannot be null");
         }
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyBatchVectorRead(
+                    table, vectorColumn, vectors, limit, options, filter);
+        }
         return new BatchVectorReadImpl(
                 table, partitionFilter, filter, limit, vectorColumn, vectors, options);
+    }
+
+    protected boolean isPrimaryKeyVectorSearch() {
+        return vectorColumn != null
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
     }
 }

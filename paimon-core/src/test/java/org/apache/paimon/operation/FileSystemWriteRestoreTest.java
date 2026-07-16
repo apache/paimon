@@ -19,11 +19,14 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -38,16 +41,23 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.UUID;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link FileSystemWriteRestore}, covering the {@code totalBuckets} resolution logic for
@@ -68,6 +78,70 @@ public class FileSystemWriteRestoreTest {
             RowType.of(
                     new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                     new String[] {"pt", "k", "v"});
+
+    @Test
+    void testRestoreFromPinnedSnapshotForPostponeBucket() {
+        Snapshot pinned = mock(Snapshot.class);
+        Snapshot latest = mock(Snapshot.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        when(snapshotManager.snapshot(5L)).thenReturn(pinned);
+        when(snapshotManager.latestSnapshotFromFileSystem()).thenReturn(latest);
+
+        FileStoreScan scan = mock(FileStoreScan.class);
+        FileStoreScan.Plan plan = mock(FileStoreScan.Plan.class);
+        when(scan.withSnapshot(pinned)).thenReturn(scan);
+        when(scan.withPartitionBucket(EMPTY_ROW, 0)).thenReturn(scan);
+        when(scan.plan()).thenReturn(plan);
+        when(plan.files()).thenReturn(Collections.emptyList());
+
+        IndexFileMeta ann = new IndexFileMeta("test-vector-ann", "ann", 1, 1, null, null, null);
+        IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
+        when(indexFileHandler.scanSourceIndexes(pinned, EMPTY_ROW, 0))
+                .thenReturn(Collections.singletonList(ann));
+
+        FileSystemWriteRestore restore =
+                new FileSystemWriteRestore(
+                        new CoreOptions(new HashMap<>()),
+                        snapshotManager,
+                        scan,
+                        indexFileHandler,
+                        5L);
+
+        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
+
+        assertThat(restored.snapshot()).isSameAs(pinned);
+        assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
+        verify(scan).withSnapshot(pinned);
+        verify(indexFileHandler).scanSourceIndexes(pinned, EMPTY_ROW, 0);
+        verify(snapshotManager, never()).latestSnapshotFromFileSystem();
+    }
+
+    @Test
+    void testRestoreSourceIndexPayloadsWithoutDirectory() {
+        Snapshot snapshot = mock(Snapshot.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        when(snapshotManager.latestSnapshotFromFileSystem()).thenReturn(snapshot);
+
+        FileStoreScan scan = mock(FileStoreScan.class);
+        FileStoreScan.Plan plan = mock(FileStoreScan.Plan.class);
+        when(scan.withSnapshot(snapshot)).thenReturn(scan);
+        when(scan.withPartitionBucket(EMPTY_ROW, 0)).thenReturn(scan);
+        when(scan.plan()).thenReturn(plan);
+        when(plan.files()).thenReturn(Collections.emptyList());
+
+        IndexFileMeta ann = new IndexFileMeta("test-vector-ann", "ann", 1, 1, null, null, null);
+        IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
+        when(indexFileHandler.scanSourceIndexes(snapshot, EMPTY_ROW, 0))
+                .thenReturn(Collections.singletonList(ann));
+
+        FileSystemWriteRestore restore =
+                new FileSystemWriteRestore(
+                        new CoreOptions(new HashMap<>()), snapshotManager, scan, indexFileHandler);
+
+        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
+
+        assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
+    }
 
     @Test
     public void testEmptyBucketUsesPartitionBucketMapping() throws Exception {
@@ -94,7 +168,8 @@ public class FileSystemWriteRestoreTest {
 
         WriteRestore restore = newWriteRestore(table);
 
-        RestoreFiles restored = restore.restoreFiles(binaryRow(1), emptyBucket, false, false);
+        RestoreFiles restored =
+                restore.restoreFiles(binaryRow(1), emptyBucket, false, false, false);
 
         assertThat(restored.totalBuckets())
                 .as(
@@ -114,7 +189,8 @@ public class FileSystemWriteRestoreTest {
         commitOneRow(table, 1, 100); // ensures the snapshot exists
 
         WriteRestore restore = newWriteRestore(table);
-        RestoreFiles restored = restore.restoreFiles(binaryRow(/* unseen */ 999), 0, false, false);
+        RestoreFiles restored =
+                restore.restoreFiles(binaryRow(/* unseen */ 999), 0, false, false, false);
 
         assertThat(restored.totalBuckets()).isEqualTo(8);
         assertThat(restored.dataFiles()).isNullOrEmpty();
@@ -171,7 +247,8 @@ public class FileSystemWriteRestoreTest {
         table = withBucket(table, 32);
 
         WriteRestore restore = newWriteRestore(table);
-        RestoreFiles restored = restore.restoreFiles(binaryRow(1), nonEmptyBucket, false, false);
+        RestoreFiles restored =
+                restore.restoreFiles(binaryRow(1), nonEmptyBucket, false, false, false);
 
         assertThat(restored.totalBuckets()).isEqualTo(2);
         assertThat(restored.dataFiles()).isNotEmpty();

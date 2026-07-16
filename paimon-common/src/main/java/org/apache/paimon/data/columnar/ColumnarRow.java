@@ -166,7 +166,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public InternalArray getArray(int pos) {
-        return vectorizedColumnBatch.getArray(rowId, pos);
+        InternalArray array = vectorizedColumnBatch.getArray(rowId, pos);
+        if (array instanceof ColumnarArray) {
+            ((ColumnarArray) array).setFileIO(fileIO);
+        }
+        return array;
     }
 
     @Override

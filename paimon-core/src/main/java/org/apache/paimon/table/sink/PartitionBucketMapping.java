@@ -68,8 +68,8 @@ public class PartitionBucketMapping implements Serializable {
     /**
      * Creates a mapping with only a default bucket count and no per-partition overrides.
      *
-     * <p>Use this when per-partition bucket counts are not needed (i.e. the additional manifest scan
-     * is skipped), so that every partition resolves to {@code numBuckets}.
+     * <p>Use this when per-partition bucket counts are not needed (i.e. the additional manifest
+     * scan is skipped), so that every partition resolves to {@code numBuckets}.
      *
      * @param numBuckets the default number of buckets for all partitions
      * @return a mapping that resolves every partition to {@code numBuckets}

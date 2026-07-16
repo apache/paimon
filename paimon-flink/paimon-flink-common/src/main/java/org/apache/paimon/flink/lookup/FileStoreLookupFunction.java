@@ -18,12 +18,14 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
@@ -34,6 +36,7 @@ import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
@@ -92,6 +95,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
     @Nullable private final ShuffleStrategy strategy;
+    private final Set<Integer> blobFields;
+    private final boolean blobAsDescriptor;
 
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
@@ -156,6 +161,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (partitionLoader != null) {
             partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
+        RowType projectedType = rowType.project(projectFields);
+        this.blobFields =
+                IntStream.range(0, projectedType.getFieldCount())
+                        .filter(i -> BlobType.isBlobFileField(projectedType.getTypeAt(i)))
+                        .boxed()
+                        .collect(Collectors.toSet());
+        Options options = table.coreOptions().toConfiguration();
+        this.blobAsDescriptor =
+                options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
+                        || options.get(CoreOptions.LOOKUP_CACHE_BLOB_DESCRIPTOR);
 
         this.predicate = predicate;
 
@@ -318,7 +333,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<RowData> rows = new ArrayList<>();
         List<InternalRow> lookupResults = lookupTable.get(key);
         for (InternalRow matchedRow : lookupResults) {
-            rows.add(new FlinkRowData(matchedRow));
+            rows.add(
+                    blobFields.isEmpty()
+                            ? new FlinkRowData(matchedRow)
+                            : new FlinkRowDataWithBlob(matchedRow, blobFields, blobAsDescriptor));
         }
 
         if (LOG.isDebugEnabled()) {

@@ -24,7 +24,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -50,13 +53,22 @@ import org.apache.paimon.utils.Pair;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.io.Closeable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test class for {@link SortedGlobalIndexBuilder}. */
 public class SortedGlobalIndexBuilderTest extends TableTestBase {
@@ -64,6 +76,81 @@ public class SortedGlobalIndexBuilderTest extends TableTestBase {
     private static final long PART_ROW_NUM = 1000L;
     private static final KeySerializer KEY_SERIALIZER = KeySerializer.create(DataTypes.INT());
     private static final Comparator<Object> COMPARATOR = KEY_SERIALIZER.createComparator();
+
+    @Test
+    public void testSingleColumnWriterRotationPreservesResultGroups() throws Exception {
+        GlobalIndexSingleColumnWriter first = mock(GlobalIndexSingleColumnWriter.class);
+        GlobalIndexSingleColumnWriter second = mock(GlobalIndexSingleColumnWriter.class);
+        when(first.finish())
+                .thenReturn(Collections.singletonList(new ResultEntry("index-1", 2, null)));
+        when(second.finish())
+                .thenReturn(Collections.singletonList(new ResultEntry("index-2", 1, null)));
+        Queue<GlobalIndexSingleColumnWriter> writers =
+                new ArrayDeque<>(Arrays.asList(first, second));
+        SortedSingleColumnIndexWriter rotatingWriter =
+                new SortedSingleColumnIndexWriter(2, writers::remove);
+
+        rotatingWriter.write(10, 0);
+        rotatingWriter.write(20, 1);
+        rotatingWriter.write(30, 2);
+        List<List<ResultEntry>> results = rotatingWriter.finish();
+
+        verify(first).write(10, 0);
+        verify(first).write(20, 1);
+        verify(second).write(30, 2);
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0)).extracting(ResultEntry::fileName).containsExactly("index-1");
+        assertThat(results.get(1)).extracting(ResultEntry::fileName).containsExactly("index-2");
+    }
+
+    @Test
+    public void testSingleColumnWriterClosesActiveWriter() throws Exception {
+        GlobalIndexSingleColumnWriter activeWriter =
+                mock(
+                        GlobalIndexSingleColumnWriter.class,
+                        org.mockito.Mockito.withSettings().extraInterfaces(Closeable.class));
+        SortedSingleColumnIndexWriter rotatingWriter =
+                new SortedSingleColumnIndexWriter(2, () -> activeWriter);
+        rotatingWriter.write(10, 0);
+
+        assertThat(rotatingWriter).isInstanceOf(AutoCloseable.class);
+        ((AutoCloseable) rotatingWriter).close();
+
+        verify((Closeable) activeWriter).close();
+    }
+
+    @Test
+    public void testBuildForSinglePartitionClosesWriterAfterFailure() throws Exception {
+        createTableDefault();
+        GlobalIndexSingleColumnWriter activeWriter =
+                mock(
+                        GlobalIndexSingleColumnWriter.class,
+                        org.mockito.Mockito.withSettings().extraInterfaces(Closeable.class));
+        org.mockito.Mockito.doThrow(new RuntimeException("write failed"))
+                .when(activeWriter)
+                .write(10, 0);
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(getTableDefault(), "btree") {
+                    @Override
+                    public GlobalIndexSingleColumnWriter createWriter() {
+                        return activeWriter;
+                    }
+                };
+        builder.withIndexField("f0");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () ->
+                                builder.buildForSinglePartition(
+                                        new org.apache.paimon.utils.Range(0, 0),
+                                        null,
+                                        Collections.<InternalRow>singletonList(
+                                                        GenericRow.of(10, 0L))
+                                                .iterator()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("write failed");
+
+        verify((Closeable) activeWriter).close();
+    }
 
     @Override
     public Schema schemaDefault() {

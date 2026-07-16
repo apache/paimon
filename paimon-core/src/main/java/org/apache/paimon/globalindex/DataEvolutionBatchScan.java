@@ -27,12 +27,14 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
@@ -63,20 +65,21 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
 
     private final FileStoreTable table;
-    private final DataTableBatchScan batchScan;
+    private final AppendBatchTableScan batchScan;
 
     private Predicate filter;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
-    public DataEvolutionBatchScan(FileStoreTable wrapped, DataTableBatchScan batchScan) {
+    public DataEvolutionBatchScan(FileStoreTable wrapped, AppendBatchTableScan batchScan) {
         this.table = wrapped;
         this.batchScan = batchScan;
     }
 
     @Override
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        return batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
     }
 
     @Override
@@ -85,37 +88,50 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return this;
         }
 
-        predicate.visit(new RowIdPredicateVisitor()).ifPresent(this::withRowRanges);
-        predicate = removeRowIdFilter(predicate);
+        Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
+        if (rowRanges.isPresent()) {
+            withRowRanges(rowRanges.get());
+        }
         this.filter = predicate;
-        batchScan.withFilter(predicate);
+
+        batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
         return this;
     }
 
-    private Predicate removeRowIdFilter(Predicate filter) {
+    private Predicate rowIdSafeResidualFilter(Predicate filter) {
         if (filter instanceof LeafPredicate
                 && ((LeafPredicate) filter).fieldNames().contains(ROW_ID.name())) {
             return null;
         } else if (filter instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
+            if (compoundPredicate.function() instanceof Or) {
+                return containsRowId(compoundPredicate) ? null : filter;
+            }
 
             List<Predicate> newChildren = new ArrayList<>();
             for (Predicate child : compoundPredicate.children()) {
-                Predicate newChild = removeRowIdFilter(child);
+                Predicate newChild = rowIdSafeResidualFilter(child);
                 if (newChild != null) {
                     newChildren.add(newChild);
                 }
             }
 
-            if (newChildren.isEmpty()) {
-                return null;
-            } else if (newChildren.size() == 1) {
-                return newChildren.get(0);
-            } else {
-                return new CompoundPredicate(compoundPredicate.function(), newChildren);
-            }
+            return PredicateBuilder.andNullable(newChildren);
         }
         return filter;
+    }
+
+    private boolean containsRowId(Predicate filter) {
+        if (filter instanceof LeafPredicate) {
+            return ((LeafPredicate) filter).fieldNames().contains(ROW_ID.name());
+        } else if (filter instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) filter).children()) {
+                if (containsRowId(child)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
@@ -270,19 +286,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (!options.globalIndexEnabled()) {
             return Optional.empty();
         }
+        Predicate globalIndexFilter = rowIdSafeResidualFilter(filter);
+        if (globalIndexFilter == null) {
+            return Optional.empty();
+        }
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, filter);
+                GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
+            Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
             if (result.isPresent()) {
                 LOG.info("Scan table '{}' with global index.", table.name());
-                return Optional.of(result.get().or(scanner.unindexedRows(filter)));
+                return Optional.of(result.get().or(scanner.unindexedRows(globalIndexFilter)));
             }
             return Optional.empty();
         } catch (IOException e) {

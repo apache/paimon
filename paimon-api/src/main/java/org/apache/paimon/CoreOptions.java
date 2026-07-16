@@ -33,6 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
@@ -48,11 +49,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -103,6 +106,7 @@ public class CoreOptions implements Serializable {
 
     public static final String BLOB_DESCRIPTOR_PREFIX = "blob-descriptor.";
 
+    @Immutable
     public static final ConfigOption<TableType> TYPE =
             key("type")
                     .enumType(TableType.class)
@@ -2437,6 +2441,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
+            key("data-evolution.compaction.rewrite-row-ids")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
+                                    + "Enable only when callers do not rely on stable _ROW_ID; "
+                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -2603,6 +2616,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
+    public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
+            key("postpone.target-row-num-per-bucket")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
                     .longType()
@@ -2719,6 +2739,39 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
+
+    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
+            key("pk-vector.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
+                                    + "Each column owns one index and must define "
+                                    + "fields.<column>.pk-vector.index.type. Index options and distance "
+                                    + "metric are also field-scoped. The first release supports exactly "
+                                    + "one column.");
+
+    public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
+            key("pk-btree.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated columns indexed by primary-key BTree indexes.");
+
+    public static final ConfigOption<String> PK_BITMAP_INDEX_COLUMNS =
+            key("pk-bitmap.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated columns indexed by primary-key Bitmap indexes.");
+
+    public static final ConfigOption<String> PK_FULL_TEXT_INDEX_COLUMNS =
+            key("pk-full-text.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated character columns indexed by primary-key full-text indexes. "
+                                    + "The first release supports exactly one column.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -3941,6 +3994,10 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_BITMAP64);
     }
 
+    public boolean dataEvolutionCompactionRewriteRowIds() {
+        return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
+    }
+
     public FileIndexOptions indexColumnsOptions() {
         return new FileIndexOptions(this);
     }
@@ -4174,6 +4231,10 @@ public class CoreOptions implements Serializable {
         return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
     }
 
+    public Optional<Long> postponeTargetRowNumPerBucket() {
+        return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
+    }
+
     public long globalIndexRowCountPerShard() {
         return options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
     }
@@ -4242,6 +4303,234 @@ public class CoreOptions implements Serializable {
 
     public int vectorSearchLateralJoinBatchSize() {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
+    }
+
+    public boolean primaryKeyVectorIndexEnabled() {
+        return options.getOptional(PK_VECTOR_INDEX_COLUMNS).isPresent();
+    }
+
+    public boolean primaryKeyFullTextIndexEnabled() {
+        return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
+    }
+
+    public int primaryKeyIndexCompactionLevelFanout(String column) {
+        return options.getInteger(primaryKeyIndexCompactionLevelFanoutKey(column), 5);
+    }
+
+    public double primaryKeyIndexCompactionStaleRatioThreshold(String column) {
+        return options.getDouble(primaryKeyIndexCompactionStaleRatioThresholdKey(column), 0.2);
+    }
+
+    public static String primaryKeyIndexCompactionLevelFanoutKey(String column) {
+        return "fields." + column + ".pk-index.compaction.level-fanout";
+    }
+
+    public static String primaryKeyIndexCompactionStaleRatioThresholdKey(String column) {
+        return "fields." + column + ".pk-index.compaction.stale-ratio-threshold";
+    }
+
+    public List<String> primaryKeyVectorIndexColumns() {
+        return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
+    }
+
+    public List<String> primaryKeyBTreeIndexColumns() {
+        return primaryKeyIndexColumns(PK_BTREE_INDEX_COLUMNS);
+    }
+
+    public List<String> primaryKeyBitmapIndexColumns() {
+        return primaryKeyIndexColumns(PK_BITMAP_INDEX_COLUMNS);
+    }
+
+    public List<String> primaryKeyFullTextIndexColumns() {
+        return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
+    }
+
+    private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
+        String columns = options.get(option);
+        if (columns == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(columns.split(",", -1)).map(String::trim).collect(Collectors.toList());
+    }
+
+    public Options primaryKeyBTreeIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-btree", "btree-index.");
+    }
+
+    public Options primaryKeyBitmapIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-bitmap", "bitmap-index.");
+    }
+
+    public Options primaryKeyFullTextIndexOptions(String column) {
+        String optionKey = "fields." + column + ".pk-full-text.index.options";
+        TreeMap<String, String> resolved = new TreeMap<>();
+        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
+            if (entry.getKey().startsWith("full-text.")) {
+                resolved.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        String serialized = options.get(optionKey);
+        if (serialized == null || serialized.trim().isEmpty()) {
+            return new Options(resolved);
+        }
+
+        LinkedHashMap<String, String> parsed;
+        try {
+            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    optionKey + " must be a JSON object of option key-value pairs.", e);
+        }
+
+        for (Map.Entry<String, String> entry : parsed.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            checkArgument(
+                    key != null && !key.trim().isEmpty(),
+                    "%s contains an empty option key.",
+                    optionKey);
+            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
+            String qualifiedKey = key.startsWith("full-text.") ? key : "full-text." + key;
+            String previous = resolved.put(qualifiedKey, value);
+            checkArgument(
+                    previous == null || previous.equals(value),
+                    "%s defines conflicting values for %s.",
+                    optionKey,
+                    qualifiedKey);
+        }
+        return new Options(resolved);
+    }
+
+    private Options primaryKeySortedIndexOptions(
+            String column, String optionFamily, String algorithmPrefix) {
+        Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-range");
+        String optionKey = "fields." + column + "." + optionFamily + ".index.options";
+        String serialized = options.get(optionKey);
+        if (serialized == null || serialized.trim().isEmpty()) {
+            return resolved;
+        }
+
+        LinkedHashMap<String, String> parsed;
+        try {
+            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    optionKey + " must be a JSON object of option key-value pairs.", e);
+        }
+
+        for (Map.Entry<String, String> entry : parsed.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            checkArgument(
+                    key != null && !key.trim().isEmpty(),
+                    "%s contains an empty option key.",
+                    optionKey);
+            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
+            String qualifiedKey =
+                    key.startsWith(algorithmPrefix) || key.startsWith("fields.")
+                            ? key
+                            : algorithmPrefix + key;
+            String previous = resolved.get(qualifiedKey);
+            checkArgument(
+                    previous == null || previous.equals(value),
+                    "%s defines conflicting values for %s.",
+                    optionKey,
+                    qualifiedKey);
+            resolved.setString(qualifiedKey, value);
+        }
+        return resolved;
+    }
+
+    public String primaryKeyVectorIndexColumn() {
+        List<String> columns = primaryKeyVectorIndexColumns();
+        checkArgument(
+                columns.size() == 1,
+                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
+                columns);
+        return columns.get(0);
+    }
+
+    @Nullable
+    public String primaryKeyVectorIndexType(String column) {
+        return options.get("fields." + column + ".pk-vector.index.type");
+    }
+
+    @Nullable
+    private String primaryKeyVectorIndexOptionsJson(String column) {
+        return options.get("fields." + column + ".pk-vector.index.options");
+    }
+
+    public Options primaryKeyVectorIndexOptions(String column) {
+        Options resolved = new Options(toConfiguration().toMap());
+        for (Map.Entry<String, String> option :
+                primaryKeyVectorAlgorithmOptions(column).entrySet()) {
+            resolved.setString(option.getKey(), option.getValue());
+        }
+        return resolved;
+    }
+
+    private Map<String, String> primaryKeyVectorAlgorithmOptions(String column) {
+        String indexTypeKey = "fields." + column + ".pk-vector.index.type";
+        String indexOptionsKey = "fields." + column + ".pk-vector.index.options";
+        String algorithm = primaryKeyVectorIndexType(column);
+        checkArgument(
+                algorithm != null && !algorithm.trim().isEmpty(),
+                "%s must be configured before resolving index options.",
+                indexTypeKey);
+        TreeMap<String, String> algorithmOptions = new TreeMap<>();
+        String algorithmPrefix = algorithm + ".";
+        String fieldPrefix = "fields." + column + ".";
+        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
+            if (entry.getKey().startsWith(algorithmPrefix)
+                    || (entry.getKey().startsWith(fieldPrefix)
+                            && !entry.getKey().startsWith(fieldPrefix + "pk-vector."))) {
+                algorithmOptions.put(entry.getKey(), entry.getValue());
+            }
+        }
+        String serialized = primaryKeyVectorIndexOptionsJson(column);
+        if (serialized != null && !serialized.trim().isEmpty()) {
+            LinkedHashMap<String, String> parsed;
+            try {
+                parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(
+                        indexOptionsKey + " must be a JSON object of option key-value pairs.", e);
+            }
+            for (Map.Entry<String, String> entry : parsed.entrySet()) {
+                String key = entry.getKey();
+                String value = entry.getValue();
+                checkArgument(
+                        key != null && !key.trim().isEmpty(),
+                        "%s contains an empty option key.",
+                        indexOptionsKey);
+                checkArgument(
+                        value != null,
+                        "%s value for key %s must not be null.",
+                        indexOptionsKey,
+                        key);
+                String qualifiedKey =
+                        key.startsWith(algorithmPrefix) || key.startsWith("fields.")
+                                ? key
+                                : algorithmPrefix + key;
+                String previous = algorithmOptions.put(qualifiedKey, value);
+                checkArgument(
+                        previous == null || previous.equals(value),
+                        "%s defines conflicting values for %s.",
+                        indexOptionsKey,
+                        qualifiedKey);
+            }
+        }
+        algorithmOptions.put(algorithmPrefix + "metric", primaryKeyVectorDistanceMetric(column));
+        return algorithmOptions;
+    }
+
+    public String primaryKeyVectorDistanceMetric(String column) {
+        String metric = options.get("fields." + column + ".pk-vector.distance.metric");
+        return (metric == null ? "inner_product" : metric)
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_');
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -197,7 +197,7 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
                 jobConf.get(
                         // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
                         // versions, so we use a constant string instead
-                        "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
+                        "column.name.delimiter", String.valueOf(SerDeUtils.COMMA));
         if (columns == null || delimiter == null) {
             return Optional.empty();
         } else {

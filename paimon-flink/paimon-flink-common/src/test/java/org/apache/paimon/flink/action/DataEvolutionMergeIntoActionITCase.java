@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.functions.ScalarFunction;
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -717,8 +718,9 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
 
         Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
         Assertions.assertTrue(
-                t.getMessage().contains("raw-data BLOB column"),
-                "Expected error about raw-data BLOB column but got: " + t.getMessage());
+                t.getMessage().contains("raw-data BLOB or ARRAY<BLOB> column"),
+                "Expected error about raw-data BLOB or ARRAY<BLOB> column but got: "
+                        + t.getMessage());
     }
 
     @Test
@@ -771,6 +773,84 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 2, "name2"),
                         changelogRow("+I", 3, "name3"));
         testBatchRead("SELECT id, name FROM RAW_BLOB_SPLIT_T ORDER BY id", expected);
+    }
+
+    @Test
+    public void testUpdateNonBlobColumnOnRawArrayBlobTableWithSplitFiles() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_ARRAY_BLOB_SPLIT_T",
+                        Arrays.asList("id INT", "name STRING", "pictures ARRAY<BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "pictures");
+                                put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                                put("sink.parallelism", "1");
+                            }
+                        }));
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(
+                                        1,
+                                        "name1",
+                                        new byte[][] {
+                                            new byte[] {72, 101, 108, 108, 111},
+                                            new byte[] {89, 69}
+                                        }),
+                                Row.of(2, "name2", new byte[][] {new byte[] {65, 66, 67}}),
+                                Row.of(3, "name3", null)));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_ARRAY_BLOB_SPLIT_SOURCE "
+                                        + "(id INT, name STRING, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+        sEnv.executeSql(
+                        "INSERT INTO RAW_ARRAY_BLOB_SPLIT_T "
+                                + "SELECT * FROM RAW_ARRAY_BLOB_SPLIT_SOURCE")
+                .await();
+        testBatchRead(
+                "SELECT COUNT(*) > 1 FROM `RAW_ARRAY_BLOB_SPLIT_T$files` "
+                        + "WHERE file_path LIKE '%.blob'",
+                Collections.singletonList(changelogRow("+I", true)));
+
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_ARRAY_BLOB_SPLIT_S",
+                        Arrays.asList("id INT", "name STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_ARRAY_BLOB_SPLIT_S", "(1, 'updated_name1')");
+
+        builder(warehouse, database, "RAW_ARRAY_BLOB_SPLIT_T")
+                .withMergeCondition("RAW_ARRAY_BLOB_SPLIT_T.id=RAW_ARRAY_BLOB_SPLIT_S.id")
+                .withMatchedUpdateSet("RAW_ARRAY_BLOB_SPLIT_T.name=RAW_ARRAY_BLOB_SPLIT_S.name")
+                .withSourceTable("RAW_ARRAY_BLOB_SPLIT_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow(
+                                "+I",
+                                1,
+                                "updated_name1",
+                                new byte[] {72, 101, 108, 108, 111},
+                                new byte[] {89, 69}),
+                        changelogRow("+I", 2, "name2", new byte[] {65, 66, 67}, null),
+                        changelogRow("+I", 3, "name3", null, null));
+        testBatchRead(
+                "SELECT id, name, pictures[1], pictures[2] "
+                        + "FROM RAW_ARRAY_BLOB_SPLIT_T ORDER BY id",
+                expected);
     }
 
     @Test

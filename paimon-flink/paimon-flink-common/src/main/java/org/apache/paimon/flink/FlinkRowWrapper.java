@@ -42,6 +42,8 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
@@ -283,17 +285,17 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public InternalArray getArray(int pos) {
-        return new FlinkArrayWrapper(row.getArray(pos));
+        return new FlinkArrayWrapper(row.getArray(pos), uriReaderFactory);
     }
 
     @Override
     public InternalVector getVector(int pos) {
-        return new FlinkVectorWrapper(row.getArray(pos));
+        return new FlinkVectorWrapper(row.getArray(pos), uriReaderFactory);
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return new FlinkMapWrapper(row.getMap(pos));
+        return new FlinkMapWrapper(row.getMap(pos), uriReaderFactory);
     }
 
     @Override
@@ -304,9 +306,17 @@ public class FlinkRowWrapper implements InternalRow {
     private static class FlinkArrayWrapper implements InternalArray {
 
         private final org.apache.flink.table.data.ArrayData array;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         private FlinkArrayWrapper(org.apache.flink.table.data.ArrayData array) {
+            this(array, null);
+        }
+
+        private FlinkArrayWrapper(
+                org.apache.flink.table.data.ArrayData array,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.array = array;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -383,22 +393,22 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Blob getBlob(int pos) {
-            return Blob.fromBytes(array.getBinary(pos), null, null);
+            return Blob.fromBytes(array.getBinary(pos), uriReaderFactory, null);
         }
 
         @Override
         public InternalArray getArray(int pos) {
-            return new FlinkArrayWrapper(array.getArray(pos));
+            return new FlinkArrayWrapper(array.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalVector getVector(int pos) {
-            return new FlinkVectorWrapper(array.getArray(pos));
+            return new FlinkVectorWrapper(array.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalMap getMap(int pos) {
-            return new FlinkMapWrapper(array.getMap(pos));
+            return new FlinkMapWrapper(array.getMap(pos), uriReaderFactory);
         }
 
         @Override
@@ -446,14 +456,28 @@ public class FlinkRowWrapper implements InternalRow {
         private FlinkVectorWrapper(org.apache.flink.table.data.ArrayData array) {
             super(array);
         }
+
+        private FlinkVectorWrapper(
+                org.apache.flink.table.data.ArrayData array,
+                @Nullable UriReaderFactory uriReaderFactory) {
+            super(array, uriReaderFactory);
+        }
     }
 
     private static class FlinkMapWrapper implements InternalMap {
 
         private final org.apache.flink.table.data.MapData map;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         private FlinkMapWrapper(org.apache.flink.table.data.MapData map) {
+            this(map, null);
+        }
+
+        private FlinkMapWrapper(
+                org.apache.flink.table.data.MapData map,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.map = map;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -463,12 +487,12 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public InternalArray keyArray() {
-            return new FlinkArrayWrapper(map.keyArray());
+            return new FlinkArrayWrapper(map.keyArray(), uriReaderFactory);
         }
 
         @Override
         public InternalArray valueArray() {
-            return new FlinkArrayWrapper(map.valueArray());
+            return new FlinkArrayWrapper(map.valueArray(), uriReaderFactory);
         }
     }
 

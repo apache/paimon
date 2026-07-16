@@ -29,7 +29,8 @@ Usage::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import datetime
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -59,21 +60,68 @@ def _enrich_options_with_rest_token(
     return enriched
 
 
+# Time-travel targets are mutually exclusive: at most one may be set.
+TimeTravelTimestamp = Union[int, str, "datetime.datetime"]
+
+
+def _validate_single_time_travel(
+    snapshot_id: int | None,
+    tag_name: str | None,
+    timestamp: TimeTravelTimestamp | None,
+) -> None:
+    specified = [
+        name
+        for name, value in (
+            ("snapshot_id", snapshot_id),
+            ("tag_name", tag_name),
+            ("timestamp", timestamp),
+        )
+        if value is not None
+    ]
+    if len(specified) > 1:
+        raise ValueError(
+            "Only one of snapshot_id, tag_name, timestamp can be set, "
+            f"got: {specified}"
+        )
+
+
+def _timestamp_scan_option(timestamp: TimeTravelTimestamp) -> dict[str, str]:
+    """Map a timestamp to the matching Paimon scan option.
+
+    ``datetime`` / ``int`` (epoch millis) -> ``scan.timestamp-millis``;
+    ``str`` (e.g. ``'2026-07-09 10:00:00'``) -> ``scan.timestamp``.
+    A naive ``datetime`` is interpreted in the local timezone.
+    """
+    # bool is a subclass of int; reject it so True/False can't become a timestamp.
+    if isinstance(timestamp, bool):
+        raise TypeError("timestamp must be int millis, datetime, or str, not bool")
+    if isinstance(timestamp, datetime.datetime):
+        return {"scan.timestamp-millis": str(int(timestamp.timestamp() * 1000))}
+    if isinstance(timestamp, int):
+        return {"scan.timestamp-millis": str(timestamp)}
+    if isinstance(timestamp, str):
+        return {"scan.timestamp": timestamp}
+    raise TypeError(
+        "timestamp must be int (epoch millis), datetime, or str, "
+        f"got: {type(timestamp).__name__}"
+    )
+
+
 def _time_travel_table(
     table: FileStoreTable,
     snapshot_id: int | None = None,
     tag_name: str | None = None,
+    timestamp: TimeTravelTimestamp | None = None,
 ) -> FileStoreTable:
-    if snapshot_id is not None and tag_name is not None:
-        raise ValueError(
-            "snapshot_id and tag_name cannot be set at the same time"
-        )
+    _validate_single_time_travel(snapshot_id, tag_name, timestamp)
 
     travel_options: dict[str, str] = {}
     if snapshot_id is not None:
         travel_options["scan.snapshot-id"] = str(snapshot_id)
     if tag_name is not None:
         travel_options["scan.tag-name"] = tag_name
+    if timestamp is not None:
+        travel_options.update(_timestamp_scan_option(timestamp))
     if travel_options:
         return table.copy(travel_options)
     return table
@@ -121,9 +169,12 @@ def _read_table(
     io_config=None,
     snapshot_id: int | None = None,
     tag_name: str | None = None,
+    timestamp: TimeTravelTimestamp | None = None,
 ) -> "daft.DataFrame":
     """Read a Paimon table object into a lazy Daft DataFrame."""
-    table = _time_travel_table(table, snapshot_id=snapshot_id, tag_name=tag_name)
+    table = _time_travel_table(
+        table, snapshot_id=snapshot_id, tag_name=tag_name, timestamp=timestamp
+    )
     return _source_for_table(table, catalog_options=catalog_options, io_config=io_config).read()
 
 
@@ -151,6 +202,7 @@ def _explain_table(
     io_config=None,
     snapshot_id: int | None = None,
     tag_name: str | None = None,
+    timestamp: TimeTravelTimestamp | None = None,
     filters: Any = None,
     partition_filters: Any = None,
     columns: list[str] | None = None,
@@ -160,7 +212,9 @@ def _explain_table(
     """Explain a Paimon table object using Daft's datasource pushdown model."""
     from daft.io.pushdowns import Pushdowns
 
-    table = _time_travel_table(table, snapshot_id=snapshot_id, tag_name=tag_name)
+    table = _time_travel_table(
+        table, snapshot_id=snapshot_id, tag_name=tag_name, timestamp=timestamp
+    )
     source = _source_for_table(table, catalog_options=catalog_options, io_config=io_config)
     filter_expr, filter_pyexprs = _normalize_explain_filters(filters)
     partition_filter_expr, _ = _normalize_explain_filters(partition_filters)
@@ -194,6 +248,7 @@ def read_paimon(
     *,
     snapshot_id: Optional[int] = None,
     tag_name: Optional[str] = None,
+    timestamp: Optional[TimeTravelTimestamp] = None,
     io_config=None,
 ) -> "daft.DataFrame":
     """Read a Paimon table into a lazy Daft DataFrame.
@@ -208,19 +263,22 @@ def read_paimon(
         catalog_options: Options passed to ``CatalogFactory.create()``,
             e.g. ``{"warehouse": "/path/to/warehouse"}``.
         snapshot_id: Optional snapshot id to time-travel to. Mutually
-            exclusive with ``tag_name``.
+            exclusive with ``tag_name`` and ``timestamp``.
         tag_name: Optional tag name to time-travel to. Mutually
-            exclusive with ``snapshot_id``.
+            exclusive with ``snapshot_id`` and ``timestamp``.
+        timestamp: Optional timestamp to time-travel to the latest snapshot
+            at or before it. Accepts an ``int`` (epoch milliseconds) or
+            ``datetime`` (mapped to ``scan.timestamp-millis``), or a ``str``
+            such as ``'2026-07-09 10:00:00'`` (mapped to ``scan.timestamp``).
+            A naive ``datetime`` is interpreted in the local timezone.
+            Mutually exclusive with ``snapshot_id`` and ``tag_name``.
         io_config: Optional Daft IOConfig for accessing object storage.
             If None, will be inferred from the catalog options.
 
     Returns:
         A lazy ``daft.DataFrame`` backed by this Paimon table.
     """
-    if snapshot_id is not None and tag_name is not None:
-        raise ValueError(
-            "snapshot_id and tag_name cannot be set at the same time"
-        )
+    _validate_single_time_travel(snapshot_id, tag_name, timestamp)
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
 
@@ -230,6 +288,7 @@ def read_paimon(
     return _read_table(
         table, catalog_options=catalog_options,
         io_config=io_config, snapshot_id=snapshot_id, tag_name=tag_name,
+        timestamp=timestamp,
     )
 
 
@@ -243,6 +302,7 @@ def explain_paimon_scan(
     limit: int | None = None,
     snapshot_id: Optional[int] = None,
     tag_name: Optional[str] = None,
+    timestamp: Optional[TimeTravelTimestamp] = None,
     io_config=None,
     verbose: bool = False,
 ) -> "PaimonScanExplain":
@@ -263,6 +323,7 @@ def explain_paimon_scan(
         io_config=io_config,
         snapshot_id=snapshot_id,
         tag_name=tag_name,
+        timestamp=timestamp,
         filters=filters,
         partition_filters=partition_filters,
         columns=columns,

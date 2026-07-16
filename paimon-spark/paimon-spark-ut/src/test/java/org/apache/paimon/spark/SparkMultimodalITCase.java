@@ -195,6 +195,21 @@ public class SparkMultimodalITCase {
                                                         .equals(row.getLong(3))))
                 .isTrue();
 
+        // **vector search with metadata columns only */
+        String vectorSearchWithMetadataColumnsOnlySql =
+                "select _row_id AS _row_id, __paimon_search_score "
+                        + "from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5) "
+                        + "where date = '20260420'";
+        df = spark.sql(vectorSearchWithMetadataColumnsOnlySql);
+        assertThat(df.columns()).hasSize(2);
+        assertThat(df.columns()).contains("_row_id", "__paimon_search_score");
+        rows = df.collectAsList();
+        assertThat(rows).hasSize(5);
+        assertThat(rows.stream().allMatch(row -> !row.isNullAt(0) && !row.isNullAt(1))).isTrue();
+        assertThat(rows.stream().allMatch(row -> baseRowIds.containsValue(row.getLong(0))))
+                .isTrue();
+        assertThat(rows.stream().map(row -> row.getLong(0)).collect(Collectors.toSet())).hasSize(5);
+
         // **vector search with score */
         String vectorSearchSql =
                 "select gid, sid,  embs, __paimon_search_score "
@@ -256,6 +271,32 @@ public class SparkMultimodalITCase {
                 .containsEntry(6L, 5L)
                 .containsEntry(7L, 5L)
                 .containsEntry(8L, 5L);
+
+        // ** lateral vector search with metadata columns only in subquery */
+        rows =
+                spark.sql(
+                                "SELECT q.gid AS query_gid, "
+                                        + "r._row_id AS result_row_id, "
+                                        + "r.__paimon_search_score AS result_score "
+                                        + "FROM my_db1.vector_test AS q, "
+                                        + "LATERAL (SELECT _row_id, __paimon_search_score "
+                                        + "FROM vector_search('my_db1.vector_test', 'embs', q.embs, 5)) AS r "
+                                        + "WHERE q.`date` = '20260420';")
+                        .collectAsList();
+        assertThat(rows).hasSize(40);
+        assertThat(rows.stream().allMatch(row -> !row.isNullAt(0) && !row.isNullAt(1))).isTrue();
+        assertThat(rows.stream().allMatch(row -> baseRowIds.containsValue(row.getLong(1))))
+                .isTrue();
+        Map<Long, java.util.Set<Long>> rowIdsPerQueryGid =
+                rows.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        row -> row.getLong(0),
+                                        Collectors.mapping(
+                                                row -> row.getLong(1), Collectors.toSet())));
+        assertThat(rowIdsPerQueryGid).hasSize(8);
+        assertThat(rowIdsPerQueryGid.values().stream().allMatch(rowIds -> rowIds.size() == 5))
+                .isTrue();
         spark.close();
 
         spark = builder.getOrCreate();

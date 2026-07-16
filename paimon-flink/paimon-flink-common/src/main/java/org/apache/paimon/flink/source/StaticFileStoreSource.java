@@ -23,6 +23,7 @@ import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
@@ -49,13 +50,23 @@ public class StaticFileStoreSource extends FlinkSource {
 
     @Nullable private final DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
 
+    private final boolean skipPreloadTargetSnapshot;
+
     public StaticFileStoreSource(
             ReadBuilder readBuilder,
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
             boolean blobAsDescriptor) {
-        this(readBuilder, limit, splitBatchSize, splitAssignMode, null, null, blobAsDescriptor);
+        this(
+                readBuilder,
+                limit,
+                splitBatchSize,
+                splitAssignMode,
+                null,
+                null,
+                blobAsDescriptor,
+                false);
     }
 
     public StaticFileStoreSource(
@@ -65,11 +76,13 @@ public class StaticFileStoreSource extends FlinkSource {
             SplitAssignMode splitAssignMode,
             @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             @Nullable NestedProjectedRowData rowData,
-            boolean blobAsDescriptor) {
+            boolean blobAsDescriptor,
+            boolean skipPreloadTargetSnapshot) {
         super(readBuilder, limit, rowData, blobAsDescriptor);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;
+        this.skipPreloadTargetSnapshot = skipPreloadTargetSnapshot;
     }
 
     @Override
@@ -92,6 +105,9 @@ public class StaticFileStoreSource extends FlinkSource {
     private List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
         TableScan scan = readBuilder.newScan();
+        if (skipPreloadTargetSnapshot && scan instanceof ChainGroupReadTable.ChainTableBatchScan) {
+            ((ChainGroupReadTable.ChainTableBatchScan) scan).skipPreloadTargetSnapshot();
+        }
         // register scan metrics
         if (context.metricGroup() != null) {
             ((InnerTableScan) scan)

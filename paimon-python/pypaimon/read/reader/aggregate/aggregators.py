@@ -35,6 +35,7 @@ error rather than a silent fallback.
 
 from typing import Any
 
+from pypaimon.common.options import CoreOptions
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType
@@ -52,6 +53,7 @@ NAME_MAX = "max"
 NAME_MIN = "min"
 NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
+NAME_LISTAGG = "listagg"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -92,6 +94,17 @@ def _check_boolean(name: str, field_type: DataType) -> None:
             "Data type for '{}' column must be 'BOOLEAN' but was "
             "'{}'.".format(name, field_type)
         )
+
+
+def is_blank(s: str) -> bool:
+    if s is None:
+        return True
+
+    for ch in s:
+        if not ch.isspace():
+            return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +234,65 @@ class FieldBoolAndAgg(FieldAggregator):
         return bool(accumulator) and bool(input_field)
 
 
+class FieldListaggAgg(FieldAggregator):
+    """LISTAGG aggregator for STRING fields.
+
+    Concatenates string values using the configured delimiter.
+
+    If ``distinct`` is True, duplicated tokens are removed while
+    preserving their first appearance order.
+    """
+
+    def __init__(
+            self,
+            name: str,
+            field_type: DataType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        super().__init__(name, field_type)
+
+        if _atomic_base_name(field_type) != "STRING":
+            raise ValueError(
+                "Data type for '{}' column must be 'STRING' but was '{}'."
+                .format(name, field_type)
+            )
+
+        self.delimiter = options.field_listagg_delimiter(field_name)
+        self.distinct = options.field_collect_distinct(field_name)
+        self._separator = " " if self.delimiter in (None, "") else self.delimiter
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None or is_blank(str(input_field)):
+            return accumulator
+
+        if accumulator is None or is_blank(str(accumulator)):
+            return input_field
+
+        accumulator = str(accumulator)
+        input_field = str(input_field)
+
+        if not self.distinct:
+            return accumulator + self.delimiter + input_field
+
+        accumulator_tokens = accumulator.split(self._separator)
+        existing_tokens = set(accumulator_tokens)
+
+        result = [accumulator]
+
+        for token in input_field.split(self._separator):
+            if is_blank(token) or token in existing_tokens:
+                continue
+
+            existing_tokens.add(token)
+            result.append(token)
+
+        if len(result) == 1:
+            return accumulator
+
+        return self.delimiter.join(result)
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -252,6 +324,16 @@ def _build_boolean(cls, identifier: str):
     return _factory
 
 
+def _build_field_options(cls, identifier: str):
+    """Build a factory that accepts any DataType. Used by
+    ``primary_key`` / ``last_value`` / ``first_value`` variants and by
+    ``max`` / ``min``, all of which work on any orderable DataType.
+    """
+    def _factory(field_type, field_name, options):
+        return cls(identifier, field_type, field_name, options)
+    return _factory
+
+
 register_aggregator(
     NAME_PRIMARY_KEY,
     _build_no_type_check(FieldPrimaryKeyAgg, NAME_PRIMARY_KEY),
@@ -280,4 +362,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_BOOL_AND, _build_boolean(FieldBoolAndAgg, NAME_BOOL_AND)
+)
+register_aggregator(
+    NAME_LISTAGG, _build_field_options(FieldListaggAgg, NAME_LISTAGG)
 )

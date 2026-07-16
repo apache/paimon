@@ -126,7 +126,7 @@ execution.checkpointing.timeout = 60 min
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
 here (For example, writing a large number of partitions simultaneously), you can use `sink.writer-coordinator.enabled`
 to use a Flink coordinator to cache the read manifest data to accelerate initialization. The cache memory for coordinator
-is `sink.writer-coordinator.cache-memory`, default is 1GB in Job Manager.
+is `sink.writer-coordinator.cache-memory`, default is 2GB in Job Manager.
 
 The coordinator manifest cache normally holds entries with soft references, so the JVM can reclaim them when the Job
 Manager runs low on heap. On a heavily loaded Job Manager this can backfire: the JVM reclaims cached manifests, writers

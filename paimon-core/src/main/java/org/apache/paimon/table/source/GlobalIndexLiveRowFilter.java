@@ -23,6 +23,7 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -39,6 +40,14 @@ class GlobalIndexLiveRowFilter {
     @Nullable
     static RoaringNavigableMap64 liveRows(
             @Nullable FileStoreTable table, @Nullable PartitionPredicate partitionFilter) {
+        return liveRows(table, partitionFilter, null);
+    }
+
+    @Nullable
+    static RoaringNavigableMap64 liveRows(
+            @Nullable FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable List<Range> rowRanges) {
         if (table == null || !table.coreOptions().deletionVectorsEnabled()) {
             return null;
         }
@@ -48,14 +57,17 @@ class GlobalIndexLiveRowFilter {
             return null;
         }
 
-        RoaringNavigableMap64 liveRows = new RoaringNavigableMap64();
-        for (Split split :
+        SnapshotReader snapshotReader =
                 table.newSnapshotReader()
                         .withPartitionFilter(partitionFilter)
                         .withMode(ScanMode.ALL)
-                        .withSnapshot(snapshot)
-                        .read()
-                        .splits()) {
+                        .withSnapshot(snapshot);
+        if (rowRanges != null) {
+            snapshotReader.withRowRanges(rowRanges);
+        }
+
+        RoaringNavigableMap64 liveRows = new RoaringNavigableMap64();
+        for (Split split : snapshotReader.read().splits()) {
             if (split instanceof DataSplit) {
                 addLiveRows(table, liveRows, (DataSplit) split);
             }

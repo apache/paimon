@@ -163,10 +163,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void write(KeyValue kv) throws Exception {
         long sequenceNumber = newSequenceNumber();
-        boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+        InternalRow value = writerFactory.externalizeBlob(kv.valueKind(), kv.value());
+        boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), value);
         if (!success) {
             flushWriteBuffer(false, false);
-            success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+            success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), value);
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
@@ -263,6 +264,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             waitCompaction = true;
         }
         trySyncLatestCompaction(waitCompaction);
+        writerFactory.prepareCommit();
         return drainIncrement();
     }
 
@@ -341,6 +343,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void close() throws Exception {
+        writerFactory.abortManagedBlobWrites();
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();

@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -41,11 +42,16 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     private final ColumnVector data;
     private final int offset;
     private final int numElements;
+    private FileIO fileIO;
 
     public ColumnarArray(ColumnVector data, int offset, int numElements) {
         this.data = data;
         this.offset = offset;
         this.numElements = numElements;
+    }
+
+    public void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
     }
 
     @Override
@@ -135,12 +141,16 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public Blob getBlob(int pos) {
-        return Blob.fromBytes(getBinary(pos), null, null);
+        return Blob.fromBytes(getBinary(pos), null, fileIO, false);
     }
 
     @Override
     public InternalArray getArray(int pos) {
-        return ((ArrayColumnVector) data).getArray(offset + pos);
+        InternalArray array = ((ArrayColumnVector) data).getArray(offset + pos);
+        if (array instanceof ColumnarArray) {
+            ((ColumnarArray) array).setFileIO(fileIO);
+        }
+        return array;
     }
 
     @Override

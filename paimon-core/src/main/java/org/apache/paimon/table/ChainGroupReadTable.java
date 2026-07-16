@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -102,12 +103,21 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         return new ChainTableBatchScan(((AbstractFileStoreTable) wrapped).tableSchema, this);
     }
 
-    private DataTableScan newSnapshotScan() {
-        return wrapped.newScan();
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        super.validateSchema();
+        return new ChainTableBatchScan(
+                ((AbstractFileStoreTable) wrapped).tableSchema,
+                this,
+                table -> table.newScan(snapshotReaderFactory));
     }
 
-    private DataTableScan newDeltaScan() {
-        return other().newScan();
+    private DataTableScan newSnapshotScan(Function<FileStoreTable, DataTableScan> scanCreator) {
+        return scanCreator.apply(wrapped);
+    }
+
+    private DataTableScan newDeltaScan(Function<FileStoreTable, DataTableScan> scanCreator) {
+        return scanCreator.apply(other());
     }
 
     @Override
@@ -207,11 +217,18 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         public ChainTableBatchScan(
                 TableSchema tableSchema, ChainGroupReadTable chainGroupReadTable) {
+            this(tableSchema, chainGroupReadTable, FileStoreTable::newScan);
+        }
+
+        private ChainTableBatchScan(
+                TableSchema tableSchema,
+                ChainGroupReadTable chainGroupReadTable,
+                Function<FileStoreTable, DataTableScan> scanCreator) {
             super(
                     chainGroupReadTable.wrapped,
                     chainGroupReadTable.other(),
                     tableSchema,
-                    FileStoreTable::newScan);
+                    scanCreator);
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
             this.partitionConverter =
@@ -507,8 +524,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 boolean snapshot, PartitionPredicate scanPartitionPredicate) {
             DataTableScan scan =
                     snapshot
-                            ? chainGroupReadTable.newSnapshotScan()
-                            : chainGroupReadTable.newDeltaScan();
+                            ? chainGroupReadTable.newSnapshotScan(scanCreator)
+                            : chainGroupReadTable.newDeltaScan(scanCreator);
             if (scanPartitionPredicate != null) {
                 scan.withPartitionFilter(scanPartitionPredicate);
             }
@@ -546,8 +563,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private DataTableScan newFilteredScan(boolean snapshot) {
             DataTableScan scan =
                     snapshot
-                            ? chainGroupReadTable.newSnapshotScan()
-                            : chainGroupReadTable.newDeltaScan();
+                            ? chainGroupReadTable.newSnapshotScan(scanCreator)
+                            : chainGroupReadTable.newDeltaScan(scanCreator);
             if (dataPredicate != null) {
                 scan.withFilter(dataPredicate);
             }

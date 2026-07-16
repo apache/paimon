@@ -163,7 +163,12 @@ public class FixedBucketRowKeyExtractorTest {
     private FixedBucketRowKeyExtractor extractor(
             RowType rowType, String partK, String bk, String pk, int numBucket) {
         return extractor(
-                rowType, partK, bk, pk, numBucket, PartitionBucketMapping.defaultBuckets(numBucket));
+                rowType,
+                partK,
+                bk,
+                pk,
+                numBucket,
+                PartitionBucketMapping.defaultBuckets(numBucket));
     }
 
     private FixedBucketRowKeyExtractor extractor(

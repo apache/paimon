@@ -18,6 +18,7 @@
 import os
 import shutil
 import tempfile
+import types
 import unittest
 import uuid
 from unittest import mock
@@ -154,6 +155,48 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
 
+    def test_new_commit_failure_aborts_pending_messages(self):
+        err = RuntimeError("new_commit failed")
+        recorder = {}
+
+        with self.assertRaisesRegex(RuntimeError, "new_commit failed"):
+            self._run_with_fake_commit(
+                recorder=recorder,
+                new_commit_errors=[err],
+            )
+
+        self.assertEqual(recorder["commit_calls"], 0)
+        self.assertEqual(recorder["abort_calls"], 1)
+        self.assertEqual(recorder["abort_msgs"], recorder["msgs"])
+
+    def test_commit_failure_does_not_abort_after_commit_started(self):
+        err = RuntimeError("commit failed")
+        recorder = {}
+
+        with self.assertRaisesRegex(RuntimeError, "commit failed"):
+            self._run_with_fake_commit(
+                recorder=recorder,
+                commit_error=err,
+            )
+
+        self.assertEqual(recorder["commit_calls"], 1)
+        self.assertEqual(recorder["abort_calls"], 0)
+        self.assertEqual(recorder["close_calls"], 1)
+
+    def test_close_failure_after_success_warns_and_returns_stats(self):
+        close_error = RuntimeError("close failed")
+
+        with self.assertLogs("pypaimon.ray.update_by_row_id", level="WARNING") as logs:
+            recorder = self._run_with_fake_commit(close_error=close_error)
+
+        self.assertEqual(recorder["result"], {"num_updated": 3})
+        self.assertEqual(recorder["commit_calls"], 1)
+        self.assertEqual(recorder["abort_calls"], 0)
+        self.assertIn(
+            "Failed to close update_by_row_id commit",
+            "\n".join(logs.output),
+        )
+
     def test_accepts_pyarrow_and_pandas_source(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
@@ -280,6 +323,116 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             update_by_row_id(target, src, self.catalog_options, update_cols=["nope"])
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=[])
+
+    def _run_with_fake_commit(self, *, recorder=None, new_commit_errors=None,
+                              commit_error=None, close_error=None):
+        import importlib
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+
+        if recorder is None:
+            recorder = {}
+        recorder.update({
+            "msgs": [object()],
+            "new_commit_errors": list(new_commit_errors or []),
+            "commit_error": commit_error,
+            "close_error": close_error,
+            "new_commit_calls": 0,
+            "commit_calls": 0,
+            "abort_calls": 0,
+            "close_calls": 0,
+        })
+
+        class FakeOptions:
+            def data_evolution_enabled(self):
+                return True
+
+            def row_tracking_enabled(self):
+                return True
+
+            def deletion_vectors_enabled(self):
+                return False
+
+        class FakeCommit:
+            def commit(self, msgs):
+                recorder["commit_calls"] += 1
+                recorder["commit_msgs"] = list(msgs)
+                if recorder["commit_error"] is not None:
+                    raise recorder["commit_error"]
+
+            def abort(self, msgs):
+                recorder["abort_calls"] += 1
+                recorder["abort_msgs"] = list(msgs)
+
+            def close(self):
+                recorder["close_calls"] += 1
+                if recorder["close_error"] is not None:
+                    raise recorder["close_error"]
+
+        class FakeWriteBuilder:
+            def new_commit(self):
+                recorder["new_commit_calls"] += 1
+                if recorder["new_commit_errors"]:
+                    raise recorder["new_commit_errors"].pop(0)
+                return FakeCommit()
+
+        class FakeTable:
+            field_names = ["age"]
+            partition_keys = []
+            options = FakeOptions()
+            table_schema = types.SimpleNamespace(fields=[
+                types.SimpleNamespace(
+                    name="age",
+                    type=types.SimpleNamespace(type="INT"),
+                )
+            ])
+
+            def snapshot_manager(self):
+                return types.SimpleNamespace(get_latest_snapshot=lambda: types.SimpleNamespace(
+                    id=1,
+                    total_record_count=1,
+                ))
+
+            def new_batch_write_builder(self):
+                return FakeWriteBuilder()
+
+        class FakeCatalog:
+            def get_table(self, target):
+                return FakeTable()
+
+        class FakeSource:
+            def schema(self):
+                return types.SimpleNamespace(names=["_ROW_ID", "age"])
+
+            def map_batches(self, fn, batch_format=None):
+                return self
+
+        parser_path = (
+            "pypaimon.schema.data_types.PyarrowFieldParser.from_paimon_schema"
+        )
+        with mock.patch(
+                "pypaimon.catalog.catalog_factory.CatalogFactory.create",
+                return_value=FakeCatalog()), \
+                mock.patch.object(m, "_normalize_source",
+                                  side_effect=lambda source, catalog_options: source), \
+                mock.patch.object(m, "build_update_schema",
+                                  return_value=pa.schema([
+                                      ("_ROW_ID", pa.int64()),
+                                      ("age", pa.int32()),
+                                  ])), \
+                mock.patch(parser_path,
+                           return_value=pa.schema([
+                               ("age", pa.int32()),
+                           ])), \
+                mock.patch.object(m, "distributed_update_apply",
+                                  return_value=(recorder["msgs"], 3, [])):
+            recorder["result"] = m.update_by_row_id(
+                "default.fake",
+                FakeSource(),
+                self.catalog_options,
+                update_cols=["age"],
+            )
+        return recorder
 
 
 if __name__ == "__main__":

@@ -91,10 +91,37 @@ class ProjectionPredicateIndexTest(unittest.TestCase):
         w.close()
         return self.catalog.get_table(full)
 
+    def _populate_data_evolution(self, table_name: str):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        full = 'default.{}'.format(table_name)
+        self.catalog.create_table(full, schema, False)
+        table = self.catalog.get_table(full)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(self.data)
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        return self.catalog.get_table(full)
+
     def _read(self, read_builder):
         scan = read_builder.new_scan()
         read = read_builder.new_read()
         return read.to_arrow(scan.plan().splits())
+
+    @staticmethod
+    def _rows_by_id(table):
+        data = table.to_pydict()
+        rows = [
+            {name: values[i] for name, values in data.items()}
+            for i in range(table.num_rows)
+        ]
+        return sorted(rows, key=lambda row: row['id'])
 
     def test_pk_filter_on_non_pk_with_projection_keeping_filter_column(self):
         """The OffsetRow handed to FilterRecordReader uses read_type indices.
@@ -108,12 +135,12 @@ class ProjectionPredicateIndexTest(unittest.TestCase):
 
         # Projection narrows read_type from [id, name, value] to [id, value]
         rb = table.new_read_builder().with_projection(['id', 'value']).with_filter(pred)
-        actual = self._read(rb).sort_by('id')
+        actual = self._read(rb)
+        rows = self._rows_by_id(actual)
 
         self.assertEqual(actual.num_rows, 1)
         self.assertEqual(actual.column_names, ['id', 'value'])
-        self.assertEqual(actual.column('id').to_pylist(), [3])
-        self.assertEqual(actual.column('value').to_pylist(), [30])
+        self.assertEqual(rows, [{'id': 3, 'value': 30}])
 
     def test_pk_filter_on_non_pk_with_projection_reordering_columns(self):
         """Reordering the projection (value before id) changes the column
@@ -125,12 +152,15 @@ class ProjectionPredicateIndexTest(unittest.TestCase):
         pred = pb.greater_than('value', 15)
 
         rb = table.new_read_builder().with_projection(['value', 'id']).with_filter(pred)
-        actual = self._read(rb).sort_by('id')
+        actual = self._read(rb)
+        rows = self._rows_by_id(actual)
 
         self.assertEqual(actual.num_rows, 2)
         self.assertEqual(actual.column_names, ['value', 'id'])
-        self.assertEqual(actual.column('id').to_pylist(), [2, 3])
-        self.assertEqual(actual.column('value').to_pylist(), [20, 30])
+        self.assertEqual(rows, [
+            {'value': 20, 'id': 2},
+            {'value': 30, 'id': 3},
+        ])
 
     def test_pk_filter_no_projection_still_works(self):
         """Sanity: with no projection, behaviour must match the pre-fix path."""
@@ -140,47 +170,77 @@ class ProjectionPredicateIndexTest(unittest.TestCase):
         pred = pb.equal('value', 20)
 
         rb = table.new_read_builder().with_filter(pred)
-        actual = self._read(rb).sort_by('id')
+        actual = self._read(rb)
+        rows = self._rows_by_id(actual)
 
         self.assertEqual(actual.num_rows, 1)
-        self.assertEqual(actual.column('name').to_pylist(), ['b'])
-        self.assertEqual(actual.column('value').to_pylist(), [20])
+        self.assertEqual(rows, [{'id': 2, 'name': 'b', 'value': 20}])
 
-    def test_pk_filter_column_outside_projection_drops_filter(self):
-        """When the filter column is *not* projected we cannot evaluate the
-        predicate at row level — the contract is to fall through (no
-        FilterRecordReader). The reader still produces the projected columns,
-        and the count must not be smaller than the unfiltered projection.
-        """
+    def test_pk_filter_column_outside_projection_still_filters(self):
+        """The filter column does not have to be visible in the final output."""
         table = self._populate_pk('test_pk_filter_outside_proj')
 
         pb = table.new_read_builder().new_predicate_builder()
         pred = pb.equal('value', 30)
 
-        # value is NOT in the projection — predicate cannot apply at row level
         rb = table.new_read_builder().with_projection(['id']).with_filter(pred)
-        actual = self._read(rb).sort_by('id')
+        actual = self._read(rb)
 
-        # All three rows are still returned because the filter is dropped,
-        # not misapplied with a stale index.
-        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.num_rows, 1)
         self.assertEqual(actual.column_names, ['id'])
-        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(sorted(actual.column('id').to_pylist()), [3])
+
+    def test_pk_string_filter_outside_projection_still_filters(self):
+        table = self._populate_pk('test_pk_string_filter_outside_proj')
+
+        pb = table.new_read_builder().new_predicate_builder()
+        pred = pb.startswith('name', 'a')
+
+        rb = table.new_read_builder().with_projection(['id']).with_filter(pred)
+        actual = self._read(rb)
+
+        self.assertEqual(actual.num_rows, 1)
+        self.assertEqual(actual.column_names, ['id'])
+        self.assertEqual(actual.column('id').to_pylist(), [1])
 
     def test_append_only_filter_with_projection_unchanged(self):
-        """Append-only path uses arrow file-level pushdown by field name, not
-        by index. Guard against any regression introduced by the fix.
-        """
         table = self._populate_append('test_append_proj_filter')
 
         pb = table.new_read_builder().new_predicate_builder()
         pred = pb.equal('value', 30)
 
         rb = table.new_read_builder().with_projection(['id', 'value']).with_filter(pred)
-        actual = self._read(rb).sort_by('id')
+        actual = self._read(rb)
+        rows = self._rows_by_id(actual)
 
         self.assertEqual(actual.num_rows, 1)
         self.assertEqual(actual.column_names, ['id', 'value'])
+        self.assertEqual(rows, [{'id': 3, 'value': 30}])
+
+    def test_append_only_filter_column_outside_projection_still_filters(self):
+        table = self._populate_append('test_append_filter_outside_proj')
+
+        pb = table.new_read_builder().new_predicate_builder()
+        pred = pb.equal('value', 30)
+
+        rb = table.new_read_builder().with_projection(['id']).with_filter(pred)
+        actual = self._read(rb)
+
+        self.assertEqual(actual.num_rows, 1)
+        self.assertEqual(actual.column_names, ['id'])
+        self.assertEqual(actual.column('id').to_pylist(), [3])
+
+    def test_data_evolution_filter_column_outside_projection_still_filters(self):
+        table = self._populate_data_evolution('test_de_filter_outside_proj')
+
+        pb = table.new_read_builder().new_predicate_builder()
+        pred = pb.equal('value', 30)
+
+        rb = table.new_read_builder().with_projection(['id']).with_filter(pred)
+        actual = self._read(rb)
+
+        self.assertEqual(actual.num_rows, 1)
+        self.assertEqual(actual.column_names, ['id'])
         self.assertEqual(actual.column('id').to_pylist(), [3])
 
 
@@ -261,6 +321,39 @@ class RewritePredicateIndicesUnitTest(unittest.TestCase):
         from pypaimon.read.push_down_utils import rewrite_predicate_indices
 
         self.assertIsNone(rewrite_predicate_indices(None, []))
+
+    def test_arrow_filter_support_marks_only_unsafe_string_predicates(self):
+        from pypaimon.read.push_down_utils import predicate_supports_arrow_filter
+
+        pb = self._build_predicate()
+        safe = pb.greater_than('c', 1)
+        unsafe = pb.startswith('b', 'a')
+        mixed = pb.and_predicates([safe, unsafe])
+
+        self.assertTrue(predicate_supports_arrow_filter(safe))
+        self.assertFalse(predicate_supports_arrow_filter(unsafe))
+        self.assertFalse(predicate_supports_arrow_filter(mixed))
+
+    def test_missing_first_row_id_materializes_null_row_ids(self):
+        from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+        from pypaimon.table.special_fields import SpecialFields
+
+        reader = object.__new__(DataFileBatchReader)
+        reader.system_fields = {SpecialFields.ROW_ID.name: 0}
+        reader.first_row_id = None
+        reader.row_id_offsets = None
+        reader._row_id_cursor = 0
+
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([0, 0], type=pa.int64())],
+            schema=pa.schema([
+                pa.field(SpecialFields.ROW_ID.name, pa.int64(), nullable=False)
+            ]),
+        )
+
+        actual = reader._assign_row_tracking(batch)
+
+        self.assertEqual(actual.column(0).to_pylist(), [None, None])
 
     def test_raises_when_leaf_field_missing(self):
         from pypaimon.read.push_down_utils import rewrite_predicate_indices

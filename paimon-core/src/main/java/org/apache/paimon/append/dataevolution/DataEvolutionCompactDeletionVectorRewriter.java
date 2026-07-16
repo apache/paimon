@@ -68,9 +68,11 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DataEvolutionCompactDeletionVectorRewriter {
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
 
-    public DataEvolutionCompactDeletionVectorRewriter(FileStoreTable table) {
+    public DataEvolutionCompactDeletionVectorRewriter(FileStoreTable table, Snapshot snapshot) {
         this.table = table;
+        this.snapshot = snapshot;
     }
 
     public List<CommitMessage> rewriteDeletionVectors(List<CommitMessage> messages) {
@@ -78,7 +80,6 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             return Collections.emptyList();
         }
 
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
         Map<BinaryRow, AppendDeleteFileMaintainer> maintainerByParts =
                 collectMaintainers(snapshot, messages);
         if (maintainerByParts.isEmpty()) {
@@ -117,8 +118,21 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             List<DataFileMeta> before = normalFiles(compactIncrement.compactBefore());
             List<DataFileMeta> after = normalFiles(compactIncrement.compactAfter());
 
-            // Skip blob tasks
+            // Skip blob-only tasks and index-only commit messages.
             if (before.isEmpty() && after.isEmpty()) {
+                continue;
+            }
+
+            AppendDeleteFileMaintainer maintainer =
+                    result.computeIfAbsent(
+                            commitMessage.partition(),
+                            ignored ->
+                                    BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                                            table.store().newIndexFileHandler(),
+                                            snapshot,
+                                            commitMessage.partition()));
+            if (isMaterialized(compactIncrement)) {
+                removeMaterializedDeletionVectors(maintainer, rangeHelper, before);
                 continue;
             }
 
@@ -133,15 +147,6 @@ public class DataEvolutionCompactDeletionVectorRewriter {
                             + "range, but compact before range is %s and compact after range is %s.",
                     beforeRange,
                     afterRange);
-
-            AppendDeleteFileMaintainer maintainer =
-                    result.computeIfAbsent(
-                            commitMessage.partition(),
-                            ignored ->
-                                    BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                            table.store().newIndexFileHandler(),
-                                            snapshot,
-                                            commitMessage.partition()));
             DeletionVector merged = newDeletionVector();
 
             // Merge all old DeletionVectors, should consider row range offset of each sub dv
@@ -159,6 +164,24 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             }
         }
         return result;
+    }
+
+    private void removeMaterializedDeletionVectors(
+            AppendDeleteFileMaintainer maintainer,
+            RangeHelper<DataFileMeta> rangeHelper,
+            List<DataFileMeta> before) {
+        for (List<DataFileMeta> previousRowGroup : rangeHelper.mergeOverlappingRanges(before)) {
+            DataFileMeta oldAnchor = retrieveAnchorFile(previousRowGroup, file -> file);
+            maintainer.notifyRemovedDeletionVector(oldAnchor.fileName());
+        }
+    }
+
+    private boolean isMaterialized(CompactIncrement compactIncrement) {
+        List<DataFileMeta> before = normalFiles(compactIncrement.compactBefore());
+        if (before.isEmpty()) {
+            return false;
+        }
+        return compactIncrement.compactAfter().stream().allMatch(file -> file.firstRowId() == null);
     }
 
     /**

@@ -439,16 +439,17 @@ You can query the partition files of the table.
 SELECT * FROM my_table$partitions;
 
 /*
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
-| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options | total_buckets | done  |
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
-| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |             1 | false |
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+----------------------+
+| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options | total_buckets | done  | deleted_record_count |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+----------------------+
+| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |             1 | false |                    0 |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+----------------------+
 */
 ```
 
 **Note**: 
 - The `created_by`, `created_at`, `updated_by`, and `options` fields are populated from REST catalog audit information. For non-REST catalogs, these fields will be `NULL`.
+- The `deleted_record_count` field is the number of records marked deleted by deletion vectors in the partition. It is `0` when the partition has no deletion vectors and `NULL` when legacy deletion vector metadata does not contain cardinality.
 
 ### Buckets Table
 

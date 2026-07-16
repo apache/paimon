@@ -71,4 +71,33 @@ public class RowRangeMappingIndexTest {
 
         assertThat(index.map(new Range(12, 17))).isEmpty();
     }
+
+    @Test
+    public void testRelativeMappingCanBeShiftedToAbsoluteRowIds() {
+        RowRangeMappingIndex relative =
+                RowRangeMappingIndex.create(
+                        Arrays.asList(
+                                RowRangeMappingIndex.mapping(10, 14, 0),
+                                RowRangeMappingIndex.mapping(20, 24, 5)));
+
+        RowRangeMappingIndex absolute = relative.shiftNewStarts(100L);
+        assertThat(absolute.map(new Range(10, 14))).hasValue(new Range(100, 104));
+        assertThat(absolute.map(new Range(20, 24))).hasValue(new Range(105, 109));
+    }
+
+    @Test
+    public void testOverlaps() {
+        RowRangeMappingIndex index =
+                RowRangeMappingIndex.create(
+                        Arrays.asList(
+                                RowRangeMappingIndex.mapping(10, 14, 100),
+                                RowRangeMappingIndex.mapping(20, 24, 105)));
+
+        assertThat(index.overlaps(new Range(5, 9))).isFalse();
+        assertThat(index.overlaps(new Range(5, 10))).isTrue();
+        assertThat(index.overlaps(new Range(15, 19))).isFalse();
+        assertThat(index.overlaps(new Range(14, 20))).isTrue();
+        assertThat(index.overlaps(new Range(24, 30))).isTrue();
+        assertThat(index.overlaps(new Range(25, 30))).isFalse();
+    }
 }

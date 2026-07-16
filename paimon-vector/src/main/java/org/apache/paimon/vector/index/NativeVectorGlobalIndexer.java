@@ -39,17 +39,40 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
     private final DataType fieldType;
     private final Map<String, String> options;
     private final String identifier;
+    private final double trainSampleRatio;
 
     public NativeVectorGlobalIndexer(
             DataType fieldType, Map<String, String> options, String identifier) {
+        this(
+                fieldType,
+                options,
+                identifier,
+                NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_SAMPLE_RATIO);
+    }
+
+    public NativeVectorGlobalIndexer(
+            DataType fieldType,
+            Map<String, String> options,
+            String identifier,
+            double trainSampleRatio) {
         this.fieldType = fieldType;
         this.options = Objects.requireNonNull(options, "options must not be null");
         this.identifier = Objects.requireNonNull(identifier, "identifier must not be null");
+        if (Double.isNaN(trainSampleRatio)
+                || Double.isInfinite(trainSampleRatio)
+                || trainSampleRatio <= 0
+                || trainSampleRatio > 1) {
+            throw new IllegalArgumentException(
+                    "trainSampleRatio must be greater than 0 and less than or equal to 1: "
+                            + trainSampleRatio);
+        }
+        this.trainSampleRatio = trainSampleRatio;
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new NativeVectorGlobalIndexWriter(fileWriter, fieldType, options, identifier);
+        return new NativeVectorGlobalIndexWriter(
+                fileWriter, fieldType, options, identifier, trainSampleRatio);
     }
 
     @Override

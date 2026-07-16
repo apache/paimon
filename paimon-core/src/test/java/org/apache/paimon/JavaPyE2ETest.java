@@ -29,7 +29,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
@@ -86,6 +88,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -1180,7 +1183,7 @@ public class JavaPyE2ETest {
         table = (FileStoreTable) catalog.getTable(identifier);
         org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator coordinator =
                 new org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator(
-                        table, false, false);
+                        table, false, false, table.latestSnapshot().get());
         List<org.apache.paimon.append.dataevolution.DataEvolutionCompactTask> tasks =
                 coordinator.plan();
         assertThat(tasks.size()).isGreaterThan(0);
@@ -1326,6 +1329,96 @@ public class JavaPyE2ETest {
         LOG.info(
                 "testReadRowAppendTable: Java read {} ROW-format rows written by Python",
                 res.size());
+    }
+
+    /** Java writes an ARRAY&lt;BLOB&gt; table for Python to read. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteArrayBlobTable() throws Exception {
+        Identifier identifier = identifier("array_blob_java_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payloads", DataTypes.ARRAY(DataTypes.BLOB()))
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            new GenericArray(
+                                    new Object[] {
+                                        new BlobData("java-alpha".getBytes(StandardCharsets.UTF_8)),
+                                        null,
+                                        new BlobData(new byte[0])
+                                    })));
+            write.write(GenericRow.of(2, new GenericArray(new Object[0])));
+            write.write(GenericRow.of(3, null));
+            write.write(
+                    GenericRow.of(
+                            4,
+                            new GenericArray(
+                                    new Object[] {
+                                        new BlobData("java-omega".getBytes(StandardCharsets.UTF_8))
+                                    })));
+            commit.commit(write.prepareCommit());
+        }
+
+        assertArrayBlobRows(readArrayBlobRows(table), "java-alpha", "java-omega");
+    }
+
+    /** Java reads an ARRAY&lt;BLOB&gt; table written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadArrayBlobTable() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(identifier("array_blob_python_test"));
+        assertArrayBlobRows(readArrayBlobRows(table), "python-alpha", "python-omega");
+    }
+
+    private Map<Integer, List<byte[]>> readArrayBlobRows(FileStoreTable table) throws Exception {
+        Map<Integer, List<byte[]>> rows = new HashMap<>();
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        if (row.isNullAt(1)) {
+                            rows.put(id, null);
+                            return;
+                        }
+
+                        InternalArray array = row.getArray(1);
+                        List<byte[]> values = new ArrayList<>(array.size());
+                        for (int i = 0; i < array.size(); i++) {
+                            values.add(array.isNullAt(i) ? null : array.getBlob(i).toData());
+                        }
+                        rows.put(id, values);
+                    });
+        }
+        return rows;
+    }
+
+    private void assertArrayBlobRows(
+            Map<Integer, List<byte[]>> rows, String firstValue, String lastValue) {
+        assertThat(rows).containsOnlyKeys(1, 2, 3, 4);
+        assertThat(rows.get(1)).hasSize(3);
+        assertThat(rows.get(1).get(0)).isEqualTo(firstValue.getBytes(StandardCharsets.UTF_8));
+        assertThat(rows.get(1).get(1)).isNull();
+        assertThat(rows.get(1).get(2)).isEmpty();
+        assertThat(rows.get(2)).isEmpty();
+        assertThat(rows.get(3)).isNull();
+        assertThat(rows.get(4)).hasSize(1);
+        assertThat(rows.get(4).get(0)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */
@@ -1831,7 +1924,8 @@ public class JavaPyE2ETest {
     private void doDataEvolutionCompact(FileStoreTable table, boolean compactBlob)
             throws Exception {
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, compactBlob, false);
+                new DataEvolutionCompactCoordinator(
+                        table, compactBlob, false, table.latestSnapshot().get());
         List<CommitMessage> messages = new ArrayList<>();
         try {
             List<DataEvolutionCompactTask> tasks;

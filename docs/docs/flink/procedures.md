@@ -37,7 +37,7 @@ argument can be omitted. For the above example, the call statement is \
 ``CALL sys.compact(`table` => 'default.t', options => 'sink.parallelism=4')``.
 
 Specify partitions: we use string to represent partition filter. "," means "AND" and ";" means "OR". For example, if you want
-to specify two partitions date=01 and date=02, you need to write 'date=01;date=02'; If you want to specify one partition
+to specify two partitions date=01 or date=02, you need to write 'date=01;date=02'; If you want to specify one partition
 with date=01 and day=01, you need to write 'date=01,day=01'.
 
 Table options syntax: we use string to represent table options. The format is 'key1=value1,key2=value2...'.
@@ -120,8 +120,8 @@ All available procedures are listed below.
       <td>
          To compact databases. Arguments:
             <li>includingDatabases: to specify databases. You can use regular expression.</li>
-            <li>mode: compact mode. "divided": start a sink for each table, detecting the new table requires restarting the job;
-               "combined" (default): start a single combined sink for all tables, the new table will be automatically detected.
+            <li>mode: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job;
+               "combined": start a single combined sink for all tables, the new table will be automatically detected.
             </li>
             <li>includingTables: to specify tables. You can use regular expression.</li>
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
@@ -137,6 +137,29 @@ All available procedures are listed below.
             excluding_tables => 'ignore', 
             table_options => 'sink.parallelism=4',
             compat_strategy => 'full')
+      </td>
+   </tr>
+   <tr>
+      <td>compact_chain_table</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.compact_chain_table(
+            `table` => 'table',
+            partition => 'partition',
+            overwrite => overwrite) <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition') <br/>
+         CALL [catalog.]sys.compact_chain_table('table', 'partition', overwrite) <br/><br/>
+      </td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: the target chain table identifier. Cannot be empty.</li>
+            <li>partition: partition specification format (e.g., 'dt=20250810,hour=22'). Cannot be empty.</li>
+            <li>overwrite: whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(`table` => 'default.T', partition => 'dt=20250810,hour=22')<br/><br/>
+         CALL sys.compact_chain_table('default.T', 'dt=20250810,hour=22', true)
       </td>
    </tr>
    <tr>
@@ -1115,6 +1138,35 @@ All available procedures are listed below.
             `index_column` => 'name',<br/>
             `index_type` => 'btree',<br/>
             `dry_run` => true)
+      </td>
+   </tr>
+   <tr>
+      <td>full_text_search</td>
+      <td>
+         CALL [catalog.]sys.full_text_search(<br/>
+            `table` => 'identifier',<br/>
+            `column` => 'columnName',<br/>
+            query => 'queryJson',<br/>
+            top_k => topK,<br/>
+            projection => 'col1,col2,__paimon_search_score',<br/>
+            options => 'key1=value1;key2=value2')<br/>
+      </td>
+      <td>
+         To perform full-text search on a table and return deterministically ordered JSON rows. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>column(required): the character column to search.</li>
+            <li>query(required): native full-text query JSON.</li>
+            <li>top_k(required): the maximum number of results, from 1 through 10,000.</li>
+            <li>projection(optional): comma-separated result columns. Add <code>__paimon_search_score</code> to return the search relevance score.</li>
+            <li>options(optional): additional dynamic options of the table. The query authorization setting cannot be overridden.</li>
+      </td>
+      <td>
+         CALL sys.full_text_search(<br/>
+            `table` => 'default.articles',<br/>
+            `column` => 'content',<br/>
+            query => '{"match":{"column":"content","terms":"paimon lake"}}',<br/>
+            top_k => 10,<br/>
+            projection => 'id,content,__paimon_search_score')
       </td>
    </tr>
    <tr>

@@ -99,6 +99,34 @@ class GlobalIndexSearchMode(str, Enum):
 
 class CoreOptions:
     """Core options for Paimon tables."""
+
+    # Options that define the table's structure/identity and cannot be changed
+    # once the table has snapshots. Mirrors the @Immutable annotated options in
+    # the Java org.apache.paimon.CoreOptions (IMMUTABLE_OPTIONS).
+    IMMUTABLE_OPTIONS: frozenset = frozenset([
+        "type",
+        "bucket-key",
+        "bucket-function.type",
+        "data-file.path-directory",
+        "merge-engine",
+        "sequence.snapshot-ordering",
+        "aggregation.remove-record-on-delete",
+        "partial-update.remove-record-on-delete",
+        "partial-update.remove-record-on-sequence-group",
+        "rowkind.field",
+        "primary-key",
+        "partition",
+        "dynamic-bucket.initial-buckets",
+        "force-lookup",
+        "row-tracking.enabled",
+        "data-evolution.enabled",
+        "index-file-in-data-file-dir",
+        "blob-field",
+        "blob-descriptor-field",
+        "blob-view-field",
+        "pk-clustering-override",
+    ])
+
     # File format constants
     FILE_FORMAT_ORC: str = "orc"
     FILE_FORMAT_AVRO: str = "avro"
@@ -108,6 +136,11 @@ class CoreOptions:
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
     FILE_FORMAT_MOSAIC: str = "mosaic"
+
+    # Field agg constants
+    FIELDS_PREFIX = "fields"
+    DISTINCT = "distinct"
+    LIST_AGG_DELIMITER = "list-agg-delimiter"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -127,7 +160,7 @@ class CoreOptions:
     TYPE: ConfigOption[str] = (
         ConfigOptions.key("type")
         .string_type()
-        .default_value("primary-key")
+        .default_value("table")
         .with_description("Specify what type of table this is.")
     )
 
@@ -1317,3 +1350,21 @@ class CoreOptions:
 
     def dynamic_partition_overwrite(self) -> bool:
         return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)
+
+    def field_listagg_delimiter(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.LIST_AGG_DELIMITER}'
+            )
+            .string_type()
+            .default_value(',')
+        )
+
+    def field_collect_distinct(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.DISTINCT}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )

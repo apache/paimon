@@ -44,6 +44,28 @@ def _map_kwargs(
     return kwargs
 
 
+def _resolve_source_projection(
+    clauses: List[_NormalizedClause],
+    source_on: Sequence[str],
+    source_field_names: Sequence[str],
+) -> list:
+    needed = set(source_on)
+    source_set = set(source_field_names)
+
+    for clause in clauses:
+        for value in clause.spec.values():
+            if isinstance(value, SourceColumnRef):
+                needed.add(value.column)
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import extract_columns
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in source_set:
+                    needed.add(col)
+
+    return [c for c in source_field_names if c in needed]
+
+
 def _build_matched_transform(
     clauses: List[_NormalizedClause],
     on_map: Dict[str, str],
@@ -330,7 +352,10 @@ def build_matched_update_ds(
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
     )
-    source_cols = list(source_ds.schema().names)
+    source_cols = _resolve_source_projection(
+        clauses, source_on, source_ds.schema().names,
+    )
+    source_ds = source_ds.select_columns(source_cols)
     source_renamed = source_ds.rename_columns(
         {c: f"s.{c}" for c in source_cols}
     )
@@ -880,7 +905,10 @@ def build_not_matched_insert_ds(
     captured_field_names = list(target_field_names)
     out_schema = target_pa_schema
 
-    source_cols = list(source_ds.schema().names)
+    source_cols = _resolve_source_projection(
+        clauses, source_on, source_ds.schema().names,
+    )
+    source_ds = source_ds.select_columns(source_cols)
     source_renamed = source_ds.rename_columns(
         {c: f"s.{c}" for c in source_cols}
     )

@@ -138,9 +138,35 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                 }
             }
         }
-        for (int i = 0; i < n; i++) {
-            merged[i] = maybeRerankIndexedResult(merged[i], indexType, globalIndexer, vectors[i]);
+        return maybeRerankIndexedBatchResults(merged, indexType, globalIndexer);
+    }
+
+    protected ScoredGlobalIndexResult[] maybeRerankIndexedBatchResults(
+            ScoredGlobalIndexResult[] results, String indexType, GlobalIndexer globalIndexer) {
+        if (configuredRefineFactor(indexType) == 0) {
+            return results;
         }
-        return merged;
+
+        int n = results.length;
+        int searchLimit = indexedSearchLimit(indexType);
+        ScoredGlobalIndexResult[] candidates = new ScoredGlobalIndexResult[n];
+        RoaringNavigableMap64 unionCandidates = new RoaringNavigableMap64();
+        for (int i = 0; i < n; i++) {
+            candidates[i] = results[i].topK(searchLimit);
+            unionCandidates.or(candidates[i].results());
+        }
+
+        if (unionCandidates.isEmpty()) {
+            return candidates;
+        }
+
+        Map<Long, float[]> rawVectors = readRawVectors(unionCandidates, false);
+        String metric = rawSearchMetric(globalIndexer);
+        ScoredGlobalIndexResult[] reranked = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            reranked[i] =
+                    scoreRawVectors(candidates[i].results(), rawVectors, vectors[i], metric, limit);
+        }
+        return reranked;
     }
 }

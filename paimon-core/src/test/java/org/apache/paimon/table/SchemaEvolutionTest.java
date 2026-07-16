@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
@@ -166,6 +167,53 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testAddVariantFieldWithShredding() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET);
+        options.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(DataTypes.INT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.addColumn("payload", DataTypes.VARIANT())));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(2, GenericVariant.fromJson("{\"age\":30,\"name\":\"Alice\"}")));
+        commit = table.newCommit(commitUser);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        Map<Integer, String> actual = new HashMap<>();
+        forEachRemaining(
+                table,
+                null,
+                row ->
+                        actual.put(
+                                row.getInt(0),
+                                row.isNullAt(1) ? null : row.getVariant(1).toJson()));
+
+        assertThat(actual)
+                .containsEntry(1, null)
+                .containsEntry(2, "{\"age\":30,\"name\":\"Alice\"}");
+    }
+
+    @Test
     public void testAddDuplicateField() throws Exception {
         final String columnName = "f3";
         Schema schema =
@@ -270,7 +318,8 @@ public class SchemaEvolutionTest {
                                                         "__BLOB_FIELD",
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+                .hasMessageContaining(
+                        "must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type");
 
         // nested column rejected.
         assertThatThrownBy(

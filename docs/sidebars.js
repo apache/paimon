@@ -84,8 +84,10 @@ const sidebars = {
       "primary-key-table/sequence-rowkind",
       "primary-key-table/compaction",
       "primary-key-table/query-performance",
+      "primary-key-table/global-index",
       "primary-key-table/chain-table",
       "primary-key-table/pk-clustering-override",
+      "primary-key-table/blob-storage",
       {
         type: "category",
         "label": "Merge Engine",
@@ -151,7 +153,8 @@ const sidebars = {
       "flink/default-value",
       "flink/procedures",
       "flink/action-jars",
-      "flink/savepoint"
+      "flink/savepoint",
+      "flink/lineage"
     ]
   },
   {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -25,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -41,6 +43,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
     private final long firstRowId;
     private final int fieldCount;
     private final int blobIndex;
+    private final Object blobPlaceholder;
     private final int rowIdIndex;
     private final int seqNumIndex;
     private final long sequenceNumber;
@@ -57,6 +60,10 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.fieldCount = readRowType.getFieldCount();
         this.blobIndex = blobIndex;
+        this.blobPlaceholder =
+                readRowType.getTypeAt(blobIndex).getTypeRoot() == DataTypeRoot.ARRAY
+                        ? BlobArrayPlaceholder.INSTANCE
+                        : BlobPlaceholder.INSTANCE;
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
         this.sequenceNumber = sequenceNumber;
@@ -95,7 +102,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
 
     private InternalRow placeholderRow(long rowId) {
         GenericRow row = new GenericRow(fieldCount);
-        row.setField(blobIndex, BlobPlaceholder.INSTANCE);
+        row.setField(blobIndex, blobPlaceholder);
         if (rowIdIndex >= 0) {
             row.setField(rowIdIndex, rowId);
         }

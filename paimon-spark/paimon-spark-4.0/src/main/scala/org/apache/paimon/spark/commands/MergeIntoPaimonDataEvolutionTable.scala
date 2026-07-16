@@ -39,8 +39,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.DataTypeRoot.BLOB
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{BlobType, DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
@@ -420,14 +419,19 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     // Find raw blob update columns and avoid reading them from target table
     val blobInlineFields = table.coreOptions().blobInlineField().asScala.toSet
-    val rawBlobFieldNames = table
+    val rawBlobFields = table
       .rowType()
       .getFields
       .asScala
       .filter(
         field =>
-          field.`type`().is(BLOB) &&
+          BlobType.isBlobFileField(field.`type`()) &&
             !blobInlineFields.exists(inlineField => resolver(inlineField, field.name())))
+    val rawBlobFieldNames = rawBlobFields
+      .map(_.name())
+      .toSet
+    val rawArrayBlobFieldNames = rawBlobFields
+      .filter(_.`type`().getTypeRoot == DataTypeRoot.ARRAY)
       .map(_.name())
       .toSet
 
@@ -438,6 +442,30 @@ case class MergeIntoPaimonDataEvolutionTable(
     // The final output is composed by updated columns, metadata columns and blob marker columns.
     // Marker columns are used to mark whether a blob field should be written with placeholder
     val rawBlobUpdateColumns = updateColumnsSorted.filter(isRawBlobUpdateColumn)
+
+    def modifiedRawBlobNames(action: UpdateAction): Set[String] = {
+      action.assignments.flatMap {
+        assignment =>
+          if (isModifiedAssignment(assignment)) {
+            val key = assignmentKeyAttribute(assignment)
+            rawBlobUpdateColumns.find(_.sameRef(key)).map(_.name)
+          } else {
+            None
+          }
+      }.toSet
+    }
+
+    val modifiedRawArrayBlobColumnNames = matchedActions
+      .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
+      .flatten
+      .filter(name => rawArrayBlobFieldNames.exists(arrayBlobName => resolver(arrayBlobName, name)))
+      .toSet
+    if (modifiedRawArrayBlobColumnNames.nonEmpty) {
+      throw new UnsupportedOperationException(
+        "Should not append/update raw-data ARRAY<BLOB> column through MERGE INTO: " +
+          modifiedRawArrayBlobColumnNames.toSeq.sorted.mkString(", "))
+    }
+
     val rawBlobMarkerNames =
       rawBlobMarkerNamesAvoiding(
         rawBlobUpdateColumns.size,
@@ -483,18 +511,6 @@ case class MergeIntoPaimonDataEvolutionTable(
       }
     }
     allFields ++= updateColumnsSorted.filterNot(isRawBlobUpdateColumn)
-
-    def modifiedRawBlobNames(action: UpdateAction): Set[String] = {
-      action.assignments.flatMap {
-        assignment =>
-          if (isModifiedAssignment(assignment)) {
-            val key = assignmentKeyAttribute(assignment)
-            rawBlobUpdateColumns.find(_.sameRef(key)).map(_.name)
-          } else {
-            None
-          }
-      }.toSet
-    }
 
     def assignmentValue(action: UpdateAction, attr: AttributeReference): Expression = {
       action.assignments
