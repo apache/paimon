@@ -303,9 +303,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/paimon-python
 
-  # Python 3.7 requirements resolution runs in its own python:3.7-slim container,
-  # because actions/setup-python cannot install 3.7 on ubuntu-latest (24.04). Keeping
-  # it separate also prevents a 3.7 failure from blocking the 3.8-3.13 / Ray checks.
+  # 3.7 requirements in its own python:3.7-slim container (setup-python can't install 3.7 on ubuntu-latest).
   requirement_version_compatible_test_py37:
     runs-on: ubuntu-latest
     container: "python:3.7-slim"
