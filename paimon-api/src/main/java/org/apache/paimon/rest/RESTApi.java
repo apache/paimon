@@ -42,9 +42,11 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
@@ -58,6 +60,8 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -852,6 +856,37 @@ public class RESTApi {
                 resourcePaths.markDonePartitions(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
+                restAuthFunction);
+    }
+
+    /** Create partitions for table, ignoring partitions which already exist. */
+    public CreatePartitionsResponse createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions) {
+        return createPartitions(identifier, partitions, true);
+    }
+
+    /** Create partitions for table. */
+    public CreatePartitionsResponse createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists) {
+        CreatePartitionsRequest request = new CreatePartitionsRequest(partitions, ignoreIfExists);
+        return client.post(
+                resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                CreatePartitionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Drop (unregister) partitions for table; the server never deletes data files. */
+    public DropPartitionsResponse dropPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfNotExists) {
+        DropPartitionsRequest request = new DropPartitionsRequest(partitions, ignoreIfNotExists);
+        return client.post(
+                resourcePaths.dropPartitions(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                DropPartitionsResponse.class,
                 restAuthFunction);
     }
 

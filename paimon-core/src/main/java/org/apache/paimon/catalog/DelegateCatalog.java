@@ -317,9 +317,21 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsManagedPartitionListing() {
+        return wrapped.supportsManagedPartitionListing();
+    }
+
+    @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        wrapped.createPartitions(identifier, partitions, ignoreIfExists);
     }
 
     @Override
@@ -449,10 +461,28 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<Partition> listPartitionsPagedWithoutFallback(
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
+            throws TableNotExistException {
+        return wrapped.listPartitionsPagedWithoutFallback(
+                identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
     public List<Partition> listPartitionsByNames(
             Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         return wrapped.listPartitionsByNames(identifier, partitions);
+    }
+
+    @Override
+    public List<Partition> listPartitionsByNamesWithoutFallback(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByNamesWithoutFallback(identifier, partitions);
     }
 
     @Override

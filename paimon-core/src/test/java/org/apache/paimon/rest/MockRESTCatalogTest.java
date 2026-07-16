@@ -215,6 +215,15 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Test
+    void testPartitionCapabilities() {
+        // Paimon tables keep upstream commit-based partition maintenance; managed format table
+        // partitions ride their own capability so partition expire never routes through the
+        // truncate-based Catalog#dropPartitions default (it cannot represent .done markers).
+        assertThat(restCatalog.supportsPartitionModification()).isFalse();
+        assertThat(restCatalog.supportsManagedPartitionListing()).isTrue();
+    }
+
+    @Test
     void testBaseHeadersInRequests() throws Exception {
         // Set custom headers in options
         String customHeaderName = "custom-header";

@@ -424,6 +424,24 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
+     * Get a page of partitions without falling back to filesystem discovery.
+     *
+     * <p>This entry point is intended for tables whose partition visibility is owned by the
+     * catalog. Implementations must fail when the catalog service cannot list partitions.
+     */
+    default PagedList<Partition> listPartitionsPagedWithoutFallback(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Catalog %s does not support managed partition listing.",
+                        getClass().getName()));
+    }
+
+    /**
      * Get Partition list by partition names of the table.
      *
      * @param identifier path of the table to list partitions
@@ -435,6 +453,21 @@ public interface Catalog extends AutoCloseable {
     List<Partition> listPartitionsByNames(
             Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException;
+
+    /**
+     * Get partitions by partition names without falling back to filesystem discovery.
+     *
+     * <p>This entry point is intended for tables whose partition visibility is owned by the
+     * catalog. Implementations must fail when the catalog service cannot list partitions.
+     */
+    default List<Partition> listPartitionsByNamesWithoutFallback(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Catalog %s does not support managed partition listing.",
+                        getClass().getName()));
+    }
 
     // ======================= view methods ===============================
 
@@ -1025,6 +1058,16 @@ public interface Catalog extends AutoCloseable {
     boolean supportsPartitionModification();
 
     /**
+     * Whether this catalog supports managed format table partitions: fail-closed catalog-owned
+     * partition listing plus the {@link #createPartitions(Identifier, List)} and {@link
+     * #dropPartitions(Identifier, List)} registration DDL for such tables, independent of {@link
+     * #supportsPartitionModification()}.
+     */
+    default boolean supportsManagedPartitionListing() {
+        return false;
+    }
+
+    /**
      * Create partitions of the specify table. Ignore existing partitions.
      *
      * @param identifier path of the table to create partitions
@@ -1033,6 +1076,27 @@ public interface Catalog extends AutoCloseable {
      */
     default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {}
+
+    /**
+     * Create partitions of the specify table with explicit existence semantics.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        if (!ignoreIfExists) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Catalog %s does not support createPartitions without ignoreIfExists.",
+                            getClass().getName()));
+        }
+        createPartitions(identifier, partitions);
+    }
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.
