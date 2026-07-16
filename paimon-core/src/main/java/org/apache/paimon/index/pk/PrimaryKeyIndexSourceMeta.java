@@ -33,7 +33,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Ordered source data files covered by a source-backed primary-key index payload. */
 public final class PrimaryKeyIndexSourceMeta {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 1;
 
     private final int dataLevel;
     private final List<PrimaryKeyIndexSourceFile> sourceFiles;

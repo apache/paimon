@@ -20,6 +20,7 @@ package org.apache.paimon.index.pk;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyIndexSourceMeta}. */
 class PrimaryKeyIndexSourceMetaTest {
+
+    @Test
+    void testSerializedVersionRemainsOne() throws Exception {
+        PrimaryKeyIndexSourceMeta metadata =
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 10));
+
+        DataInputDeserializer input = new DataInputDeserializer(metadata.serialize());
+
+        assertThat(input.readInt()).isEqualTo(1);
+    }
 
     @Test
     void testDataLevelRoundTrip() {
@@ -90,19 +101,19 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testRejectsUnsupportedVersion() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(64);
-        output.writeInt(1);
+        output.writeInt(2);
         output.writeInt(1);
         output.writeUTF("data-1");
         output.writeLong(1);
 
         assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(output.getCopyOfBuffer()))
-                .hasMessageContaining("Unsupported index source version: 1");
+                .hasMessageContaining("Unsupported index source version: 2");
     }
 
     @Test
     void testRejectsSourceCountBeforeAllocation() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(8);
-        output.writeInt(2);
+        output.writeInt(1);
         output.writeInt(1);
         output.writeInt(Integer.MAX_VALUE);
 
@@ -115,7 +126,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testRejectsTruncatedAndTrailingMetadata() throws Exception {
         DataOutputSerializer truncated = new DataOutputSerializer(64);
-        truncated.writeInt(2);
+        truncated.writeInt(1);
         truncated.writeInt(1);
         truncated.writeInt(1);
         truncated.writeUTF("data-1");
@@ -123,7 +134,7 @@ class PrimaryKeyIndexSourceMetaTest {
                 .hasMessageContaining("Failed to deserialize index source metadata");
 
         DataOutputSerializer trailing = new DataOutputSerializer(64);
-        trailing.writeInt(2);
+        trailing.writeInt(1);
         trailing.writeInt(1);
         trailing.writeInt(1);
         trailing.writeUTF("data-1");
