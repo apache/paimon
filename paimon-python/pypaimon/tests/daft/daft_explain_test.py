@@ -90,6 +90,7 @@ def _single_split_explain(
     raw_convertible: bool,
     has_deletion_vectors: bool,
     has_auth: bool = False,
+    data_evolution_enabled: bool = False,
 ) -> ExplainResult:
     split = ExplainSplitInfo(
         partition={},
@@ -109,7 +110,7 @@ def _single_split_explain(
         is_primary_key_table=False,
         bucket_mode="unaware",
         deletion_vectors_enabled=has_deletion_vectors,
-        data_evolution_enabled=False,
+        data_evolution_enabled=data_evolution_enabled,
         snapshot_id=1,
         schema_id=0,
         file_count=1,
@@ -332,6 +333,50 @@ def test_explain_scan_reports_pk_lsm_fallback(catalog_options):
     assert result.splits is not None
     assert all(split.reader_mode == READER_MODE_PYPAIMON_FALLBACK for split in result.splits)
     assert all(split.fallback_reason == "LSM merge required" for split in result.splits)
+
+
+def test_explain_scan_reports_data_evolution_fallback(catalog_options, monkeypatch):
+    pa_schema = pa.schema([
+        ("id", pa.int64()),
+        ("name", pa.string()),
+    ])
+    _, table = _create_table(
+        catalog_options,
+        "explain_data_evolution_fallback",
+        pa_schema,
+        options={
+            "bucket": "-1",
+            "file.format": "parquet",
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+        },
+    )
+
+    class FakeReadBuilder:
+        def explain(self, verbose: bool = False) -> ExplainResult:
+            assert verbose is True
+            return _single_split_explain(
+                table_identifier="test_db.explain_data_evolution_fallback",
+                raw_convertible=False,
+                has_deletion_vectors=False,
+                data_evolution_enabled=True,
+            )
+
+    def fake_scan_read_builder(self, table, read_pushdowns):
+        return FakeReadBuilder()
+
+    monkeypatch.setattr(PaimonDataSource, "_scan_read_builder", fake_scan_read_builder)
+
+    result = _explain_table(table, catalog_options=catalog_options, verbose=True)
+
+    assert table.is_primary_key_table is False
+    assert result.pypaimon_fallback_split_count == 1
+    assert result.native_parquet_split_count == 0
+    assert result.fallback_reasons == {"data-evolution merge required": 1}
+    assert result.splits is not None
+    assert len(result.splits) == 1
+    assert result.splits[0].reader_mode == READER_MODE_PYPAIMON_FALLBACK
+    assert result.splits[0].fallback_reason == "data-evolution merge required"
 
 
 def test_explain_scan_reports_non_parquet_fallback(catalog_options):
