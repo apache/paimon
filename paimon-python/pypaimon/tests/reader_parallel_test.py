@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import threading
+import types
 import unittest
 from unittest import mock
 
@@ -29,42 +30,46 @@ from pypaimon.read.table_read import TableRead, _RemainingRows
 
 
 class ResolveParallelismTest(unittest.TestCase):
-    """Pure unit tests for parallelism parsing — no Paimon table needed."""
+    """Pure unit tests for parallelism resolution — no Paimon table needed.
 
-    def test_int_passthrough(self):
-        self.assertEqual(TableRead._parse_parallelism(4, "parallelism", 10), 4)
-        self.assertEqual(TableRead._parse_parallelism(1, "parallelism", 10), 1)
+    ``_resolve_parallelism`` only reads ``self._read_parallelism``, so a
+    lightweight stand-in with that attribute is enough to exercise it.
+    """
 
-    def test_int_string_parsed(self):
-        self.assertEqual(TableRead._parse_parallelism("4", "read.parallelism", 10), 4)
+    @staticmethod
+    def _resolve(runtime, num_splits, option=None):
+        stub = types.SimpleNamespace(_read_parallelism=option)
+        return TableRead._resolve_parallelism(stub, runtime, num_splits)
 
-    def test_auto_resolves_to_min_splits_cpu(self):
+    def test_runtime_int_passthrough(self):
+        self.assertEqual(self._resolve(4, 10), 4)
+        self.assertEqual(self._resolve(1, 10), 1)
+
+    def test_runtime_overrides_option(self):
+        self.assertEqual(self._resolve(2, 10, option=8), 2)
+
+    def test_option_used_when_no_runtime(self):
+        self.assertEqual(self._resolve(None, 10, option=8), 8)
+
+    def test_none_resolves_to_auto_min_splits_cpu(self):
         cpu = os.cpu_count() or 1
+        # Neither runtime nor option set => auto.
         # More splits than CPUs => capped at CPU count.
-        self.assertEqual(
-            TableRead._parse_parallelism("auto", "read.parallelism", cpu + 100), cpu)
+        self.assertEqual(self._resolve(None, cpu + 100), cpu)
         # Fewer splits than CPUs => capped at split count.
-        self.assertEqual(
-            TableRead._parse_parallelism("auto", "read.parallelism", 1), 1)
+        self.assertEqual(self._resolve(None, 1), 1)
+        # Zero splits never yields a sub-1 worker count.
+        self.assertEqual(self._resolve(None, 0), 1)
 
-    def test_auto_case_insensitive(self):
-        cpu = os.cpu_count() or 1
-        self.assertEqual(
-            TableRead._parse_parallelism("AUTO", "read.parallelism", cpu + 100), cpu)
-        self.assertEqual(
-            TableRead._parse_parallelism(" auto ", "read.parallelism", cpu + 100), cpu)
-
-    def test_invalid_int_raises_with_source(self):
+    def test_invalid_runtime_raises_with_source(self):
         with self.assertRaises(ValueError) as ctx:
-            TableRead._parse_parallelism(0, "parallelism", 10)
+            self._resolve(0, 10)
         self.assertIn("parallelism", str(ctx.exception))
-        with self.assertRaises(ValueError) as ctx:
-            TableRead._parse_parallelism("0", "read.parallelism", 10)
-        self.assertIn("read.parallelism", str(ctx.exception))
+        self.assertNotIn("read.parallelism", str(ctx.exception))
 
-    def test_non_numeric_string_raises(self):
+    def test_invalid_option_raises_with_source(self):
         with self.assertRaises(ValueError) as ctx:
-            TableRead._parse_parallelism("nonsense", "read.parallelism", 10)
+            self._resolve(None, 10, option=0)
         self.assertIn("read.parallelism", str(ctx.exception))
 
 
@@ -149,11 +154,15 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             'dt': dts,
         }, schema=cls.pa_schema)
 
-        # Default table — read.parallelism unset (defaults to 1, i.e. serial).
+        # Default table — read.parallelism unset => auto (parallel when
+        # there are >= 2 splits and >= 2 CPUs).
         cls.table = cls._build_table('append_parallel_default', None, data)
         # Option-set table — read.parallelism=4 baked into the table schema.
         cls.table_opt_4 = cls._build_table(
             'append_parallel_opt4', {'read.parallelism': '4'}, data)
+        # Option forcing serial reads.
+        cls.table_opt_1 = cls._build_table(
+            'append_parallel_opt1', {'read.parallelism': '1'}, data)
 
     @classmethod
     def _build_table(cls, name, options, data):
@@ -192,7 +201,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         rb = self.table.new_read_builder()
         splits = self._scan_splits(rb)
         read = rb.new_read()
-        serial = read.to_arrow(splits)
+        serial = read.to_arrow(splits, parallelism=1)
         parallel = read.to_arrow(splits, parallelism=4)
         # Same split order preserved => byte-identical tables.
         self.assertEqual(serial, parallel)
@@ -209,39 +218,37 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         splits_serial = self._scan_splits(rb_serial)
         splits_parallel = self._scan_splits(rb_parallel)
 
-        serial_df = rb_serial.new_read().to_pandas(splits_serial) \
+        serial_df = rb_serial.new_read().to_pandas(splits_serial, parallelism=1) \
             .sort_values('user_id').reset_index(drop=True)
         # No explicit parallelism — must pick up read.parallelism=4 from the table option.
         parallel_df = rb_parallel.new_read().to_pandas(splits_parallel) \
             .sort_values('user_id').reset_index(drop=True)
         self.assertTrue(serial_df.equals(parallel_df))
 
-    def test_auto_method_arg_matches_serial(self):
-        rb = self.table.new_read_builder()
-        splits = self._scan_splits(rb)
+    def test_default_none_runs_auto_parallel(self):
+        # No runtime arg and no table option => auto. With >= 2 splits on a
+        # multi-core box this takes the parallel fan-out path; the result
+        # must still match a forced-serial read row for row.
+        read = self.table.new_read_builder().new_read()
+        splits = self._scan_splits(self.table.new_read_builder())
         self.assertGreaterEqual(len(splits), 2)
-        read = rb.new_read()
         serial = read.to_arrow(splits, parallelism=1)
-        # "auto" resolves to min(splits, cpu). With >= 2 splits and a
-        # multi-core CI box this exercises the parallel fan-out path.
-        auto = read.to_arrow(splits, parallelism="auto")
-        # Input split order preserved => byte-identical tables.
+        auto = read.to_arrow(splits)
         self.assertEqual(serial, auto)
         self.assertEqual(auto.num_rows, self.expected_rows)
 
-    def test_auto_table_option_matches_serial(self):
-        data = self.table.new_read_builder().new_read().to_arrow(
-            self._scan_splits(self.table.new_read_builder()), parallelism=1)
-        auto_table = self._build_table(
-            'append_parallel_auto', {'read.parallelism': 'auto'}, data)
-        rb = auto_table.new_read_builder()
-        splits = self._scan_splits(rb)
-        self.assertGreaterEqual(len(splits), 2)
-        # No explicit parallelism — picks up read.parallelism=auto from the option.
-        auto_df = rb.new_read().to_pandas(splits) \
-            .sort_values('user_id').reset_index(drop=True)
-        serial_df = data.to_pandas().sort_values('user_id').reset_index(drop=True)
-        self.assertTrue(serial_df.equals(auto_df))
+    def test_default_none_auto_takes_parallel_path_when_multicore(self):
+        read = self.table.new_read_builder().new_read()
+        splits = self._scan_splits(self.table.new_read_builder())
+        # Only assert fan-out where the box actually has >= 2 CPUs, else
+        # auto legitimately resolves to 1 and stays serial.
+        if (os.cpu_count() or 1) < 2:
+            self.skipTest("single-core runner: auto resolves to serial")
+        with mock.patch.object(
+            read, '_to_arrow_parallel', wraps=read._to_arrow_parallel
+        ) as spy:
+            read.to_arrow(splits)
+        spy.assert_called_once()
 
     # ------------------------------------------------------------------
     # Priority: method arg > table option > built-in default.
@@ -257,9 +264,9 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             read.to_arrow(splits, parallelism=1)
 
     def test_method_arg_overrides_option_to_parallel(self):
-        # option=1 (default) but caller passes 4: should enable parallelism.
-        read = self.table.new_read_builder().new_read()
-        splits = self._scan_splits(self.table.new_read_builder())
+        # option=1 (forces serial) but caller passes 4: should enable parallelism.
+        read = self.table_opt_1.new_read_builder().new_read()
+        splits = self._scan_splits(self.table_opt_1.new_read_builder())
         with mock.patch.object(
             read, '_to_arrow_parallel', wraps=read._to_arrow_parallel
         ) as spy:
@@ -271,8 +278,10 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
     # Boundary / invalid value handling.
     # ------------------------------------------------------------------
 
-    def test_parallelism_one_equals_serial(self):
-        rb = self.table.new_read_builder()
+    def test_option_one_equals_serial(self):
+        # Table option read.parallelism=1 must behave exactly like an
+        # explicit parallelism=1 (serial) read.
+        rb = self.table_opt_1.new_read_builder()
         splits = self._scan_splits(rb)
         read = rb.new_read()
         self.assertEqual(read.to_arrow(splits),

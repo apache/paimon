@@ -168,7 +168,7 @@ class TableRead:
     def to_arrow(
         self,
         splits: List[Split],
-        parallelism: Optional[Any] = None,
+        parallelism: Optional[int] = None,
         blob_parallelism: Optional[int] = None,
     ) -> Optional[pyarrow.Table]:
         """Read ``splits`` into a single arrow ``Table``.
@@ -177,15 +177,14 @@ class TableRead:
             splits: scan-plan splits returned from a ``TableScan``.
             parallelism: optional runtime override of the
                 ``read.parallelism`` table option. ``None`` (default) falls
-                back to the table option; a non-None value temporarily
-                overrides it for this call. ``1`` keeps reads serial;
-                ``>= 2`` enables a thread pool that reads splits
-                concurrently and assembles the final table in input order.
-                The string ``"auto"`` resolves to ``min(number of splits,
-                CPU count)``. Must be ``>= 1`` or ``"auto"``. Note that with
-                ``>= 2`` (or ``"auto"``) and a ``limit`` set, the returned
-                rows are an arbitrary subset of the requested size, since
-                which splits fill the row quota first is non-deterministic.
+                back to the table option; when that is also unset the read
+                auto-scales to ``min(number of splits, CPU count)``. ``1``
+                keeps reads serial; ``>= 2`` caps the thread pool that reads
+                splits concurrently and assembles the final table in input
+                order. Must be ``>= 1``. Note that with ``>= 2`` (or auto)
+                and a ``limit`` set, the returned rows are an arbitrary
+                subset of the requested size, since which splits fill the row
+                quota first is non-deterministic.
             blob_parallelism: number of threads for concurrent blob reads
                 within each batch. ``None`` or ``1`` (default) reads blobs
                 serially; ``>= 2`` uses a thread pool with ``pread`` for
@@ -278,44 +277,23 @@ class TableRead:
             finally:
                 reader.close()
 
-    def _resolve_parallelism(self, runtime: Optional[Any], num_splits: int) -> int:
+    def _resolve_parallelism(self, runtime: Optional[int], num_splits: int) -> int:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
-        table option > built-in default of 1. The validation message names
-        whichever source produced the offending value, so users know where
-        to fix it.
-
-        Both the runtime argument and the option accept an integer (>= 1) or
-        the string ``"auto"``, which resolves to ``min(num_splits, cpu
-        count)`` -- recommended for single-process reads (pandas/duckdb/arrow)
-        and left off by default under distributed engines that already
-        parallelize across splits.
+        table option > auto. When neither the argument nor the option is set
+        the read auto-scales to ``min(num_splits, CPU count)``. A value >= 1
+        caps the thread pool; ``1`` forces serial reads. The validation
+        message names whichever source produced the offending value.
         """
         if runtime is not None:
-            value = runtime
-            source = "parallelism"
+            value, source = runtime, "parallelism"
+        elif self._read_parallelism is not None:
+            value, source = self._read_parallelism, "read.parallelism"
         else:
-            value = self._read_parallelism
-            source = "read.parallelism"
-        return self._parse_parallelism(value, source, num_splits)
-
-    @staticmethod
-    def _parse_parallelism(value: Any, source: str, num_splits: int) -> int:
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized == "auto":
-                # os.cpu_count() may return None on exotic platforms; fall
-                # back to 1 so "auto" never crashes. min() with num_splits
-                # avoids spinning up more workers than there is work.
-                cpu = os.cpu_count() or 1
-                return max(1, min(num_splits, cpu))
-            try:
-                value = int(normalized)
-            except ValueError:
-                raise ValueError(
-                    f"{source} must be a positive integer or \"auto\", "
-                    f"got {value!r}")
+            # os.cpu_count() may return None on exotic platforms; fall back
+            # to 1. min() with num_splits avoids more workers than work.
+            return max(1, min(num_splits, os.cpu_count() or 1))
         if value < 1:
             raise ValueError(f"{source} must be >= 1, got {value}")
         return value
@@ -540,7 +518,7 @@ class TableRead:
     def to_pandas(
         self,
         splits: List[Split],
-        parallelism: Optional[Any] = None,
+        parallelism: Optional[int] = None,
     ) -> pandas.DataFrame:
         """Read ``splits`` into a pandas ``DataFrame``.
 
