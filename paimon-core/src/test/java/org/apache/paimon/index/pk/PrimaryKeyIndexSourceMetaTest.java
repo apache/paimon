@@ -20,6 +20,7 @@ package org.apache.paimon.index.pk;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -33,9 +34,41 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PrimaryKeyIndexSourceMetaTest {
 
     @Test
+    void testSerializedVersionRemainsOne() throws Exception {
+        PrimaryKeyIndexSourceMeta metadata =
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 10));
+
+        DataInputDeserializer input = new DataInputDeserializer(metadata.serialize());
+
+        assertThat(input.readInt()).isEqualTo(1);
+    }
+
+    @Test
+    void testDataLevelRoundTrip() {
+        PrimaryKeyIndexSourceMeta metadata =
+                new PrimaryKeyIndexSourceMeta(3, new PrimaryKeyIndexSourceFile("data-1", 10));
+
+        PrimaryKeyIndexSourceMeta restored =
+                PrimaryKeyIndexSourceMeta.deserialize(metadata.serialize());
+
+        assertThat(restored.dataLevel()).isEqualTo(3);
+        assertThat(restored.sourceFiles()).isEqualTo(metadata.sourceFiles());
+    }
+
+    @Test
+    void testRejectsNonPositiveDataLevel() {
+        assertThatThrownBy(
+                        () ->
+                                new PrimaryKeyIndexSourceMeta(
+                                        0, new PrimaryKeyIndexSourceFile("data-1", 10)))
+                .hasMessageContaining("data level must be positive");
+    }
+
+    @Test
     void testMultipleSourceRoundTrip() {
         PrimaryKeyIndexSourceMeta metadata =
                 new PrimaryKeyIndexSourceMeta(
+                        1,
                         Arrays.asList(
                                 new PrimaryKeyIndexSourceFile("data-1", 10),
                                 new PrimaryKeyIndexSourceFile("data-2", 20)));
@@ -51,7 +84,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testSingleSourceRoundTrip() {
         PrimaryKeyIndexSourceMeta metadata =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile("data-1", 0));
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 0));
 
         PrimaryKeyIndexSourceMeta restored =
                 PrimaryKeyIndexSourceMeta.deserialize(metadata.serialize());
@@ -81,6 +114,7 @@ class PrimaryKeyIndexSourceMetaTest {
     void testRejectsSourceCountBeforeAllocation() throws Exception {
         DataOutputSerializer output = new DataOutputSerializer(8);
         output.writeInt(1);
+        output.writeInt(1);
         output.writeInt(Integer.MAX_VALUE);
 
         assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(output.getCopyOfBuffer()))
@@ -94,11 +128,13 @@ class PrimaryKeyIndexSourceMetaTest {
         DataOutputSerializer truncated = new DataOutputSerializer(64);
         truncated.writeInt(1);
         truncated.writeInt(1);
+        truncated.writeInt(1);
         truncated.writeUTF("data-1");
         assertThatThrownBy(() -> PrimaryKeyIndexSourceMeta.deserialize(truncated.getCopyOfBuffer()))
                 .hasMessageContaining("Failed to deserialize index source metadata");
 
         DataOutputSerializer trailing = new DataOutputSerializer(64);
+        trailing.writeInt(1);
         trailing.writeInt(1);
         trailing.writeInt(1);
         trailing.writeUTF("data-1");
@@ -111,7 +147,7 @@ class PrimaryKeyIndexSourceMetaTest {
     @Test
     void testReadsFromIndexFile() {
         PrimaryKeyIndexSourceMeta metadata =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile("data-1", 5));
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile("data-1", 5));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "btree",

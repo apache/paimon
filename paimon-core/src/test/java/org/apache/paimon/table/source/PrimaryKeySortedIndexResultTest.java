@@ -60,10 +60,10 @@ class PrimaryKeySortedIndexResultTest {
 
     @Test
     void testIndexedEmptyRawAndInvalidFiles() {
-        DataFileMeta indexed = dataFile("indexed", 5);
-        DataFileMeta empty = dataFile("empty", 5);
-        DataFileMeta raw = dataFile("raw", 5);
-        DataFileMeta invalid = dataFile("invalid", 5);
+        DataFileMeta indexed = dataFile("indexed", 5, 1);
+        DataFileMeta empty = dataFile("empty", 5, 2);
+        DataFileMeta raw = dataFile("raw", 5, 3);
+        DataFileMeta invalid = dataFile("invalid", 5, 4);
         List<DeletionFile> deletionFiles =
                 Arrays.asList(
                         new DeletionFile("dv-indexed", 0, 1, 1L),
@@ -77,18 +77,16 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE,
-                        5,
-                        0.2);
+                        PrimaryKeyIndexDefinition.Family.BTREE);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
                         Collections.singletonList(split),
                         Collections.singletonList(definition),
                         Arrays.asList(
-                                payloadEntry(payload("btree-indexed", "indexed", 5)),
-                                payloadEntry(payload("btree-empty", "empty", 5)),
-                                payloadEntry(payload("btree-invalid", "invalid", 5))));
+                                payloadEntry(payload("btree-indexed", "indexed", 5, 1)),
+                                payloadEntry(payload("btree-empty", "empty", 5, 2)),
+                                payloadEntry(payload("btree-invalid", "invalid", 5, 4))));
         RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
         Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
         PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
@@ -124,8 +122,8 @@ class PrimaryKeySortedIndexResultTest {
 
     @Test
     void testNonRawConvertibleSplitPreservesMergeBoundary() {
-        DataFileMeta first = dataFile("first", 5);
-        DataFileMeta second = dataFile("second", 5);
+        DataFileMeta first = dataFile("first", 5, 1);
+        DataFileMeta second = dataFile("second", 5, 2);
         List<DeletionFile> deletionFiles =
                 Arrays.asList(
                         new DeletionFile("dv-first", 0, 1, 1L),
@@ -137,17 +135,15 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE,
-                        5,
-                        0.2);
+                        PrimaryKeyIndexDefinition.Family.BTREE);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
                         Collections.singletonList(split),
                         Collections.singletonList(definition),
                         Arrays.asList(
-                                payloadEntry(payload("btree-first", "first", 5)),
-                                payloadEntry(payload("btree-second", "second", 5))));
+                                payloadEntry(payload("btree-first", "first", 5, 1)),
+                                payloadEntry(payload("btree-second", "second", 5, 2))));
         RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
         Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
         PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
@@ -179,9 +175,7 @@ class PrimaryKeySortedIndexResultTest {
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         new Options(),
-                        PrimaryKeyIndexDefinition.Family.BTREE,
-                        5,
-                        0.2);
+                        PrimaryKeyIndexDefinition.Family.BTREE);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
@@ -256,21 +250,26 @@ class PrimaryKeySortedIndexResultTest {
     }
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
+        return dataFile(fileName, rowCount, 1);
+    }
+
+    private static DataFileMeta dataFile(String fileName, long rowCount, int dataLevel) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(dataLevel);
     }
 
     private static IndexManifestEntry payloadEntry(IndexFileMeta payload) {
@@ -278,8 +277,14 @@ class PrimaryKeySortedIndexResultTest {
     }
 
     private static IndexFileMeta payload(String fileName, String sourceName, long sourceRowCount) {
+        return payload(fileName, sourceName, sourceRowCount, 1);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName, String sourceName, long sourceRowCount, int dataLevel) {
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                                dataLevel,
                                 new PrimaryKeyIndexSourceFile(sourceName, sourceRowCount))
                         .serialize();
         return new IndexFileMeta(

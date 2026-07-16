@@ -4299,22 +4299,6 @@ public class CoreOptions implements Serializable {
         return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
     }
 
-    public int primaryKeyIndexCompactionLevelFanout(String column) {
-        return options.getInteger(primaryKeyIndexCompactionLevelFanoutKey(column), 5);
-    }
-
-    public double primaryKeyIndexCompactionStaleRatioThreshold(String column) {
-        return options.getDouble(primaryKeyIndexCompactionStaleRatioThresholdKey(column), 0.2);
-    }
-
-    public static String primaryKeyIndexCompactionLevelFanoutKey(String column) {
-        return "fields." + column + ".pk-index.compaction.level-fanout";
-    }
-
-    public static String primaryKeyIndexCompactionStaleRatioThresholdKey(String column) {
-        return "fields." + column + ".pk-index.compaction.stale-ratio-threshold";
-    }
-
     public List<String> primaryKeyVectorIndexColumns() {
         return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
     }

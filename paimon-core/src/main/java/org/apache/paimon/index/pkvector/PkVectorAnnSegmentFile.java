@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -66,9 +67,16 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             String indexType)
             throws IOException {
         checkArgument(!sources.isEmpty(), "An ANN segment must reference source files.");
+        int dataLevel = sources.get(0).dataLevel;
+        checkArgument(dataLevel > 0, "An ANN segment requires a positive data level.");
         long totalRowCount = 0;
         List<PrimaryKeyIndexSourceFile> sourceFiles = new ArrayList<>(sources.size());
         for (Source source : sources) {
+            checkArgument(
+                    source.dataLevel == dataLevel,
+                    "An ANN segment cannot mix data levels %s and %s.",
+                    dataLevel,
+                    source.dataLevel);
             totalRowCount = Math.addExact(totalRowCount, source.sourceFile.rowCount());
             sourceFiles.add(source.sourceFile);
         }
@@ -142,6 +150,9 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             }
 
             List<ResultEntry> results = writer.finish();
+            if (liveRowCount == 0 && results.isEmpty()) {
+                results = Collections.singletonList(fileWriter.emptyResult());
+            }
             checkArgument(
                     results.size() == 1,
                     "ANN segment build must produce exactly one payload file, but produced %s.",
@@ -161,7 +172,8 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                                     vectorField.id(),
                                     null,
                                     payloadMetadata,
-                                    new PrimaryKeyIndexSourceMeta(sourceFiles).serialize()),
+                                    new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles)
+                                            .serialize()),
                             pathFactory.isExternalPath() ? payloadPath.toString() : null);
             success = true;
             return segment;
@@ -205,6 +217,16 @@ public class PkVectorAnnSegmentFile extends IndexFile {
             return path;
         }
 
+        private ResultEntry emptyResult() throws IOException {
+            deleteCreatedFiles();
+            createdFiles.clear();
+            String fileName = newFileName("empty-vector");
+            try (PositionOutputStream ignored = newOutputStream(fileName)) {
+                // The searcher does not open payloads for segments without live rows.
+            }
+            return new ResultEntry(fileName, 0, null);
+        }
+
         private void deleteCreatedFiles() {
             for (Path path : createdFiles.values()) {
                 fileIO.deleteQuietly(path);
@@ -215,6 +237,7 @@ public class PkVectorAnnSegmentFile extends IndexFile {
     /** One vector source used while building an ANN segment. */
     public static class Source {
 
+        private final int dataLevel;
         private final PrimaryKeyIndexSourceFile sourceFile;
         @Nullable private final PkVectorReader vectors;
         @Nullable private final ReaderFactory readerFactory;
@@ -226,13 +249,15 @@ public class PkVectorAnnSegmentFile extends IndexFile {
 
         public Source(
                 DataFileMeta sourceFile, PkVectorReader vectors, LongPredicate excludedPosition) {
-            this(sourceMetadata(sourceFile), vectors, excludedPosition);
+            this(sourceFile.level(), sourceMetadata(sourceFile), vectors, excludedPosition);
         }
 
         Source(
+                int dataLevel,
                 PrimaryKeyIndexSourceFile sourceFile,
                 PkVectorReader vectors,
                 LongPredicate excludedPosition) {
+            this.dataLevel = dataLevel;
             this.sourceFile = sourceFile;
             this.vectors = vectors;
             this.readerFactory = null;
@@ -240,17 +265,28 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
 
         private Source(
+                int dataLevel,
                 PrimaryKeyIndexSourceFile sourceFile,
                 ReaderFactory readerFactory,
                 LongPredicate excludedPosition) {
+            this.dataLevel = dataLevel;
             this.sourceFile = sourceFile;
             this.vectors = null;
             this.readerFactory = readerFactory;
             this.excludedPosition = excludedPosition;
         }
 
-        static Source lazy(PrimaryKeyIndexSourceFile sourceFile, ReaderFactory readerFactory) {
-            return new Source(sourceFile, readerFactory, position -> false);
+        static Source lazy(
+                int dataLevel, PrimaryKeyIndexSourceFile sourceFile, ReaderFactory readerFactory) {
+            return new Source(dataLevel, sourceFile, readerFactory, position -> false);
+        }
+
+        static Source lazy(
+                int dataLevel,
+                PrimaryKeyIndexSourceFile sourceFile,
+                ReaderFactory readerFactory,
+                LongPredicate excludedPosition) {
+            return new Source(dataLevel, sourceFile, readerFactory, excludedPosition);
         }
 
         private PkVectorReader openReader() throws IOException {

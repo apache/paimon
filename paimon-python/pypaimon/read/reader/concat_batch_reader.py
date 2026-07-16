@@ -260,7 +260,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
-                 blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024):
+                 blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024,
+                 blob_parallelism: int = 1):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
@@ -279,6 +280,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             self._deletion_vector_range, self._deletion_vector = deletion_vector
         self._returned = False
         self._batch_size = max(1, batch_size)
+        self._blob_parallelism = max(1, blob_parallelism)
+        self._file_io = None
         self._target_ranges = self._compute_target_ranges()
         self._target_range_index = 0
         self._next_row_id = (
@@ -297,6 +300,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if not batch_row_ids:
             return None
 
+        resolve_blobs_concurrently = (
+            self._blob_parallelism > 1 and not self._blob_as_descriptor
+        )
         groups: Dict[int, Dict[int, Tuple[object, bool]]] = {}
 
         batch_first = batch_row_ids[0]
@@ -308,6 +314,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if not blob_values:
                 continue
             group = groups.setdefault(state.file.max_sequence_number, {})
+            if resolve_blobs_concurrently and self._file_io is None:
+                self._file_io = state.reader._file_io
             for row_id, blob in blob_values.items():
                 if row_id in group:
                     raise ValueError(
@@ -318,10 +326,18 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 elif blob is Blob.PLACE_HOLDER or blob is Blob.ARRAY_PLACE_HOLDER:
                     group[row_id] = (None, True)
                 elif self._is_array_blob:
-                    group[row_id] = (self._array_value_for_arrow(blob), False)
+                    if resolve_blobs_concurrently:
+                        group[row_id] = (blob, False)
+                    else:
+                        group[row_id] = (self._array_value_for_arrow(blob), False)
                 else:
                     if self._blob_as_descriptor:
                         group[row_id] = (blob.to_descriptor().serialize(), False)
+                    elif resolve_blobs_concurrently:
+                        # Keep values lazy until fallback selects the newest
+                        # non-placeholder version for each row. Otherwise older
+                        # overridden BLOB versions would be read unnecessarily.
+                        group[row_id] = (blob, False)
                     else:
                         group[row_id] = (blob.to_data(), False)
             if state.selected_range_index >= len(state.selected_ranges):
@@ -345,6 +361,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if not found:
                 raise ValueError("All blob files at the same row id store a placeholder.")
 
+        if resolve_blobs_concurrently:
+            result = self._resolve_selected_blobs(result)
+
         return pa.RecordBatch.from_arrays(
             [pa.array(result, type=self._output_type)],
             names=[self._field_name],
@@ -360,6 +379,41 @@ class BlobFallbackBatchReader(RecordBatchReader):
             else:
                 result.append(blob.to_data())
         return result
+
+    def _resolve_selected_blobs(self, values: List[object]) -> List[object]:
+        """Materialize selected scalar or array BLOBs with the shared FileIO."""
+        resolved = []
+        indexed_blobs: List[Tuple[int, Optional[int], Blob]] = []
+        for row_index, value in enumerate(values):
+            if self._is_array_blob:
+                if value is None:
+                    resolved.append(None)
+                    continue
+                array_values = []
+                for element_index, blob in enumerate(value):
+                    if blob is None:
+                        array_values.append(None)
+                    else:
+                        array_values.append(None)
+                        indexed_blobs.append((row_index, element_index, blob))
+                resolved.append(array_values)
+            elif isinstance(value, Blob):
+                resolved.append(None)
+                indexed_blobs.append((row_index, None, value))
+            else:
+                resolved.append(value)
+
+        if not indexed_blobs:
+            return resolved
+
+        bodies = self._file_io.read_blobs_concurrent(
+            [blob for _, _, blob in indexed_blobs], self._blob_parallelism)
+        for (row_index, element_index, _), body in zip(indexed_blobs, bodies):
+            if element_index is None:
+                resolved[row_index] = body
+            else:
+                resolved[row_index][element_index] = body
+        return resolved
 
     def _compute_target_ranges(self) -> List[Range]:
         ranges = Range.sort_and_merge_overlap([
@@ -459,7 +513,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 blob_offsets,
                 self._data_field,
                 reader._input_stream,
-                blob_as_descriptor=self._blob_as_descriptor,
+                blob_as_descriptor=(
+                    self._blob_as_descriptor or self._blob_parallelism > 1
+                ),
             )
 
             blobs = []

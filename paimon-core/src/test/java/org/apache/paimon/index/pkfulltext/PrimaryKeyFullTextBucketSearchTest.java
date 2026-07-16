@@ -387,7 +387,7 @@ class PrimaryKeyFullTextBucketSearchTest {
 
     private static IndexFileMeta payload(String source, String name, long rowCount) {
         byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile(source, rowCount))
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile(source, rowCount))
                         .serialize();
         return new IndexFileMeta(
                 "full-text",
@@ -403,7 +403,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         for (String source : sources) {
             sourceFiles.add(new PrimaryKeyIndexSourceFile(source, 3));
         }
-        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sourceFiles).serialize();
         long rowCount = 3L * sourceFiles.size();
         return new IndexFileMeta(
                 "full-text",

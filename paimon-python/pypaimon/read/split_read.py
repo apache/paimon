@@ -284,7 +284,7 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
-            blob_parallelism = getattr(self, '_blob_parallelism', 1)
+            blob_parallelism = self._blob_parallelism
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
@@ -1005,7 +1005,7 @@ class DataEvolutionSplitRead(SplitRead):
                 self.table.options))
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
-            blob_parallelism = getattr(self, '_blob_parallelism', 1)
+            blob_parallelism = self._blob_parallelism
             reader = BlobInlineConvertReader(
                 reader, self.table,
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names),
@@ -1284,6 +1284,7 @@ class DataEvolutionSplitRead(SplitRead):
                         CoreOptions.blob_as_descriptor(self.table.options),
                         deletion_vector=deletion_vector,
                         batch_size=batch_size,
+                        blob_parallelism=self._blob_parallelism,
                     )
                 else:
                     # Create concatenated reader for multiple files
@@ -1328,7 +1329,7 @@ class DataEvolutionSplitRead(SplitRead):
                 return None
 
         file_path = file.external_path if file.external_path else file.file_path
-        blob_parallelism = getattr(self, '_blob_parallelism', 1)
+        blob_parallelism = self._blob_parallelism
         return FormatBlobReader(
             self.table.file_io,
             file_path,

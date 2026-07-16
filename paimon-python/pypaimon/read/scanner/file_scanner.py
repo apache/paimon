@@ -276,6 +276,8 @@ class FileScanner:
         # ``scan_with_stats()`` flips it on for a single explain pass and
         # the filter callbacks below increment counters when present.
         self.scan_stats: Optional[ScanStats] = None
+        self.auth_partition_predicate = None
+        self.auth_has_non_partition_filter = False
 
         # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
         # BucketSelectConverter. Set on demand and reused across all
@@ -589,7 +591,7 @@ class FileScanner:
             return splits
         if self.data_evolution and self.deletion_vectors_enabled:
             return splits
-        if self._has_non_partition_filter():
+        if self._has_non_partition_filter() or self.auth_has_non_partition_filter:
             return splits
 
         scanned_row_count = 0
@@ -688,6 +690,8 @@ class FileScanner:
         # partition predicates, so this check is the sole partition gate
         # at the entry level — not a "redundant safety net".
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
+            return False
+        if self.auth_partition_predicate and not self.auth_partition_predicate.test(entry.partition):
             return False
         if stats is not None:
             stats.entries_after_partition += 1

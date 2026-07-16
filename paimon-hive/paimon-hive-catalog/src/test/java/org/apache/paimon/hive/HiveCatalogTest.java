@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
@@ -31,6 +32,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
@@ -454,6 +456,69 @@ public class HiveCatalogTest extends CatalogTestBase {
     protected void checkPartition(Partition expected, Partition actual) {
         assertThat(actual.recordCount()).isEqualTo(expected.recordCount());
         assertThat(actual.lastFileCreationTime()).isEqualTo(expected.lastFileCreationTime() / 1000);
+    }
+
+    @Test
+    public void testObjectTable() throws Exception {
+        String databaseName = "object_table_db";
+        String tableName = "object_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+
+        // Create object table with only options (type=object-table)
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TYPE.key(), TableType.OBJECT_TABLE.toString());
+        Schema schema = Schema.newBuilder().options(options).build();
+
+        catalog.createTable(identifier, schema, false);
+
+        // Verify table exists in HMS
+        assertThat(catalog.listTables(databaseName)).contains(tableName);
+
+        // Verify getTable returns ObjectTable instance
+        org.apache.paimon.table.Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(ObjectTable.class);
+
+        ObjectTable objectTable = (ObjectTable) table;
+        // Verify fixed schema fields
+        assertThat(objectTable.rowType().getFieldNames())
+                .containsExactly("path", "name", "length", "mtime", "atime", "owner");
+        // Verify location is set (defaults to table path)
+        assertThat(objectTable.location()).isNotNull();
+        // Verify options contain type=object-table
+        assertThat(objectTable.options().get(CoreOptions.TYPE.key()))
+                .isEqualTo(TableType.OBJECT_TABLE.toString());
+
+        // Drop table and verify it's gone
+        catalog.dropTable(identifier, false);
+        assertThat(catalog.listTables(databaseName)).doesNotContain(tableName);
+    }
+
+    @Test
+    public void testObjectTableWithCustomPath() throws Exception {
+        String databaseName = "object_table_custom_db";
+        String tableName = "object_table_custom";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+
+        // Create object table with custom path
+        String customPath =
+                new Path(warehouse, databaseName + ".db/" + tableName + "_data").toString();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TYPE.key(), TableType.OBJECT_TABLE.toString());
+        options.put(CoreOptions.PATH.key(), customPath);
+        Schema schema = Schema.newBuilder().options(options).build();
+
+        catalog.createTable(identifier, schema, false);
+
+        // Verify getTable returns ObjectTable with the custom location
+        org.apache.paimon.table.Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(ObjectTable.class);
+        ObjectTable objectTable = (ObjectTable) table;
+        assertThat(objectTable.location()).isEqualTo(customPath);
+
+        // Clean up
+        catalog.dropTable(identifier, false);
     }
 
     @Test

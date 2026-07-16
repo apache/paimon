@@ -4,7 +4,10 @@ Full-text search global index for Apache Paimon, backed by the native `paimon-fu
 
 ## Overview
 
-This module provides full-text search capabilities for Paimon's Data Evolution (append) tables through the Global Index framework. It contains only the Paimon integration layer. Native full-text access, JNI, FFI, index archive handling, and query parsing are provided by the separate `paimon-full-text-index` dependency.
+This module provides full-text search for both Data Evolution (append) tables through the Global
+Index framework and compaction-visible primary-key tables through file-aligned index archives. It
+contains only the Paimon integration layer. Native full-text access, JNI, FFI, index archive
+handling, and query parsing are provided by the separate `paimon-full-text-index` dependency.
 
 ### Architecture
 
@@ -93,7 +96,49 @@ All integers are **big-endian**.
 
 ## Usage
 
-### Build Index
+### Primary-Key Tables
+
+Primary-key full-text indexing uses the fixed `full-text` SPI automatically. Configure the text
+column directly on the table; no implementation selector is needed.
+
+```sql
+CREATE TABLE articles (
+    id BIGINT,
+    content STRING,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '16',
+    'deletion-vectors.enabled' = 'true',
+    'pk-full-text.index.columns' = 'content',
+    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}'
+);
+```
+
+Paimon creates one native archive for the complete set of eligible `COMPACT` data files in each
+Level-1-or-higher data level. Data compaction replaces the affected level archive atomically. One
+archive can cover multiple ordered source files; its row IDs concatenate their physical row
+positions.
+
+Primary-key full-text search currently supports only `global-index.search-mode=fast`. Level-0 and
+other uncovered files are not searched; their rows become searchable after compaction publishes
+an eligible data file and persistent archive. Search applies each source file's deletion vector,
+preserves native relevance scores, and selects a global Top-K. Only Hybrid search rewrites route
+scores through its configured `rrf`, `weighted_score`, or `mrr` ranker.
+
+```sql
+CALL sys.full_text_search(
+    `table` => 'default.articles',
+    `column` => 'content',
+    query => '{"match":{"column":"content","terms":"paimon lake"}}',
+    top_k => 10,
+    projection => 'id,content,__paimon_search_score'
+);
+```
+
+See [Primary-Key Indexes](../docs/docs/primary-key-table/global-index.mdx) for requirements,
+Spark and Java examples, Hybrid search, and current limitations.
+
+### Build a Global Index
 
 ```sql
 CALL sys.create_global_index(

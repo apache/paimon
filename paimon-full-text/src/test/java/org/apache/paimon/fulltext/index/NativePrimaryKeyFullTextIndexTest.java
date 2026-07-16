@@ -192,7 +192,7 @@ class NativePrimaryKeyFullTextIndexTest {
                         null,
                         result.meta(),
                         new PrimaryKeyIndexSourceMeta(
-                                        new PrimaryKeyIndexSourceFile("data-1", texts.size()))
+                                        1, new PrimaryKeyIndexSourceFile("data-1", texts.size()))
                                 .serialize()),
                 null);
     }

@@ -43,44 +43,79 @@ public final class PkVectorExactSearcher {
             int limit,
             LongPredicate excludedPosition)
             throws IOException {
-        checkArgument(query.length == reader.dimension(), "Query vector dimension does not match.");
+        return searchBatch(
+                        dataFileName,
+                        reader,
+                        new float[][] {query},
+                        metric,
+                        limit,
+                        excludedPosition)
+                .get(0);
+    }
+
+    public static List<List<PkVectorSearchResult>> searchBatch(
+            String dataFileName,
+            PkVectorReader reader,
+            float[][] queries,
+            String metric,
+            int limit,
+            LongPredicate excludedPosition)
+            throws IOException {
+        checkArgument(queries != null && queries.length > 0, "Query vectors cannot be empty.");
         checkArgument(limit > 0, "Vector search limit must be positive.");
         checkArgument(
                 VectorSearchMetric.isSupported(metric),
                 "Unsupported vector distance metric: %s.",
                 metric);
         metric = VectorSearchMetric.normalize(metric);
+
+        Comparator<PkVectorSearchResult> bestFirst =
+                Comparator.comparingDouble(PkVectorSearchResult::distance)
+                        .thenComparingLong(PkVectorSearchResult::rowPosition);
+        List<PriorityQueue<PkVectorSearchResult>> nearest = new ArrayList<>(queries.length);
+        for (float[] query : queries) {
+            validateQuery(query, reader.dimension());
+            nearest.add(new PriorityQueue<>(limit, bestFirst.reversed()));
+        }
+
+        float[] vector = new float[reader.dimension()];
+        for (long position = 0; position < reader.rowCount(); position++) {
+            if (!reader.readNextVector(vector) || excludedPosition.test(position)) {
+                continue;
+            }
+            for (int i = 0; i < queries.length; i++) {
+                PkVectorSearchResult candidate =
+                        new PkVectorSearchResult(
+                                dataFileName,
+                                position,
+                                VectorSearchMetric.computeDistance(queries[i], vector, metric));
+                PriorityQueue<PkVectorSearchResult> queryNearest = nearest.get(i);
+                if (queryNearest.size() < limit) {
+                    queryNearest.add(candidate);
+                } else if (bestFirst.compare(candidate, queryNearest.peek()) < 0) {
+                    queryNearest.poll();
+                    queryNearest.add(candidate);
+                }
+            }
+        }
+
+        List<List<PkVectorSearchResult>> results = new ArrayList<>(queries.length);
+        for (PriorityQueue<PkVectorSearchResult> queryNearest : nearest) {
+            List<PkVectorSearchResult> result = new ArrayList<>(queryNearest);
+            Collections.sort(result, bestFirst);
+            results.add(Collections.unmodifiableList(result));
+        }
+        return Collections.unmodifiableList(results);
+    }
+
+    private static void validateQuery(float[] query, int dimension) {
+        checkArgument(query != null, "Query vector cannot be null.");
+        checkArgument(query.length == dimension, "Query vector dimension does not match.");
         for (int i = 0; i < query.length; i++) {
             checkArgument(
                     Float.isFinite(query[i]),
                     "Query vector element at position %s must be finite.",
                     i);
         }
-
-        Comparator<PkVectorSearchResult> bestFirst =
-                Comparator.comparingDouble(PkVectorSearchResult::distance)
-                        .thenComparingLong(PkVectorSearchResult::rowPosition);
-        PriorityQueue<PkVectorSearchResult> nearest =
-                new PriorityQueue<>(limit, bestFirst.reversed());
-        float[] vector = new float[reader.dimension()];
-        for (long position = 0; position < reader.rowCount(); position++) {
-            if (!reader.readNextVector(vector) || excludedPosition.test(position)) {
-                continue;
-            }
-            PkVectorSearchResult candidate =
-                    new PkVectorSearchResult(
-                            dataFileName,
-                            position,
-                            VectorSearchMetric.computeDistance(query, vector, metric));
-            if (nearest.size() < limit) {
-                nearest.add(candidate);
-            } else if (bestFirst.compare(candidate, nearest.peek()) < 0) {
-                nearest.poll();
-                nearest.add(candidate);
-            }
-        }
-        List<PkVectorSearchResult> result = new ArrayList<>(nearest);
-        Collections.sort(result, bestFirst);
-        return Collections.unmodifiableList(result);
     }
 }

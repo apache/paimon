@@ -32,7 +32,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -79,18 +78,18 @@ class PrimaryKeyFullTextSearchTest {
     }
 
     @Test
-    void testHybridRouteRejectsPrimaryKeyFullText() {
+    void testHybridRouteUsesPrimaryKeyFullText() {
         FileStoreTable table = table(false);
 
-        assertThatThrownBy(
-                        () ->
-                                new HybridSearchBuilderImpl(table)
-                                        .addFullTextRoute("content", "hello", 10, 1F)
-                                        .withLimit(10)
-                                        .routeBuilders())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Hybrid search does not support primary-key full-text indexes");
+        HybridSearchBuilder.Route route =
+                new HybridSearchBuilderImpl(table)
+                        .addFullTextRoute("content", "hello", 10, 1F)
+                        .withLimit(10)
+                        .routeBuilders()
+                        .get(0);
+
+        assertThat(route.fullTextSearchBuilder().newFullTextScan())
+                .isInstanceOf(PrimaryKeyFullTextScan.class);
     }
 
     private static FileStoreTable table(boolean dataEvolution) {

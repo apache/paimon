@@ -38,6 +38,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -48,6 +53,108 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link PrimaryKeyVectorBucketSearch}. */
 class PrimaryKeyVectorBucketSearchTest {
+
+    @Test
+    void testSearchesUncoveredFilesConcurrently() throws Exception {
+        DataFileMeta data1 = dataFile("data-1");
+        DataFileMeta data2 = dataFile("data-2");
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        PkVectorDataFileReader reader1 = blockingReader(started, release);
+        PkVectorDataFileReader reader2 = blockingReader(started, release);
+        when(readerFactory.create(data1)).thenReturn(reader1);
+        when(readerFactory.create(data2)).thenReturn(reader2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            CompletableFuture<PrimaryKeyVectorBucketSearch.Result> future =
+                    new PrimaryKeyVectorBucketSearch(
+                                    readerFactory,
+                                    null,
+                                    Collections.emptyMap(),
+                                    "l2",
+                                    GlobalIndexSearchMode.FULL)
+                            .searchAsync(
+                                    new PkVectorBucketIndexState(
+                                            7, "test-vector-ann", Collections.emptyList()),
+                                    Arrays.asList(data1, data2),
+                                    Collections.emptyMap(),
+                                    Collections.emptyMap(),
+                                    new float[] {0, 0},
+                                    1,
+                                    1,
+                                    executor);
+
+            try {
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                release.countDown();
+            }
+            assertThat(future.get(5, TimeUnit.SECONDS).exactCandidates()).isEmpty();
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testStartsAnnSegmentsBeforeWaitingForResults() throws Exception {
+        DataFileMeta data1 = dataFile("data-1");
+        DataFileMeta data2 = dataFile("data-2");
+        IndexFileMeta ann1 = segment("ann-1", data1);
+        IndexFileMeta ann2 = segment("ann-2", data2);
+        PkVectorAnnSegmentSearcher annSearcher = mock(PkVectorAnnSegmentSearcher.class);
+        CompletableFuture<List<PkVectorSearchResult>> future1 = new CompletableFuture<>();
+        CompletableFuture<List<PkVectorSearchResult>> future2 = new CompletableFuture<>();
+        CountDownLatch started = new CountDownLatch(2);
+        when(annSearcher.searchAsync(
+                        org.mockito.ArgumentMatchers.any(IndexFileMeta.class),
+                        org.mockito.ArgumentMatchers.any(PrimaryKeyIndexSourceMeta.class),
+                        org.mockito.ArgumentMatchers.any(float[].class),
+                        org.mockito.ArgumentMatchers.eq(1),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap()),
+                        org.mockito.ArgumentMatchers.eq(
+                                new java.util.HashSet<>(Arrays.asList("data-1", "data-2"))),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap()),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap())))
+                .thenAnswer(
+                        invocation -> {
+                            started.countDown();
+                            return invocation
+                                            .<IndexFileMeta>getArgument(0)
+                                            .fileName()
+                                            .equals("ann-1")
+                                    ? future1
+                                    : future2;
+                        });
+
+        CompletableFuture<PrimaryKeyVectorBucketSearch.Result> resultFuture =
+                new PrimaryKeyVectorBucketSearch(
+                                mock(PkVectorDataFileReader.Factory.class),
+                                annSearcher,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.FAST)
+                        .searchAsync(
+                                new PkVectorBucketIndexState(
+                                        7, "test-vector-ann", Arrays.asList(ann1, ann2)),
+                                Arrays.asList(data1, data2),
+                                Collections.emptyMap(),
+                                Collections.emptyMap(),
+                                new float[] {0, 0},
+                                1,
+                                1,
+                                Runnable::run);
+
+        assertThat(started.getCount()).isZero();
+        future1.complete(Collections.singletonList(new PkVectorSearchResult("data-1", 0, 2F)));
+        future2.complete(Collections.singletonList(new PkVectorSearchResult("data-2", 0, 1F)));
+
+        assertThat(resultFuture.get(5, TimeUnit.SECONDS).indexedCandidates())
+                .extracting(PkVectorSearchResult::dataFileName)
+                .containsExactly("data-2");
+    }
 
     @Test
     void testFastModeSkipsExactFallback() throws Exception {
@@ -112,7 +219,7 @@ class PrimaryKeyVectorBucketSearchTest {
         PkVectorAnnSegmentSearcher annSearcher = mock(PkVectorAnnSegmentSearcher.class);
         Map<String, DeletionVector> deletionVectors = Collections.emptyMap();
         Map<String, String> searchOptions = Collections.singletonMap("nprobes", "8");
-        when(annSearcher.search(
+        when(annSearcher.searchAsync(
                         org.mockito.ArgumentMatchers.eq(ann),
                         org.mockito.ArgumentMatchers.any(PrimaryKeyIndexSourceMeta.class),
                         org.mockito.ArgumentMatchers.any(float[].class),
@@ -120,8 +227,12 @@ class PrimaryKeyVectorBucketSearchTest {
                         org.mockito.ArgumentMatchers.eq(deletionVectors),
                         org.mockito.ArgumentMatchers.eq(
                                 new java.util.HashSet<>(Arrays.asList("data-1", "data-2"))),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap()),
                         org.mockito.ArgumentMatchers.eq(searchOptions)))
-                .thenReturn(Collections.singletonList(new PkVectorSearchResult("data-1", 1, 0.5F)));
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Collections.singletonList(
+                                        new PkVectorSearchResult("data-1", 1, 0.5F))));
 
         PrimaryKeyVectorBucketSearch.Result results =
                 new PrimaryKeyVectorBucketSearch(
@@ -162,15 +273,19 @@ class PrimaryKeyVectorBucketSearchTest {
         IndexFileMeta ann = segment("ann", Arrays.asList(retired, active));
         PkVectorAnnSegmentSearcher annSearcher = mock(PkVectorAnnSegmentSearcher.class);
         Map<String, DeletionVector> deletionVectors = Collections.emptyMap();
-        when(annSearcher.search(
+        when(annSearcher.searchAsync(
                         org.mockito.ArgumentMatchers.eq(ann),
                         org.mockito.ArgumentMatchers.any(PrimaryKeyIndexSourceMeta.class),
                         org.mockito.ArgumentMatchers.any(float[].class),
                         org.mockito.ArgumentMatchers.eq(1),
                         org.mockito.ArgumentMatchers.eq(deletionVectors),
                         org.mockito.ArgumentMatchers.eq(Collections.singleton("active")),
+                        org.mockito.ArgumentMatchers.eq(Collections.emptyMap()),
                         org.mockito.ArgumentMatchers.eq(Collections.emptyMap())))
-                .thenReturn(Collections.singletonList(new PkVectorSearchResult("active", 0, 1F)));
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Collections.singletonList(
+                                        new PkVectorSearchResult("active", 0, 1F))));
         PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
 
         List<PkVectorSearchResult> results =
@@ -236,6 +351,39 @@ class PrimaryKeyVectorBucketSearchTest {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("data-1", 1L, 4F));
     }
 
+    @Test
+    void testBatchExactFallbackPreservesQueryOrderAndOpensFileOnce() throws Exception {
+        DataFileMeta data = dataFile("data");
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{0, 0}, {5, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+
+        List<PrimaryKeyVectorBucketSearch.Result> results =
+                new PrimaryKeyVectorBucketSearch(
+                                readerFactory,
+                                null,
+                                Collections.emptyMap(),
+                                "l2",
+                                GlobalIndexSearchMode.FULL)
+                        .searchBatch(
+                                new PkVectorBucketIndexState(
+                                        7, "test-vector-ann", Collections.emptyList()),
+                                Collections.singletonList(data),
+                                Collections.emptyMap(),
+                                new float[][] {{0, 0}, {5, 0}},
+                                1,
+                                1);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).exactCandidates())
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(0L);
+        assertThat(results.get(1).exactCandidates())
+                .extracting(PkVectorSearchResult::rowPosition)
+                .containsExactly(1L);
+        verify(readerFactory).create(data);
+    }
+
     private static PkVectorDataFileReader reader(float[][] vectors) throws IOException {
         PkVectorDataFileReader reader = mock(PkVectorDataFileReader.class);
         when(reader.dimension()).thenReturn(2);
@@ -251,6 +399,24 @@ class PrimaryKeyVectorBucketSearchTest {
                             System.arraycopy(
                                     vector, 0, invocation.getArgument(0), 0, vector.length);
                             return true;
+                        });
+        return reader;
+    }
+
+    private static PkVectorDataFileReader blockingReader(
+            CountDownLatch started, CountDownLatch release) throws Exception {
+        PkVectorDataFileReader reader = mock(PkVectorDataFileReader.class);
+        when(reader.dimension()).thenReturn(2);
+        when(reader.rowCount()).thenReturn(2L);
+        when(reader.readNextVector(org.mockito.ArgumentMatchers.any(float[].class)))
+                .thenAnswer(
+                        invocation -> {
+                            started.countDown();
+                            if (!release.await(5, TimeUnit.SECONDS)) {
+                                throw new AssertionError(
+                                        "Timed out waiting for concurrent search.");
+                            }
+                            return false;
                         });
         return reader;
     }
@@ -281,6 +447,7 @@ class PrimaryKeyVectorBucketSearchTest {
         long rowCount = sources.stream().mapToLong(DataFileMeta::rowCount).sum();
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                                1,
                                 sources.stream()
                                         .map(
                                                 source ->

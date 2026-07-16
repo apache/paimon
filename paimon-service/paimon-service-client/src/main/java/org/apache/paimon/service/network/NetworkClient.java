@@ -143,22 +143,28 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
                     new IllegalStateException(clientName + " is already shut down."));
         }
 
-        ServerConnection<REQ, RESP> serverConnection = connections.get(serverAddress);
-        if (serverConnection == null) {
-            final ServerConnection<REQ, RESP> newConnection =
-                    ServerConnection.createPendingConnection(clientName, messageSerializer, stats);
-            serverConnection = newConnection;
-            connections.put(serverAddress, newConnection);
-            bootstrap
-                    .connect(serverAddress.getAddress(), serverAddress.getPort())
-                    .addListener((ChannelFutureListener) newConnection::establishConnection);
+        final ServerConnection<REQ, RESP> serverConnection =
+                connections.computeIfAbsent(
+                        serverAddress,
+                        ignored -> {
+                            final ServerConnection<REQ, RESP> newConnection =
+                                    ServerConnection.createPendingConnection(
+                                            clientName, messageSerializer, stats);
+                            bootstrap
+                                    .connect(serverAddress.getAddress(), serverAddress.getPort())
+                                    .addListener(
+                                            (ChannelFutureListener)
+                                                    newConnection::establishConnection);
 
-            newConnection
-                    .getCloseFuture()
-                    .handle(
-                            (ignoredA, ignoredB) ->
-                                    connections.remove(serverAddress, newConnection));
-        }
+                            newConnection
+                                    .getCloseFuture()
+                                    .handle(
+                                            (ignoredA, ignoredB) ->
+                                                    connections.remove(
+                                                            serverAddress, newConnection));
+
+                            return newConnection;
+                        });
         return serverConnection.sendRequest(request);
     }
 

@@ -123,6 +123,24 @@ class PrimaryKeyFullTextScanTest {
     }
 
     @Test
+    void testRejectsPartialLevelCoverage() {
+        DataFileMeta first = dataFile("data-1", 1, FileSource.COMPACT);
+        DataFileMeta second = dataFile("data-2", 1, FileSource.COMPACT);
+
+        PrimaryKeyFullTextScan.Plan plan =
+                PrimaryKeyFullTextScan.plan(
+                        11,
+                        Collections.singletonList(dataSplit(Arrays.asList(first, second), null)),
+                        Collections.singletonList(
+                                payloadEntry("data-1", FIELD_ID, "partial-level")),
+                        FIELD_ID);
+
+        PrimaryKeyFullTextSearchSplit split = (PrimaryKeyFullTextSearchSplit) plan.splits().get(0);
+        assertThat(split.payloadFiles()).isEmpty();
+        assertThat(split.uncoveredDataFiles()).containsExactly("data-1", "data-2");
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void testCapturesOneSnapshotAndPrunesPartitions() {
         FileStoreTable table = mock(FileStoreTable.class);
@@ -131,6 +149,8 @@ class PrimaryKeyFullTextScanTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS, "content");
         when(table.coreOptions()).thenReturn(new CoreOptions(tableOptions));
+        when(table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11")))
+                .thenReturn(table);
 
         SnapshotReader reader = mock(SnapshotReader.class, RETURNS_SELF);
         SnapshotReader.Plan snapshotPlan = mock(SnapshotReader.Plan.class, CALLS_REAL_METHODS);
@@ -169,7 +189,7 @@ class PrimaryKeyFullTextScanTest {
         configureBatchScan(table, reader, snapshot);
 
         PrimaryKeyFullTextScan.Plan plan =
-                new PrimaryKeyFullTextScan(table, definition, partitionFilter).scan();
+                new PrimaryKeyFullTextScan(table, definition, partitionFilter, snapshot).scan();
 
         assertThat(plan.snapshotId()).isEqualTo(11);
         PrimaryKeyFullTextSearchSplit split = (PrimaryKeyFullTextSearchSplit) plan.splits().get(0);
@@ -177,6 +197,7 @@ class PrimaryKeyFullTextScanTest {
                 .extracting(IndexFileMeta::fileName)
                 .containsExactly("current");
         assertThat(split.uncoveredDataFiles()).isEmpty();
+        verify(table).copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11"));
         verify(reader).withPartitionFilter(partitionFilter);
         verify(reader).indexFileHandler();
     }
@@ -213,9 +234,7 @@ class PrimaryKeyFullTextScanTest {
                 FIELD_ID,
                 "full-text",
                 new Options(),
-                PrimaryKeyIndexDefinition.Family.FULL_TEXT,
-                2,
-                0.5);
+                PrimaryKeyIndexDefinition.Family.FULL_TEXT);
     }
 
     private static DataSplit dataSplit(
@@ -245,7 +264,7 @@ class PrimaryKeyFullTextScanTest {
         for (String sourceFile : sourceFiles) {
             sources.add(new PrimaryKeyIndexSourceFile(sourceFile, 2));
         }
-        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sources).serialize();
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sources).serialize();
         long rowCount = 2L * sources.size();
         return new IndexManifestEntry(
                 FileKind.ADD,

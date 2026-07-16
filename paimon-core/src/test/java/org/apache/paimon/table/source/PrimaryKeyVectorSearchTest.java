@@ -154,6 +154,30 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
     }
 
     @Test
+    void testBatchVectorSearchPreservesQueryOrder() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {0, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {5, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {10, 0})));
+
+        List<GlobalIndexResult> results =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}, {10, 0}})
+                        .withLimit(1)
+                        .withOption("refine_factor", "2")
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(2);
+        assertThat(readIds(table, results.get(0))).containsExactly(1);
+        assertThat(readIds(table, results.get(1))).containsExactly(3);
+    }
+
+    @Test
     void testEmptyVectorSearch() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -166,6 +190,21 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(((GlobalIndexSplitResult) result).splits()).isEmpty();
+    }
+
+    @Test
+    void testBatchBuilderSelectsPrimaryKeyVectorScan() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        VectorScan scan =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}})
+                        .withLimit(1)
+                        .newVectorScan();
+
+        assertThat(scan).isInstanceOf(PrimaryKeyVectorScan.class);
     }
 
     @Test

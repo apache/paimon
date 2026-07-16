@@ -290,6 +290,54 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("distributed primary-key vector search applies residual filter before top k") {
+    withTable("T") {
+      createVectorTable(
+        columns = "id INT, payload STRING, embedding ARRAY<FLOAT>",
+        bucket = 4,
+        extraOptions = Seq("global-index.thread-num" -> "2"))
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 'drop', array(1.0f, 0.0f)),
+                  |  (2, 'keep', array(2.0f, 0.0f)),
+                  |  (3, 'keep', array(3.0f, 0.0f)),
+                  |  (4, 'keep', array(4.0f, 0.0f)),
+                  |  (5, 'keep', array(5.0f, 0.0f)),
+                  |  (6, 'keep', array(6.0f, 0.0f)),
+                  |  (7, 'keep', array(7.0f, 0.0f)),
+                  |  (8, 'keep', array(8.0f, 0.0f)),
+                  |  (9, 'keep', array(9.0f, 0.0f)),
+                  |  (10, 'keep', array(10.0f, 0.0f)),
+                  |  (11, 'keep', array(11.0f, 0.0f)),
+                  |  (12, 'keep', array(12.0f, 0.0f)),
+                  |  (13, 'keep', array(13.0f, 0.0f)),
+                  |  (14, 'keep', array(14.0f, 0.0f)),
+                  |  (15, 'keep', array(15.0f, 0.0f)),
+                  |  (16, 'keep', array(16.0f, 0.0f))
+                  |""".stripMargin)
+
+      val jobGroup = s"primary-key-vector-residual-filter-${System.nanoTime()}"
+      spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+      try {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+          val ids = spark
+            .sql("""
+                   |SELECT id
+                   |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                   |WHERE payload = 'keep'
+                   |""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSet
+          assert(ids == Set(2, 3))
+        }
+      } finally {
+        spark.sparkContext.clearJobGroup()
+      }
+      assert(spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).nonEmpty)
+    }
+  }
+
   test("deduplicate updates and deletes primary-key vector results") {
     withTable("T") {
       createVectorTable()
@@ -347,6 +395,65 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
         assert(rows.head.getInt(0) == 1)
         assert(rows.head.getString(1) == "keep")
       }
+    }
+  }
+
+  test("lateral primary-key vector search reads physical positions") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f), array(0.0f, 0.0f)),
+                  |  (2, array(5.0f, 0.0f), array(0.5f, 0.0f))
+                  |""".stripMargin)
+
+      val rows = spark
+        .sql("""
+               |SELECT q.id AS query_id, r.id AS result_id, r._row_id AS row_id,
+               |       r.__paimon_search_score AS score
+               |FROM T AS q,
+               |LATERAL (
+               |  SELECT id, _row_id, __paimon_search_score
+               |  FROM vector_search('T', 'embedding', q.query_embedding, 1)
+               |) AS r
+               |ORDER BY query_id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.length == 2)
+      assert(rows.map(_.getInt(1)).toSeq == Seq(1, 1))
+      assert(rows.map(_.getLong(2)).distinct.length == 1)
+      assert(Math.abs(rows(0).getFloat(3) - 0.5f) < 1e-6)
+      assert(Math.abs(rows(1).getFloat(3) - 0.8f) < 1e-6)
+    }
+  }
+
+  test("lateral primary-key vector search projects physical metadata") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, array(1.0f, 0.0f), array(0.0f, 0.0f)),
+                  |  (2, array(5.0f, 0.0f), array(0.5f, 0.0f))
+                  |""".stripMargin)
+
+      val rows = spark
+        .sql("""
+               |SELECT q.id AS query_id, r._row_id AS row_id,
+               |       r.__paimon_search_score AS score
+               |FROM T AS q,
+               |LATERAL (
+               |  SELECT _row_id, __paimon_search_score
+               |  FROM vector_search('T', 'embedding', q.query_embedding, 1)
+               |) AS r
+               |ORDER BY query_id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.length == 2)
+      assert(rows.map(_.getLong(1)).distinct.length == 1)
+      assert(Math.abs(rows(0).getFloat(2) - 0.5f) < 1e-6)
+      assert(Math.abs(rows(1).getFloat(2) - 0.8f) < 1e-6)
     }
   }
 
