@@ -76,7 +76,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
@@ -203,7 +202,7 @@ public class SortedIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest));
+            commit(table, allStreams.get(0).union(rest), CoreOptions.createCommitUser(userOptions));
             return true;
         }
 
@@ -322,12 +321,13 @@ public class SortedIndexTopoBuilder {
         return new RowType(readType.isNullable(), fields);
     }
 
-    private static void commit(FileStoreTable table, DataStream<Committable> written) {
+    private static void commit(
+            FileStoreTable table, DataStream<Committable> written, String commitUser) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
                         true,
-                        "SortedIndexCommitter-" + UUID.randomUUID(),
+                        commitUser,
                         context ->
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),

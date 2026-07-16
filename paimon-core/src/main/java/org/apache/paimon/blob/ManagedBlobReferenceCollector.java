@@ -43,7 +43,7 @@ public class ManagedBlobReferenceCollector {
     private final Path sidecar;
     private final int[] blobFieldIndexes;
     private final boolean[] blobArrayFields;
-    private final Set<ManagedBlobReferenceFile.Reference> references;
+    private final Set<String> descriptorUris;
 
     private boolean closed;
 
@@ -68,7 +68,7 @@ public class ManagedBlobReferenceCollector {
         for (int i = 0; i < arrayFields.size(); i++) {
             blobArrayFields[i] = arrayFields.get(i);
         }
-        this.references = new HashSet<>();
+        this.descriptorUris = new HashSet<>();
     }
 
     public void write(KeyValue keyValue) {
@@ -97,8 +97,7 @@ public class ManagedBlobReferenceCollector {
 
     private void collect(Blob blob) {
         if (blob instanceof BlobRef) {
-            ManagedBlobReferenceFile.fromDescriptorUri(blob.toDescriptor().uri())
-                    .ifPresent(references::add);
+            descriptorUris.add(blob.toDescriptor().uri());
         }
     }
 
@@ -107,7 +106,14 @@ public class ManagedBlobReferenceCollector {
             return;
         }
         try {
-            ManagedBlobReferenceFile.write(fileIO, sidecar, new ArrayList<>(references));
+            List<ManagedBlobReferenceFile.Reference> references =
+                    new ArrayList<>(descriptorUris.size());
+            for (String descriptorUri : descriptorUris) {
+                ManagedBlobReferenceFile.fromDescriptorUri(descriptorUri)
+                        .ifPresent(references::add);
+            }
+            descriptorUris.clear();
+            ManagedBlobReferenceFile.write(fileIO, sidecar, references);
             closed = true;
         } catch (IOException e) {
             abort();

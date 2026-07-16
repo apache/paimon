@@ -26,6 +26,7 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
@@ -517,7 +518,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 restored.dataFiles(),
                                 restored.sourceIndexPayloads(),
                                 primaryKeyIndexExecutor(),
-                                ioManager);
+                                ioManager,
+                                DeletionVector.factory(dvMaintainer));
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {

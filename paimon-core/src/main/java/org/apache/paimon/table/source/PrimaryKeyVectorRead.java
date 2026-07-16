@@ -65,6 +65,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -188,19 +190,63 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
 
     protected SearchResult searchBuckets(List<BucketVectorSearchSplit> splits) {
         try {
-            SearchContext context = new SearchContext(table);
-            List<Candidate> indexedCandidates = new ArrayList<>();
-            List<Candidate> exactCandidates = new ArrayList<>();
+            SearchContext context = createSearchContext();
+            List<CompletableFuture<SearchResult>> futures = new ArrayList<>(splits.size());
+            // Start from the caller because each bucket submits leaf searches to the same executor.
+            // Wrapping the whole bucket in that executor and waiting inside it can starve leaf
+            // work.
             for (BucketVectorSearchSplit split : splits) {
-                SearchResult result = search(split, context);
-                indexedCandidates.addAll(result.indexedCandidates());
-                exactCandidates.addAll(result.exactCandidates());
+                futures.add(searchAsync(split, context));
             }
-            return new SearchResult(
-                    topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            List<SearchResult> results = new ArrayList<>(futures.size());
+            for (CompletableFuture<SearchResult> future : futures) {
+                results.add(future.join());
+            }
+            return mergeSearchResults(results);
         } catch (IOException e) {
             throw new RuntimeException("Failed to search primary-key vector index.", e);
+        } catch (CompletionException e) {
+            throw new RuntimeException("Failed to search primary-key vector index.", e.getCause());
         }
+    }
+
+    protected List<SearchResult> searchBuckets(
+            List<BucketVectorSearchSplit> splits, float[][] queries) {
+        try {
+            SearchContext context = createSearchContext();
+            List<CompletableFuture<List<SearchResult>>> futures = new ArrayList<>(splits.size());
+            for (BucketVectorSearchSplit split : splits) {
+                futures.add(searchBatchAsync(split, context, queries));
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            List<List<SearchResult>> resultsByQuery = new ArrayList<>(queries.length);
+            for (int i = 0; i < queries.length; i++) {
+                resultsByQuery.add(new ArrayList<>());
+            }
+            for (CompletableFuture<List<SearchResult>> future : futures) {
+                List<SearchResult> splitResults = future.join();
+                checkArgument(
+                        splitResults.size() == queries.length,
+                        "Primary-key vector batch result count does not match query count.");
+                for (int i = 0; i < queries.length; i++) {
+                    resultsByQuery.get(i).add(splitResults.get(i));
+                }
+            }
+            List<SearchResult> results = new ArrayList<>(queries.length);
+            for (List<SearchResult> queryResults : resultsByQuery) {
+                results.add(mergeSearchResults(queryResults));
+            }
+            return Collections.unmodifiableList(results);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to search primary-key vector index.", e);
+        } catch (CompletionException e) {
+            throw new RuntimeException("Failed to search primary-key vector index.", e.getCause());
+        }
+    }
+
+    SearchContext createSearchContext() {
+        return new SearchContext(table);
     }
 
     protected GlobalIndexResult createResult(
@@ -227,7 +273,14 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                 topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
     }
 
-    private SearchResult search(BucketVectorSearchSplit split, SearchContext context)
+    CompletableFuture<SearchResult> searchAsync(
+            BucketVectorSearchSplit split, SearchContext context) throws IOException {
+        return searchBatchAsync(split, context, new float[][] {query})
+                .thenApply(results -> results.get(0));
+    }
+
+    CompletableFuture<List<SearchResult>> searchBatchAsync(
+            BucketVectorSearchSplit split, SearchContext context, float[][] queries)
             throws IOException {
         DataSplit dataSplit = split.dataSplit();
         List<DataFileMeta> activeFiles =
@@ -261,18 +314,27 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         searchOptions,
                         metric,
                         table.coreOptions().globalIndexSearchMode());
-        PrimaryKeyVectorBucketSearch.Result result =
-                bucketSearch.search(
+        return bucketSearch
+                .searchBatchAsync(
                         state,
                         activeFiles,
                         deletionVectors,
                         rowRangesByFile(split),
-                        query,
+                        queries,
                         indexedLimit,
-                        limit);
-        return new SearchResult(
-                candidates(dataSplit, result.indexedCandidates()),
-                candidates(dataSplit, result.exactCandidates()));
+                        limit,
+                        context.executor)
+                .thenApply(
+                        bucketResults -> {
+                            List<SearchResult> results = new ArrayList<>(bucketResults.size());
+                            for (PrimaryKeyVectorBucketSearch.Result result : bucketResults) {
+                                results.add(
+                                        new SearchResult(
+                                                candidates(dataSplit, result.indexedCandidates()),
+                                                candidates(dataSplit, result.exactCandidates())));
+                            }
+                            return Collections.unmodifiableList(results);
+                        });
     }
 
     private Map<String, List<Range>> rowRangesByFile(BucketVectorSearchSplit split)
@@ -621,7 +683,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         }
     }
 
-    private static class SearchContext {
+    static class SearchContext {
 
         private final FileIO fileIO;
         private final IndexFileHandler indexFileHandler;

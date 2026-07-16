@@ -20,6 +20,7 @@ package org.apache.paimon.index.pk;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -427,6 +428,24 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                 @Nullable List<IndexFileMeta> restoredPayloads,
                 ExecutorService executor,
                 @Nullable IOManager ioManager) {
+            return create(
+                    partition,
+                    bucket,
+                    restoredDataFiles,
+                    restoredPayloads,
+                    executor,
+                    ioManager,
+                    DeletionVector.emptyFactory());
+        }
+
+        public BucketedPrimaryKeyIndexMaintainer create(
+                BinaryRow partition,
+                int bucket,
+                @Nullable List<DataFileMeta> restoredDataFiles,
+                @Nullable List<IndexFileMeta> restoredPayloads,
+                ExecutorService executor,
+                @Nullable IOManager ioManager,
+                DeletionVector.Factory deletionVectorFactory) {
             List<DataFileMeta> dataFiles =
                     restoredDataFiles == null ? Collections.emptyList() : restoredDataFiles;
             List<IndexFileMeta> payloads =
@@ -435,7 +454,12 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                     vectorFactory == null
                             ? null
                             : vectorFactory.create(
-                                    partition, bucket, dataFiles, payloads, executor);
+                                    partition,
+                                    bucket,
+                                    dataFiles,
+                                    payloads,
+                                    executor,
+                                    deletionVectorFactory);
             BucketedFullTextIndexMaintainer fullText =
                     fullTextFactory == null
                             ? null

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index.pkvector;
 
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -44,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -362,6 +364,106 @@ class BucketedVectorIndexMaintainerTest {
 
         assertThat(commit.compactIncrement()).isPresent();
         assertThat(commit.compactIncrement().get().newIndexFiles()).hasSize(1);
+    }
+
+    @Test
+    void testBuildExcludesDeletionVectorPositions() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data", 2);
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{1, 0}, {2, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(0);
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        annFile,
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        readerFactory,
+                        fileName -> Optional.of(deletionVector),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(data),
+                                Collections.emptyList()),
+                        true);
+
+        assertThat(commit.compactIncrement()).isPresent();
+        assertThat(commit.compactIncrement().get().newIndexFiles())
+                .singleElement()
+                .extracting(IndexFileMeta::rowCount)
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void testPendingBuildUsesDeletionVectorSnapshot() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data", 3);
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{1, 0}, {2, 0}, {3, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(0);
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        annFile,
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        readerFactory,
+                        fileName -> Optional.of(deletionVector),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+        CountDownLatch executorBlocked = new CountDownLatch(1);
+        CountDownLatch releaseExecutor = new CountDownLatch(1);
+        executor.submit(
+                () -> {
+                    executorBlocked.countDown();
+                    releaseExecutor.await();
+                    return null;
+                });
+        assertThat(executorBlocked.await(30, TimeUnit.SECONDS)).isTrue();
+
+        try {
+            maintainer.prepareCommit(
+                    DataIncrement.emptyIncrement(),
+                    new CompactIncrement(
+                            Collections.emptyList(),
+                            Collections.singletonList(data),
+                            Collections.emptyList()),
+                    false);
+            deletionVector.delete(1);
+        } finally {
+            releaseExecutor.countDown();
+        }
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), true);
+        assertThat(commit.appendIncrement()).isPresent();
+        assertThat(commit.appendIncrement().get().newIndexFiles())
+                .singleElement()
+                .extracting(IndexFileMeta::rowCount)
+                .isEqualTo(2L);
     }
 
     @Test
@@ -708,10 +810,14 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     private static DataFileMeta dataFile(String fileName) {
+        return dataFile(fileName, 1);
+    }
+
+    private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
                         fileName,
                         100,
-                        1,
+                        rowCount,
                         SimpleStats.EMPTY_STATS,
                         0,
                         0,

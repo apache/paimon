@@ -44,6 +44,35 @@ public final class PrimaryKeySearchRanker {
 
     private PrimaryKeySearchRanker() {}
 
+    /** Selects globally highest-scored physical positions without rewriting their scores. */
+    public static List<PrimaryKeySearchPosition> topKByScore(
+            List<List<PrimaryKeySearchPosition>> rankings, int limit) {
+        checkArgument(limit > 0, "Search result limit must be positive: %s.", limit);
+        Map<PrimaryKeySearchPosition, PrimaryKeySearchPosition> unique = new HashMap<>();
+        for (List<PrimaryKeySearchPosition> ranking : rankings) {
+            for (PrimaryKeySearchPosition position : ranking) {
+                PrimaryKeySearchPosition previous = unique.get(position);
+                if (previous == null || LOCAL_BEST_FIRST.compare(position, previous) < 0) {
+                    unique.put(position, position);
+                }
+            }
+        }
+
+        PriorityQueue<PrimaryKeySearchPosition> topK =
+                new PriorityQueue<>(limit, LOCAL_BEST_FIRST.reversed());
+        for (PrimaryKeySearchPosition position : unique.values()) {
+            if (topK.size() < limit) {
+                topK.add(position);
+            } else if (LOCAL_BEST_FIRST.compare(position, topK.peek()) < 0) {
+                topK.poll();
+                topK.add(position);
+            }
+        }
+        List<PrimaryKeySearchPosition> result = new ArrayList<>(topK);
+        result.sort(LOCAL_BEST_FIRST);
+        return Collections.unmodifiableList(result);
+    }
+
     public static List<PrimaryKeySearchPosition> rrf(
             List<List<PrimaryKeySearchPosition>> rankings, int limit) {
         List<Ranking> weighted = new ArrayList<>(rankings.size());

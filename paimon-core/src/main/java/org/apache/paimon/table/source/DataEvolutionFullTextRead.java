@@ -53,7 +53,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextRead}. */
-public class FullTextReadImpl implements FullTextRead {
+public class DataEvolutionFullTextRead implements FullTextRead {
 
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
@@ -61,16 +61,17 @@ public class FullTextReadImpl implements FullTextRead {
     private final DataField textColumn;
     private final String query;
 
-    public FullTextReadImpl(FileStoreTable table, int limit, DataField textColumn, String query) {
+    public DataEvolutionFullTextRead(
+            FileStoreTable table, int limit, DataField textColumn, String query) {
         this(table, null, limit, Collections.singletonList(textColumn), query);
     }
 
-    public FullTextReadImpl(
+    public DataEvolutionFullTextRead(
             FileStoreTable table, int limit, List<DataField> textColumns, String query) {
         this(table, null, limit, textColumns, query);
     }
 
-    public FullTextReadImpl(
+    public DataEvolutionFullTextRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             int limit,

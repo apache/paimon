@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.read;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.BucketVectorSearchSplit;
 import org.apache.paimon.table.source.PrimaryKeyVectorRead;
@@ -27,6 +28,8 @@ import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.SerializableFunction;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -46,7 +49,17 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
             float[] query,
             int limit,
             Map<String, String> searchOptions) {
-        super(table, vectorField, query, limit, searchOptions);
+        this(table, vectorField, query, limit, searchOptions, null);
+    }
+
+    public SparkPrimaryKeyVectorRead(
+            FileStoreTable table,
+            DataField vectorField,
+            float[] query,
+            int limit,
+            Map<String, String> searchOptions,
+            @Nullable Predicate filter) {
+        super(table, vectorField, query, limit, searchOptions, filter);
     }
 
     @Override
