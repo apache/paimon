@@ -952,7 +952,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         writer.finish());
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
-                                new PrimaryKeyIndexSourceFile("data-file", documents.length))
+                                1, new PrimaryKeyIndexSourceFile("data-file", documents.length))
                         .serialize();
         List<IndexFileMeta> sourceBackedFiles = new ArrayList<>();
         for (IndexFileMeta indexFile : indexFiles) {

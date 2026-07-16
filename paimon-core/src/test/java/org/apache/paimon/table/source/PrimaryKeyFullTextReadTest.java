@@ -150,7 +150,8 @@ class PrimaryKeyFullTextReadTest {
 
     private static IndexFileMeta payload(String source) {
         byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile(source, 2)).serialize();
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile(source, 2))
+                        .serialize();
         return new IndexFileMeta(
                 "full-text",
                 "index-" + source,

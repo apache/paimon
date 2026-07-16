@@ -63,9 +63,7 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 BTreeGlobalIndexerFactory.IDENTIFIER,
                                 options.primaryKeyBTreeIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.BTREE,
-                                options.primaryKeyIndexCompactionLevelFanout(column),
-                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
+                                PrimaryKeyIndexDefinition.Family.BTREE));
             } else if (bitmapColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -73,9 +71,7 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 BitmapGlobalIndexerFactory.IDENTIFIER,
                                 options.primaryKeyBitmapIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.BITMAP,
-                                options.primaryKeyIndexCompactionLevelFanout(column),
-                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
+                                PrimaryKeyIndexDefinition.Family.BITMAP));
             } else if (vectorColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -83,9 +79,7 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 options.primaryKeyVectorIndexType(column),
                                 options.primaryKeyVectorIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.VECTOR,
-                                options.primaryKeyIndexCompactionLevelFanout(column),
-                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
+                                PrimaryKeyIndexDefinition.Family.VECTOR));
             } else if (fullTextColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -93,9 +87,7 @@ public class PrimaryKeyIndexDefinitions {
                                 field.id(),
                                 "full-text",
                                 options.primaryKeyFullTextIndexOptions(column),
-                                PrimaryKeyIndexDefinition.Family.FULL_TEXT,
-                                options.primaryKeyIndexCompactionLevelFanout(column),
-                                options.primaryKeyIndexCompactionStaleRatioThreshold(column)));
+                                PrimaryKeyIndexDefinition.Family.FULL_TEXT));
             }
         }
 

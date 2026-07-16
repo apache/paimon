@@ -237,6 +237,7 @@ class PrimaryKeyVectorScanTest {
     private static IndexFileMeta payloadFile(String indexType, int fieldId, String fileName) {
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                                1,
                                 Collections.singletonList(
                                         new PrimaryKeyIndexSourceFile("data-1", 2)))
                         .serialize();
