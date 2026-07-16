@@ -76,7 +76,8 @@ public class WriterCommittables {
 
     @VisibleForTesting
     WriterCommittables(CheckpointCommittables entry) {
-        // ? 为什么要 -1
+        // Use -1 for the end-input ID to avoid treating it as an ordinary checkpoint and allow
+        // subsequent ordinary checkpoints to be merged.
         this.maxCheckpointId =
                 entry.checkpointId() == END_INPUT_CHECKPOINT_ID ? -1 : entry.checkpointId();
         this.committablesPerCheckpoint = new TreeMap<>();

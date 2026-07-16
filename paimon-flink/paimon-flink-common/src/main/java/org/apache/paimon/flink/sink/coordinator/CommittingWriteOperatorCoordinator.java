@@ -50,6 +50,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -78,12 +79,12 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
     private final boolean streamingCheckpointEnabled;
     private final boolean failoverAfterRecovery;
-    private final int parallelism;
 
-    private final WriterCommittables[] subtaskCommittables;
+    private WriterCommittables[] subtaskCommittables;
     private final TypeSerializer<CheckpointCommittables> committablesSerializer;
     private final CoordinatorStateSerializer stateSerializer;
-    private final ExecutorService commitExecutor;
+    private CoordinatorExecutorThreadFactory coordinatorThreadFactory;
+    private ExecutorService commitExecutor;
 
     // Populated by resetToCheckpoint and consumed by start. Plain fields are sufficient: both
     // callbacks run on the same scheduler thread in order.
@@ -107,17 +108,12 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.commitUser = initialCommitUser;
         this.failoverAfterRecovery = failoverAfterRecovery;
-        this.parallelism = context.currentParallelism();
-        this.subtaskCommittables = new WriterCommittables[parallelism];
         this.committablesSerializer =
                 new SimpleVersionedSerializerTypeSerializerProxy<>(
                         () ->
                                 new CheckpointCommittablesSerializer(
                                         new CommittableSerializer(new CommitMessageSerializer())));
         this.stateSerializer = new CoordinatorStateSerializer();
-        this.commitExecutor =
-                Executors.newSingleThreadExecutor(
-                        new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context));
         this.state = State.CREATED;
         this.endInputCommitted = false;
     }
@@ -130,6 +126,14 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 state == State.CREATED || state == State.RESTORING,
                 "Coordinator already started, illegal state %s",
                 state);
+        // RecreateOnResetOperatorCoordinator constructs the inner coordinator with a lazily
+        // initialized Context. In particular, AdaptiveBatchScheduler creates the inner instance
+        // before currentParallelism() is available. start() is the first lifecycle callback where
+        // the Context is guaranteed to be initialized.
+        subtaskCommittables = new WriterCommittables[context.currentParallelism()];
+        coordinatorThreadFactory =
+                new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context);
+        commitExecutor = Executors.newSingleThreadExecutor(coordinatorThreadFactory);
         runInEventLoop(
                 () -> {
                     if (state == State.RESTORING) {
@@ -186,7 +190,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     @Override
     public void handleEventFromOperator(int subtask, int attemptNumber, OperatorEvent event) {
-        runInEventLoop(
+        boolean waitForBatchEndInputCommit =
+                !streamingCheckpointEnabled
+                        && event instanceof CommittableEvent
+                        && ((CommittableEvent) event).getCheckpointId() == END_INPUT_CHECKPOINT_ID;
+        ThrowingRunnable<Throwable> eventHandler =
                 () -> {
                     if (event instanceof CommittableEvent) {
                         handleCommittableEvent(subtask, (CommittableEvent) event);
@@ -195,11 +203,61 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     } else {
                         throw new UnsupportedOperationException("Unsupported event type: " + event);
                     }
+                };
+
+        if (waitForBatchEndInputCommit) {
+            runInEventLoopSync(
+                    eventHandler,
+                    "handling operator event %s from subtask %d (#%d)",
+                    event,
+                    subtask,
+                    attemptNumber);
+        } else {
+            runInEventLoop(
+                    eventHandler,
+                    "handling operator event %s from subtask %d (#%d)",
+                    event,
+                    subtask,
+                    attemptNumber);
+        }
+    }
+
+    /**
+     * Runs an action in the commit event loop and waits for completion. This is only used for the
+     * final end-input event in batch mode without checkpointing. It prevents the asynchronous
+     * coordinator event handling from returning before the final commit has completed, which could
+     * otherwise let the batch job finish prematurely.
+     */
+    private void runInEventLoopSync(
+            ThrowingRunnable<Throwable> action,
+            String actionName,
+            Object... actionNameFormatParameters) {
+        checkState(
+                coordinatorThreadFactory == null
+                        || !coordinatorThreadFactory.isCurrentThreadCoordinatorThread(),
+                "Cannot synchronously wait for an action submitted to the commit event loop.");
+        CompletableFuture<Void> completion = new CompletableFuture<>();
+        runInEventLoop(
+                () -> {
+                    try {
+                        action.run();
+                        completion.complete(null);
+                    } catch (Throwable t) {
+                        completion.completeExceptionally(t);
+                        throw t;
+                    }
                 },
-                "handling operator event %s from subtask %d (#%d)",
-                event,
-                subtask,
-                attemptNumber);
+                actionName,
+                actionNameFormatParameters);
+
+        try {
+            completion.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while committing batch end input", e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException("Failed to commit batch end input", e.getCause());
+        }
     }
 
     @Override

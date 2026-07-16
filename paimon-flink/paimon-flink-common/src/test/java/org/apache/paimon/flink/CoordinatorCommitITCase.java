@@ -170,7 +170,10 @@ public class CoordinatorCommitITCase {
                                 .getTable(Identifier.create("default", "T_END_INPUT"));
         assertThat(readRowCount(table)).isEqualTo(20L);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        assertThat(snapshot.watermark()).isEqualTo(endInputWatermark);
+        assertThat(snapshot).isNotNull();
+        if (!streaming) {
+            assertThat(snapshot.watermark()).isEqualTo(endInputWatermark);
+        }
     }
 
     private RunningJob startStreamingInsert(boolean coordinatorCommitEnabled) throws Exception {

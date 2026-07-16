@@ -48,14 +48,20 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return createWriteOperatorFactory(writeProvider, commitUser, true);
+    }
+
+    @Override
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
+            StoreSinkWrite.Provider writeProvider,
+            String commitUser,
+            boolean streamingCheckpointEnabled) {
         if (coordinatorCommitEnabled()) {
             return createCoordinatorCommittingRowWriteOperatorFactory(
                     table,
                     writeProvider,
                     commitUser,
-                    // checkpointing on by default for the JM-side committer; bounded sources will
-                    // be handled by end-input support in a follow-up PR
-                    true,
+                    streamingCheckpointEnabled,
                     true,
                     createCommitterFactory());
         }

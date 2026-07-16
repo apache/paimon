@@ -100,6 +100,23 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
+    public void testContextIsNotAccessedBeforeStart() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        DelayedInitializationContext context =
+                new DelayedInitializationContext(new OperatorID(), 2);
+
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        context.initialize();
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        assertThat(coordinator.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
     public void testCommitSingleSubtask() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 1);
@@ -1342,6 +1359,35 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         @Override
         public CheckpointCoordinator getCheckpointCoordinator() {
             return null;
+        }
+    }
+
+    private class DelayedInitializationContext extends TestingContext {
+
+        private boolean initialized;
+
+        private DelayedInitializationContext(OperatorID operatorID, int parallelism) {
+            super(operatorID, parallelism);
+        }
+
+        private void initialize() {
+            initialized = true;
+        }
+
+        @Override
+        public int currentParallelism() {
+            if (!initialized) {
+                throw new IllegalStateException("Context was not yet initialized");
+            }
+            return super.currentParallelism();
+        }
+
+        @Override
+        public ClassLoader getUserCodeClassloader() {
+            if (!initialized) {
+                throw new IllegalStateException("Context was not yet initialized");
+            }
+            return super.getUserCodeClassloader();
         }
     }
 

@@ -128,6 +128,8 @@ public abstract class FlinkSink<T> implements Serializable {
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming = isStreaming(input);
+        boolean streamingCheckpointEnabled =
+                isStreaming && env.getCheckpointConfig().isCheckpointingEnabled();
 
         boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
@@ -141,7 +143,8 @@ public abstract class FlinkSink<T> implements Serializable {
                                         isStreaming,
                                         ignorePreviousFiles,
                                         hasSinkMaterializer(input)),
-                                commitUser));
+                                commitUser,
+                                streamingCheckpointEnabled));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {
@@ -332,6 +335,17 @@ public abstract class FlinkSink<T> implements Serializable {
                 createCommitterFactory(),
                 createCommittableStateManager(),
                 endInputWatermark);
+    }
+
+    /**
+     * Creates the writer operator factory with the runtime checkpoint mode when the writer needs
+     * it. Existing sinks do not use this information and keep the two-argument implementation.
+     */
+    protected OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
+            StoreSinkWrite.Provider writeProvider,
+            String commitUser,
+            boolean streamingCheckpointEnabled) {
+        return createWriteOperatorFactory(writeProvider, commitUser);
     }
 
     protected abstract OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
