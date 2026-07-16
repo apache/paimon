@@ -134,6 +134,15 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             raise ValueError("Limit must be positive, set via with_limit()")
         definition = self._primary_key_full_text_definition()
         if definition is not None:
+            from pypaimon.common.options.core_options import GlobalIndexSearchMode
+            mode = CoreOptions(
+                Options(dict(self._table.table_schema.options))
+            ).global_index_search_mode()
+            if mode != GlobalIndexSearchMode.FAST:
+                raise NotImplementedError(
+                    "Primary-key full-text search only supports the FAST "
+                    "global-index search mode; FULL and DETAIL require "
+                    "merge-aware logical-row fallback.")
             from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
             return PrimaryKeyFullTextRead(
                 self._table, self._limit, self._text_columns(), self._query,

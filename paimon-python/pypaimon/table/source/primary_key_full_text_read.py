@@ -28,6 +28,9 @@ from pypaimon.table.source.primary_key_vector_read import (
     _allowed, _deleted_positions, _live_positions)
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.common.options.core_options import (
+    CoreOptions, GlobalIndexSearchMode)
+from pypaimon.common.options.options import Options
 
 
 class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
@@ -35,6 +38,14 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
 
     def __init__(self, table, limit, text_column, query, definition,
                  partition_filter=None):
+        mode = CoreOptions(
+            Options(dict(table.table_schema.options))
+        ).global_index_search_mode()
+        if mode != GlobalIndexSearchMode.FAST:
+            raise NotImplementedError(
+                "Primary-key full-text search only supports the FAST "
+                "global-index search mode; FULL and DETAIL require "
+                "merge-aware logical-row fallback.")
         self._definition = definition
         super().__init__(table, limit, text_column, query, partition_filter)
 
@@ -70,7 +81,6 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
                     _partition_bytes(context[0].data_split.partition),
                     context[0].data_split.bucket, source.file_name,
                     row_position, score_getter(local_row_id)))
-        candidates.extend(self._raw_candidates(plan))
         candidates.sort(
             key=lambda position: (
                 -position.score,
