@@ -21,11 +21,16 @@ package org.apache.paimon.index.pkvector;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
+import org.apache.paimon.io.DataFileMeta;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -35,11 +40,65 @@ public final class PkVectorBucketIndexState {
     private final int vectorFieldId;
     private final String indexType;
     private final List<IndexFileMeta> annSegments;
+    private final List<IndexFileMeta> staleSegments;
     private final Map<String, IndexFileMeta> sourceFileToAnnSegment;
 
-    public static PkVectorBucketIndexState fromActivePayloads(
-            int vectorFieldId, String indexType, List<IndexFileMeta> activePayloads) {
-        return new PkVectorBucketIndexState(vectorFieldId, indexType, activePayloads);
+    public static PkVectorBucketIndexState fromActiveDataFiles(
+            int vectorFieldId,
+            String indexType,
+            List<DataFileMeta> activeDataFiles,
+            List<IndexFileMeta> activePayloads) {
+        Map<Integer, List<PrimaryKeyIndexSourceFile>> sourcesByLevel = new TreeMap<>();
+        for (DataFileMeta dataFile : activeDataFiles) {
+            if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
+                sourcesByLevel
+                        .computeIfAbsent(dataFile.level(), ignored -> new ArrayList<>())
+                        .add(
+                                new PrimaryKeyIndexSourceFile(
+                                        dataFile.fileName(), dataFile.rowCount()));
+            }
+        }
+        for (List<PrimaryKeyIndexSourceFile> sources : sourcesByLevel.values()) {
+            sources.sort(Comparator.comparing(PrimaryKeyIndexSourceFile::fileName));
+        }
+
+        Map<Integer, List<IndexFileMeta>> segmentsByLevel = new TreeMap<>();
+        List<IndexFileMeta> stale = new ArrayList<>();
+        for (IndexFileMeta segment : activePayloads) {
+            try {
+                PkVectorBucketIndexState singleton =
+                        new PkVectorBucketIndexState(
+                                vectorFieldId, indexType, Collections.singletonList(segment));
+                PrimaryKeyIndexSourceMeta sourceMeta =
+                        PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
+                List<PrimaryKeyIndexSourceFile> desired =
+                        sourcesByLevel.get(sourceMeta.dataLevel());
+                if (singleton.annSegments().size() != 1
+                        || desired == null
+                        || !desired.equals(sourceMeta.sourceFiles())) {
+                    stale.add(segment);
+                } else {
+                    segmentsByLevel
+                            .computeIfAbsent(sourceMeta.dataLevel(), ignored -> new ArrayList<>())
+                            .add(segment);
+                }
+            } catch (RuntimeException ignored) {
+                stale.add(segment);
+            }
+        }
+
+        List<IndexFileMeta> current = new ArrayList<>();
+        for (List<IndexFileMeta> levelSegments : segmentsByLevel.values()) {
+            if (levelSegments.size() == 1) {
+                current.add(levelSegments.get(0));
+            } else {
+                stale.addAll(levelSegments);
+            }
+        }
+        PkVectorBucketIndexState state =
+                new PkVectorBucketIndexState(vectorFieldId, indexType, current);
+        return new PkVectorBucketIndexState(
+                vectorFieldId, indexType, state.annSegments, stale, state.sourceFileToAnnSegment);
     }
 
     public PkVectorBucketIndexState(
@@ -67,7 +126,22 @@ public final class PkVectorBucketIndexState {
         }
 
         this.annSegments = Collections.unmodifiableList(new java.util.ArrayList<>(activePayloads));
+        this.staleSegments = Collections.emptyList();
         this.sourceFileToAnnSegment = Collections.unmodifiableMap(annBySource);
+    }
+
+    private PkVectorBucketIndexState(
+            int vectorFieldId,
+            String indexType,
+            List<IndexFileMeta> annSegments,
+            List<IndexFileMeta> staleSegments,
+            Map<String, IndexFileMeta> sourceFileToAnnSegment) {
+        this.vectorFieldId = vectorFieldId;
+        this.indexType = indexType;
+        this.annSegments = Collections.unmodifiableList(new ArrayList<>(annSegments));
+        this.staleSegments = Collections.unmodifiableList(new ArrayList<>(staleSegments));
+        this.sourceFileToAnnSegment =
+                Collections.unmodifiableMap(new LinkedHashMap<>(sourceFileToAnnSegment));
     }
 
     public int vectorFieldId() {
@@ -80,6 +154,10 @@ public final class PkVectorBucketIndexState {
 
     public List<IndexFileMeta> annSegments() {
         return annSegments;
+    }
+
+    public List<IndexFileMeta> staleSegments() {
+        return staleSegments;
     }
 
     public Map<String, IndexFileMeta> sourceFileToAnnSegment() {

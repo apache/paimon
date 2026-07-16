@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index.pkvector;
 
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -44,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -268,13 +270,12 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     @Test
-    void testPartialCompactionKeepsOldAnnAndIndexesNewSource() throws Exception {
+    void testPartialCompactionRebuildsCompleteLevel() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.stale-ratio-threshold", "1.0");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -318,14 +319,14 @@ class BucketedVectorIndexMaintainerTest {
 
         BucketedVectorIndexMaintainer.VectorIndexIncrement increment =
                 commit.compactIncrement().get();
-        assertThat(increment.deletedIndexFiles()).isEmpty();
+        assertThat(increment.deletedIndexFiles()).containsExactly(initialAnn);
         assertThat(increment.newIndexFiles()).hasSize(1);
-        IndexFileMeta delta = increment.newIndexFiles().get(0);
-        assertThat(delta.indexType()).isEqualTo("test-vector-ann");
-        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(delta).sourceFiles())
+        IndexFileMeta replacement = increment.newIndexFiles().get(0);
+        assertThat(replacement.indexType()).isEqualTo("test-vector-ann");
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(replacement).sourceFiles())
                 .extracting(PrimaryKeyIndexSourceFile::fileName)
-                .containsExactly("data-3");
-        assertThat(maintainer.segments()).containsExactly(initialAnn, delta);
+                .containsExactly("data-2", "data-3");
+        assertThat(maintainer.segments()).containsExactly(replacement);
     }
 
     @Test
@@ -365,13 +366,112 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     @Test
-    void testRebuildsDerivedLevelAndAtomicallyReplacesInputs() throws Exception {
+    void testBuildExcludesDeletionVectorPositions() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data", 2);
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{1, 0}, {2, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(0);
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        annFile,
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        readerFactory,
+                        fileName -> Optional.of(deletionVector),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(data),
+                                Collections.emptyList()),
+                        true);
+
+        assertThat(commit.compactIncrement()).isPresent();
+        assertThat(commit.compactIncrement().get().newIndexFiles())
+                .singleElement()
+                .extracting(IndexFileMeta::rowCount)
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void testPendingBuildUsesDeletionVectorSnapshot() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
+        DataField vectorField =
+                new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataFileMeta data = dataFile("data", 3);
+        PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader dataReader = reader(new float[][] {{1, 0}, {2, 0}, {3, 0}});
+        when(readerFactory.create(data)).thenReturn(dataReader);
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(0);
+        BucketedVectorIndexMaintainer maintainer =
+                new BucketedVectorIndexMaintainer(
+                        7,
+                        annFile,
+                        vectorField,
+                        indexOptions(),
+                        "l2",
+                        "test-vector-ann",
+                        readerFactory,
+                        fileName -> Optional.of(deletionVector),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+        CountDownLatch executorBlocked = new CountDownLatch(1);
+        CountDownLatch releaseExecutor = new CountDownLatch(1);
+        executor.submit(
+                () -> {
+                    executorBlocked.countDown();
+                    releaseExecutor.await();
+                    return null;
+                });
+        assertThat(executorBlocked.await(30, TimeUnit.SECONDS)).isTrue();
+
+        try {
+            maintainer.prepareCommit(
+                    DataIncrement.emptyIncrement(),
+                    new CompactIncrement(
+                            Collections.emptyList(),
+                            Collections.singletonList(data),
+                            Collections.emptyList()),
+                    false);
+            deletionVector.delete(1);
+        } finally {
+            releaseExecutor.countDown();
+        }
+
+        BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), true);
+        assertThat(commit.appendIncrement()).isPresent();
+        assertThat(commit.appendIncrement().get().newIndexFiles())
+                .singleElement()
+                .extracting(IndexFileMeta::rowCount)
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void testRebuildsDuplicateLevelSegmentsAsCompleteLevel() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -444,7 +544,6 @@ class BucketedVectorIndexMaintainerTest {
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         List<DataFileMeta> dataFiles = new ArrayList<>();
         List<IndexFileMeta> initialSegments = new ArrayList<>();
         for (int i = 1; i <= 6; i++) {
@@ -491,7 +590,7 @@ class BucketedVectorIndexMaintainerTest {
                                         CompactIncrement.emptyIncrement(),
                                         true))
                 .isInstanceOf(UncheckedIOException.class);
-        assertThat(maintainer.segments()).containsExactlyInAnyOrderElementsOf(initialSegments);
+        assertThat(maintainer.segments()).isEmpty();
         assertThat(fileCount()).isEqualTo(6);
 
         BucketedVectorIndexMaintainer.VectorIndexCommit retry =
@@ -502,7 +601,7 @@ class BucketedVectorIndexMaintainerTest {
                 retry.appendIncrement().get();
         assertThat(increment.deletedIndexFiles())
                 .containsExactlyInAnyOrderElementsOf(initialSegments);
-        assertThat(increment.newIndexFiles()).hasSize(2);
+        assertThat(increment.newIndexFiles()).hasSize(1);
     }
 
     @Test
@@ -708,10 +807,14 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     private static DataFileMeta dataFile(String fileName) {
+        return dataFile(fileName, 1);
+    }
+
+    private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
                         fileName,
                         100,
-                        1,
+                        rowCount,
                         SimpleStats.EMPTY_STATS,
                         0,
                         0,
@@ -741,7 +844,7 @@ class BucketedVectorIndexMaintainerTest {
                         fieldId,
                         null,
                         new byte[] {1},
-                        new PrimaryKeyIndexSourceMeta(sourceFile).serialize()),
+                        new PrimaryKeyIndexSourceMeta(1, sourceFile).serialize()),
                 null);
     }
 

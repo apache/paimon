@@ -21,7 +21,8 @@ from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.catalog_exception import IllegalArgumentError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
-                                         ForbiddenException, BadRequestException)
+                                         ForbiddenException, BadRequestException,
+                                         ServiceFailureException, NotImplementedException)
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -756,3 +757,19 @@ class RESTCatalog(Catalog):
                ) -> FileStoreTable:
         """Create FileStoreTable with dynamic options and catalog environment"""
         return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)
+
+    def auth_table_query(self, identifier, select=None):
+        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+        try:
+            response = self.rest_api.auth_table_query(identifier, select)
+            return TableQueryAuthResult(response.filter, response.column_masking)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except ServiceFailureException as e:
+            raise RuntimeError(e.args[0] if e.args else str(e)) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(e.args[0] if e.args else str(e)) from e
+        except BadRequestException as e:
+            raise RuntimeError(str(e)) from e

@@ -60,6 +60,8 @@ def _create_mock_table(latest_snapshot_id: int = 5):
     table.table_schema.fields = []
     table.schema_manager = Mock()
     table.schema_manager.get_schema.return_value = table.table_schema
+    table.catalog_environment = Mock()
+    table.catalog_environment.table_query_auth.return_value = None
 
     return table, latest_snapshot_id
 

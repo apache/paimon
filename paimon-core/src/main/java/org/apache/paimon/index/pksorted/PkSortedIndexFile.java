@@ -54,6 +54,7 @@ public class PkSortedIndexFile extends IndexFile {
     }
 
     public IndexFileMeta build(
+            int dataLevel,
             List<PrimaryKeyIndexSourceFile> sourceFiles,
             DataField indexField,
             String indexType,
@@ -101,7 +102,7 @@ public class PkSortedIndexFile extends IndexFile {
                     "Sorted payload row count %s does not match source row count %s.",
                     result.rowCount(),
                     sourceRowCount);
-            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+            byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles).serialize();
             Path payloadPath = fileWriter.path(result.fileName());
             IndexFileMeta payload =
                     new IndexFileMeta(

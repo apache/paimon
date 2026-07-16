@@ -164,7 +164,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     @Override
     public FieldReader visitArray(Schema schema, @Nullable DataType elementType) {
         FieldReader elementReader = visit(schema.getElementType(), elementType);
-        return new ArrayReader(schema.getElementType(), elementReader);
+        return new ArrayReader(elementReader);
     }
 
     @Override
@@ -429,26 +429,15 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     private static class ArrayReader implements FieldReader {
 
-        private final Schema elementSchema;
         private final FieldReader elementReader;
         private final List<Object> reusedList = new ArrayList<>();
 
-        private ArrayReader(@Nullable Schema elementSchema, FieldReader elementReader) {
-            this.elementSchema = elementSchema;
+        private ArrayReader(FieldReader elementReader) {
             this.elementReader = elementReader;
         }
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            if (elementSchema != null && decoder instanceof BinaryDecoder) {
-                AvroBytesArray avroBytesArray =
-                        AvroBytesArray.create(
-                                (BinaryDecoder) decoder, elementReader, elementSchema);
-                if (avroBytesArray != null) {
-                    return avroBytesArray;
-                }
-            }
-
             reusedList.clear();
             long chunkLength = decoder.readArrayStart();
 
@@ -482,7 +471,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         private final DataType elementType;
 
         private ArrayVectorReader(FieldReader elementReader, DataType elementType) {
-            super(null, elementReader);
+            super(elementReader);
             this.elementType = elementType;
         }
 

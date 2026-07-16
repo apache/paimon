@@ -40,7 +40,9 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListTablesResponse, ListTagsResponse,
                                        PagedList,
                                        PagedResponse, GetTableSnapshotResponse,
-                                       Partition)
+                                       Partition,
+                                       AuthTableQueryRequest,
+                                       AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -685,6 +687,16 @@ class RESTApi:
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
+            self.rest_auth_function,
+        )
+
+    def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> AuthTableQueryResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = AuthTableQueryRequest(select=select)
+        return self.client.post_with_response_type(
+            self.resource_paths.auth_table(database_name, table_name),
+            request,
+            AuthTableQueryResponse,
             self.rest_auth_function,
         )
 

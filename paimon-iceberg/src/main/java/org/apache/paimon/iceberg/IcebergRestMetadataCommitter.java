@@ -324,7 +324,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return createTable(new Schema(), null, newMetadata);
         } else {
             LOG.info(
-                    "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
+                    "Partition fieldId > 0. In order to avoid partition evolution, dummy schema will be created first");
 
             int size =
                     spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();

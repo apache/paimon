@@ -1024,24 +1024,6 @@ public class SchemaValidation {
         validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
-
-        Set<String> compactedIndexColumns = new HashSet<>();
-        compactedIndexColumns.addAll(vectorColumns);
-        compactedIndexColumns.addAll(btreeColumns);
-        compactedIndexColumns.addAll(bitmapColumns);
-        compactedIndexColumns.addAll(fullTextColumns);
-        for (String column : compactedIndexColumns) {
-            String fanoutKey = CoreOptions.primaryKeyIndexCompactionLevelFanoutKey(column);
-            checkArgument(
-                    options.primaryKeyIndexCompactionLevelFanout(column) > 1,
-                    "%s must be greater than 1.",
-                    fanoutKey);
-            String staleRatioKey =
-                    CoreOptions.primaryKeyIndexCompactionStaleRatioThresholdKey(column);
-            double staleRatio = options.primaryKeyIndexCompactionStaleRatioThreshold(column);
-            checkArgument(
-                    staleRatio > 0 && staleRatio <= 1, "%s must be in (0, 1].", staleRatioKey);
-        }
     }
 
     private static void validateNoDuplicatePrimaryKeyIndexColumns(

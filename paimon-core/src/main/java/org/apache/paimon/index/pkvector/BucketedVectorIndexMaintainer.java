@@ -18,8 +18,8 @@
 
 package org.apache.paimon.index.pkvector;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
@@ -40,7 +40,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +50,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.function.LongPredicate;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -64,9 +64,11 @@ public class BucketedVectorIndexMaintainer {
     private final String metric;
     private final String algorithm;
     private final PkVectorDataFileReader.Factory vectorReaderFactory;
+    private final DeletionVector.Factory deletionVectorFactory;
     private final PrimaryKeyIndexLevels<IndexFileMeta> annLevels;
     private ExecutorService executor;
     private final List<IndexFileMeta> annSegments;
+    private final List<IndexFileMeta> retiredSegments;
     private final Map<String, DataFileMeta> activeSourceFiles;
     @Nullable private PendingBuild pendingBuild;
 
@@ -81,6 +83,32 @@ public class BucketedVectorIndexMaintainer {
             List<DataFileMeta> restoredDataFiles,
             List<IndexFileMeta> restoredPayloads,
             ExecutorService executor) {
+        this(
+                vectorFieldId,
+                annSegmentFile,
+                vectorField,
+                indexOptions,
+                metric,
+                algorithm,
+                vectorReaderFactory,
+                DeletionVector.emptyFactory(),
+                restoredDataFiles,
+                restoredPayloads,
+                executor);
+    }
+
+    BucketedVectorIndexMaintainer(
+            int vectorFieldId,
+            PkVectorAnnSegmentFile annSegmentFile,
+            DataField vectorField,
+            Options indexOptions,
+            String metric,
+            String algorithm,
+            PkVectorDataFileReader.Factory vectorReaderFactory,
+            DeletionVector.Factory deletionVectorFactory,
+            List<DataFileMeta> restoredDataFiles,
+            List<IndexFileMeta> restoredPayloads,
+            ExecutorService executor) {
         this.vectorFieldId = vectorFieldId;
         this.annSegmentFile = annSegmentFile;
         this.vectorField = vectorField;
@@ -88,15 +116,19 @@ public class BucketedVectorIndexMaintainer {
         this.metric = metric;
         this.algorithm = algorithm;
         this.vectorReaderFactory = vectorReaderFactory;
-        CoreOptions coreOptions = new CoreOptions(indexOptions);
+        this.deletionVectorFactory = deletionVectorFactory;
         this.annLevels =
                 new PrimaryKeyIndexLevels<>(
-                        coreOptions.primaryKeyIndexCompactionLevelFanout(vectorField.name()),
-                        coreOptions.primaryKeyIndexCompactionStaleRatioThreshold(
-                                vectorField.name()),
-                        IndexFileMeta::fileName,
+                        segment -> sourceMeta(segment).dataLevel(),
                         segment -> sourceMeta(segment).sourceFiles());
         this.executor = executor;
+
+        this.activeSourceFiles = new LinkedHashMap<>();
+        for (DataFileMeta file : restoredDataFiles) {
+            if (PrimaryKeyIndexSourcePolicy.shouldRead(file)) {
+                activeSourceFiles.put(file.fileName(), file);
+            }
+        }
 
         List<IndexFileMeta> definitionPayloads = new ArrayList<>();
         for (IndexFileMeta payload : restoredPayloads) {
@@ -107,14 +139,13 @@ public class BucketedVectorIndexMaintainer {
             }
         }
         PkVectorBucketIndexState restoredState =
-                new PkVectorBucketIndexState(vectorFieldId, algorithm, definitionPayloads);
+                PkVectorBucketIndexState.fromActiveDataFiles(
+                        vectorFieldId,
+                        algorithm,
+                        new ArrayList<>(activeSourceFiles.values()),
+                        definitionPayloads);
         this.annSegments = new ArrayList<>(restoredState.annSegments());
-        this.activeSourceFiles = new LinkedHashMap<>();
-        for (DataFileMeta file : restoredDataFiles) {
-            if (PrimaryKeyIndexSourcePolicy.shouldRead(file)) {
-                activeSourceFiles.put(file.fileName(), file);
-            }
-        }
+        this.retiredSegments = new ArrayList<>(restoredState.staleSegments());
         validateCoverage(annSegments, activeSourceFiles);
     }
 
@@ -129,6 +160,7 @@ public class BucketedVectorIndexMaintainer {
                 "Append files must not be primary-key vector index sources.");
 
         List<IndexFileMeta> originalSegments = new ArrayList<>(annSegments);
+        List<IndexFileMeta> originalRetired = new ArrayList<>(retiredSegments);
         Map<String, DataFileMeta> originalSourceFiles = new LinkedHashMap<>(activeSourceFiles);
         List<IndexFileMeta> generated = new ArrayList<>();
         try {
@@ -144,7 +176,8 @@ public class BucketedVectorIndexMaintainer {
                 }
             }
 
-            List<IndexFileMeta> removed = new ArrayList<>();
+            List<IndexFileMeta> removed = new ArrayList<>(retiredSegments);
+            retiredSegments.clear();
 
             List<IndexFileMeta> created = new ArrayList<>();
             activeSourceFiles.clear();
@@ -159,23 +192,19 @@ public class BucketedVectorIndexMaintainer {
                         replaceSegments(build, created, removed);
                     } else {
                         annSegmentFile.delete(build.segment);
+                        generated.remove(build.segment);
                     }
                 }
 
                 if (pendingBuild == null) {
-                    List<DataFileMeta> uncovered = uncoveredFiles();
-                    if (!uncovered.isEmpty()) {
-                        startPendingBuild(uncovered, Collections.<IndexFileMeta>emptyList());
-                    } else {
-                        Optional<PrimaryKeyIndexLevels.Plan<IndexFileMeta>> plan =
-                                annLevels.pick(annSegments, activeSourceFiles);
-                        if (plan.isPresent()) {
-                            if (plan.get().sourceFiles().isEmpty()) {
-                                removeSegments(plan.get().inputUnits(), created, removed);
-                                continue;
-                            }
-                            startPendingBuild(plan.get().sourceFiles(), plan.get().inputUnits());
+                    Optional<PrimaryKeyIndexLevels.Plan<IndexFileMeta>> plan =
+                            annLevels.pick(annSegments, activeSourceFiles);
+                    if (plan.isPresent()) {
+                        if (plan.get().sourceFiles().isEmpty()) {
+                            removeSegments(plan.get().inputUnits(), created, removed);
+                            continue;
                         }
+                        startPendingBuild(plan.get());
                     }
                 }
                 if (!waitCompaction || pendingBuild == null) {
@@ -201,9 +230,14 @@ public class BucketedVectorIndexMaintainer {
                     compactChange,
                     failure ->
                             rollbackPrepareCommit(
-                                    originalSegments, originalSourceFiles, generated, failure));
+                                    originalSegments,
+                                    originalRetired,
+                                    originalSourceFiles,
+                                    generated,
+                                    failure));
         } catch (Throwable failure) {
-            rollbackPrepareCommit(originalSegments, originalSourceFiles, generated, failure);
+            rollbackPrepareCommit(
+                    originalSegments, originalRetired, originalSourceFiles, generated, failure);
             if (failure instanceof Exception) {
                 throw (Exception) failure;
             }
@@ -214,20 +248,23 @@ public class BucketedVectorIndexMaintainer {
         }
     }
 
-    private void startPendingBuild(
-            List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments) {
-        PendingBuild build = new PendingBuild(sourceFiles, inputSegments);
+    private void startPendingBuild(PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan)
+            throws IOException {
+        PendingBuild build = new PendingBuild(plan);
         build.start();
         pendingBuild = build;
     }
 
     private synchronized void rollbackPrepareCommit(
             List<IndexFileMeta> originalSegments,
+            List<IndexFileMeta> originalRetired,
             Map<String, DataFileMeta> originalSourceFiles,
             List<IndexFileMeta> generated,
             Throwable failure) {
         annSegments.clear();
         annSegments.addAll(originalSegments);
+        retiredSegments.clear();
+        retiredSegments.addAll(originalRetired);
         activeSourceFiles.clear();
         activeSourceFiles.putAll(originalSourceFiles);
 
@@ -270,18 +307,6 @@ public class BucketedVectorIndexMaintainer {
         }
     }
 
-    private List<DataFileMeta> uncoveredFiles() {
-        Set<String> covered = coveredSources(annSegments);
-        List<DataFileMeta> uncovered = new ArrayList<>();
-        for (DataFileMeta file : activeSourceFiles.values()) {
-            if (!covered.contains(file.fileName())) {
-                uncovered.add(file);
-            }
-        }
-        uncovered.sort(Comparator.comparing(DataFileMeta::fileName));
-        return uncovered;
-    }
-
     private Optional<CompletedBuild> finishPendingBuild(boolean blocking) throws Exception {
         if (pendingBuild == null || (!blocking && !pendingBuild.isDone())) {
             return Optional.empty();
@@ -291,7 +316,7 @@ public class BucketedVectorIndexMaintainer {
         try {
             IndexFileMeta segment = completed.get();
             pendingBuild = null;
-            return Optional.of(new CompletedBuild(segment, completed.inputSegments));
+            return Optional.of(new CompletedBuild(completed.plan, segment));
         } catch (CancellationException e) {
             pendingBuild = null;
             return Optional.empty();
@@ -309,15 +334,30 @@ public class BucketedVectorIndexMaintainer {
     }
 
     private boolean canAccept(CompletedBuild build) {
-        if (!annSegments.containsAll(build.inputSegments)) {
+        if (!annLevels.isCurrent(build.plan, activeSourceFiles)
+                || !annSegments.containsAll(build.inputSegments)) {
+            return false;
+        }
+        PrimaryKeyIndexSourceMeta outputSourceMeta;
+        try {
+            outputSourceMeta = sourceMeta(build.segment);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        if (outputSourceMeta.dataLevel() != build.plan.dataLevel()
+                || outputSourceMeta.sourceFiles().size() != build.plan.sourceFiles().size()) {
             return false;
         }
         List<IndexFileMeta> retained = new ArrayList<>(annSegments);
         retained.removeAll(build.inputSegments);
         Set<String> covered = coveredSources(retained);
-        for (PrimaryKeyIndexSourceFile source : sourceMeta(build.segment).sourceFiles()) {
+        for (int i = 0; i < outputSourceMeta.sourceFiles().size(); i++) {
+            PrimaryKeyIndexSourceFile source = outputSourceMeta.sourceFiles().get(i);
+            DataFileMeta expected = build.plan.sourceFiles().get(i);
             DataFileMeta activeFile = activeSourceFiles.get(source.fileName());
-            if (activeFile == null
+            if (!source.fileName().equals(expected.fileName())
+                    || source.rowCount() != expected.rowCount()
+                    || activeFile == null
                     || activeFile.rowCount() != source.rowCount()
                     || covered.contains(source.fileName())) {
                 return false;
@@ -343,15 +383,22 @@ public class BucketedVectorIndexMaintainer {
         }
     }
 
-    private IndexFileMeta buildAnnSegment(List<DataFileMeta> files) {
+    private IndexFileMeta buildAnnSegment(
+            List<DataFileMeta> files, Map<String, DeletionVector> deletionVectors) {
         try {
             List<PkVectorAnnSegmentFile.Source> sources = new ArrayList<>(files.size());
             for (DataFileMeta file : files) {
                 PrimaryKeyIndexSourceFile sourceFile =
                         new PrimaryKeyIndexSourceFile(file.fileName(), file.rowCount());
+                DeletionVector deletionVector = deletionVectors.get(file.fileName());
+                LongPredicate excludedPosition =
+                        deletionVector != null ? deletionVector::isDeleted : position -> false;
                 sources.add(
                         PkVectorAnnSegmentFile.Source.lazy(
-                                sourceFile, () -> vectorReaderFactory.create(file)));
+                                file.level(),
+                                sourceFile,
+                                () -> vectorReaderFactory.create(file),
+                                excludedPosition));
             }
             return annSegmentFile.build(sources, vectorField, indexOptions, metric, algorithm);
         } catch (IOException e) {
@@ -359,10 +406,33 @@ public class BucketedVectorIndexMaintainer {
         }
     }
 
+    private Map<String, DeletionVector> snapshotDeletionVectors(List<DataFileMeta> files)
+            throws IOException {
+        Map<String, DeletionVector> snapshots = new LinkedHashMap<>();
+        for (DataFileMeta file : files) {
+            Optional<DeletionVector> deletionVector = deletionVectorFactory.create(file.fileName());
+            if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+                snapshots.put(
+                        file.fileName(),
+                        DeletionVector.deserializeFromBytes(
+                                DeletionVector.serializeToBytes(deletionVector.get())));
+            }
+        }
+        return snapshots;
+    }
+
     private void validateCoverage(
             List<IndexFileMeta> candidateAnn, Map<String, DataFileMeta> sourceFiles) {
         PkVectorBucketIndexState state =
-                new PkVectorBucketIndexState(vectorFieldId, algorithm, candidateAnn);
+                PkVectorBucketIndexState.fromActiveDataFiles(
+                        vectorFieldId,
+                        algorithm,
+                        new ArrayList<>(sourceFiles.values()),
+                        candidateAnn);
+        checkArgument(
+                state.staleSegments().isEmpty()
+                        && state.annSegments().size() == candidateAnn.size(),
+                "ANN segments must each exactly cover one current data level.");
         for (Map.Entry<String, IndexFileMeta> entry : state.sourceFileToAnnSegment().entrySet()) {
             DataFileMeta file = sourceFiles.get(entry.getKey());
             if (file == null) {
@@ -385,27 +455,33 @@ public class BucketedVectorIndexMaintainer {
     }
 
     public synchronized PkVectorBucketIndexState state() {
-        return new PkVectorBucketIndexState(vectorFieldId, algorithm, annSegments);
+        return PkVectorBucketIndexState.fromActiveDataFiles(
+                vectorFieldId, algorithm, new ArrayList<>(activeSourceFiles.values()), annSegments);
     }
 
     private class PendingBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<IndexFileMeta> inputSegments;
+        private final Map<String, DeletionVector> deletionVectors;
         @Nullable private IndexFileMeta result;
         @Nullable private Future<IndexFileMeta> future;
         private boolean cancelled;
 
-        private PendingBuild(List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputSegments) {
-            this.sourceFiles = new ArrayList<>(sourceFiles);
-            this.inputSegments = new ArrayList<>(inputSegments);
+        private PendingBuild(PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan) throws IOException {
+            this.plan = plan;
+            this.sourceFiles = plan.sourceFiles();
+            this.inputSegments = plan.inputUnits();
+            this.deletionVectors = snapshotDeletionVectors(sourceFiles);
         }
 
         private void start() {
             future =
                     executor.submit(
                             () -> {
-                                IndexFileMeta segment = buildAnnSegment(sourceFiles);
+                                IndexFileMeta segment =
+                                        buildAnnSegment(sourceFiles, deletionVectors);
                                 synchronized (PendingBuild.this) {
                                     if (!cancelled) {
                                         result = segment;
@@ -445,12 +521,15 @@ public class BucketedVectorIndexMaintainer {
 
     private static class CompletedBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan;
         private final IndexFileMeta segment;
         private final List<IndexFileMeta> inputSegments;
 
-        private CompletedBuild(IndexFileMeta segment, List<IndexFileMeta> inputSegments) {
+        private CompletedBuild(
+                PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan, IndexFileMeta segment) {
+            this.plan = plan;
             this.segment = segment;
-            this.inputSegments = new ArrayList<>(inputSegments);
+            this.inputSegments = plan.inputUnits();
         }
     }
 
@@ -587,6 +666,22 @@ public class BucketedVectorIndexMaintainer {
                 @Nullable List<DataFileMeta> restoredDataFiles,
                 @Nullable List<IndexFileMeta> restoredPayloads,
                 ExecutorService executor) {
+            return create(
+                    partition,
+                    bucket,
+                    restoredDataFiles,
+                    restoredPayloads,
+                    executor,
+                    DeletionVector.emptyFactory());
+        }
+
+        public BucketedVectorIndexMaintainer create(
+                BinaryRow partition,
+                int bucket,
+                @Nullable List<DataFileMeta> restoredDataFiles,
+                @Nullable List<IndexFileMeta> restoredPayloads,
+                ExecutorService executor,
+                DeletionVector.Factory deletionVectorFactory) {
             checkArgument(indexOptions != null, "ANN index options are not configured.");
             List<DataFileMeta> dataFiles =
                     restoredDataFiles == null ? Collections.emptyList() : restoredDataFiles;
@@ -601,6 +696,7 @@ public class BucketedVectorIndexMaintainer {
                     algorithm,
                     new PkVectorDataFileReader.Factory(
                             readerFactoryBuilder, partition, bucket, vectorField, vectorDimension),
+                    deletionVectorFactory,
                     dataFiles,
                     payloads,
                     executor);
