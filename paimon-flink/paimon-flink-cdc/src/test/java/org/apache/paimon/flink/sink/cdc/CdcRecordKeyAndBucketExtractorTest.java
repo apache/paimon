@@ -193,6 +193,6 @@ public class CdcRecordKeyAndBucketExtractorTest {
 
     private FixedBucketRowKeyExtractor extractor(TableSchema schema) {
         return new FixedBucketRowKeyExtractor(
-                schema, new PartitionBucketMapping(schema.numBuckets()));
+                schema, PartitionBucketMapping.defaultBuckets(schema.numBuckets()));
     }
 }

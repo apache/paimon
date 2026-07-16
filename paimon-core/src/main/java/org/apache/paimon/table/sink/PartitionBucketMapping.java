@@ -54,15 +54,6 @@ public class PartitionBucketMapping implements Serializable {
     private final Map<BinaryRow, Integer> partitionBucketMap;
 
     /**
-     * Creates a mapping with only a default bucket count and no per-partition overrides.
-     *
-     * @param defaultBucketCount the default number of buckets for all partitions
-     */
-    public PartitionBucketMapping(int defaultBucketCount) {
-        this(defaultBucketCount, Collections.emptyMap());
-    }
-
-    /**
      * Creates a mapping with a default bucket count and an explicit per-partition bucket map.
      *
      * @param defaultBucketCount the default number of buckets, used as a fallback
@@ -72,6 +63,19 @@ public class PartitionBucketMapping implements Serializable {
             int defaultBucketCount, Map<BinaryRow, Integer> partitionBucketMap) {
         this.defaultBucketCount = defaultBucketCount;
         this.partitionBucketMap = partitionBucketMap;
+    }
+
+    /**
+     * Creates a mapping with only a default bucket count and no per-partition overrides.
+     *
+     * <p>Use this when per-partition bucket counts are not needed (i.e. the additional manifest scan
+     * is skipped), so that every partition resolves to {@code numBuckets}.
+     *
+     * @param numBuckets the default number of buckets for all partitions
+     * @return a mapping that resolves every partition to {@code numBuckets}
+     */
+    public static PartitionBucketMapping defaultBuckets(int numBuckets) {
+        return new PartitionBucketMapping(numBuckets, Collections.emptyMap());
     }
 
     /**
@@ -90,15 +94,24 @@ public class PartitionBucketMapping implements Serializable {
      */
     public static PartitionBucketMapping loadFromTable(FileStoreTable table) {
         int defaultBuckets = table.schema().numBuckets();
-        if (table.partitionKeys().isEmpty()) {
-            return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
+        if (!table.coreOptions().bucketPerPartitionCountEnabled()
+                || table.partitionKeys().isEmpty()) {
+            return defaultBuckets(defaultBuckets);
         }
         return loadFromScan(table.store().newScan(), defaultBuckets);
     }
 
+    /**
+     * Loads a {@link PartitionBucketMapping} from the given scan by reading the manifest partition
+     * entries to resolve the per-partition bucket counts.
+     *
+     * <p>Callers should evaluate whether per-partition bucket counts are enabled <em>before</em>
+     * invoking this method, since it always triggers an additional scan. Use {@link
+     * #defaultBuckets(int)} instead when the scan should be skipped.
+     */
     public static PartitionBucketMapping loadFromScan(FileStoreScan scan, int defaultBuckets) {
         if (scan == null) {
-            return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
+            return defaultBuckets(defaultBuckets);
         }
         List<PartitionEntry> partitionEntries = scan.readPartitionEntries();
         Map<BinaryRow, Integer> partitionBucketMap = new HashMap<>();

@@ -110,7 +110,7 @@ public class RowDataChannelComputerTest {
     private void testImpl(TableSchema schema, List<InternalRow> input) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         PartitionBucketMapping partitionBucketMapping =
-                new PartitionBucketMapping(schema.numBuckets());
+                PartitionBucketMapping.defaultBuckets(schema.numBuckets());
         FixedBucketRowKeyExtractor extractor =
                 new FixedBucketRowKeyExtractor(schema, partitionBucketMapping);
 

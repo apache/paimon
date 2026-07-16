@@ -35,7 +35,7 @@ public class PartitionBucketMappingTest {
 
     @Test
     public void testDefaultBucketCount() {
-        PartitionBucketMapping mapping = new PartitionBucketMapping(16);
+        PartitionBucketMapping mapping = PartitionBucketMapping.defaultBuckets(16);
 
         // Any partition should resolve to the default
         assertThat(mapping.resolveNumBuckets(BinaryRow.EMPTY_ROW)).isEqualTo(16);

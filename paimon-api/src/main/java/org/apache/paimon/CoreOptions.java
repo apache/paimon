@@ -148,6 +148,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to ignore the order of the buckets when reading data from an append-only table.");
 
+    public static final ConfigOption<Boolean> BUCKET_PER_PARTITION_COUNT_ENABLED =
+            key("bucket.per-partition-count-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to allow individual partitions of a fixed-bucket table to keep "
+                                    + "their own bucket count, so that a single partition can be rescaled "
+                                    + "independently. Enabling this scans the manifest to resolve each "
+                                    + "partition's bucket count on write.");
+
     @Immutable
     public static final ConfigOption<BucketFunctionType> BUCKET_FUNCTION_TYPE =
             key("bucket-function.type")
@@ -2744,6 +2754,10 @@ public class CoreOptions implements Serializable {
 
     public int bucket() {
         return options.get(BUCKET);
+    }
+
+    public boolean bucketPerPartitionCountEnabled() {
+        return options.get(BUCKET_PER_PARTITION_COUNT_ENABLED);
     }
 
     public BucketFunctionType bucketFunctionType() {

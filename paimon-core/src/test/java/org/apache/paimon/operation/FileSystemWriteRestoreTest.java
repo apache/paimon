@@ -186,6 +186,8 @@ public class FileSystemWriteRestoreTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, path.toString());
         options.set(CoreOptions.BUCKET, bucket);
+        // These tests exercise per-partition bucket resolution, which is opt-in.
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

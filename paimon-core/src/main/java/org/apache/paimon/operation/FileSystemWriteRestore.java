@@ -53,7 +53,10 @@ public class FileSystemWriteRestore implements WriteRestore {
                 this.scan.dropStats();
             }
         }
-        this.partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, options.bucket());
+        this.partitionBucketMapping =
+                options.bucketPerPartitionCountEnabled()
+                        ? PartitionBucketMapping.loadFromScan(scan, options.bucket())
+                        : PartitionBucketMapping.defaultBuckets(options.bucket());
     }
 
     @Override

@@ -245,7 +245,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                 "CREATE TABLE `TP` "
                         + "(dt STRING, f0 INT, PRIMARY KEY (dt, f0) NOT ENFORCED) "
                         + "PARTITIONED BY (dt) "
-                        + "WITH ('bucket' = '2')");
+                        + "WITH ('bucket' = '2', 'bucket.per-partition-count-enabled' = 'true')");
 
         // Insert data into two partitions
         batchSql("INSERT INTO TP VALUES ('p1', 1), ('p1', 2), ('p1', 3)");
@@ -334,7 +334,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS `fs_catalog`.`default`.`TPE` "
                         + "(dt STRING, f0 INT, PRIMARY KEY (dt, f0) NOT ENFORCED) "
                         + "PARTITIONED BY (dt) "
-                        + "WITH ('bucket' = '2')");
+                        + "WITH ('bucket' = '2', 'bucket.per-partition-count-enabled' = 'true')");
         batchSql("USE CATALOG fs_catalog");
         batchSql("INSERT INTO TPE VALUES ('p1', 1)");
         // Also seed partition p2 — this acts as a positive control: p2 is

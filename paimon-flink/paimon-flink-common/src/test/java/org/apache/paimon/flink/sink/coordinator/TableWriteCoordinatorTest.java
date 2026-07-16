@@ -279,6 +279,9 @@ class TableWriteCoordinatorTest extends TableTestBase {
                         .primaryKey("pt", "k")
                         .partitionKeys("pt")
                         .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
+                        .option(
+                                CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED.key(),
+                                Boolean.TRUE.toString())
                         .build();
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = getTable(identifier);

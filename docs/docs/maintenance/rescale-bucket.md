@@ -45,8 +45,12 @@ Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
   Reorganize existing data must be achieved by `INSERT OVERWRITE`.
 - Rescale bucket number does not influence the read and running write jobs.
-- For **partitioned tables**, it is possible to have different bucket numbers for different partitions. *E.g.*
+- For **partitioned tables**, it is possible to have different bucket numbers for different partitions.
+  This requires setting `'bucket.per-partition-count-enabled' = 'true'` on the table; otherwise every
+  partition uses the single table-level bucket count. *E.g.*
   ```sql
+  ALTER TABLE my_table SET ('bucket.per-partition-count-enabled' = 'true');
+
   ALTER TABLE my_table SET ('bucket' = '4');
   INSERT OVERWRITE my_table PARTITION (dt = '2022-01-01')
   SELECT * FROM ...;
@@ -60,6 +64,15 @@ Please note that
   Each partition retains its own bucket count from its data files,
   and the new bucket count only applies to newly created partitions or partitions that
   have been reorganized with `INSERT OVERWRITE`.
+
+:::info
+  Per-partition bucket counts are disabled by default. Set `'bucket.per-partition-count-enabled' = 'true'`
+  to let partitions keep their own bucket count and be rescaled independently. When it is disabled, all
+  partitions share the table-level `bucket` value.
+
+  Note that enabling this option adds an extra manifest scan on write (to resolve each partition's bucket
+  count), so only enable it when you actually need different bucket counts across partitions.
+:::
 
 :::warning
   Per-partition bucket counts are currently supported by the **Flink** engine only. The **Spark** writer

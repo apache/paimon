@@ -46,13 +46,13 @@ public class SchemaBucketFileStoreTable extends DelegatedFileStoreTable {
     public Optional<WriteSelector> newWriteSelector() {
         return Optional.of(
                 new FixedBucketWriteSelector(
-                        schema(), new PartitionBucketMapping(schema().numBuckets())));
+                        schema(), PartitionBucketMapping.defaultBuckets(schema().numBuckets())));
     }
 
     @Override
     public RowKeyExtractor createRowKeyExtractor() {
         return new FixedBucketRowKeyExtractor(
-                schema(), new PartitionBucketMapping(schema().numBuckets()));
+                schema(), PartitionBucketMapping.defaultBuckets(schema().numBuckets()));
     }
 
     @Override

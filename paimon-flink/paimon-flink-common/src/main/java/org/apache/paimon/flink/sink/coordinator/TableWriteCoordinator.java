@@ -208,12 +208,17 @@ public class TableWriteCoordinator {
     }
 
     private PartitionBucketMapping singlePartitionBucketMapping(BinaryRow partition) {
+        int defaultBuckets = table.schema().numBuckets();
+        if (!table.coreOptions().bucketPerPartitionCountEnabled()) {
+            return PartitionBucketMapping.defaultBuckets(defaultBuckets);
+        }
+
         FileStoreScan partitionScan =
                 newScan()
                         .withSnapshot(snapshot)
                         .withPartitionFilter(Collections.singletonList(partition));
 
-        return PartitionBucketMapping.loadFromScan(partitionScan, table.schema().numBuckets());
+        return PartitionBucketMapping.loadFromScan(partitionScan, defaultBuckets);
     }
 
     private FileStoreScan newScan() {

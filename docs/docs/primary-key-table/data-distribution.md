@@ -34,8 +34,10 @@ the bucket of record.
 Rescaling buckets can only be done through offline processes, see [Rescale Bucket](../maintenance/rescale-bucket).
 A too large number of buckets leads to too many small files, and a too small number of buckets leads to poor write performance.
 
-For partitioned tables, each partition can have its own bucket count. After a rescale operation, existing
-partitions retain their original bucket count while newly created partitions use the updated table-level default.
+For partitioned tables, each partition can have its own bucket count when
+`'bucket.per-partition-count-enabled' = 'true'` is set. In that case, after a rescale operation existing
+partitions retain their original bucket count while newly created partitions use the updated table-level
+default. When the option is disabled (the default), all partitions share the single table-level bucket count.
 
 ## Dynamic Bucket
 
