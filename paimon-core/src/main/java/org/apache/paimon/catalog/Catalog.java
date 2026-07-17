@@ -424,24 +424,6 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Get a page of partitions without falling back to filesystem discovery.
-     *
-     * <p>This entry point is intended for tables whose partition visibility is owned by the
-     * catalog. Implementations must fail when the catalog service cannot list partitions.
-     */
-    default PagedList<Partition> listPartitionsPagedWithoutFallback(
-            Identifier identifier,
-            @Nullable Integer maxResults,
-            @Nullable String pageToken,
-            @Nullable String partitionNamePattern)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Catalog %s does not support managed partition listing.",
-                        getClass().getName()));
-    }
-
-    /**
      * Get Partition list by partition names of the table.
      *
      * @param identifier path of the table to list partitions
@@ -453,21 +435,6 @@ public interface Catalog extends AutoCloseable {
     List<Partition> listPartitionsByNames(
             Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException;
-
-    /**
-     * Get partitions by partition names without falling back to filesystem discovery.
-     *
-     * <p>This entry point is intended for tables whose partition visibility is owned by the
-     * catalog. Implementations must fail when the catalog service cannot list partitions.
-     */
-    default List<Partition> listPartitionsByNamesWithoutFallback(
-            Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Catalog %s does not support managed partition listing.",
-                        getClass().getName()));
-    }
 
     // ======================= view methods ===============================
 
@@ -1056,16 +1023,6 @@ public interface Catalog extends AutoCloseable {
      * </ul>
      */
     boolean supportsPartitionModification();
-
-    /**
-     * Whether this catalog supports managed format table partitions: fail-closed catalog-owned
-     * partition listing plus the {@link #createPartitions(Identifier, List)} and {@link
-     * #dropPartitions(Identifier, List)} registration DDL for such tables, independent of {@link
-     * #supportsPartitionModification()}.
-     */
-    default boolean supportsManagedFormatTablePartitions() {
-        return false;
-    }
 
     /**
      * Create partitions of the specify table. Ignore existing partitions.

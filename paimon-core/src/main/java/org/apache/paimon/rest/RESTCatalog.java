@@ -758,8 +758,7 @@ public class RESTCatalog implements Catalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        if (table instanceof FormatTable
-                && new CoreOptions(table.options()).partitionedTableInMetastore()) {
+        if (isCatalogManagedFormatTable(table)) {
             // Managed format table: metadata-only unregistration on the server. Data deletion is
             // the caller's responsibility (performed with the table FileIO afterwards).
             try {
@@ -790,8 +789,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return listPartitionsFromFileSystem(getTable(identifier));
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table);
         }
     }
 
@@ -803,27 +805,17 @@ public class RESTCatalog implements Catalog {
             @Nullable String partitionNamePattern)
             throws TableNotExistException {
         try {
-            return listPartitionsPagedWithoutFallback(
-                    identifier, maxResults, pageToken, partitionNamePattern);
-        } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
-        }
-    }
-
-    @Override
-    public PagedList<Partition> listPartitionsPagedWithoutFallback(
-            Identifier identifier,
-            @Nullable Integer maxResults,
-            @Nullable String pageToken,
-            @Nullable String partitionNamePattern)
-            throws TableNotExistException {
-        try {
             return api.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return new PagedList<>(listPartitionsFromFileSystem(table), null);
         }
     }
 
@@ -838,20 +830,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            return listPartitionsFromFileSystem(getTable(identifier), partitions);
-        }
-    }
-
-    @Override
-    public List<Partition> listPartitionsByNamesWithoutFallback(
-            Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        try {
-            return api.listPartitionsByNames(identifier, partitions);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table, partitions);
         }
     }
 
@@ -918,14 +901,8 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean supportsPartitionModification() {
-        // Paimon tables use commit-based partition maintenance. Managed Format Tables use the
-        // separate catalog-owned partition contract.
+        // Paimon tables use commit-based partition maintenance.
         return false;
-    }
-
-    @Override
-    public boolean supportsManagedFormatTablePartitions() {
-        return true;
     }
 
     @Override
@@ -1344,6 +1321,11 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     RESTApi api() {
         return api;
+    }
+
+    private static boolean isCatalogManagedFormatTable(Table table) {
+        return table instanceof FormatTable
+                && new CoreOptions(table.options()).partitionedTableInMetastore();
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {

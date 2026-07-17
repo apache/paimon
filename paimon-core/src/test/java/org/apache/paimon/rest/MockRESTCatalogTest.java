@@ -43,6 +43,7 @@ import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
@@ -215,12 +216,52 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Test
-    void testPartitionCapabilities() {
-        // Paimon tables use commit-based partition maintenance. Managed Format Tables use a
-        // separate capability so partition expiration never routes through the
-        // truncate-based Catalog#dropPartitions default (it cannot represent .done markers).
-        assertThat(restCatalog.supportsPartitionModification()).isFalse();
-        assertThat(restCatalog.supportsManagedFormatTablePartitions()).isTrue();
+    void testManagedFormatTablePagedPartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitionsPaged(identifier, null, null, null))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testManagedFormatTablePartitionListingByNamesDoesNotFallback() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.listPartitionsByNames(
+                                        identifier,
+                                        Collections.singletonList(
+                                                Collections.singletonMap("dt", "20260717"))))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testManagedFormatTablePartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitions(identifier))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    private Identifier createManagedFormatTable() throws Exception {
+        Identifier identifier = Identifier.create("db1", "managed_partition_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        return identifier;
     }
 
     @Test

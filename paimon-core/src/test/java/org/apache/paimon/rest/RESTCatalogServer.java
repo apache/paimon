@@ -211,6 +211,8 @@ public class RESTCatalogServer {
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
 
+    private volatile boolean partitionListingSupported = true;
+
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
         this.warehouse = warehouse;
@@ -271,6 +273,10 @@ public class RESTCatalogServer {
 
     public void removeDataToken(Identifier identifier) {
         DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
+    }
+
+    public void setPartitionListingSupported(boolean partitionListingSupported) {
+        this.partitionListingSupported = partitionListingSupported;
     }
 
     public void addNoPermissionDatabase(String database) {
@@ -503,6 +509,10 @@ public class RESTCatalogServer {
                             catalog.markDonePartitions(
                                     identifier, markDonePartitionsRequest.getPartitionSpecs());
                             return new MockResponse().setResponseCode(200);
+                        } else if (!partitionListingSupported
+                                && ((isPartitions && "GET".equals(restAuthParameter.method()))
+                                        || isListPartitionsByNames)) {
+                            return mockResponse(new ErrorResponse(null, null, "", 501), 501);
                         } else if (isDropPartitions) {
                             return dropPartitionsHandle(restAuthParameter.data(), identifier);
                         } else if (isPartitions) {
