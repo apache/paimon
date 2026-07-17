@@ -46,7 +46,10 @@ if _absent:
     )
     for _root, _dirs, _files in os.walk(_here):
         for _name in _files:
-            if not _name.endswith("_test.py"):
+            # Match pytest's default collection: both test_*.py and *_test.py.
+            if not (_name.startswith("test_") or _name.endswith("_test.py")):
+                continue
+            if not _name.endswith(".py"):
                 continue
             _path = os.path.join(_root, _name)
             try:
