@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -332,12 +333,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> {
+                    Split wrappedSplit = QueryAuthSplit.unwrap(split);
+                    if (wrappedSplit instanceof IndexedSplit) {
+                        return Collections.singletonList(split);
+                    }
+                    IndexedSplit indexedSplit =
+                            wrap((DataSplit) wrappedSplit, rowRangeIndex, scoreGetter);
+                    return Collections.singletonList(
+                            QueryAuthSplit.retainAuth(split, indexedSplit));
+                };
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }

@@ -18,13 +18,16 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.AppendBatchTableScan;
+import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -110,6 +113,41 @@ public class DataEvolutionBatchScanTest {
 
         assertThat(returned).isSameAs(scan);
         verify(batchScan).withShard(0, 2);
+    }
+
+    @Test
+    public void testPlanRetainsQueryAuthWhenWrappingIndexedSplit() {
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(newAppendFile(10L, 10L, "file")))
+                        .build();
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(null, Collections.singletonMap("f0", "mask"));
+        QueryAuthSplit queryAuthSplit = new QueryAuthSplit(dataSplit, authResult);
+        RowRangeIndex rowRangeIndex =
+                RowRangeIndex.create(Collections.singletonList(new Range(12L, 15L)));
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        when(batchScan.withRowRangeIndex(rowRangeIndex)).thenReturn(batchScan);
+        when(batchScan.plan())
+                .thenReturn(new DataFilePlan<>(Collections.singletonList(queryAuthSplit)));
+
+        List<Split> splits =
+                new DataEvolutionBatchScan(null, batchScan)
+                        .withRowRangeIndex(rowRangeIndex)
+                        .plan()
+                        .splits();
+
+        assertThat(splits).hasSize(1);
+        QueryAuthSplit result = (QueryAuthSplit) splits.get(0);
+        assertThat(result.authResult()).isSameAs(authResult);
+        IndexedSplit indexedSplit = (IndexedSplit) result.split();
+        assertThat(indexedSplit.dataSplit()).isSameAs(dataSplit);
+        assertThat(indexedSplit.rowRanges()).containsExactly(new Range(12L, 15L));
     }
 
     @Test
