@@ -118,10 +118,13 @@ run_batched_java_write_tests() {
         result=1
     fi
 
-    local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
-    lance_tests="${lance_tests}+testDataEvolutionWriteLance"
-    if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
-        result=1
+    # lance has no Python wheel on <3.8; its readers are all skipped there.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
+        lance_tests="${lance_tests}+testDataEvolutionWriteLance"
+        if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 11 ]]; then
@@ -142,10 +145,13 @@ run_batched_java_write_tests() {
         fi
     fi
 
-    local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
-    lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
-    if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
-        result=1
+    # Lumina vector reads need BitMap64 (>=3.8); skip the write below it too.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
+        lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
+        if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 9 ]]; then
