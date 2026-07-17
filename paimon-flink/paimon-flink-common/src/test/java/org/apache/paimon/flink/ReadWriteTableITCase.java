@@ -1388,7 +1388,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 + ") PARTITIONED BY (dt)\n"
                                 + "WITH (\n"
                                 + " 'bucket' = '2',\n"
-                                + " 'bucket-key' = 'currency'\n"
+                                + " 'bucket-key' = 'currency',\n"
+                                + " 'bucket.per-partition-count-enabled' = 'true'\n"
                                 + ")",
                         table));
 
