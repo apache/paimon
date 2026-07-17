@@ -63,6 +63,10 @@ public class BlockCache implements Closeable {
         return buffer;
     }
 
+    byte[] read(long offset, int length) throws IOException {
+        return readFrom(offset, length);
+    }
+
     public MemorySegment getBlock(
             long position, int length, Function<byte[], byte[]> decompressFunc, boolean isIndex) {
         CacheKey cacheKey = CacheKey.forPosition(filePath, position, length, isIndex);

@@ -52,6 +52,8 @@ public class GlobalIndexCoverage {
     @Nullable private final Snapshot snapshot;
     @Nullable private final PartitionPredicate partitionFilter;
     private final Map<Integer, List<Range>> coverageByField;
+    @Nullable private List<Range> dataRangesByDataFiles;
+    private boolean dataRangesComplete;
 
     public GlobalIndexCoverage(
             FileStoreTable table,
@@ -62,6 +64,7 @@ public class GlobalIndexCoverage {
         this.snapshot = snapshot;
         this.partitionFilter = partitionFilter;
         this.coverageByField = new HashMap<>();
+        this.dataRangesComplete = true;
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             if (meta.sourceMeta() != null) {
@@ -116,7 +119,16 @@ public class GlobalIndexCoverage {
         }
 
         List<Range> indexedRanges = Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
-        return new Range(0, snapshot.nextRowId() - 1).exclude(indexedRanges);
+        List<Range> dataRanges = dataRangesByDataFiles();
+        if (!dataRangesComplete) {
+            return new Range(0, snapshot.nextRowId() - 1).exclude(indexedRanges);
+        }
+
+        List<Range> unindexedRanges = new ArrayList<>();
+        for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
+            unindexedRanges.addAll(dataRange.exclude(indexedRanges));
+        }
+        return Range.sortAndMergeOverlap(unindexedRanges, true);
     }
 
     private void addCoverage(int fieldId, Range range) {
@@ -137,6 +149,9 @@ public class GlobalIndexCoverage {
     }
 
     private List<Range> dataRangesByDataFiles() {
+        if (dataRangesByDataFiles != null) {
+            return dataRangesByDataFiles;
+        }
         SnapshotReader snapshotReader =
                 table.newSnapshotReader()
                         .withPartitionFilter(partitionFilter)
@@ -150,9 +165,12 @@ public class GlobalIndexCoverage {
             for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
                 if (file.firstRowId() != null) {
                     dataRanges.add(file.nonNullRowIdRange());
+                } else {
+                    dataRangesComplete = false;
                 }
             }
         }
-        return dataRanges;
+        dataRangesByDataFiles = dataRanges;
+        return dataRangesByDataFiles;
     }
 }

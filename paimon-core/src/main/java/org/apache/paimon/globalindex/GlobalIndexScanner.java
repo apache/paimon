@@ -251,7 +251,7 @@ public class GlobalIndexScanner implements Closeable {
             return entry -> false;
         }
         Set<Integer> filterFieldIds = new HashSet<>(collectFieldIds(table.rowType(), filter));
-        if (topN != null) {
+        if (topN != null && topN.orders().size() == 1) {
             String fieldName = topN.orders().get(0).field().name();
             filterFieldIds.add(table.rowType().getField(fieldName).id());
         }
@@ -297,6 +297,9 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(ScalarSearch scalarSearch) {
+        if (scalarSearch.topN().orders().size() != 1) {
+            return Optional.empty();
+        }
         return globalIndexEvaluator.evaluateScalarSearch(scalarSearch);
     }
 
@@ -305,7 +308,7 @@ public class GlobalIndexScanner implements Closeable {
         for (Range range : coverage.unindexedRanges(rowType, predicate)) {
             rows.addRange(range);
         }
-        return GlobalIndexResult.create(rows);
+        return GlobalIndexResult.createExact(rows);
     }
 
     public GlobalIndexResult unindexedRowsForCorrectness(Predicate predicate) {
@@ -321,7 +324,7 @@ public class GlobalIndexScanner implements Closeable {
         for (Range range : coverage.unindexedRangesForCorrectness(fieldIds)) {
             rows.addRange(range);
         }
-        return GlobalIndexResult.create(rows);
+        return GlobalIndexResult.createExact(rows);
     }
 
     private Collection<GlobalIndexReader> createReaders(

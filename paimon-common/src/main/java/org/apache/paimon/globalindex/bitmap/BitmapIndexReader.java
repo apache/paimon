@@ -172,7 +172,7 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
     }
 
     private static Optional<GlobalIndexResult> createResult(RoaringNavigableMap64 bitmap) {
-        return Optional.of(GlobalIndexResult.create(bitmap));
+        return Optional.of(GlobalIndexResult.createExact(bitmap));
     }
 
     private RoaringNavigableMap64 isNull() {

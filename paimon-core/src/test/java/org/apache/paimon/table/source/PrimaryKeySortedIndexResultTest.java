@@ -222,7 +222,7 @@ class PrimaryKeySortedIndexResultTest {
         when(reader.visitEqual(any(), any()))
                 .thenReturn(
                         CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.create(positions))));
+                                Optional.of(GlobalIndexResult.createExact(positions))));
         return reader;
     }
 

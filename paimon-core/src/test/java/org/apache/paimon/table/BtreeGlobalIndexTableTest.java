@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -35,7 +36,9 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -60,6 +63,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,7 +105,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
         RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(finalRowIds));
+        scan.withGlobalIndexResult(GlobalIndexResult.createExact(finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
         table.newRead()
@@ -204,7 +208,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testBTreeTopNFallsBackForResidualPredicate() throws Exception {
+    public void testBTreeTopNKeepsPredicateCandidatesForResidualPredicate() throws Exception {
         write(3L);
         createIndex("f0");
         createIndex("f1");
@@ -216,8 +220,130 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withTopN(topN);
         TableScan.Plan plan = readBuilder.newScan().plan();
 
-        assertThat(plan.splits()).allMatch(split -> split instanceof DataSplit);
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        assertThat(indexedRanges(plan)).containsExactly(new Range(0L, 2L));
         assertThat(readF1(readBuilder, plan)).contains("a0");
+    }
+
+    @Test
+    public void testPredicateIndexSurvivesUnsupportedScalarTopN() throws Exception {
+        write(1000L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a900"));
+        TopN topN =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(
+                                        new FieldRef(0, "f0", DataTypes.INT()),
+                                        DESCENDING,
+                                        NULLS_LAST),
+                                new SortValue(
+                                        new FieldRef(1, "f1", DataTypes.STRING()),
+                                        ASCENDING,
+                                        NULLS_LAST)),
+                        10);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        assertThat(indexedRanges(plan)).containsExactly(new Range(900L, 900L));
+        assertThat(readF1(readBuilder, plan)).containsExactly("a900");
+    }
+
+    @Test
+    public void testBTreeTopNPushdownAcrossIndexRangesWithBoundaryTies() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.STRING());
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 8; i++) {
+                int value = i < 4 ? 1 : i - 2;
+                write.write(
+                        GenericRow.of(
+                                value,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f0");
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), ASCENDING, NULLS_LAST, 3);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        assertThat(indexedRanges(plan).stream().mapToLong(range -> range.to - range.from + 1).sum())
+                .isEqualTo(4L);
+        List<Integer> values = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> values.add(row.getInt(0)));
+        assertThat(values).containsExactly(1, 1, 1, 1);
+    }
+
+    @Test
+    public void testBTreeTopNUsesPartitionScopedCoverage() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.partitionKeys("pt");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 3; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString("p0-" + i)));
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p1"),
+                                i + 10,
+                                BinaryString.fromString("p1-" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f0");
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN = new TopN(new FieldRef(1, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withPartitionFilter(Collections.singletonMap("pt", "p0"))
+                        .withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        List<String> values = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> values.add(row.getString(2).toString()));
+        assertThat(values).containsExactly("p0-2");
     }
 
     @Test

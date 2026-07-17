@@ -279,7 +279,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     protected Optional<GlobalIndexResult> visitNotBetween(R reader, Object from, Object to) {
         RoaringNavigableMap64 result = lessThan(reader, from);
         result.or(greaterThan(reader, to));
-        return Optional.of(GlobalIndexResult.create(result));
+        return Optional.of(GlobalIndexResult.createExact(result));
     }
 
     protected RoaringNavigableMap64 like(R reader, Function<Object, Boolean> keyPredicate) {
@@ -291,7 +291,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     protected abstract RoaringNavigableMap64 greaterThan(R reader, Object literal);
 
     protected Optional<GlobalIndexResult> createResult(RoaringNavigableMap64 bitmap) {
-        return Optional.of(GlobalIndexResult.create(bitmap));
+        return Optional.of(GlobalIndexResult.createExact(bitmap));
     }
 
     protected CompletableFuture<Optional<GlobalIndexResult>> visitAllReaders(

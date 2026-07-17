@@ -527,7 +527,8 @@ public final class PrimaryKeySortedIndexScan {
 
             List<Optional<GlobalIndexResult>> localized = new ArrayList<>(sourceCount);
             for (RoaringNavigableMap64 partition : partitions) {
-                localized.add(Optional.of(GlobalIndexResult.create(partition)));
+                localized.add(
+                        Optional.of(GlobalIndexResult.create(partition, result.get().isExact())));
             }
             return localized;
         }

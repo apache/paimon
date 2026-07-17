@@ -182,7 +182,7 @@ class PrimaryKeySortedIndexScanTest {
         when(reader.visitEqual(any(), eq(42)))
                 .thenReturn(
                         CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.create(positions))));
+                                Optional.of(GlobalIndexResult.createExact(positions))));
         AtomicInteger readersCreated = new AtomicInteger();
 
         PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
@@ -376,7 +376,8 @@ class PrimaryKeySortedIndexScanTest {
 
     private static CompletableFuture<Optional<GlobalIndexResult>> completedResult(
             RoaringNavigableMap64 positions) {
-        return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.create(positions)));
+        return CompletableFuture.completedFuture(
+                Optional.of(GlobalIndexResult.createExact(positions)));
     }
 
     private static class CountingRoaringNavigableMap64 extends RoaringNavigableMap64 {

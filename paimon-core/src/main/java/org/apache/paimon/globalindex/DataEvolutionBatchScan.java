@@ -70,6 +70,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static final int MAX_SCALAR_TOPN_LIMIT = 100;
     private static final long MAX_SCALAR_TOPN_RESULT_SIZE = 10_000L;
     private static final long MAX_SCALAR_TOPN_SCANNED_ROW_IDS = 100_000L;
+    private static final long MAX_SCALAR_TOPN_READ_BLOCK_SIZE = 1024L * 1024L;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -318,82 +319,119 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (topN != null
                 && topNRowIdFilter != null
                 && topNRowIdFilter.getLongCardinality() <= topN.limit()) {
-            return Optional.of(GlobalIndexResult.create(copy(topNRowIdFilter)));
+            return Optional.of(GlobalIndexResult.create(copy(topNRowIdFilter), filter == null));
         }
         CoreOptions options = table.coreOptions();
         if (!options.globalIndexEnabled()) {
             return Optional.empty();
         }
-        if (topN != null && !canUseScalarTopN(options)) {
-            return Optional.empty();
-        }
         Predicate globalIndexFilter = filter == null ? null : rowIdSafeResidualFilter(filter);
-        if (filter != null && globalIndexFilter == null) {
+        boolean scalarTopNEnabled =
+                topN != null
+                        && canUseScalarTopN(options)
+                        && (filter == null || globalIndexFilter != null);
+        TopN indexTopN = scalarTopNEnabled ? topN : null;
+        if (globalIndexFilter == null && indexTopN == null) {
             return Optional.empty();
         }
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter, topN);
+                GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter, indexTopN);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
-            if (topN != null) {
-                RoaringNavigableMap64 includeRowIds = null;
-                if (topNRowIdFilter != null) {
-                    includeRowIds = new RoaringNavigableMap64();
-                    includeRowIds.or(topNRowIdFilter);
+            Optional<GlobalIndexResult> filterResult = Optional.empty();
+            Optional<GlobalIndexResult> predicateCandidates = Optional.empty();
+            if (globalIndexFilter != null) {
+                filterResult = scanner.scan(globalIndexFilter);
+                if (filterResult.isPresent()) {
+                    GlobalIndexResult unindexedRows = scanner.unindexedRows(globalIndexFilter);
+                    predicateCandidates =
+                            Optional.of(
+                                    filterResult
+                                            .get()
+                                            .or(unindexedRows)
+                                            .withExact(
+                                                    filterResult.get().isExact()
+                                                            && unindexedRows.results().isEmpty()));
                 }
-                if (globalIndexFilter != null) {
-                    Optional<GlobalIndexResult> filterResult = scanner.scan(globalIndexFilter);
-                    if (!filterResult.isPresent()
-                            || !filterResult.get().isExact()
-                            || intersectsUnindexedRows(
-                                    includeRowIds,
-                                    scanner.unindexedRowsForCorrectness(globalIndexFilter))) {
-                        return Optional.empty();
-                    }
-                    if (includeRowIds == null) {
-                        includeRowIds = filterResult.get().results();
-                    } else {
-                        includeRowIds.and(filterResult.get().results());
-                    }
-                }
+            }
 
-                if (includeRowIds != null && includeRowIds.getLongCardinality() <= topN.limit()) {
-                    return Optional.of(GlobalIndexResult.create(includeRowIds));
+            if (topN == null) {
+                if (predicateCandidates.isPresent()) {
+                    LOG.info("Scan table '{}' with global index.", table.name());
                 }
+                return predicateCandidates;
+            }
 
-                String orderFieldName = topN.orders().get(0).field().name();
-                int orderFieldId = table.rowType().getField(orderFieldName).id();
-                if (intersectsUnindexedRows(
-                        includeRowIds, scanner.unindexedRowsForCorrectness(orderFieldId))) {
-                    return Optional.empty();
-                }
+            Optional<GlobalIndexResult> fallbackResult =
+                    intersectTopNRowIdFilter(predicateCandidates);
+            if (!scalarTopNEnabled) {
+                return fallbackResult;
+            }
 
-                Optional<GlobalIndexResult> result =
-                        scanner.scan(
-                                new ScalarSearch(topN)
-                                        .withIncludeRowIds(includeRowIds)
-                                        .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE)
-                                        .withMaxScannedRowIds(MAX_SCALAR_TOPN_SCANNED_ROW_IDS));
-                if (result.isPresent()) {
-                    LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
+            RoaringNavigableMap64 includeRowIds = null;
+            if (topNRowIdFilter != null) {
+                includeRowIds = copy(topNRowIdFilter);
+            }
+            if (globalIndexFilter != null) {
+                if (!filterResult.isPresent()
+                        || !filterResult.get().isExact()
+                        || intersectsUnindexedRows(
+                                includeRowIds,
+                                scanner.unindexedRowsForCorrectness(globalIndexFilter))) {
+                    return fallbackResult;
                 }
+                if (includeRowIds == null) {
+                    includeRowIds = filterResult.get().results();
+                } else {
+                    includeRowIds.and(filterResult.get().results());
+                }
+            }
+
+            if (includeRowIds != null && includeRowIds.getLongCardinality() <= topN.limit()) {
+                return Optional.of(GlobalIndexResult.createExact(includeRowIds));
+            }
+
+            String orderFieldName = topN.orders().get(0).field().name();
+            int orderFieldId = table.rowType().getField(orderFieldName).id();
+            if (intersectsUnindexedRows(
+                    includeRowIds, scanner.unindexedRowsForCorrectness(orderFieldId))) {
+                return fallbackResult;
+            }
+
+            Optional<GlobalIndexResult> result =
+                    scanner.scan(
+                            new ScalarSearch(topN)
+                                    .withIncludeRowIds(includeRowIds)
+                                    .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE)
+                                    .withMaxScannedRowIds(MAX_SCALAR_TOPN_SCANNED_ROW_IDS)
+                                    .withMaxReadBlockSize(MAX_SCALAR_TOPN_READ_BLOCK_SIZE));
+            if (result.isPresent()) {
+                LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
                 return result;
             }
-
-            Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
-            if (result.isPresent()) {
-                LOG.info("Scan table '{}' with global index.", table.name());
-                return Optional.of(result.get().or(scanner.unindexedRows(globalIndexFilter)));
-            }
-            return Optional.empty();
+            return fallbackResult;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private Optional<GlobalIndexResult> intersectTopNRowIdFilter(
+            Optional<GlobalIndexResult> candidates) {
+        if (topNRowIdFilter == null) {
+            return candidates;
+        }
+        RoaringNavigableMap64 intersection = copy(topNRowIdFilter);
+        boolean exact = filter == null;
+        if (candidates.isPresent()) {
+            intersection.and(candidates.get().results());
+            exact = candidates.get().isExact();
+        }
+        return Optional.of(GlobalIndexResult.create(intersection, exact));
     }
 
     private boolean canUseScalarTopN(CoreOptions options) {

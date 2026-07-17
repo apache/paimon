@@ -31,7 +31,7 @@ public interface GlobalIndexResult {
 
     /** Whether the bitmap is the exact predicate result instead of a pruning candidate set. */
     default boolean isExact() {
-        return true;
+        return false;
     }
 
     default GlobalIndexResult withExact(boolean exact) {
@@ -65,11 +65,16 @@ public interface GlobalIndexResult {
 
     /** Returns an empty {@link GlobalIndexResult}. */
     static GlobalIndexResult createEmpty() {
-        return create(new RoaringNavigableMap64());
+        return createExact(new RoaringNavigableMap64());
     }
 
-    /** Returns a new {@link GlobalIndexResult} from bitmap. */
+    /** Returns a new inexact pruning candidate result from bitmap. */
     static GlobalIndexResult create(RoaringNavigableMap64 bitmap) {
+        return create(bitmap, false);
+    }
+
+    /** Returns a new exact predicate result from bitmap. */
+    static GlobalIndexResult createExact(RoaringNavigableMap64 bitmap) {
         return create(bitmap, true);
     }
 
@@ -92,7 +97,7 @@ public interface GlobalIndexResult {
     static GlobalIndexResult fromRange(Range range) {
         RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
         result64.addRange(range);
-        return create(result64);
+        return createExact(result64);
     }
 
     static GlobalIndexResult fromRanges(List<Range> ranges) {
@@ -100,6 +105,6 @@ public interface GlobalIndexResult {
         for (Range range : ranges) {
             result64.addRange(range);
         }
-        return create(result64);
+        return createExact(result64);
     }
 }

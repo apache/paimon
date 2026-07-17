@@ -475,6 +475,17 @@ public abstract class AbstractIndexReaderTest {
     }
 
     @TestTemplate
+    public void testScalarSearchFallsBackBeforeReadingOversizedDataBlock() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        ScalarSearch search =
+                new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, 1)).withMaxReadBlockSize(1);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            assertThat(reader.visitScalarSearch(search).join()).isEmpty();
+        }
+    }
+
+    @TestTemplate
     public void testScalarSearchFallsBackBeforeScanningHugeNullGroup() throws Exception {
         for (Pair<Object, Long> pair : data) {
             pair.setLeft(null);

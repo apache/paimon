@@ -35,7 +35,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** GlobalIndexResultSerializer to serialize and deserialize GlobalIndexResult. */
 public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult> {
 
-    private static final int VERSION = 1;
+    private static final int LEGACY_VERSION = 1;
+    private static final int VERSION = 2;
 
     @Override
     public Serializer<GlobalIndexResult> duplicate() {
@@ -60,6 +61,7 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
     public void serialize(GlobalIndexResult globalIndexResult, DataOutputView dataOutput)
             throws IOException {
         dataOutput.writeInt(VERSION);
+        dataOutput.writeBoolean(globalIndexResult.isExact());
 
         RoaringNavigableMap64 roaringNavigableMap64 = globalIndexResult.results();
         byte[] bytes = roaringNavigableMap64.serialize();
@@ -82,9 +84,10 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
     @Override
     public GlobalIndexResult deserialize(DataInputView dataInput) throws IOException {
         int version = dataInput.readInt();
-        if (version != VERSION) {
+        if (version != LEGACY_VERSION && version != VERSION) {
             throw new IllegalStateException("Invalid version: " + version);
         }
+        boolean exact = version == VERSION && dataInput.readBoolean();
 
         int size = dataInput.readInt();
         byte[] bytes = new byte[size];
@@ -95,7 +98,7 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
         int scoreSize = dataInput.readInt();
 
         if (scoreSize == 0) {
-            return GlobalIndexResult.create(roaringNavigableMap64);
+            return GlobalIndexResult.create(roaringNavigableMap64, exact);
         }
         checkArgument(
                 scoreSize == roaringNavigableMap64.getIntCardinality(),
@@ -115,7 +118,7 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
             scoreMap.put(rowId, scores[i++]);
         }
 
-        return ScoredGlobalIndexResult.create(roaringNavigableMap64, scoreMap::get);
+        return ScoredGlobalIndexResult.create(roaringNavigableMap64, scoreMap::get, exact);
     }
 
     public byte[] serialize(GlobalIndexResult globalIndexResult) throws IOException {

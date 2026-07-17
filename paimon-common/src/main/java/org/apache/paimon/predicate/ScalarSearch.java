@@ -36,16 +36,18 @@ public class ScalarSearch implements Serializable {
     @Nullable private final RoaringNavigableMap64 includeRowIds;
     private final long maxResultSize;
     private final long maxScannedRowIds;
+    private final long maxReadBlockSize;
 
     public ScalarSearch(TopN topN) {
-        this(topN, null, Long.MAX_VALUE, Long.MAX_VALUE);
+        this(topN, null, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
     }
 
     private ScalarSearch(
             TopN topN,
             @Nullable RoaringNavigableMap64 includeRowIds,
             long maxResultSize,
-            long maxScannedRowIds) {
+            long maxScannedRowIds,
+            long maxReadBlockSize) {
         this.topN = checkNotNull(topN);
         checkArgument(topN.limit() >= 0, "Limit must not be negative, got: %s", topN.limit());
         checkArgument(
@@ -57,9 +59,14 @@ public class ScalarSearch implements Serializable {
                 maxScannedRowIds >= 0,
                 "Max scanned row ids must not be negative, got: %s",
                 maxScannedRowIds);
+        checkArgument(
+                maxReadBlockSize >= 0,
+                "Max read block size must not be negative, got: %s",
+                maxReadBlockSize);
         this.includeRowIds = includeRowIds;
         this.maxResultSize = maxResultSize;
         this.maxScannedRowIds = maxScannedRowIds;
+        this.maxReadBlockSize = maxReadBlockSize;
     }
 
     public TopN topN() {
@@ -72,7 +79,8 @@ public class ScalarSearch implements Serializable {
     }
 
     public ScalarSearch withIncludeRowIds(@Nullable RoaringNavigableMap64 includeRowIds) {
-        return new ScalarSearch(topN, includeRowIds, maxResultSize, maxScannedRowIds);
+        return new ScalarSearch(
+                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
     }
 
     public long maxResultSize() {
@@ -80,7 +88,8 @@ public class ScalarSearch implements Serializable {
     }
 
     public ScalarSearch withMaxResultSize(long maxResultSize) {
-        return new ScalarSearch(topN, includeRowIds, maxResultSize, maxScannedRowIds);
+        return new ScalarSearch(
+                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
     }
 
     public long maxScannedRowIds() {
@@ -88,7 +97,17 @@ public class ScalarSearch implements Serializable {
     }
 
     public ScalarSearch withMaxScannedRowIds(long maxScannedRowIds) {
-        return new ScalarSearch(topN, includeRowIds, maxResultSize, maxScannedRowIds);
+        return new ScalarSearch(
+                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
+    }
+
+    public long maxReadBlockSize() {
+        return maxReadBlockSize;
+    }
+
+    public ScalarSearch withMaxReadBlockSize(long maxReadBlockSize) {
+        return new ScalarSearch(
+                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
     }
 
     public ScalarSearch offsetRange(long from, long to) {
@@ -99,16 +118,18 @@ public class ScalarSearch implements Serializable {
                 topN,
                 VectorSearchUtils.offsetRowIds(includeRowIds, from, to),
                 maxResultSize,
-                maxScannedRowIds);
+                maxScannedRowIds,
+                maxReadBlockSize);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "%s, IncludeRows(%s), MaxResultSize(%s), MaxScannedRowIds(%s)",
+                "%s, IncludeRows(%s), MaxResultSize(%s), MaxScannedRowIds(%s), MaxReadBlockSize(%s)",
                 topN,
                 includeRowIds == null ? "ALL" : includeRowIds.getLongCardinality(),
                 maxResultSize,
-                maxScannedRowIds);
+                maxScannedRowIds,
+                maxReadBlockSize);
     }
 }

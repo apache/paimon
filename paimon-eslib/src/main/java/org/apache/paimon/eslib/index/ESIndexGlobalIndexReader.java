@@ -1416,7 +1416,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // everything. Returning Optional.empty() here would mean "index can't evaluate" and
             // force a
             // raw-scan fallback (wrong semantics + loses the index's selectivity).
-            return Optional.of(GlobalIndexResult.create(bitmap));
+            return Optional.of(GlobalIndexResult.createExact(bitmap));
         } catch (IOException e) {
             throw new RuntimeException("Filter failed on field: " + fieldName, e);
         }
@@ -1553,7 +1553,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
         result.or(existing.get().results());
         result.andNot(matching.get().results());
-        return Optional.of(GlobalIndexResult.create(result));
+        return Optional.of(GlobalIndexResult.createExact(result));
     }
 
     private IndexFilter exactValueFilter(FieldRef fieldRef, Object literal) {
@@ -1930,7 +1930,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private static CompletableFuture<Optional<GlobalIndexResult>> emptyFilterFuture() {
         return CompletableFuture.completedFuture(
-                Optional.of(GlobalIndexResult.create(new RoaringNavigableMap64())));
+                Optional.of(GlobalIndexResult.createExact(new RoaringNavigableMap64())));
     }
 
     private static boolean isReversedRange(FieldRef fieldRef, Object from, Object to) {

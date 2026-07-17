@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -72,6 +73,14 @@ class GlobalIndexEvaluatorTest {
     }
 
     private static GlobalIndexResult resultOf(long... rowIds) {
+        RoaringNavigableMap64 bm = new RoaringNavigableMap64();
+        for (long id : rowIds) {
+            bm.add(id);
+        }
+        return GlobalIndexResult.createExact(bm);
+    }
+
+    private static GlobalIndexResult candidateResultOf(long... rowIds) {
         RoaringNavigableMap64 bm = new RoaringNavigableMap64();
         for (long id : rowIds) {
             bm.add(id);
@@ -684,6 +693,54 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testScalarSearchRejectsMultipleOrders() {
+        RowType rowType = rowType();
+        AtomicInteger requestedField = new AtomicInteger(-1);
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            requestedField.set(fieldId);
+                            return Collections.singletonList(scalarReaderReturning(resultOf(1, 2)));
+                        });
+        ScalarSearch search =
+                new ScalarSearch(
+                        new TopN(
+                                Arrays.asList(
+                                        new SortValue(
+                                                new FieldRef(0, "a", DataTypes.INT()),
+                                                DESCENDING,
+                                                NULLS_LAST),
+                                        new SortValue(
+                                                new FieldRef(1, "b", DataTypes.INT()),
+                                                DESCENDING,
+                                                NULLS_LAST)),
+                                2));
+
+        assertThat(evaluator.evaluateScalarSearch(search)).isEmpty();
+        assertThat(requestedField.get()).isEqualTo(-1);
+        evaluator.close();
+    }
+
+    @Test
+    void testCustomReaderResultDefaultsToInexact() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        readerReturning(candidateResultOf(0, 1))));
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluate(new PredicateBuilder(rowType).equal(0, 42));
+
+        assertThat(result).isPresent();
+        assertThat(result.get().isExact()).isFalse();
+        evaluator.close();
+    }
+
+    @Test
     void testScalarSearchRequiresEveryReader() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
@@ -743,13 +800,16 @@ class GlobalIndexEvaluatorTest {
                                         NULLS_LAST,
                                         2))
                         .withMaxResultSize(8)
-                        .withMaxScannedRowIds(20);
+                        .withMaxScannedRowIds(20)
+                        .withMaxReadBlockSize(1024);
 
         assertThat(evaluator.evaluateScalarSearch(search)).isPresent();
         assertThat(received[0].maxResultSize()).isEqualTo(4);
         assertThat(received[1].maxResultSize()).isEqualTo(4);
         assertThat(received[0].maxScannedRowIds()).isEqualTo(10);
         assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
+        assertThat(received[0].maxReadBlockSize()).isEqualTo(1024);
+        assertThat(received[1].maxReadBlockSize()).isEqualTo(1024);
         evaluator.close();
     }
 
@@ -769,13 +829,56 @@ class GlobalIndexEvaluatorTest {
                                         NULLS_LAST,
                                         2))
                         .withMaxResultSize(8)
-                        .withMaxScannedRowIds(20);
+                        .withMaxScannedRowIds(20)
+                        .withMaxReadBlockSize(1024);
 
         assertThat(reader.visitScalarSearch(search).join()).isPresent();
         assertThat(received[0].maxResultSize()).isEqualTo(4);
         assertThat(received[1].maxResultSize()).isEqualTo(4);
         assertThat(received[0].maxScannedRowIds()).isEqualTo(10);
         assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
+        assertThat(received[0].maxReadBlockSize()).isEqualTo(1024);
+        assertThat(received[1].maxReadBlockSize()).isEqualTo(1024);
+    }
+
+    @Test
+    void testUnionScalarSearchStartsReadersSequentially() {
+        CompletableFuture<Optional<GlobalIndexResult>> first = new CompletableFuture<>();
+        AtomicBoolean secondStarted = new AtomicBoolean();
+        GlobalIndexReader firstReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+                            ScalarSearch scalarSearch) {
+                        return first;
+                    }
+                };
+        GlobalIndexReader secondReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+                            ScalarSearch scalarSearch) {
+                        secondStarted.set(true);
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2)));
+                    }
+                };
+        UnionGlobalIndexReader reader =
+                new UnionGlobalIndexReader(Arrays.asList(firstReader, secondReader));
+        ScalarSearch search =
+                new ScalarSearch(
+                                new TopN(
+                                        new FieldRef(1, "b", DataTypes.INT()),
+                                        DESCENDING,
+                                        NULLS_LAST,
+                                        1))
+                        .withMaxResultSize(2);
+
+        CompletableFuture<Optional<GlobalIndexResult>> result = reader.visitScalarSearch(search);
+        assertThat(secondStarted).isFalse();
+
+        first.complete(Optional.of(resultOf(1)));
+        assertThat(result.join()).isPresent();
+        assertThat(secondStarted).isTrue();
     }
 
     @Test

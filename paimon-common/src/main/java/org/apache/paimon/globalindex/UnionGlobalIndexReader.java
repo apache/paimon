@@ -22,6 +22,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -175,55 +176,51 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                 scalarSearch
                         .withMaxResultSize(childMaxResultSize)
                         .withMaxScannedRowIds(childMaxScannedRowIds);
-        return unionAsync(
-                reader -> reader.visitScalarSearch(childSearch),
-                true,
-                scalarSearch.maxResultSize());
+        ScalarUnionAccumulator accumulator = new ScalarUnionAccumulator();
+        CompletableFuture<ScalarUnionAccumulator> future =
+                CompletableFuture.completedFuture(accumulator);
+        for (GlobalIndexReader reader : readers) {
+            future =
+                    future.thenCompose(
+                            current -> {
+                                if (current.failed) {
+                                    return CompletableFuture.completedFuture(current);
+                                }
+                                try {
+                                    return reader.visitScalarSearch(childSearch)
+                                            .thenApply(
+                                                    child -> {
+                                                        current.add(
+                                                                child,
+                                                                scalarSearch.maxResultSize());
+                                                        return current;
+                                                    });
+                                } catch (UnsupportedOperationException ignored) {
+                                    current.failed = true;
+                                    return CompletableFuture.completedFuture(current);
+                                }
+                            });
+        }
+        return future.thenApply(ScalarUnionAccumulator::result);
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
-        return unionAsync(visitor, false, Long.MAX_VALUE);
-    }
-
-    private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
-            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor,
-            boolean requireAllReaders,
-            long maxResultSize) {
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            try {
-                futures.add(visitor.apply(reader));
-            } catch (UnsupportedOperationException e) {
-                if (requireAllReaders) {
-                    return CompletableFuture.completedFuture(Optional.empty());
-                }
-                throw e;
-            }
+            futures.add(visitor.apply(reader));
         }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
                             Optional<GlobalIndexResult> result = Optional.empty();
                             boolean exact = true;
-                            long resultSize = 0;
                             for (CompletableFuture<Optional<GlobalIndexResult>> f : futures) {
                                 Optional<GlobalIndexResult> current = f.join();
                                 if (!current.isPresent()) {
-                                    if (requireAllReaders) {
-                                        return Optional.empty();
-                                    }
                                     exact = false;
                                     continue;
-                                }
-                                long currentSize = current.get().results().getLongCardinality();
-                                if (Long.MAX_VALUE - resultSize < currentSize) {
-                                    return Optional.empty();
-                                }
-                                resultSize += currentSize;
-                                if (resultSize > maxResultSize) {
-                                    return Optional.empty();
                                 }
                                 if (!result.isPresent()) {
                                     result = current;
@@ -237,6 +234,41 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                             return Optional.of(
                                     result.get().withExact(exact && result.get().isExact()));
                         });
+    }
+
+    private static class ScalarUnionAccumulator {
+        private final RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
+        private boolean exact = true;
+        private boolean hasResult;
+        private boolean failed;
+        private long resultSize;
+
+        private void add(Optional<GlobalIndexResult> result, long maxResultSize) {
+            if (!result.isPresent()) {
+                failed = true;
+                return;
+            }
+            long currentSize = result.get().results().getLongCardinality();
+            if (Long.MAX_VALUE - resultSize < currentSize) {
+                failed = true;
+                return;
+            }
+            resultSize += currentSize;
+            if (resultSize > maxResultSize) {
+                failed = true;
+                return;
+            }
+            rowIds.or(result.get().results());
+            exact &= result.get().isExact();
+            hasResult = true;
+        }
+
+        private Optional<GlobalIndexResult> result() {
+            if (failed || !hasResult) {
+                return Optional.empty();
+            }
+            return Optional.of(GlobalIndexResult.create(rowIds, exact));
+        }
     }
 
     @Override

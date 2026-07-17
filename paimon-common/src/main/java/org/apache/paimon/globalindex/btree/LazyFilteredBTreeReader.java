@@ -27,6 +27,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
@@ -183,7 +184,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 new BTreeIndexReader.ScalarSearchResultAccumulator(
                         scalarSearch.maxResultSize(), scalarSearch.maxScannedRowIds());
         if (limit == 0) {
-            return Optional.of(GlobalIndexResult.create(result.rowIds()));
+            return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
         }
 
         SortValue order = scalarSearch.topN().orders().get(0);
@@ -192,7 +193,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 return Optional.empty();
             }
             if (result.cardinality() >= limit) {
-                return Optional.of(GlobalIndexResult.create(result.rowIds()));
+                return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
             }
         }
 
@@ -204,7 +205,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 && !addNullRows(readers, scalarSearch, result)) {
             return Optional.empty();
         }
-        return Optional.of(GlobalIndexResult.create(result.rowIds()));
+        return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
     }
 
     private boolean addNullRows(
@@ -213,7 +214,12 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             BTreeIndexReader.ScalarSearchResultAccumulator result) {
         RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
         for (BTreeIndexReader reader : readers) {
-            RoaringNavigableMap64 nullRowIds = reader.nullRowIds();
+            Optional<RoaringNavigableMap64> optionalNullRowIds =
+                    reader.nullRowIds(scalarSearch.maxReadBlockSize());
+            if (!optionalNullRowIds.isPresent()) {
+                return false;
+            }
+            RoaringNavigableMap64 nullRowIds = optionalNullRowIds.get();
             if (!result.reserveScannedRowIds(nullRowIds.getLongCardinality())) {
                 return false;
             }
@@ -242,7 +248,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         PriorityQueue<EntryCursor> cursors = new PriorityQueue<>(cursorComparator);
         try {
             for (BTreeIndexReader reader : readers) {
-                EntryCursor cursor = new EntryCursor(reader, order.direction());
+                EntryCursor cursor =
+                        new EntryCursor(reader, order.direction(), scalarSearch.maxReadBlockSize());
                 if (cursor.advance()) {
                     cursors.offer(cursor);
                 }
@@ -267,6 +274,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 }
             }
             return true;
+        } catch (SstFileReader.BlockTooLargeException ignored) {
+            return false;
         } catch (IOException e) {
             throw new RuntimeException("Failed to scan BTree index files for scalar TopN.", e);
         }
@@ -300,13 +309,16 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         private final BTreeIndexReader.ReverseEntryIterator reverseIterator;
         private BTreeIndexReader.KeyRowIds current;
 
-        private EntryCursor(BTreeIndexReader reader, SortValue.SortDirection direction) {
+        private EntryCursor(
+                BTreeIndexReader reader, SortValue.SortDirection direction, long maxReadBlockSize) {
             this.direction = direction;
             this.forwardIterator =
-                    direction == SortValue.SortDirection.ASCENDING ? reader.entryIterator() : null;
+                    direction == SortValue.SortDirection.ASCENDING
+                            ? reader.entryIterator(maxReadBlockSize)
+                            : null;
             this.reverseIterator =
                     direction == SortValue.SortDirection.DESCENDING
-                            ? reader.reverseEntryIterator()
+                            ? reader.reverseEntryIterator(maxReadBlockSize)
                             : null;
         }
 

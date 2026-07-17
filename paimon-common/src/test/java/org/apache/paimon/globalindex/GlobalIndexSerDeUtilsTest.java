@@ -43,6 +43,18 @@ public class GlobalIndexSerDeUtilsTest {
 
         assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results()).isEqualTo(bitmap);
+        assertThat(deserialized.isExact()).isFalse();
+    }
+
+    @Test
+    public void testSerializeAndDeserializeExactGlobalIndexResult() throws IOException {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5, 10);
+        GlobalIndexResult original = GlobalIndexResult.createExact(bitmap);
+
+        GlobalIndexResult deserialized = deserialize(serialize(original));
+
+        assertThat(deserialized.results()).isEqualTo(bitmap);
+        assertThat(deserialized.isExact()).isTrue();
     }
 
     @Test
@@ -54,6 +66,7 @@ public class GlobalIndexSerDeUtilsTest {
 
         assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results().isEmpty()).isTrue();
+        assertThat(deserialized.isExact()).isTrue();
     }
 
     @Test
@@ -72,6 +85,7 @@ public class GlobalIndexSerDeUtilsTest {
 
         assertThat(deserialized).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results()).isEqualTo(bitmap);
+        assertThat(deserialized.isExact()).isTrue();
 
         ScoredGlobalIndexResult topkResult = (ScoredGlobalIndexResult) deserialized;
         ScoreGetter scoreGetter = topkResult.scoreGetter();
@@ -104,6 +118,22 @@ public class GlobalIndexSerDeUtilsTest {
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 1L)).isEqualTo(0.5f);
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 100L)).isEqualTo(0.3f);
         assertThat(scoreGetter.score(Long.MAX_VALUE - 1)).isEqualTo(0.1f);
+    }
+
+    @Test
+    public void testDeserializeLegacyResultAsInexact() throws IOException {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5, 10);
+        byte[] bitmapBytes = bitmap.serialize();
+        DataOutputSerializer output = new DataOutputSerializer(1024);
+        output.writeInt(1);
+        output.writeInt(bitmapBytes.length);
+        output.write(bitmapBytes);
+        output.writeInt(0);
+
+        GlobalIndexResult deserialized = deserialize(output.getCopyOfBuffer());
+
+        assertThat(deserialized.results()).isEqualTo(bitmap);
+        assertThat(deserialized.isExact()).isFalse();
     }
 
     private byte[] serialize(GlobalIndexResult result) throws IOException {

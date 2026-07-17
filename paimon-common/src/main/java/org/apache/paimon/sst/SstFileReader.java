@@ -19,6 +19,7 @@
 package org.apache.paimon.sst;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
@@ -35,6 +36,7 @@ import java.util.Comparator;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_INT_SIZE;
 
 /**
  * An SST File Reader which serves point queries and range queries. Users can call {@code
@@ -106,22 +108,60 @@ public class SstFileReader implements Closeable {
         return dataBlock.iterator();
     }
 
+    private BlockIterator getNextBlock(
+            BlockIterator indexBlockIterator, long maxUncompressedBlockSize) throws IOException {
+        MemorySlice blockHandle = indexBlockIterator.next().getValue();
+        BlockReader dataBlock =
+                readBlock(
+                        BlockHandle.readBlockHandle(blockHandle.toInput()),
+                        false,
+                        maxUncompressedBlockSize);
+        return dataBlock.iterator();
+    }
+
     /**
      * @param blockHandle The block handle.
      * @param index Whether read the block as an index.
      * @return The reader of the target block.
      */
     private BlockReader readBlock(BlockHandle blockHandle, boolean index) {
-        // read block trailer
+        BlockTrailer blockTrailer = readBlockTrailer(blockHandle);
+        return readBlock(blockHandle, index, blockTrailer);
+    }
+
+    private BlockReader readBlock(
+            BlockHandle blockHandle, boolean index, long maxUncompressedBlockSize)
+            throws IOException {
+        BlockTrailer blockTrailer = readBlockTrailer(blockHandle);
+        long uncompressedBlockSize = uncompressedBlockSize(blockHandle, blockTrailer);
+        if (uncompressedBlockSize > maxUncompressedBlockSize) {
+            throw new BlockTooLargeException(uncompressedBlockSize, maxUncompressedBlockSize);
+        }
+        return readBlock(blockHandle, index, blockTrailer);
+    }
+
+    private BlockTrailer readBlockTrailer(BlockHandle blockHandle) {
         MemorySegment trailerData =
                 blockCache.getBlock(
                         blockHandle.offset() + blockHandle.size(),
                         BlockTrailer.ENCODED_LENGTH,
                         b -> b,
                         true);
-        BlockTrailer blockTrailer =
-                BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
+        return BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
+    }
 
+    private long uncompressedBlockSize(BlockHandle blockHandle, BlockTrailer blockTrailer)
+            throws IOException {
+        if (blockTrailer.getCompressionType() == BlockCompressionType.NONE) {
+            return blockHandle.size();
+        }
+        int prefixLength = Math.min(MAX_VAR_INT_SIZE, blockHandle.size());
+        byte[] prefix = blockCache.read(blockHandle.offset(), prefixLength);
+        return MemorySlice.wrap(prefix).toInput().readVarLenInt();
+    }
+
+    private BlockReader readBlock(
+            BlockHandle blockHandle, boolean index, BlockTrailer blockTrailer) {
         MemorySegment unCompressedBlock =
                 blockCache.getBlock(
                         blockHandle.offset(),
@@ -129,6 +169,18 @@ public class SstFileReader implements Closeable {
                         bytes -> decompressBlock(bytes, blockTrailer),
                         index);
         return BlockReader.create(MemorySlice.wrap(unCompressedBlock), comparator);
+    }
+
+    /** Raised before loading a data block whose uncompressed size exceeds the caller's limit. */
+    public static class BlockTooLargeException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        private BlockTooLargeException(long blockSize, long maxBlockSize) {
+            super(
+                    String.format(
+                            "Uncompressed SST block size %s exceeds limit %s.",
+                            blockSize, maxBlockSize));
+        }
     }
 
     private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
@@ -220,6 +272,20 @@ public class SstFileReader implements Closeable {
             return getNextBlock(indexIterator);
         }
 
+        public BlockIterator readBatch(long maxUncompressedBlockSize) throws IOException {
+            if (seekedDataBlock != null) {
+                BlockIterator result = seekedDataBlock;
+                seekedDataBlock = null;
+                return result;
+            }
+
+            if (!indexIterator.hasNext()) {
+                return null;
+            }
+
+            return getNextBlock(indexIterator, maxUncompressedBlockSize);
+        }
+
         public BlockIterator readBatchReverse() throws IOException {
             if (!indexIterator.hasPrevious()) {
                 return null;
@@ -228,6 +294,22 @@ public class SstFileReader implements Closeable {
             MemorySlice blockHandle = indexIterator.previous().getValue();
             BlockReader dataBlock =
                     readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
+            BlockIterator iterator = dataBlock.iterator();
+            iterator.seekToLast();
+            return iterator;
+        }
+
+        public BlockIterator readBatchReverse(long maxUncompressedBlockSize) throws IOException {
+            if (!indexIterator.hasPrevious()) {
+                return null;
+            }
+
+            MemorySlice blockHandle = indexIterator.previous().getValue();
+            BlockReader dataBlock =
+                    readBlock(
+                            BlockHandle.readBlockHandle(blockHandle.toInput()),
+                            false,
+                            maxUncompressedBlockSize);
             BlockIterator iterator = dataBlock.iterator();
             iterator.seekToLast();
             return iterator;

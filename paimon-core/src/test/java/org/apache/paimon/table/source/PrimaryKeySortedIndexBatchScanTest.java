@@ -235,7 +235,7 @@ class PrimaryKeySortedIndexBatchScanTest {
         when(reader.visitEqual(any(), eq(42)))
                 .thenReturn(
                         CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.create(positions))));
+                                Optional.of(GlobalIndexResult.createExact(positions))));
         return reader;
     }
 

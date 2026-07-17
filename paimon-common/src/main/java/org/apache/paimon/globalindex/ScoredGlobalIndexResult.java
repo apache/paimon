@@ -28,6 +28,11 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
 
     ScoreGetter scoreGetter();
 
+    @Override
+    default ScoredGlobalIndexResult withExact(boolean exact) {
+        return exact == isExact() ? this : create(results(), scoreGetter(), exact);
+    }
+
     default GlobalIndexResult and(GlobalIndexResult other) {
         throw new UnsupportedOperationException("Please realize this by specified global index");
     }
@@ -44,7 +49,10 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             roaringNavigableMap64Offset.add(rowId + offset);
         }
 
-        return create(roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
+        return create(
+                roaringNavigableMap64Offset,
+                rowId -> thisScoreGetter.score(rowId - offset),
+                isExact());
     }
 
     @Override
@@ -59,23 +67,15 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
         RoaringNavigableMap64 otherRowIds = other.results();
         ScoreGetter otherScoreGetter = ((ScoredGlobalIndexResult) other).scoreGetter();
 
-        final RoaringNavigableMap64 resultOr = RoaringNavigableMap64.or(thisRowIds, otherRowIds);
-        return new ScoredGlobalIndexResult() {
-            @Override
-            public ScoreGetter scoreGetter() {
-                return rowId -> {
+        return create(
+                RoaringNavigableMap64.or(thisRowIds, otherRowIds),
+                rowId -> {
                     if (thisRowIds.contains(rowId)) {
                         return thisScoreGetter.score(rowId);
                     }
                     return otherScoreGetter.score(rowId);
-                };
-            }
-
-            @Override
-            public RoaringNavigableMap64 results() {
-                return resultOr;
-            }
-        };
+                },
+                isExact() && other.isExact());
     }
 
     default ScoredGlobalIndexResult topK(int k) {
@@ -111,16 +111,22 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             topKRowIds.add(entry[0]);
         }
 
-        return ScoredGlobalIndexResult.create(topKRowIds, scoreGetter);
+        return ScoredGlobalIndexResult.create(topKRowIds, scoreGetter, isExact());
     }
 
     /** Returns an empty {@link ScoredGlobalIndexResult}. */
     static ScoredGlobalIndexResult createEmpty() {
-        return create(new RoaringNavigableMap64(), rowId -> 0);
+        return create(new RoaringNavigableMap64(), rowId -> 0, true);
     }
 
     /** Returns a new {@link ScoredGlobalIndexResult} from bitmap. */
     static ScoredGlobalIndexResult create(RoaringNavigableMap64 bitmap, ScoreGetter scoreGetter) {
+        return create(bitmap, scoreGetter, true);
+    }
+
+    /** Returns a new {@link ScoredGlobalIndexResult} with exactness metadata. */
+    static ScoredGlobalIndexResult create(
+            RoaringNavigableMap64 bitmap, ScoreGetter scoreGetter, boolean exact) {
         return new ScoredGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
@@ -130,6 +136,11 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             @Override
             public RoaringNavigableMap64 results() {
                 return bitmap;
+            }
+
+            @Override
+            public boolean isExact() {
+                return exact;
             }
         };
     }

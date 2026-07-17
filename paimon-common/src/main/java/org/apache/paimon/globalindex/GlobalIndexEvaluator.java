@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
@@ -86,6 +87,9 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     public Optional<GlobalIndexResult> evaluateScalarSearch(ScalarSearch scalarSearch) {
+        if (scalarSearch.topN().orders().size() != 1) {
+            return Optional.empty();
+        }
         FieldRef fieldRef = scalarSearch.topN().orders().get(0).field();
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
@@ -103,21 +107,17 @@ public class GlobalIndexEvaluator implements Closeable {
                 scalarSearch
                         .withMaxResultSize(readerMaxResultSize)
                         .withMaxScannedRowIds(readerMaxScannedRowIds);
-        List<CompletableFuture<Optional<GlobalIndexResult>>> futures = new ArrayList<>();
-        for (GlobalIndexReader reader : readers) {
-            try {
-                futures.add(reader.visitScalarSearch(readerSearch));
-            } catch (UnsupportedOperationException ignored) {
-                return Optional.empty();
-            }
-        }
-
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        boolean exact = true;
+        long resultSize = 0;
         try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
-            Optional<GlobalIndexResult> result = Optional.empty();
-            long resultSize = 0;
-            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
-                Optional<GlobalIndexResult> current = future.join();
+            for (GlobalIndexReader reader : readers) {
+                Optional<GlobalIndexResult> current;
+                try {
+                    current = reader.visitScalarSearch(readerSearch).get();
+                } catch (UnsupportedOperationException ignored) {
+                    return Optional.empty();
+                }
                 if (!current.isPresent()) {
                     return Optional.empty();
                 }
@@ -129,13 +129,17 @@ public class GlobalIndexEvaluator implements Closeable {
                 if (resultSize > scalarSearch.maxResultSize()) {
                     return Optional.empty();
                 }
-                result = result.isPresent() ? Optional.of(result.get().or(current.get())) : current;
+                result.or(current.get().results());
+                exact &= current.get().isExact();
             }
-            return result;
+            return Optional.of(GlobalIndexResult.create(result, exact));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during scalar index evaluation", e);
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof UnsupportedOperationException) {
+                return Optional.empty();
+            }
             if (e.getCause() instanceof RuntimeException) {
                 throw (RuntimeException) e.getCause();
             }
