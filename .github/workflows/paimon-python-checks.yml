@@ -86,11 +86,13 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
+        if: matrix.python-version != '3.7'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install paimon-full-text native dependency
+        if: matrix.python-version != '3.7'
         run: |
           bash .github/workflows/install-paimon-full-text.sh native
 
@@ -112,6 +114,9 @@ jobs:
           echo "✓ dev/requirements.txt can be resolved on this Python"
 
       - name: Build Java
+        # 3.7 runs a Python-only core subset (mixed tests skipped), so it does
+        # not need the Java modules built.
+        if: matrix.python-version != '3.7'
         run: |
           echo "Start compiling modules"
           mvn -T 2C -B -ntp clean install -DskipTests
