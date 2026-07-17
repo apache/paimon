@@ -32,8 +32,10 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -55,6 +57,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -136,6 +140,64 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         });
 
         assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+    }
+
+    @Test
+    public void testBTreeGlobalIndexPredicateTopNPushdown() throws Exception {
+        write(1000L);
+        createIndex("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        RoaringNavigableMap64 candidateRows = new RoaringNavigableMap64();
+        candidateRows.add(100L);
+        candidateRows.add(900L);
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withTopN(topN).withTopNRowIdFilter(candidateRows);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        assertThat(indexedRanges(plan)).containsExactly(new Range(900L, 900L));
+        assertThat(readF1(readBuilder, plan)).containsExactly("a900");
+    }
+
+    @Test
+    public void testBTreeTopNFallsBackForUnindexedTail() throws Exception {
+        write(500L);
+        createIndex("f0");
+        appendRows(500, 1000);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        RoaringNavigableMap64 candidateRows = new RoaringNavigableMap64();
+        candidateRows.add(100L);
+        candidateRows.add(900L);
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withTopN(topN).withTopNRowIdFilter(candidateRows);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(indexedRanges(plan))
+                .containsExactlyInAnyOrder(new Range(100L, 100L), new Range(900L, 900L));
+        assertThat(readF1(readBuilder, plan)).containsExactlyInAnyOrder("a100", "a900");
+    }
+
+    @Test
+    public void testCandidateTopNDoesNotApplyWholeTableSplitPruning() throws Exception {
+        write(500L);
+        appendRows(500, 1000);
+        createIndex("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        RoaringNavigableMap64 candidateRows = new RoaringNavigableMap64();
+        candidateRows.add(100L);
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withTopN(topN).withTopNRowIdFilter(candidateRows);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(indexedRanges(plan)).containsExactly(new Range(100L, 100L));
+        assertThat(readF1(readBuilder, plan)).containsExactly("a100");
     }
 
     @Test
@@ -420,6 +482,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .createReader(plan)
                 .forEachRemaining(row -> readF1.add(row.getString(1).toString()));
         return readF1;
+    }
+
+    private List<Range> indexedRanges(TableScan.Plan plan) {
+        return plan.splits().stream()
+                .map(split -> (IndexedSplit) split)
+                .flatMap(split -> split.rowRanges().stream())
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private List<String> readF1(FileStoreTable table, Predicate predicate) throws Exception {

@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
@@ -135,6 +136,12 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     protected Optional<GlobalIndexResult> visitBetween(
             BTreeIndexReader reader, Object from, Object to) {
         return reader.visitBetween(from, to);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+            ScalarSearch scalarSearch) {
+        return visitAllFiles(reader -> reader.visitScalarSearch(scalarSearch));
     }
 
     @Override

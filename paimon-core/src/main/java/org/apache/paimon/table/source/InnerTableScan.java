@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
@@ -100,6 +101,10 @@ public interface InnerTableScan extends TableScan {
 
     default InnerTableScan withTopN(TopN topN) {
         return this;
+    }
+
+    default InnerTableScan withTopNRowIdFilter(RoaringNavigableMap64 rowIds) {
+        throw new UnsupportedOperationException("TopN row ID filtering is not supported.");
     }
 
     default InnerTableScan dropStats() {

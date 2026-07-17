@@ -276,6 +276,10 @@ public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<Glo
                 .collect(Collectors.toList());
     }
 
+    public List<GlobalIndexIOMeta> allFiles() {
+        return files.stream().map(Pair::getLeft).collect(Collectors.toList());
+    }
+
     public static byte[] prefixUpperBound(byte[] prefix) {
         for (int i = prefix.length - 1; i >= 0; i--) {
             int unsignedByte = prefix[i] & 0xFF;

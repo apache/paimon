@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
+import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.AppendBatchTableScan;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
@@ -68,6 +70,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private final AppendBatchTableScan batchScan;
 
     private Predicate filter;
+    private TopN topN;
+    private RoaringNavigableMap64 topNRowIdFilter;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -148,7 +152,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withTopN(TopN topN) {
-        batchScan.withTopN(topN);
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withTopNRowIdFilter(RoaringNavigableMap64 rowIds) {
+        this.topNRowIdFilter = rowIds;
         return this;
     }
 
@@ -265,9 +275,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
             }
+            if (rowRangeIndex == null && topNRowIdFilter != null) {
+                rowRangeIndex = RowRangeIndex.create(topNRowIdFilter.toRangeList());
+            }
         }
 
         if (rowRangeIndex == null) {
+            batchScan.withTopN(topN);
             return batchScan.plan();
         }
 
@@ -279,26 +293,62 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
-        if (filter == null) {
+        if (filter == null && topN == null) {
             return Optional.empty();
         }
         CoreOptions options = table.coreOptions();
         if (!options.globalIndexEnabled()) {
             return Optional.empty();
         }
-        Predicate globalIndexFilter = rowIdSafeResidualFilter(filter);
-        if (globalIndexFilter == null) {
+        Predicate globalIndexFilter = filter == null ? null : rowIdSafeResidualFilter(filter);
+        if (filter != null && globalIndexFilter == null) {
             return Optional.empty();
         }
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+                GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter, topN);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
+            if (topN != null) {
+                RoaringNavigableMap64 includeRowIds = null;
+                if (topNRowIdFilter != null) {
+                    includeRowIds = new RoaringNavigableMap64();
+                    includeRowIds.or(topNRowIdFilter);
+                }
+                if (globalIndexFilter != null) {
+                    Optional<GlobalIndexResult> filterResult = scanner.scan(globalIndexFilter);
+                    if (!filterResult.isPresent()
+                            || intersectsUnindexedRows(
+                                    includeRowIds,
+                                    scanner.unindexedRowsForCorrectness(globalIndexFilter))) {
+                        return Optional.empty();
+                    }
+                    if (includeRowIds == null) {
+                        includeRowIds = filterResult.get().results();
+                    } else {
+                        includeRowIds.and(filterResult.get().results());
+                    }
+                }
+
+                String orderFieldName = topN.orders().get(0).field().name();
+                int orderFieldId = table.rowType().getField(orderFieldName).id();
+                if (intersectsUnindexedRows(
+                        includeRowIds, scanner.unindexedRowsForCorrectness(orderFieldId))) {
+                    return Optional.empty();
+                }
+
+                Optional<GlobalIndexResult> result =
+                        scanner.scan(new ScalarSearch(topN).withIncludeRowIds(includeRowIds));
+                if (result.isPresent()) {
+                    LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
+                }
+                return result;
+            }
+
             Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
             if (result.isPresent()) {
                 LOG.info("Scan table '{}' with global index.", table.name());
@@ -308,6 +358,20 @@ public class DataEvolutionBatchScan implements DataTableScan {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private boolean intersectsUnindexedRows(
+            @Nullable RoaringNavigableMap64 includeRowIds, GlobalIndexResult unindexedRows) {
+        if (unindexedRows.results().isEmpty()) {
+            return false;
+        }
+        if (includeRowIds == null) {
+            return true;
+        }
+        RoaringNavigableMap64 intersection = new RoaringNavigableMap64();
+        intersection.or(unindexedRows.results());
+        intersection.and(includeRowIds);
+        return !intersection.isEmpty();
     }
 
     @VisibleForTesting

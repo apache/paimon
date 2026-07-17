@@ -30,6 +30,8 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BlockIterator;
@@ -127,6 +129,35 @@ public class BTreeIndexReader implements Closeable {
             KeyRowIds current = next;
             next = null;
             return current;
+        }
+    }
+
+    /** Reverse iterator over all non-null key entries. */
+    public class ReverseEntryIterator {
+        private final SstFileReader.SstFileIterator fileIter;
+        private BlockIterator dataIter;
+
+        private ReverseEntryIterator() {
+            this.fileIter = reader.createReverseIterator();
+        }
+
+        public boolean hasNext() throws IOException {
+            while (dataIter == null || !dataIter.hasPrevious()) {
+                dataIter = fileIter.readBatchReverse();
+                if (dataIter == null) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public KeyRowIds next() throws IOException {
+            if (!hasNext()) {
+                throw new NoSuchElementException("No more entries in btree index file.");
+            }
+            Map.Entry<MemorySlice, MemorySlice> entry = dataIter.previous();
+            return new KeyRowIds(
+                    keySerializer.deserialize(entry.getKey()), deserializeRowIds(entry.getValue()));
         }
     }
 
@@ -235,6 +266,10 @@ public class BTreeIndexReader implements Closeable {
         return new EntryIterator();
     }
 
+    public ReverseEntryIterator reverseEntryIterator() {
+        return new ReverseEntryIterator();
+    }
+
     /** Visits all local row ids belonging to null keys. */
     public void scanNullRowIds(LongConsumer consumer) {
         for (long rowId : nullBitmap.get()) {
@@ -337,6 +372,94 @@ public class BTreeIndexReader implements Closeable {
 
     public Optional<GlobalIndexResult> visitBetween(Object from, Object to) {
         return createResult(() -> rangeQuery(from, to, true, true));
+    }
+
+    public Optional<GlobalIndexResult> visitScalarSearch(ScalarSearch scalarSearch) {
+        return createResult(() -> scalarSearch(scalarSearch));
+    }
+
+    private RoaringNavigableMap64 scalarSearch(ScalarSearch scalarSearch) throws IOException {
+        SortValue order = scalarSearch.topN().orders().get(0);
+        int limit = scalarSearch.topN().limit();
+        RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+
+        if (order.nullOrdering() == SortValue.NullOrdering.NULLS_FIRST) {
+            result.or(matchingNullRows(includeRowIds));
+            if (result.getLongCardinality() >= limit) {
+                return result;
+            }
+            result.or(
+                    matchingNonNullRows(
+                            order.direction(), limit - result.getLongCardinality(), includeRowIds));
+            return result;
+        }
+
+        result.or(matchingNonNullRows(order.direction(), limit, includeRowIds));
+        if (result.getLongCardinality() < limit) {
+            result.or(matchingNullRows(includeRowIds));
+        }
+        return result;
+    }
+
+    private RoaringNavigableMap64 matchingNonNullRows(
+            SortValue.SortDirection direction,
+            long limit,
+            @Nullable RoaringNavigableMap64 includeRowIds)
+            throws IOException {
+        if (limit <= 0 || minKey == null) {
+            return new RoaringNavigableMap64();
+        }
+
+        if (direction == SortValue.SortDirection.ASCENDING) {
+            RoaringNavigableMap64 result = new RoaringNavigableMap64();
+            EntryIterator iterator = entryIterator();
+            while (iterator.hasNext()) {
+                RoaringNavigableMap64 group = matchingRows(iterator.next().rowIds(), includeRowIds);
+                if (group.isEmpty()) {
+                    continue;
+                }
+                result.or(group);
+                if (result.getLongCardinality() >= limit) {
+                    break;
+                }
+            }
+            return result;
+        }
+
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        ReverseEntryIterator iterator = reverseEntryIterator();
+        while (iterator.hasNext()) {
+            RoaringNavigableMap64 group = matchingRows(iterator.next().rowIds(), includeRowIds);
+            if (group.isEmpty()) {
+                continue;
+            }
+            result.or(group);
+            if (result.getLongCardinality() >= limit) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private RoaringNavigableMap64 matchingNullRows(@Nullable RoaringNavigableMap64 includeRowIds) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        result.or(nullBitmap.get());
+        if (includeRowIds != null) {
+            result.and(includeRowIds);
+        }
+        return result;
+    }
+
+    private RoaringNavigableMap64 matchingRows(
+            long[] rowIds, @Nullable RoaringNavigableMap64 includeRowIds) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        for (long rowId : rowIds) {
+            if (includeRowIds == null || includeRowIds.contains(rowId)) {
+                result.add(rowId);
+            }
+        }
+        return result;
     }
 
     private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {

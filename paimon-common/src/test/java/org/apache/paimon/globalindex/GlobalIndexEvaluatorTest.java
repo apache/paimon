@@ -23,6 +23,8 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -44,6 +46,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -655,6 +659,31 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testScalarSearchUsesOrderFieldAndUnionsReaders() {
+        RowType rowType = rowType();
+        AtomicInteger requestedField = new AtomicInteger(-1);
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            requestedField.set(fieldId);
+                            return Arrays.asList(
+                                    scalarReaderReturning(resultOf(1, 2)),
+                                    scalarReaderReturning(resultOf(3, 4)));
+                        });
+        ScalarSearch search =
+                new ScalarSearch(
+                        new TopN(new FieldRef(1, "b", DataTypes.INT()), DESCENDING, NULLS_LAST, 2));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluateScalarSearch(search);
+
+        assertThat(requestedField.get()).isEqualTo(1);
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L, 4L);
+        evaluator.close();
+    }
+
+    @Test
     void testUnionReaderClosesRemainingReadersAfterFailure() {
         AtomicBoolean secondClosed = new AtomicBoolean();
         GlobalIndexReader failingReader =
@@ -781,5 +810,15 @@ class GlobalIndexEvaluatorTest {
 
         @Override
         public void close() throws IOException {}
+    }
+
+    private static GlobalIndexReader scalarReaderReturning(GlobalIndexResult expectedResult) {
+        return new StubGlobalIndexReader(null) {
+            @Override
+            public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+                    ScalarSearch scalarSearch) {
+                return CompletableFuture.completedFuture(Optional.of(expectedResult));
+            }
+        };
     }
 }

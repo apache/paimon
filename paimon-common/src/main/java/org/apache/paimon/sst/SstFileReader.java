@@ -92,6 +92,12 @@ public class SstFileReader implements Closeable {
         return new SstFileIterator(indexBlock.iterator());
     }
 
+    public SstFileIterator createReverseIterator() {
+        BlockIterator iterator = indexBlock.iterator();
+        iterator.seekToLast();
+        return new SstFileIterator(iterator);
+    }
+
     private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
         // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
@@ -212,6 +218,19 @@ public class SstFileReader implements Closeable {
             }
 
             return getNextBlock(indexIterator);
+        }
+
+        public BlockIterator readBatchReverse() throws IOException {
+            if (!indexIterator.hasPrevious()) {
+                return null;
+            }
+
+            MemorySlice blockHandle = indexIterator.previous().getValue();
+            BlockReader dataBlock =
+                    readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
+            BlockIterator iterator = dataBlock.iterator();
+            iterator.seekToLast();
+            return iterator;
         }
     }
 }

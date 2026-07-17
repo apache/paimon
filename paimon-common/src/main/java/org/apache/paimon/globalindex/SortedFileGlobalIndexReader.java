@@ -294,6 +294,11 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         return Optional.of(GlobalIndexResult.create(bitmap));
     }
 
+    protected CompletableFuture<Optional<GlobalIndexResult>> visitAllFiles(
+            Function<R, Optional<GlobalIndexResult>> visitor) {
+        return visitSelectedFiles(Optional.of(fileSelector.allFiles()), visitor);
+    }
+
     protected abstract R openReader(GlobalIndexIOMeta meta);
 
     @Override

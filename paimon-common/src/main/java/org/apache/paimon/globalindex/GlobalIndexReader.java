@@ -22,6 +22,7 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
@@ -59,6 +60,11 @@ public interface GlobalIndexReader
 
     default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
             FullTextSearch fullTextSearch) {
+        throw new UnsupportedOperationException();
+    }
+
+    default CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+            ScalarSearch scalarSearch) {
         throw new UnsupportedOperationException();
     }
 

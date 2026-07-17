@@ -32,6 +32,7 @@ import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
@@ -59,6 +60,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Integer limit = null;
     private TopN topN = null;
+    private RoaringNavigableMap64 topNRowIdFilter = null;
 
     private Integer shardIndexOfThisSubtask;
     private Integer shardNumberOfParallelSubtasks;
@@ -146,6 +148,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withTopNRowIdFilter(RoaringNavigableMap64 rowIds) {
+        this.topNRowIdFilter = rowIds;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         this.shardIndexOfThisSubtask = indexOfThisSubtask;
         this.shardNumberOfParallelSubtasks = numberOfParallelSubtasks;
@@ -194,6 +202,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (topN != null) {
             tableScan.withTopN(topN);
+        }
+        if (topNRowIdFilter != null) {
+            tableScan.withTopNRowIdFilter(topNRowIdFilter);
         }
         return tableScan;
     }

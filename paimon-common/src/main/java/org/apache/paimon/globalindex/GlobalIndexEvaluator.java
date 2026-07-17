@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -73,6 +74,48 @@ public class GlobalIndexEvaluator implements Closeable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during index evaluation", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException) {
+                throw (RuntimeException) e.getCause();
+            }
+            if (e.getCause() instanceof Error) {
+                throw (Error) e.getCause();
+            }
+            throw new RuntimeException(e.getCause());
+        }
+    }
+
+    public Optional<GlobalIndexResult> evaluateScalarSearch(ScalarSearch scalarSearch) {
+        FieldRef fieldRef = scalarSearch.topN().orders().get(0).field();
+        int fieldId = rowType.getField(fieldRef.name()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures = new ArrayList<>();
+        for (GlobalIndexReader reader : readers) {
+            try {
+                futures.add(reader.visitScalarSearch(scalarSearch));
+            } catch (UnsupportedOperationException ignored) {
+                // Try another index implementation for the same field.
+            }
+        }
+        if (futures.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+            Optional<GlobalIndexResult> result = Optional.empty();
+            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                Optional<GlobalIndexResult> current = future.join();
+                if (!current.isPresent()) {
+                    continue;
+                }
+                result = result.isPresent() ? Optional.of(result.get().or(current.get())) : current;
+            }
+            return result;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during scalar index evaluation", e);
         } catch (ExecutionException e) {
             if (e.getCause() instanceof RuntimeException) {
                 throw (RuntimeException) e.getCause();

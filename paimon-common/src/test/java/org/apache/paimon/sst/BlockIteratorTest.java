@@ -84,6 +84,19 @@ public class BlockIteratorTest {
         keyOut.writeInt(ROW_NUM * 2 + 2);
         iterator.seekTo(keyOut.toSlice());
         Assertions.assertFalse(iterator.hasNext());
+
+        // 3. test reverse iteration
+        iterator.seekToLast();
+        int expected = ROW_NUM - 1;
+        while (iterator.hasPrevious()) {
+            Map.Entry<MemorySlice, MemorySlice> reverseEntry = iterator.previous();
+            Assertions.assertEquals(expected * 2, reverseEntry.getKey().readInt(0));
+            Assertions.assertArrayEquals(
+                    constructValue(valueOut, aligned, expected),
+                    reverseEntry.getValue().copyBytes());
+            expected--;
+        }
+        Assertions.assertEquals(-1, expected);
     }
 
     private MemorySlice writeBlock(boolean aligned) throws IOException {

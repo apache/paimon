@@ -110,6 +110,15 @@ public class GlobalIndexCoverage {
         return Range.sortAndMergeOverlap(unindexedRanges, true);
     }
 
+    public List<Range> unindexedRangesForCorrectness(Collection<Integer> fieldIds) {
+        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
+            return Collections.emptyList();
+        }
+
+        List<Range> indexedRanges = Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
+        return new Range(0, snapshot.nextRowId() - 1).exclude(indexedRanges);
+    }
+
     private void addCoverage(int fieldId, Range range) {
         coverageByField.computeIfAbsent(fieldId, k -> new ArrayList<>()).add(range);
     }

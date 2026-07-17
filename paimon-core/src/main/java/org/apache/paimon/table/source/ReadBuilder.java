@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import java.io.Serializable;
@@ -140,6 +141,11 @@ public interface ReadBuilder extends Serializable {
      * is a complete filter.
      */
     ReadBuilder withTopN(TopN topN);
+
+    /** Restrict TopN evaluation to the specified row IDs. */
+    default ReadBuilder withTopNRowIdFilter(RoaringNavigableMap64 rowIds) {
+        throw new UnsupportedOperationException("TopN row ID filtering is not supported.");
+    }
 
     /**
      * Specify the shard to be read, and allocate sharded files to read records. Note that this

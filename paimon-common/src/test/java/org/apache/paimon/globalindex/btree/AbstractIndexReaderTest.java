@@ -37,6 +37,8 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
@@ -58,6 +60,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -78,6 +81,9 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Common test class for BTreeIndexReader. */
@@ -304,6 +310,59 @@ public abstract class AbstractIndexReaderTest {
                             .join()
                             .get();
             Assertions.assertTrue(none.results().isEmpty());
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchWithCandidateRows() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+        for (Pair<Object, Long> pair : data) {
+            if (pair.getValue() % 3 == 0) {
+                candidates.add(pair.getValue());
+            }
+        }
+
+        List<Pair<Object, Long>> selected =
+                data.stream()
+                        .filter(pair -> candidates.contains(pair.getValue()))
+                        .collect(Collectors.toList());
+        int limit = 17;
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            Object ascendingBoundary = selected.get(limit - 1).getKey();
+            GlobalIndexResult ascending =
+                    reader.visitScalarSearch(
+                                    new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, limit))
+                                            .withIncludeRowIds(candidates))
+                            .join()
+                            .get();
+            assertResult(
+                    ascending,
+                    selected.stream()
+                            .filter(
+                                    pair ->
+                                            comparator.compare(pair.getKey(), ascendingBoundary)
+                                                    <= 0)
+                            .map(Pair::getValue)
+                            .collect(Collectors.toList()));
+
+            Object descendingBoundary = selected.get(selected.size() - limit).getKey();
+            GlobalIndexResult descending =
+                    reader.visitScalarSearch(
+                                    new ScalarSearch(new TopN(ref, DESCENDING, NULLS_LAST, limit))
+                                            .withIncludeRowIds(candidates))
+                            .join()
+                            .get();
+            assertResult(
+                    descending,
+                    selected.stream()
+                            .filter(
+                                    pair ->
+                                            comparator.compare(pair.getKey(), descendingBoundary)
+                                                    >= 0)
+                            .map(Pair::getValue)
+                            .collect(Collectors.toList()));
         }
     }
 

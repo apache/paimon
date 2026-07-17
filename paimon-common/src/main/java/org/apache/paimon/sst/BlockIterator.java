@@ -31,6 +31,7 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
     private final BlockReader reader;
     private final MemorySliceInput input;
     private BlockEntry polled;
+    private int reversePosition = -1;
 
     public BlockIterator(BlockReader reader) {
         this.reader = reader;
@@ -86,6 +87,23 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
         }
 
         return false;
+    }
+
+    public void seekToLast() {
+        polled = null;
+        reversePosition = reader.recordCount() - 1;
+    }
+
+    public boolean hasPrevious() {
+        return reversePosition >= 0;
+    }
+
+    public BlockEntry previous() {
+        if (!hasPrevious()) {
+            throw new NoSuchElementException();
+        }
+        input.setPosition(reader.seekTo(reversePosition--));
+        return readEntry();
     }
 
     private BlockEntry readEntry() {

@@ -29,6 +29,8 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -210,10 +212,19 @@ public class GlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
+        return create(table, partitionFilter, filter, null);
+    }
+
+    public static Optional<GlobalIndexScanner> create(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            @Nullable TopN topN) {
         @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
-                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
+                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter, topN))
+                        .stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         if (indexFiles.isEmpty()) {
@@ -234,11 +245,16 @@ public class GlobalIndexScanner implements Closeable {
     private static Filter<IndexManifestEntry> indexFileFilter(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
-            @Nullable Predicate filter) {
-        if (filter == null) {
+            @Nullable Predicate filter,
+            @Nullable TopN topN) {
+        if (filter == null && topN == null) {
             return entry -> false;
         }
-        Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
+        Set<Integer> filterFieldIds = new HashSet<>(collectFieldIds(table.rowType(), filter));
+        if (topN != null) {
+            String fieldName = topN.orders().get(0).field().name();
+            filterFieldIds.add(table.rowType().getField(fieldName).id());
+        }
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
                     if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
@@ -280,9 +296,37 @@ public class GlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate);
     }
 
+    public Optional<GlobalIndexResult> scan(ScalarSearch scalarSearch) {
+        return globalIndexEvaluator.evaluateScalarSearch(scalarSearch);
+    }
+
     public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         for (Range range : coverage.unindexedRanges(rowType, predicate)) {
+            rows.addRange(range);
+        }
+        return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRows(int fieldId) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (Range range : coverage.unindexedRanges(fieldId)) {
+            rows.addRange(range);
+        }
+        return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRowsForCorrectness(Predicate predicate) {
+        return unindexedRowsForCorrectness(collectFieldIds(rowType, predicate));
+    }
+
+    public GlobalIndexResult unindexedRowsForCorrectness(int fieldId) {
+        return unindexedRowsForCorrectness(Collections.singleton(fieldId));
+    }
+
+    private GlobalIndexResult unindexedRowsForCorrectness(Collection<Integer> fieldIds) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (Range range : coverage.unindexedRangesForCorrectness(fieldIds)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);

@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.ScalarSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 
@@ -154,6 +155,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                             }
                             return result;
                         });
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+            ScalarSearch scalarSearch) {
+        return unionAsync(reader -> reader.visitScalarSearch(scalarSearch));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
