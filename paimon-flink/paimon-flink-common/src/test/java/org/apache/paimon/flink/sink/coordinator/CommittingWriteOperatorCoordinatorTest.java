@@ -552,6 +552,33 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.close();
     }
 
+    /**
+     * When one subtask marks itself idle, the coordinator must skip that subtask and take the min
+     * only over the remaining active subtasks — mirroring Flink's {@code StatusWatermarkValve}.
+     */
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testAlignmentSkipsIdleSubtaskWhenSomeActive() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // cp1: subtask-0 IDLE at watermark=100, subtask-1 ACTIVE with data + watermark=500.
+        // Without idle handling this would emit min=100 and hold the snapshot back to 100.
+        // With idle handling subtask-0 is excluded and the snapshot watermark advances to 500.
+        coordinator.handleEventFromOperator(0, 0, idleEvent(1L, 100L));
+        coordinator.handleEventFromOperator(1, 0, event(500L, committable(table, 1, 1)));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.watermark()).isEqualTo(500L);
+        coordinator.close();
+    }
+
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
     public void testPollManifestCommittablesForCheckpoint() throws Exception {
@@ -662,7 +689,9 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                         checkpointId2,
                         writerCommittables,
                         CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
-                                checkpointId2, writerCommittables),
+                                checkpointId2,
+                                writerCommittables,
+                                new WatermarkAligner(writerCommittables.length)),
                         committer);
 
         BinaryRow partition = new BinaryRow(1);
@@ -751,13 +780,13 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         Map<Long, Long> upToCp1 =
                 CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
-                        1L, writerCommittables);
+                        1L, writerCommittables, new WatermarkAligner(writerCommittables.length));
         assertThat(upToCp1).hasSize(1);
         assertThat(upToCp1.get(1L)).isEqualTo(100L);
 
         Map<Long, Long> upToCp2 =
                 CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
-                        2L, writerCommittables);
+                        2L, writerCommittables, new WatermarkAligner(writerCommittables.length));
         assertThat(upToCp2).hasSize(2);
         assertThat(upToCp2.get(1L)).isEqualTo(100L);
         assertThat(upToCp2.get(2L)).isEqualTo(400L);
@@ -1177,6 +1206,14 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         return CommittableEvent.create(
                 checkpointId,
                 new CheckpointCommittables(checkpointId, committables, watermark),
+                SERIALIZER);
+    }
+
+    private CommittableEvent idleEvent(long checkpointId, long watermark) throws Exception {
+        return CommittableEvent.create(
+                checkpointId,
+                new CheckpointCommittables(
+                        checkpointId, Collections.emptyList(), watermark, /* idle */ true),
                 SERIALIZER);
     }
 
