@@ -221,6 +221,8 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
     def test_rest_catalog_commit_snapshot_with_lance_format(self):
         """Test snapshot commit with Lance format table."""
+        import pytest
+        pytest.importorskip("lance")
         from pypaimon import Schema
         import pyarrow as pa
         import tempfile
