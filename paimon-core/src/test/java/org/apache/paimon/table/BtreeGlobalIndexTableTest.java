@@ -26,7 +26,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
-import org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -51,6 +50,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils.sortAndBuild;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -334,8 +334,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : indexSplits(table, rowRanges, dataSplits)) {
-            commitMessages.addAll(
-                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, fieldName, dataSplit));
+            commitMessages.addAll(sortAndBuild(builder, table, fieldName, dataSplit));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
