@@ -26,7 +26,6 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -228,7 +227,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (toCompact.isEmpty()) {
             return Collections.emptyList();
         }
-        checkNoSharedShreddingRewrite("Compaction rewrite");
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
@@ -261,7 +259,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     public List<DataFileMeta> clusterRewrite(
             BinaryRow partition, int bucket, List<DataFileMeta> toCluster) throws Exception {
-        checkNoSharedShreddingRewrite("Cluster rewrite");
         RecordReaderIterator<InternalRow> reader =
                 createFilesIterator(partition, bucket, toCluster, null);
 
@@ -296,13 +293,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         }
 
         return rewriter.result();
-    }
-
-    private void checkNoSharedShreddingRewrite(String rewriteName) {
-        if (!MapSharedShreddingUtils.detectShreddingColumns(writeType, options).isEmpty()) {
-            throw new UnsupportedOperationException(
-                    rewriteName + " is not supported for MAP shared-shredding.");
-        }
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(
