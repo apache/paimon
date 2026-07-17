@@ -54,8 +54,16 @@ public final class SortCompactPlanMetadata implements Serializable {
 
     @Nullable private final byte[] serializedDeletionVectorEntries;
 
-    private SortCompactPlanMetadata(@Nullable byte[] serializedDeletionVectorEntries) {
+    /**
+     * Whether the base snapshot was readable when this metadata was captured. Distinguishes a
+     * successful capture of an empty deletion-vector state from a failed capture.
+     */
+    private final boolean baseSnapshotCaptured;
+
+    private SortCompactPlanMetadata(
+            @Nullable byte[] serializedDeletionVectorEntries, boolean baseSnapshotCaptured) {
         this.serializedDeletionVectorEntries = serializedDeletionVectorEntries;
+        this.baseSnapshotCaptured = baseSnapshotCaptured;
     }
 
     /** Capture index metadata from the base snapshot for the planned compact input. */
@@ -67,18 +75,19 @@ public final class SortCompactPlanMetadata implements Serializable {
         }
 
         Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries = new HashMap<>();
-        captureInto(table, baseSnapshotId, partitions, baseDeletionVectorEntries);
-        return fromCapturedMap(baseDeletionVectorEntries);
+        boolean captured =
+                captureInto(table, baseSnapshotId, partitions, baseDeletionVectorEntries);
+        return fromCapturedMap(baseDeletionVectorEntries, captured);
     }
 
-    static void captureInto(
+    static boolean captureInto(
             FileStoreTable table,
             long baseSnapshotId,
             Set<BinaryRow> partitions,
             Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries) {
         Snapshot snapshot = resolveBaseSnapshot(table, baseSnapshotId);
         if (snapshot == null) {
-            return;
+            return false;
         }
 
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
@@ -93,6 +102,7 @@ public final class SortCompactPlanMetadata implements Serializable {
                 }
             }
         }
+        return true;
     }
 
     void copyInto(Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries) {
@@ -112,8 +122,17 @@ public final class SortCompactPlanMetadata implements Serializable {
         }
     }
 
+    /**
+     * Whether the base snapshot was readable at capture time. An empty deletion-vector payload with
+     * {@code true} means known-empty; with {@code false} means capture failed.
+     */
+    boolean baseSnapshotCaptured() {
+        return baseSnapshotCaptured;
+    }
+
     private static SortCompactPlanMetadata fromCapturedMap(
-            Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries) {
+            Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries,
+            boolean baseSnapshotCaptured) {
         byte[] serializedDeletionVectorEntries = null;
         if (!baseDeletionVectorEntries.isEmpty()) {
             List<IndexManifestEntry> entries = new ArrayList<>();
@@ -129,7 +148,7 @@ public final class SortCompactPlanMetadata implements Serializable {
             }
         }
 
-        return new SortCompactPlanMetadata(serializedDeletionVectorEntries);
+        return new SortCompactPlanMetadata(serializedDeletionVectorEntries, baseSnapshotCaptured);
     }
 
     @Nullable

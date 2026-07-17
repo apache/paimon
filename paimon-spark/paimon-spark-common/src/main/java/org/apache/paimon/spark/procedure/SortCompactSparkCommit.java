@@ -51,7 +51,7 @@ final class SortCompactSparkCommit {
             if (!rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages)) {
                 abortQuietly(rewriter, writtenMessages, e);
             }
-            throw new RuntimeException(e);
+            throw rewriter.maybeWrapDvConflict(e);
         }
 
         try {

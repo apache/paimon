@@ -550,6 +550,67 @@ public class SortCompactCommitterTest {
     }
 
     @Test
+    public void testCommitDeletionConflictIsWrappedWithHint() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = createAppendStore(options);
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("data-0.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+
+        DataFileMeta sorted = newFile("sorted-0.orc", 0, 0, 100, 100);
+        CommitMessageImpl written =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        table.coreOptions().bucket(),
+                        new DataIncrement(
+                                Collections.singletonList(sorted),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        CompactIncrement.emptyIncrement());
+        ManifestCommittable manifestCommittable = new ManifestCommittable(1L, 10L);
+        manifestCommittable.addFileCommittable(written);
+
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits) {
+                    @Override
+                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {}
+                };
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            TableCommitImpl spiedCommit = spy(commit);
+            doThrow(new RuntimeException("File deletion conflicts detected! Give up committing."))
+                    .when(spiedCommit)
+                    .commitMultiple(anyList(), eq(false));
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            spiedCommit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            rewriter);
+            assertThatThrownBy(
+                            () -> committer.commit(Collections.singletonList(manifestCommittable)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("conflict on input files after the base snapshot")
+                    .hasMessageContaining("deletion vectors")
+                    .hasMessageContaining("Please retry")
+                    .cause()
+                    .hasMessageContaining("File deletion conflicts");
+        }
+    }
+
+    @Test
     public void testCommitFailureAfterSnapshotDoesNotAbortWrittenMessages() throws Exception {
         TestAppendFileStore store = createAppendStore(new HashMap<>());
         CommitMessageImpl initial =

@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -46,8 +47,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -64,12 +68,17 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
  * their output (partition, bucket). The result is a {@link CommitMessageImpl} with an empty {@link
  * DataIncrement} and a populated {@link CompactIncrement}.
  *
- * <p>For deletion-vector enabled append tables, the deletion-vector index entries of the removed
- * old files are cleaned up, mirroring {@link AppendCompactTask}.
+ * <p>For deletion-vector enabled append tables, only the deletion-vector index entries captured
+ * from the base snapshot are cleaned up, mirroring {@link
+ * org.apache.paimon.append.AppendCompactTask}. Concurrent deletion-vector writes after the base
+ * snapshot are <b>not</b> merged into cleanup; if deletion vectors on input files changed, rewrite
+ * fails with an explicit error (or commit conflict wrapping as a fallback) so the job can be
+ * retried.
  */
 public class SortCompactCommitMessageRewriter {
 
     private static final String ABORT_COMMIT_USER = "sort-compact-abort";
+    private static final int DV_DRIFT_SAMPLE_LIMIT = 5;
 
     private final FileStoreTable table;
     private final long baseSnapshotId;
@@ -87,6 +96,13 @@ public class SortCompactCommitMessageRewriter {
      * partition.
      */
     private final Map<BinaryRow, List<IndexManifestEntry>> baseDeletionVectorEntries;
+
+    /**
+     * Whether {@link #baseDeletionVectorEntries} is a known base-snapshot state (including a known
+     * empty map). False only when the base snapshot was already missing at construction and no
+     * {@link SortCompactPlanMetadata} was provided.
+     */
+    private final boolean baseDeletionVectorStateKnown;
 
     public SortCompactCommitMessageRewriter(
             FileStoreTable table, long baseSnapshotId, List<DataSplit> compactInputSplits) {
@@ -129,9 +145,11 @@ public class SortCompactCommitMessageRewriter {
         }
         if (planMetadata != null) {
             planMetadata.copyInto(baseDeletionVectorEntries);
+            this.baseDeletionVectorStateKnown = planMetadata.baseSnapshotCaptured();
         } else {
-            SortCompactPlanMetadata.captureInto(
-                    table, baseSnapshotId, partitions, baseDeletionVectorEntries);
+            this.baseDeletionVectorStateKnown =
+                    SortCompactPlanMetadata.captureInto(
+                            table, baseSnapshotId, partitions, baseDeletionVectorEntries);
         }
     }
 
@@ -149,8 +167,7 @@ public class SortCompactCommitMessageRewriter {
      */
     public List<CommitMessage> rewrite(List<CommitMessage> writtenMessages) {
         validateWriteOnlyMessages(writtenMessages);
-        Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries =
-                scanLatestDeletionVectorEntries();
+        validateNoDeletionVectorDrift(writtenMessages);
 
         // group written messages by (partition, bucket)
         Map<BinaryRow, Map<Integer, List<CommitMessageImpl>>> grouped = new HashMap<>();
@@ -174,7 +191,7 @@ public class SortCompactCommitMessageRewriter {
                         group = writtenGroup;
                     }
                 }
-                result.add(rewriteGroup(partition, bucket, group, latestDeletionVectorEntries));
+                result.add(rewriteGroup(partition, bucket, group));
             }
             if (writtenInPartition != null && writtenInPartition.isEmpty()) {
                 grouped.remove(partition);
@@ -186,12 +203,7 @@ public class SortCompactCommitMessageRewriter {
             BinaryRow partition = partitionEntry.getKey();
             for (Map.Entry<Integer, List<CommitMessageImpl>> bucketEntry :
                     partitionEntry.getValue().entrySet()) {
-                result.add(
-                        rewriteGroup(
-                                partition,
-                                bucketEntry.getKey(),
-                                bucketEntry.getValue(),
-                                latestDeletionVectorEntries));
+                result.add(rewriteGroup(partition, bucketEntry.getKey(), bucketEntry.getValue()));
             }
         }
         return result;
@@ -223,6 +235,138 @@ public class SortCompactCommitMessageRewriter {
         }
     }
 
+    /**
+     * Fail fast when deletion vectors on compact-before files changed after the base snapshot.
+     *
+     * <p>Sort compact reads rows from the base snapshot. Committing after a concurrent DV write
+     * would drop the newer deletion vectors and restore deleted rows. This check only validates;
+     * cleanup still uses {@link #baseDeletionVectorEntries} only.
+     */
+    private void validateNoDeletionVectorDrift(List<CommitMessage> writtenMessages) {
+        if (!table.coreOptions().deletionVectorsEnabled()
+                || table.bucketMode() != BucketMode.BUCKET_UNAWARE
+                || !hasInput()) {
+            return;
+        }
+
+        // Without a known base DV state we cannot tell whether DVs changed; skip the proactive
+        // check and rely on commit conflict wrapping.
+        if (!baseDeletionVectorStateKnown) {
+            return;
+        }
+
+        Snapshot latestSnapshot = tryLatestSnapshot();
+        // No readable latest snapshot (e.g. the only snapshot was expired): nothing to compare.
+        if (latestSnapshot == null) {
+            return;
+        }
+
+        Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries =
+                scanDeletionVectorEntries(latestSnapshot);
+        Long latestSnapshotId = latestSnapshot.id();
+
+        BinaryRow firstChangedPartition = null;
+        List<String> changedSamples = new ArrayList<>();
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionEntry :
+                compactBeforeFiles.entrySet()) {
+            BinaryRow partition = partitionEntry.getKey();
+            Map<String, String> baseDvByDataFile =
+                    dataFileToDvIndexFileName(
+                            baseDeletionVectorEntries.getOrDefault(
+                                    partition, Collections.emptyList()));
+            Map<String, String> latestDvByDataFile =
+                    dataFileToDvIndexFileName(
+                            latestDeletionVectorEntries.getOrDefault(
+                                    partition, Collections.emptyList()));
+            for (List<DataFileMeta> files : partitionEntry.getValue().values()) {
+                for (DataFileMeta file : files) {
+                    String baseDv = baseDvByDataFile.get(file.fileName());
+                    String latestDv = latestDvByDataFile.get(file.fileName());
+                    if (Objects.equals(baseDv, latestDv)) {
+                        continue;
+                    }
+                    if (firstChangedPartition == null) {
+                        firstChangedPartition = partition;
+                    }
+                    if (changedSamples.size() < DV_DRIFT_SAMPLE_LIMIT) {
+                        changedSamples.add(
+                                String.format(
+                                        "%s (baseDv=%s -> latestDv=%s)",
+                                        file.fileName(), baseDv, latestDv));
+                    }
+                }
+            }
+        }
+
+        if (firstChangedPartition != null) {
+            abortAndFail(
+                    writtenMessages,
+                    deletionVectorDriftMessage(
+                            firstChangedPartition, changedSamples, latestSnapshotId));
+        }
+    }
+
+    private String deletionVectorDriftMessage(
+            BinaryRow partition, List<String> changedSamples, @Nullable Long latestSnapshotId) {
+        return "Sort compact cannot commit because deletion vectors on input files changed after the base snapshot. "
+                + "Sort compact reads data from the base snapshot, so committing would drop newer deletion vectors and restore deleted rows. "
+                + "Changed files (partition="
+                + partition
+                + ", sample): "
+                + String.join(", ", changedSamples)
+                + ". baseSnapshotId="
+                + baseSnapshotId
+                + ", latestSnapshotId="
+                + latestSnapshotId
+                + ". Please retry the sort compact job after concurrent deletes/updates have finished.";
+    }
+
+    /**
+     * Hint used when a generic file-deletion conflict is caught at commit time (TOCTOU after the
+     * rewrite-time DV drift check).
+     *
+     * <p>On deletion-vector tables, {@code File deletion conflicts} covers both concurrent DV
+     * changes and unrelated removals of the same input files, so this hint must not claim that DVs
+     * definitely changed.
+     */
+    public static String sortCompactDvConflictHint() {
+        return "Sort compact cannot commit due to a conflict on input files after the base snapshot. "
+                + "On deletion-vector tables this often means concurrent deletes/updates changed deletion vectors "
+                + "on those inputs (committing could drop newer deletion vectors and restore deleted rows), "
+                + "or another job already compacted/removed the same files. "
+                + "A concurrent write may have raced between rewrite and commit. "
+                + "Please retry the sort compact job after concurrent deletes/updates have finished.";
+    }
+
+    /** Whether {@code cause} looks like a file / deletion-vector conflict from commit. */
+    public static boolean isDeletionConflict(Throwable cause) {
+        for (Throwable t = cause; t != null; t = t.getCause()) {
+            String message = t.getMessage();
+            if (message == null) {
+                continue;
+            }
+            if (message.contains("File deletion conflicts")
+                    || message.toLowerCase(Locale.ROOT).contains("deletion vector")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Wrap a commit failure with {@link #sortCompactDvConflictHint()} when the table has deletion
+     * vectors enabled and the failure looks like a deletion conflict.
+     */
+    public RuntimeException maybeWrapDvConflict(Exception cause) {
+        if (table.coreOptions().deletionVectorsEnabled() && isDeletionConflict(cause)) {
+            return new RuntimeException(sortCompactDvConflictHint(), cause);
+        }
+        if (cause instanceof RuntimeException) {
+            return (RuntimeException) cause;
+        }
+        return new RuntimeException(cause);
+    }
+
     /** Abort newly written files when sort compact rewrite or commit fails. */
     public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
         if (writtenMessages.isEmpty()) {
@@ -242,10 +386,7 @@ public class SortCompactCommitMessageRewriter {
     }
 
     private CommitMessage rewriteGroup(
-            BinaryRow partition,
-            int bucket,
-            List<CommitMessageImpl> group,
-            Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries) {
+            BinaryRow partition, int bucket, List<CommitMessageImpl> group) {
         List<DataFileMeta> compactBefore = compactBefore(partition, bucket);
 
         // merge all newly written sorted files of this (partition, bucket) as compact output
@@ -267,7 +408,8 @@ public class SortCompactCommitMessageRewriter {
             totalBuckets = compactBeforeTotalBuckets(partition, bucket);
         }
 
-        // for deletion-vector append tables, clean up the DV index entries of removed old files
+        // for deletion-vector append tables, clean up only the base-snapshot DV index entries of
+        // removed old files (do not merge concurrent latest-snapshot DVs)
         if (table.coreOptions().deletionVectorsEnabled()
                 && table.bucketMode() == BucketMode.BUCKET_UNAWARE
                 && !compactBefore.isEmpty()) {
@@ -275,8 +417,8 @@ public class SortCompactCommitMessageRewriter {
                     BaseAppendDeleteFileMaintainer.forUnawareAppend(
                             table.store().newIndexFileHandler(),
                             partition,
-                            deletionVectorEntriesForRewrite(
-                                    partition, latestDeletionVectorEntries));
+                            baseDeletionVectorEntries.getOrDefault(
+                                    partition, Collections.emptyList()));
             for (DataFileMeta oldFile : compactBefore) {
                 dvMaintainer.notifyRemovedDeletionVector(oldFile.fileName());
             }
@@ -300,26 +442,32 @@ public class SortCompactCommitMessageRewriter {
                 partition, bucket, totalBuckets, DataIncrement.emptyIncrement(), compactIncrement);
     }
 
-    private Map<BinaryRow, List<IndexManifestEntry>> scanLatestDeletionVectorEntries() {
-        Map<BinaryRow, List<IndexManifestEntry>> latestEntries = new HashMap<>();
-        Snapshot latest = tryLatestSnapshot();
-        if (latest != null) {
-            IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
-            for (IndexManifestEntry entry : indexFileHandler.scan(latest, DELETION_VECTORS_INDEX)) {
-                latestEntries.computeIfAbsent(entry.partition(), k -> new ArrayList<>()).add(entry);
-            }
+    private Map<BinaryRow, List<IndexManifestEntry>> scanDeletionVectorEntries(
+            @Nullable Snapshot snapshot) {
+        Map<BinaryRow, List<IndexManifestEntry>> entries = new HashMap<>();
+        if (snapshot == null) {
+            return entries;
         }
-        return latestEntries;
+        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        for (IndexManifestEntry entry : indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX)) {
+            entries.computeIfAbsent(entry.partition(), k -> new ArrayList<>()).add(entry);
+        }
+        return entries;
     }
 
-    private List<IndexManifestEntry> deletionVectorEntriesForRewrite(
-            BinaryRow partition,
-            Map<BinaryRow, List<IndexManifestEntry>> latestDeletionVectorEntries) {
-        List<IndexManifestEntry> entries = new ArrayList<>();
-        entries.addAll(baseDeletionVectorEntries.getOrDefault(partition, Collections.emptyList()));
-        entries.addAll(
-                latestDeletionVectorEntries.getOrDefault(partition, Collections.emptyList()));
-        return entries;
+    private static Map<String, String> dataFileToDvIndexFileName(List<IndexManifestEntry> entries) {
+        Map<String, String> result = new HashMap<>();
+        for (IndexManifestEntry entry : entries) {
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+            if (dvRanges == null) {
+                continue;
+            }
+            String indexFileName = entry.indexFile().fileName();
+            for (String dataFileName : dvRanges.keySet()) {
+                result.put(dataFileName, indexFileName);
+            }
+        }
+        return result;
     }
 
     @Nullable
