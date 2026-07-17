@@ -295,7 +295,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                         commitContext),
                         false,
                         commitUser,
-                        false);
+                        false,
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -533,7 +534,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                         expected),
                         true,
                         commitUser,
-                        false);
+                        false,
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -1198,7 +1200,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                 commitContext),
                 true,
                 commitUser,
-                failoverAfterRecovery);
+                failoverAfterRecovery,
+                null);
     }
 
     private CommittingWriteOperatorCoordinator createCoordinatorCapturingContext(
@@ -1218,7 +1221,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 },
                 true,
                 commitUser,
-                false);
+                false,
+                null);
     }
 
     private Committable committable(FileStoreTable table, long checkpointId, int value)

@@ -24,7 +24,6 @@ import org.apache.paimon.flink.sink.coordinator.CheckpointCommittablesSerializer
 import org.apache.paimon.flink.sink.coordinator.CommittableEvent;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
 import org.apache.paimon.flink.sink.coordinator.RestoredCommittableEvent;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.utils.Preconditions;
@@ -49,8 +48,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-
-import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 
 /**
  * Write operator that hands committables to a JM-side {@link CommittingWriteOperatorCoordinator}
@@ -83,8 +80,6 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     /** Latest watermark observed on the input; forwarded on subsequent events. */
     private transient long currentWatermark;
 
-    private final Long endInputWatermark;
-
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
 
@@ -96,7 +91,6 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
             OperatorEventGateway operatorEventGateway) {
         super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.operatorEventGateway = Preconditions.checkNotNull(operatorEventGateway);
-        this.endInputWatermark = new Options(table.options()).get(END_INPUT_WATERMARK);
     }
 
     @Override
@@ -170,12 +164,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
-        long watermark =
-                checkpointId == END_INPUT_CHECKPOINT_ID && endInputWatermark != null
-                        ? endInputWatermark
-                        : currentWatermark;
         CheckpointCommittables entry =
-                new CheckpointCommittables(checkpointId, committables, watermark);
+                new CheckpointCommittables(checkpointId, committables, currentWatermark);
 
         if (checkpointId == END_INPUT_CHECKPOINT_ID) {
             CheckpointCommittables previous = pendingCommittables.get(checkpointId);
@@ -184,7 +174,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                 // final committables and send one authoritative entry to the coordinator.
                 List<Committable> merged = new ArrayList<>(previous.committables());
                 merged.addAll(entry.committables());
-                entry = new CheckpointCommittables(checkpointId, merged, watermark);
+                entry = new CheckpointCommittables(checkpointId, merged, currentWatermark);
             }
         }
         // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.

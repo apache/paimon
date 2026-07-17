@@ -92,7 +92,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                                         table, table.newCommit(context.commitUser()), context),
                         true,
                         commitUser,
-                        false);
+                        false,
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -355,7 +356,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
     }
 
     @Test
-    public void testEndInputSendsMaxCheckpointAndUsesConfiguredWatermark() throws Exception {
+    public void testEndInputSendsMaxCheckpointAndForwardsCurrentWatermark() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -378,7 +379,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         assertThat(event.getCheckpointId()).isEqualTo(Long.MAX_VALUE);
         CheckpointCommittables entry = event.deserialize(COMMITTABLES_SERIALIZER);
         assertThat(entry.checkpointId()).isEqualTo(Long.MAX_VALUE);
-        assertThat(entry.watermark()).isEqualTo(12345L);
+        assertThat(entry.watermark()).isEqualTo(Long.MIN_VALUE);
         assertThat(entry.committables()).hasSize(1);
         CoordinatorCommittingRowDataStoreWriteOperator operator =
                 (CoordinatorCommittingRowDataStoreWriteOperator) harness.getOperator();

@@ -52,7 +52,9 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 
-import static org.apache.paimon.CoreOptions.*;
+import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -129,6 +131,7 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean isStreaming = isStreaming(input);
         boolean streamingCheckpointEnabled =
                 isStreaming && env.getCheckpointConfig().isCheckpointingEnabled();
+        Options options = Options.fromMap(table.options());
 
         boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
@@ -143,14 +146,13 @@ public abstract class FlinkSink<T> implements Serializable {
                                         ignorePreviousFiles,
                                         hasSinkMaterializer(input)),
                                 commitUser,
-                                streamingCheckpointEnabled));
+                                streamingCheckpointEnabled,
+                                options.get(END_INPUT_WATERMARK)));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {
             written.setParallelism(parallelism);
         }
-
-        Options options = Options.fromMap(table.options());
 
         String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
         if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
@@ -336,14 +338,11 @@ public abstract class FlinkSink<T> implements Serializable {
                 endInputWatermark);
     }
 
-    /**
-     * Creates the writer operator factory with the runtime checkpoint mode when the writer needs
-     * it. Existing sinks do not use this information and keep the two-argument implementation.
-     */
     protected OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider,
             String commitUser,
-            boolean streamingCheckpointEnabled) {
+            boolean streamingCheckpointEnabled,
+            @Nullable Long endInputWatermark) {
         return createWriteOperatorFactory(writeProvider, commitUser);
     }
 

@@ -39,6 +39,8 @@ import org.apache.flink.util.function.ThrowingRunnable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -96,18 +98,21 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private String commitUser;
     private MemoryBackendStateStore stateStore;
     private boolean endInputCommitted;
+    @Nullable private final Long endInputWatermark;
 
     public CommittingWriteOperatorCoordinator(
             OperatorCoordinator.Context context,
             Committer.Factory<Committable, ManifestCommittable> committerFactory,
             boolean streamingCheckpointEnabled,
             String initialCommitUser,
-            boolean failoverAfterRecovery) {
+            boolean failoverAfterRecovery,
+            @Nullable Long endInputWatermark) {
         this.context = context;
         this.committerFactory = committerFactory;
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.commitUser = initialCommitUser;
         this.failoverAfterRecovery = failoverAfterRecovery;
+        this.endInputWatermark = endInputWatermark;
         this.committablesSerializer =
                 new SimpleVersionedSerializerTypeSerializerProxy<>(
                         () ->
@@ -284,7 +289,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     boolean finalCommit = allSubtasksEndInput();
                     long targetCheckpointId = finalCommit ? END_INPUT_CHECKPOINT_ID : checkpointId;
                     Map<Long, Long> watermarkPerCheckpoint =
-                            alignWatermarkPerCheckpoint(targetCheckpointId, subtaskCommittables);
+                            alignWatermarkPerCheckpointForCommit(
+                                    targetCheckpointId, subtaskCommittables);
                     commitUpToCheckpoint(
                             targetCheckpointId,
                             pollManifestCommittablesForCheckpoint(
@@ -459,7 +465,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
 
         Map<Long, Long> watermarkPerCheckpoint =
-                alignWatermarkPerCheckpoint(END_INPUT_CHECKPOINT_ID, subtaskCommittables);
+                alignWatermarkPerCheckpointForCommit(END_INPUT_CHECKPOINT_ID, subtaskCommittables);
         commitUpToCheckpoint(
                 END_INPUT_CHECKPOINT_ID,
                 pollManifestCommittablesForCheckpoint(
@@ -477,7 +483,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         if (failoverAfterRecovery) {
             // recommit the restored committables and trigger a failover to reinitialize all writers
             Map<Long, Long> watermarkPerCheckpoint =
-                    alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
+                    alignWatermarkPerCheckpointForCommit(checkpointId, subtaskCommittables);
             commitUpToCheckpoint(
                     checkpointId,
                     pollManifestCommittablesForCheckpoint(
@@ -563,6 +569,20 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 min = Math.min(min, committables.watermarkAt(cp));
             }
             watermarkPerCheckpoint.put(cp, min);
+        }
+        return watermarkPerCheckpoint;
+    }
+
+    /**
+     * Reduces the per-subtask watermarks into the specified {@code endInputWatermark} within the
+     * committable when EndInput is encountered.
+     */
+    private Map<Long, Long> alignWatermarkPerCheckpointForCommit(
+            long checkpointId, WriterCommittables[] subtaskCommittables) {
+        Map<Long, Long> watermarkPerCheckpoint =
+                alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
+        if (checkpointId == END_INPUT_CHECKPOINT_ID && endInputWatermark != null) {
+            watermarkPerCheckpoint.put(END_INPUT_CHECKPOINT_ID, endInputWatermark);
         }
         return watermarkPerCheckpoint;
     }
@@ -731,18 +751,21 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         private final boolean streamingCheckpointEnabled;
         private final String initialCommitUser;
         private final boolean failoverAfterRecovery;
+        @Nullable private final Long endInputWatermark;
 
         public Provider(
                 OperatorID operatorId,
                 Committer.Factory<Committable, ManifestCommittable> committerFactory,
                 boolean streamingCheckpointEnabled,
                 String initialCommitUser,
-                boolean failoverAfterRecovery) {
+                boolean failoverAfterRecovery,
+                @Nullable Long endInputWatermark) {
             super(operatorId);
             this.committerFactory = committerFactory;
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
             this.initialCommitUser = initialCommitUser;
             this.failoverAfterRecovery = failoverAfterRecovery;
+            this.endInputWatermark = endInputWatermark;
         }
 
         @Override
@@ -752,7 +775,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     committerFactory,
                     streamingCheckpointEnabled,
                     initialCommitUser,
-                    failoverAfterRecovery);
+                    failoverAfterRecovery,
+                    endInputWatermark);
         }
     }
 }
