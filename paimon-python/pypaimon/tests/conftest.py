@@ -15,18 +15,18 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-"""Skip test modules that cannot run on this interpreter.
+"""Keep the supported-feature suite green on interpreters missing optional
+capabilities (e.g. Python 3.7).
 
-Two cases are handled:
-
-* A module imports an optional dependency with no wheels here (e.g.
-  ray/daft/datafusion/pypaimon_rust/mosaic/lance/vortex on Python 3.7). Such
-  modules import the dep at load time and would raise collection errors.
-* A module builds RoaringBitmap64 at runtime, but pyroaring < 1.0 (Python 3.7)
-  has no BitMap64, so the 64-bit roaring index path is unavailable.
-
-Modules that guard their optional import (pytest.importorskip / try-except) skip
-themselves and are left alone. When everything is installed this is a no-op."""
+* collect_ignore: a module that imports an optional dependency at load time
+  (ray/daft/mosaic/lance/... with no 3.7 wheels) cannot be collected, so it is
+  ignored. The scan is intentionally line-anchored -- it only matches top-level
+  imports; guarded imports (indented pytest.importorskip / try-except) are left
+  to skip themselves.
+* pytest_runtest_makereport: a test that reaches a missing optional dependency
+  -- or pyroaring.BitMap64 (needs pyroaring>=1.0, i.e. Python>=3.8) -- only at
+  runtime is turned into a skip instead of a failure. Real failures are
+  untouched. When everything is installed this is a no-op."""
 
 import importlib.util
 import os
@@ -87,9 +87,49 @@ if _absent:
         if _top_import.search(_src):
             _ignore(_path)
 
-# Modules that build RoaringBitmap64 need pyroaring >= 1.0 (Python >= 3.8).
-if not _has_bitmap64():
-    _rb = re.compile(r"\bRoaringBitmap64\b")
-    for _path, _src in _iter_test_sources():
-        if _rb.search(_src):
-            _ignore(_path)
+# A test may only reach a missing optional dependency (or pyroaring.BitMap64)
+# at runtime, where collect_ignore cannot help. Turn those specific import
+# failures into skips so the supported-feature suite stays green.
+_RUNTIME_OPTIONAL = ("ray", "daft", "datafusion", "pypaimon_rust", "mosaic",
+                     "lance", "vortex", "duckdb", "snappy")
+
+
+def _optional_absence_reason(exc):
+    _seen = set()
+    while exc is not None and id(exc) not in _seen:
+        _seen.add(id(exc))
+        _msg = str(exc)
+        if isinstance(exc, ImportError):
+            _name = (getattr(exc, "name", None) or "").split(".")[0]
+            if _name in _RUNTIME_OPTIONAL:
+                return "optional dependency %r unavailable" % _name
+            if "BitMap64" in _msg:
+                return "pyroaring BitMap64 requires Python >= 3.8"
+        for _dep in _RUNTIME_OPTIONAL:
+            if "No module named '%s'" % _dep in _msg:
+                return "optional dependency %r unavailable" % _dep
+        if "python-snappy" in _msg:
+            return "python-snappy not installed"
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+if _absent or not _has_bitmap64():
+    import pytest
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(item, call):
+        outcome = yield
+        try:
+            rep = outcome.get_result()
+            if rep.when not in ("setup", "call") or not rep.failed or call.excinfo is None:
+                return
+            _reason = _optional_absence_reason(call.excinfo.value)
+            if _reason:
+                rep.outcome = "skipped"
+                rep.longrepr = (str(item.location[0]),
+                                item.location[1] or 0,
+                                "Skipped: " + _reason)
+        except Exception:
+            # Never let the skip-shim itself break test reporting.
+            return

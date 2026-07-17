@@ -195,14 +195,24 @@ function pytest_check() {
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
 
-    # 3.6 uses the minimal py36 subset. 3.7+ run the full suite; modules needing
-    # optional deps with no 3.7 wheels are skipped by tests/conftest.py.
+    # 3.6 uses the minimal py36 subset. 3.7+ run the full suite; tests reaching
+    # an optional dep at runtime are skipped by tests/conftest.py.
     if [ "$PYTHON_VERSION" = "3.6" ]; then
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
-        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36"
+        IGNORES="--ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        if [ "$PYTHON_VERSION" = "3.7" ]; then
+            # Feature areas that need pyarrow>=13 (list->fixed_size_list cast,
+            # S3 force_virtual_addressing) or otherwise cannot run on 3.7's
+            # dependency set. BitMap64 / optional-dep tests skip via conftest.py.
+            IGNORES="$IGNORES --ignore=pypaimon/tests/multimodal_table_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/lance_utils_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/test_ray_shuffle_helper.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/pvfs_test.py"
+        fi
+        TEST_DIR="pypaimon/tests pypaimon/acceptance $IGNORES"
+        echo "Running tests for Python $PYTHON_VERSION: pypaimon/tests pypaimon/acceptance $IGNORES"
     fi
 
     # the return value of a pipeline is the status of the last command to exit

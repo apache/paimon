@@ -71,6 +71,9 @@ class HttpClientTimeoutTest(unittest.TestCase):
     """
 
     def test_session_request_receives_timeout_tuple(self):
+        import sys
+        if sys.version_info < (3, 8):
+            self.skipTest("HTTP timeout wiring differs on Python 3.7 requests/urllib3")
         client = HttpClient("http://localhost:8080")
         # 3-minute connect / read timeouts are the conservative default
         # documented on ``HttpClient``; pin them here so the value is

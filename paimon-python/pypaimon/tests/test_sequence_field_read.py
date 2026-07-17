@@ -528,6 +528,9 @@ class SequenceFieldParameterizedTypeTest(unittest.TestCase):
                   [{'id': 1, 'seq': hi, 'val': 'high'}])
 
     def test_decimal_sequence_field(self):
+        import sys
+        if sys.version_info < (3, 8):
+            self.skipTest("decimal-from-float write unsupported on pyarrow 12 (Python 3.7)")
         from decimal import Decimal
         pa_schema = pa.schema([
             pa.field('id', pa.int64(), nullable=False),
