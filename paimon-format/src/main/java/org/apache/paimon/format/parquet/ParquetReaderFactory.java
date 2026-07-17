@@ -128,11 +128,22 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         inputFile, readOptionsBuilder.build(), inputStream, true);
 
         MessageType fileSchema = footer.getFileMetaData().getSchema();
-        FilterCompat.Filter filter = ParquetFilters.convert(predicates, fileSchema, caseSensitive);
-        ParquetReadOptions readOptions = readOptionsBuilder.withRecordFilter(filter).build();
-        ParquetFileReader reader =
-                new ParquetFileReader(
-                        inputFile, footer, readOptions, inputStream, context.selection());
+        ParquetFileReader reader;
+        try {
+            FilterCompat.Filter filter =
+                    ParquetFilters.convert(predicates, fileSchema, caseSensitive);
+            ParquetReadOptions readOptions = readOptionsBuilder.withRecordFilter(filter).build();
+            reader =
+                    new ParquetFileReader(
+                            inputFile, footer, readOptions, inputStream, context.selection());
+        } catch (Throwable t) {
+            try {
+                inputStream.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            throw t;
+        }
 
         ShreddingReadPlan readPlan =
                 ShreddingReadPlanFactories.createReadPlan(
