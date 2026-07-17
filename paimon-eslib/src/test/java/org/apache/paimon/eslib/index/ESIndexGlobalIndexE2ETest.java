@@ -69,6 +69,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -451,6 +452,7 @@ class ESIndexGlobalIndexE2ETest {
                 reader.visitGreaterThan(titleRef, "abc").join();
         assertTrue(unsupportedTitleRange.isPresent());
         assertEquals(20, unsupportedTitleRange.get().results().getIntCardinality());
+        assertFalse(unsupportedTitleRange.get().isExact());
 
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
@@ -683,6 +685,16 @@ class ESIndexGlobalIndexE2ETest {
             assertTrue(contains(candidates.get().results(), 0L));
             assertTrue(contains(candidates.get().results(), 1L));
             assertTrue(contains(candidates.get().results(), 3L));
+            assertFalse(candidates.get().isExact());
+
+            Optional<GlobalIndexResult> notEqual =
+                    union.visitNotEqual(new FieldRef(0, "value", DataTypes.BIGINT()), 5L).join();
+            assertTrue(notEqual.isPresent());
+            assertEquals(3, notEqual.get().results().getIntCardinality());
+            assertTrue(contains(notEqual.get().results(), 0L));
+            assertTrue(contains(notEqual.get().results(), 1L));
+            assertTrue(contains(notEqual.get().results(), 2L));
+            assertFalse(notEqual.get().isExact());
         } finally {
             union.close();
         }
@@ -848,6 +860,7 @@ class ESIndexGlobalIndexE2ETest {
                     4,
                     keywordRange.get().results().getIntCardinality(),
                     "unsupported KEYWORD ordering must conservatively retain the whole shard");
+            assertFalse(keywordRange.get().isExact());
         } finally {
             reader.close();
         }
@@ -1574,6 +1587,7 @@ class ESIndexGlobalIndexE2ETest {
                     1,
                     fallback.get().results().getIntCardinality(),
                     "a lossy millisecond index must conservatively retain every row");
+            assertFalse(fallback.get().isExact());
             assertTrue(reader.visitIsNotNull(ts).join().isPresent());
         } finally {
             reader.close();

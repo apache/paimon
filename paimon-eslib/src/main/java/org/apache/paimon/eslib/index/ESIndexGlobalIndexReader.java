@@ -1432,7 +1432,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             for (long id : searcher.allRowIds()) {
                 bitmap.add(id);
             }
-            return Optional.of(GlobalIndexResult.create(bitmap));
+            return Optional.of(GlobalIndexResult.create(bitmap, false));
         } catch (IOException e) {
             throw new RuntimeException(
                     "Failed to read conservative ES index rows for field: " + logicalField, e);
@@ -1545,6 +1545,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         Optional<GlobalIndexResult> matching = dispatchFilter(fieldRef, matchingFilter);
         if (matching.isEmpty()) {
             return Optional.empty();
+        }
+        if (!existing.get().isExact() || !matching.get().isExact()) {
+            return conservativeAllRows(fieldRef.name());
         }
 
         RoaringNavigableMap64 result = new RoaringNavigableMap64();

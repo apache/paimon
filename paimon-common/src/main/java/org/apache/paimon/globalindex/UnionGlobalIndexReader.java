@@ -162,8 +162,21 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
             ScalarSearch scalarSearch) {
         // Scalar results from child readers cover different row ranges. Returning a partial union
         // could drop the actual TopN rows, so every child must support and complete the search.
+        if (readers.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        long childMaxResultSize = scalarSearch.maxResultSize() / readers.size();
+        long childMaxScannedRowIds = scalarSearch.maxScannedRowIds() / readers.size();
+        if (childMaxResultSize < scalarSearch.topN().limit()
+                || childMaxScannedRowIds < scalarSearch.topN().limit()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        ScalarSearch childSearch =
+                scalarSearch
+                        .withMaxResultSize(childMaxResultSize)
+                        .withMaxScannedRowIds(childMaxScannedRowIds);
         return unionAsync(
-                reader -> reader.visitScalarSearch(scalarSearch),
+                reader -> reader.visitScalarSearch(childSearch),
                 true,
                 scalarSearch.maxResultSize());
     }

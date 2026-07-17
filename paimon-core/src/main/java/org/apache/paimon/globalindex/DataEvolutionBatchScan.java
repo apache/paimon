@@ -69,6 +69,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
     private static final int MAX_SCALAR_TOPN_LIMIT = 100;
     private static final long MAX_SCALAR_TOPN_RESULT_SIZE = 10_000L;
+    private static final long MAX_SCALAR_TOPN_SCANNED_ROW_IDS = 100_000L;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -376,7 +377,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         scanner.scan(
                                 new ScalarSearch(topN)
                                         .withIncludeRowIds(includeRowIds)
-                                        .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE));
+                                        .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE)
+                                        .withMaxScannedRowIds(MAX_SCALAR_TOPN_SCANNED_ROW_IDS));
                 if (result.isPresent()) {
                     LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
                 }

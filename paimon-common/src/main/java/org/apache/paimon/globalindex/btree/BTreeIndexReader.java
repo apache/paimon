@@ -70,20 +70,64 @@ public class BTreeIndexReader implements Closeable {
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
         private final Object key;
-        private final long[] rowIds;
+        private final MemorySlice serializedRowIds;
+        private final int rowIdCount;
 
-        public KeyRowIds(Object key, long[] rowIds) {
+        private KeyRowIds(Object key, MemorySlice serializedRowIds) {
             this.key = key;
-            this.rowIds = rowIds;
+            this.serializedRowIds = serializedRowIds;
+            this.rowIdCount = readRowIdCount(serializedRowIds.toInput());
         }
 
         public Object key() {
             return key;
         }
 
+        public int rowIdCount() {
+            return rowIdCount;
+        }
+
+        public RowIdIterator rowIdIterator() {
+            return new RowIdIterator(serializedRowIds);
+        }
+
         public long[] rowIds() {
+            long[] rowIds = new long[rowIdCount];
+            RowIdIterator iterator = rowIdIterator();
+            for (int i = 0; i < rowIds.length; i++) {
+                rowIds[i] = iterator.nextLong();
+            }
             return rowIds;
         }
+    }
+
+    /** Streaming iterator over the encoded row ids of one key. */
+    public static class RowIdIterator {
+        private final MemorySliceInput input;
+        private int remaining;
+
+        private RowIdIterator(MemorySlice serializedRowIds) {
+            this.input = serializedRowIds.toInput();
+            this.remaining = readRowIdCount(input);
+        }
+
+        public boolean hasNext() {
+            return remaining > 0;
+        }
+
+        public long nextLong() {
+            if (!hasNext()) {
+                throw new NoSuchElementException("No more row ids in btree entry.");
+            }
+            remaining--;
+            return input.readVarLenLong();
+        }
+    }
+
+    private static int readRowIdCount(MemorySliceInput input) {
+        int count = input.readVarLenInt();
+        Preconditions.checkState(count > 0, "Invalid row id length: 0");
+        return count;
     }
 
     /**
@@ -111,7 +155,7 @@ public class BTreeIndexReader implements Closeable {
                 if (dataIter != null && dataIter.hasNext()) {
                     Map.Entry<MemorySlice, MemorySlice> entry = dataIter.next();
                     Object key = keySerializer.deserialize(entry.getKey());
-                    next = new KeyRowIds(key, deserializeRowIds(entry.getValue()));
+                    next = new KeyRowIds(key, entry.getValue());
                     return true;
                 }
 
@@ -156,8 +200,7 @@ public class BTreeIndexReader implements Closeable {
                 throw new NoSuchElementException("No more entries in btree index file.");
             }
             Map.Entry<MemorySlice, MemorySlice> entry = dataIter.previous();
-            return new KeyRowIds(
-                    keySerializer.deserialize(entry.getKey()), deserializeRowIds(entry.getValue()));
+            return new KeyRowIds(keySerializer.deserialize(entry.getKey()), entry.getValue());
         }
     }
 
@@ -381,7 +424,7 @@ public class BTreeIndexReader implements Closeable {
     public Optional<GlobalIndexResult> visitScalarSearch(ScalarSearch scalarSearch) {
         try {
             return Optional.of(GlobalIndexResult.create(scalarSearch(scalarSearch)));
-        } catch (ScalarSearchResultTooLargeException ignored) {
+        } catch (ScalarSearchBudgetExceededException ignored) {
             return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException("fail to read btree index file.", e);
@@ -389,12 +432,13 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private RoaringNavigableMap64 scalarSearch(ScalarSearch scalarSearch)
-            throws IOException, ScalarSearchResultTooLargeException {
+            throws IOException, ScalarSearchBudgetExceededException {
         SortValue order = scalarSearch.topN().orders().get(0);
         int limit = scalarSearch.topN().limit();
         RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
         ScalarSearchResultAccumulator result =
-                new ScalarSearchResultAccumulator(scalarSearch.maxResultSize());
+                new ScalarSearchResultAccumulator(
+                        scalarSearch.maxResultSize(), scalarSearch.maxScannedRowIds());
         if (limit == 0) {
             return result.rowIds();
         }
@@ -420,7 +464,7 @@ public class BTreeIndexReader implements Closeable {
             SortValue.SortDirection direction,
             long targetCardinality,
             @Nullable RoaringNavigableMap64 includeRowIds)
-            throws IOException, ScalarSearchResultTooLargeException {
+            throws IOException, ScalarSearchBudgetExceededException {
         if (targetCardinality <= 0 || minKey == null) {
             return;
         }
@@ -428,7 +472,7 @@ public class BTreeIndexReader implements Closeable {
         if (direction == SortValue.SortDirection.ASCENDING) {
             EntryIterator iterator = entryIterator();
             while (iterator.hasNext()) {
-                if (!addMatchingRows(result, iterator.next().rowIds(), includeRowIds)) {
+                if (!addMatchingRows(result, iterator.next(), includeRowIds)) {
                     continue;
                 }
                 if (result.cardinality() >= targetCardinality) {
@@ -440,7 +484,7 @@ public class BTreeIndexReader implements Closeable {
 
         ReverseEntryIterator iterator = reverseEntryIterator();
         while (iterator.hasNext()) {
-            if (!addMatchingRows(result, iterator.next().rowIds(), includeRowIds)) {
+            if (!addMatchingRows(result, iterator.next(), includeRowIds)) {
                 continue;
             }
             if (result.cardinality() >= targetCardinality) {
@@ -451,11 +495,15 @@ public class BTreeIndexReader implements Closeable {
 
     private void addMatchingNullRows(
             ScalarSearchResultAccumulator result, @Nullable RoaringNavigableMap64 includeRowIds)
-            throws ScalarSearchResultTooLargeException {
-        for (long rowId : nullBitmap.get()) {
+            throws ScalarSearchBudgetExceededException {
+        RoaringNavigableMap64 nullRowIds = nullBitmap.get();
+        if (!result.reserveScannedRowIds(nullRowIds.getLongCardinality())) {
+            throw new ScalarSearchBudgetExceededException();
+        }
+        for (long rowId : nullRowIds) {
             if (includeRowIds == null || includeRowIds.contains(rowId)) {
                 if (!result.add(rowId)) {
-                    throw new ScalarSearchResultTooLargeException();
+                    throw new ScalarSearchBudgetExceededException();
                 }
             }
         }
@@ -463,15 +511,20 @@ public class BTreeIndexReader implements Closeable {
 
     private boolean addMatchingRows(
             ScalarSearchResultAccumulator result,
-            long[] rowIds,
+            KeyRowIds keyRowIds,
             @Nullable RoaringNavigableMap64 includeRowIds)
-            throws ScalarSearchResultTooLargeException {
+            throws ScalarSearchBudgetExceededException {
+        if (!result.reserveScannedRowIds(keyRowIds.rowIdCount())) {
+            throw new ScalarSearchBudgetExceededException();
+        }
         boolean matched = false;
-        for (long rowId : rowIds) {
+        RowIdIterator iterator = keyRowIds.rowIdIterator();
+        while (iterator.hasNext()) {
+            long rowId = iterator.nextLong();
             if (includeRowIds == null || includeRowIds.contains(rowId)) {
                 matched = true;
                 if (!result.add(rowId)) {
-                    throw new ScalarSearchResultTooLargeException();
+                    throw new ScalarSearchBudgetExceededException();
                 }
             }
         }
@@ -481,11 +534,14 @@ public class BTreeIndexReader implements Closeable {
     static class ScalarSearchResultAccumulator {
         private final RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
         private final long maxResultSize;
+        private final long maxScannedRowIds;
         private long cardinality;
-        private boolean exceededMaxResultSize;
+        private long scannedRowIds;
+        private boolean exceededBudget;
 
-        ScalarSearchResultAccumulator(long maxResultSize) {
+        ScalarSearchResultAccumulator(long maxResultSize, long maxScannedRowIds) {
             this.maxResultSize = maxResultSize;
+            this.maxScannedRowIds = maxScannedRowIds;
         }
 
         boolean add(long rowId) {
@@ -493,7 +549,7 @@ public class BTreeIndexReader implements Closeable {
                 return true;
             }
             if (cardinality >= maxResultSize) {
-                exceededMaxResultSize = true;
+                exceededBudget = true;
                 return false;
             }
             rowIds.add(rowId);
@@ -501,12 +557,21 @@ public class BTreeIndexReader implements Closeable {
             return true;
         }
 
+        boolean reserveScannedRowIds(long count) {
+            if (count > maxScannedRowIds - scannedRowIds) {
+                exceededBudget = true;
+                return false;
+            }
+            scannedRowIds += count;
+            return true;
+        }
+
         long cardinality() {
             return cardinality;
         }
 
-        boolean exceededMaxResultSize() {
-            return exceededMaxResultSize;
+        boolean exceededBudget() {
+            return exceededBudget;
         }
 
         RoaringNavigableMap64 rowIds() {
@@ -532,7 +597,7 @@ public class BTreeIndexReader implements Closeable {
         T get() throws IOException;
     }
 
-    private static class ScalarSearchResultTooLargeException extends Exception {
+    private static class ScalarSearchBudgetExceededException extends Exception {
         private static final long serialVersionUID = 1L;
     }
 

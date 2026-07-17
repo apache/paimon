@@ -725,6 +725,60 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testScalarSearchDistributesBudgetsAcrossReaders() {
+        RowType rowType = rowType();
+        ScalarSearch[] received = new ScalarSearch[2];
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Arrays.asList(
+                                        scalarReaderRecording(received, 0, resultOf(1, 2)),
+                                        scalarReaderRecording(received, 1, resultOf(3, 4))));
+        ScalarSearch search =
+                new ScalarSearch(
+                                new TopN(
+                                        new FieldRef(1, "b", DataTypes.INT()),
+                                        DESCENDING,
+                                        NULLS_LAST,
+                                        2))
+                        .withMaxResultSize(8)
+                        .withMaxScannedRowIds(20);
+
+        assertThat(evaluator.evaluateScalarSearch(search)).isPresent();
+        assertThat(received[0].maxResultSize()).isEqualTo(4);
+        assertThat(received[1].maxResultSize()).isEqualTo(4);
+        assertThat(received[0].maxScannedRowIds()).isEqualTo(10);
+        assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
+        evaluator.close();
+    }
+
+    @Test
+    void testUnionScalarSearchDistributesBudgetsAcrossReaders() {
+        ScalarSearch[] received = new ScalarSearch[2];
+        UnionGlobalIndexReader reader =
+                new UnionGlobalIndexReader(
+                        Arrays.asList(
+                                scalarReaderRecording(received, 0, resultOf(1, 2)),
+                                scalarReaderRecording(received, 1, resultOf(3, 4))));
+        ScalarSearch search =
+                new ScalarSearch(
+                                new TopN(
+                                        new FieldRef(1, "b", DataTypes.INT()),
+                                        DESCENDING,
+                                        NULLS_LAST,
+                                        2))
+                        .withMaxResultSize(8)
+                        .withMaxScannedRowIds(20);
+
+        assertThat(reader.visitScalarSearch(search).join()).isPresent();
+        assertThat(received[0].maxResultSize()).isEqualTo(4);
+        assertThat(received[1].maxResultSize()).isEqualTo(4);
+        assertThat(received[0].maxScannedRowIds()).isEqualTo(10);
+        assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
+    }
+
+    @Test
     void testPartialAndResultIsInexact() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
@@ -878,6 +932,18 @@ class GlobalIndexEvaluatorTest {
             @Override
             public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
                     ScalarSearch scalarSearch) {
+                return CompletableFuture.completedFuture(Optional.of(expectedResult));
+            }
+        };
+    }
+
+    private static GlobalIndexReader scalarReaderRecording(
+            ScalarSearch[] received, int index, GlobalIndexResult expectedResult) {
+        return new StubGlobalIndexReader(null) {
+            @Override
+            public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+                    ScalarSearch scalarSearch) {
+                received[index] = scalarSearch;
                 return CompletableFuture.completedFuture(Optional.of(expectedResult));
             }
         };

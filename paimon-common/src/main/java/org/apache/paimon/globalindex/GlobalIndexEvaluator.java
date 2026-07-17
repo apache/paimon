@@ -90,16 +90,26 @@ public class GlobalIndexEvaluator implements Closeable {
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+        if (readers.isEmpty()) {
+            return Optional.empty();
+        }
+        long readerMaxResultSize = scalarSearch.maxResultSize() / readers.size();
+        long readerMaxScannedRowIds = scalarSearch.maxScannedRowIds() / readers.size();
+        if (readerMaxResultSize < scalarSearch.topN().limit()
+                || readerMaxScannedRowIds < scalarSearch.topN().limit()) {
+            return Optional.empty();
+        }
+        ScalarSearch readerSearch =
+                scalarSearch
+                        .withMaxResultSize(readerMaxResultSize)
+                        .withMaxScannedRowIds(readerMaxScannedRowIds);
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures = new ArrayList<>();
         for (GlobalIndexReader reader : readers) {
             try {
-                futures.add(reader.visitScalarSearch(scalarSearch));
+                futures.add(reader.visitScalarSearch(readerSearch));
             } catch (UnsupportedOperationException ignored) {
                 return Optional.empty();
             }
-        }
-        if (futures.isEmpty()) {
-            return Optional.empty();
         }
 
         try {

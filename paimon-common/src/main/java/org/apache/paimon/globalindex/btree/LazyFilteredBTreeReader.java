@@ -180,7 +180,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             List<BTreeIndexReader> readers, ScalarSearch scalarSearch) {
         int limit = scalarSearch.topN().limit();
         BTreeIndexReader.ScalarSearchResultAccumulator result =
-                new BTreeIndexReader.ScalarSearchResultAccumulator(scalarSearch.maxResultSize());
+                new BTreeIndexReader.ScalarSearchResultAccumulator(
+                        scalarSearch.maxResultSize(), scalarSearch.maxScannedRowIds());
         if (limit == 0) {
             return Optional.of(GlobalIndexResult.create(result.rowIds()));
         }
@@ -212,7 +213,11 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             BTreeIndexReader.ScalarSearchResultAccumulator result) {
         RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
         for (BTreeIndexReader reader : readers) {
-            for (long rowId : reader.nullRowIds()) {
+            RoaringNavigableMap64 nullRowIds = reader.nullRowIds();
+            if (!result.reserveScannedRowIds(nullRowIds.getLongCardinality())) {
+                return false;
+            }
+            for (long rowId : nullRowIds) {
                 if (includeRowIds == null || includeRowIds.contains(rowId)) {
                     if (!result.add(rowId)) {
                         return false;
@@ -249,8 +254,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 while (!cursors.isEmpty()
                         && comparator.compare(cursors.peek().current().key(), currentKey) == 0) {
                     EntryCursor cursor = cursors.poll();
-                    matched |= addRows(cursor.current().rowIds(), scalarSearch, result);
-                    if (result.exceededMaxResultSize()) {
+                    matched |= addRows(cursor.current(), scalarSearch, result);
+                    if (result.exceededBudget()) {
                         return false;
                     }
                     if (cursor.advance()) {
@@ -268,12 +273,17 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     private boolean addRows(
-            long[] rowIds,
+            BTreeIndexReader.KeyRowIds keyRowIds,
             ScalarSearch scalarSearch,
             BTreeIndexReader.ScalarSearchResultAccumulator result) {
+        if (!result.reserveScannedRowIds(keyRowIds.rowIdCount())) {
+            return false;
+        }
         boolean matched = false;
         RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
-        for (long rowId : rowIds) {
+        BTreeIndexReader.RowIdIterator iterator = keyRowIds.rowIdIterator();
+        while (iterator.hasNext()) {
+            long rowId = iterator.nextLong();
             if (includeRowIds == null || includeRowIds.contains(rowId)) {
                 matched = true;
                 if (!result.add(rowId)) {

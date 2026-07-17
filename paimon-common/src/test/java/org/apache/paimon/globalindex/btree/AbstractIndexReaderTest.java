@@ -444,6 +444,50 @@ public abstract class AbstractIndexReaderTest {
         }
     }
 
+    @TestTemplate
+    public void testScalarSearchFallsBackWhenSparseCandidatesExceedScanBudget() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+        candidates.add(data.get(dataNum - 1).getValue());
+        ScalarSearch search =
+                new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, 1))
+                        .withIncludeRowIds(candidates)
+                        .withMaxScannedRowIds(5);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            assertThat(reader.visitScalarSearch(search).join()).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchFallsBackBeforeDecodingHugeKeyGroup() throws Exception {
+        Object repeatedKey = data.get(0).getKey();
+        for (Pair<Object, Long> pair : data) {
+            pair.setLeft(repeatedKey);
+        }
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        ScalarSearch search =
+                new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, 1)).withMaxScannedRowIds(5);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            assertThat(reader.visitScalarSearch(search).join()).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchFallsBackBeforeScanningHugeNullGroup() throws Exception {
+        for (Pair<Object, Long> pair : data) {
+            pair.setLeft(null);
+        }
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        ScalarSearch search =
+                new ScalarSearch(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).withMaxScannedRowIds(5);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            assertThat(reader.visitScalarSearch(search).join()).isEmpty();
+        }
+    }
+
     protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
