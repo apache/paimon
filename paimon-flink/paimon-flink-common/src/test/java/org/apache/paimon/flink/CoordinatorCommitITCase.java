@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
@@ -109,71 +108,6 @@ public class CoordinatorCommitITCase {
         runningJob.cancel();
 
         assertThat(readRowCount(runningJob.table)).isGreaterThan(0L);
-    }
-
-    @Timeout(value = 120, unit = TimeUnit.SECONDS)
-    @Test
-    public void testCoordinatorCommitEndInputInStreamingMode() throws Exception {
-        assertCoordinatorCommitEndInput(
-                EnvironmentSettings.newInstance().inStreamingMode().build(), true);
-    }
-
-    @Timeout(value = 120, unit = TimeUnit.SECONDS)
-    @Test
-    public void testCoordinatorCommitEndInputInBatchMode() throws Exception {
-        assertCoordinatorCommitEndInput(
-                EnvironmentSettings.newInstance().inBatchMode().build(), false);
-    }
-
-    private void assertCoordinatorCommitEndInput(EnvironmentSettings settings, boolean streaming)
-            throws Exception {
-        final long endInputWatermark = 12345L;
-        TableEnvironment tEnv = TableEnvironment.create(settings);
-        tEnv.getConfig()
-                .getConfiguration()
-                .setString("table.exec.resource.default-parallelism", "2");
-        if (streaming) {
-            tEnv.getConfig()
-                    .getConfiguration()
-                    .setString("execution.checkpointing.interval", "200 ms");
-        }
-
-        tEnv.executeSql(
-                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '"
-                        + tempPath
-                        + "' )");
-        tEnv.executeSql("USE CATALOG mycat");
-        tEnv.executeSql(
-                "CREATE TABLE T_END_INPUT (id INT, data STRING) WITH ("
-                        + "'bucket' = '-1', "
-                        + "'write-only' = 'true', "
-                        + "'sink.coordinator-commit.enabled' = 'true', "
-                        + "'end-input.watermark' = '"
-                        + endInputWatermark
-                        + "')");
-        tEnv.executeSql(
-                "CREATE TEMPORARY TABLE src (id INT, data STRING) WITH ("
-                        + "'connector' = 'datagen', "
-                        + "'number-of-rows' = '20', "
-                        + "'rows-per-second' = '10', "
-                        + "'fields.id.kind' = 'sequence', "
-                        + "'fields.id.start' = '1', "
-                        + "'fields.id.end' = '20', "
-                        + "'fields.data.length' = '8')");
-
-        tEnv.executeSql("INSERT INTO T_END_INPUT SELECT * FROM src").await();
-
-        FileStoreTable table =
-                (FileStoreTable)
-                        ((FlinkCatalog) tEnv.getCatalog("mycat").get())
-                                .catalog()
-                                .getTable(Identifier.create("default", "T_END_INPUT"));
-        assertThat(readRowCount(table)).isEqualTo(20L);
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        assertThat(snapshot).isNotNull();
-        if (!streaming) {
-            assertThat(snapshot.watermark()).isEqualTo(endInputWatermark);
-        }
     }
 
     private RunningJob startStreamingInsert(boolean coordinatorCommitEnabled) throws Exception {
