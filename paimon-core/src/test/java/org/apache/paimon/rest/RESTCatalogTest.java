@@ -1556,7 +1556,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         CreatePartitionsResponse response =
                 restCatalog.api().createPartitions(identifier, partitionSpecs);
 
-        assertThat(response.getCreated()).containsExactlyInAnyOrder("dt=20260714", "dt=20260715");
+        assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
         assertThat(response.getExisted()).isEmpty();
 
         catalog.createPartitions(identifier, partitionSpecs);
@@ -1605,8 +1605,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                         singletonMap("dt", "20260714"),
                                         singletonMap("dt", "20260799")),
                                 true);
-        assertThat(response.getDropped()).containsExactly("dt=20260714");
-        assertThat(response.getMissing()).containsExactly("dt=20260799");
+        assertThat(response.getDropped()).containsExactly(singletonMap("dt", "20260714"));
+        assertThat(response.getMissing()).containsExactly(singletonMap("dt", "20260799"));
         assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
                 .containsExactly(singletonMap("dt", "20260715"));
 

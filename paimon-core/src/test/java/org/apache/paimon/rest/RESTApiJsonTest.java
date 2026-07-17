@@ -54,7 +54,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import org.junit.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -213,16 +212,20 @@ public class RESTApiJsonTest {
 
     @Test
     public void createPartitionsResponseParseTest() throws Exception {
+        Map<String, String> created = new HashMap<>();
+        created.put("dt", "20260714");
+        created.put("region", "cn");
+        Map<String, String> existed = new HashMap<>();
+        existed.put("dt", "20260713");
+        existed.put("region", "us");
         CreatePartitionsResponse response =
                 new CreatePartitionsResponse(
-                        Arrays.asList("dt=20260714", "dt=20260715"),
-                        Collections.singletonList("dt=20260713"));
-
+                        Collections.singletonList(created), Collections.singletonList(existed));
         CreatePartitionsResponse parsed =
                 RESTApi.fromJson(RESTApi.toJson(response), CreatePartitionsResponse.class);
 
-        assertEquals(response.getCreated(), parsed.getCreated());
-        assertEquals(response.getExisted(), parsed.getExisted());
+        assertEquals(Collections.singletonList(created), parsed.getCreated());
+        assertEquals(Collections.singletonList(existed), parsed.getExisted());
     }
 
     @Test
@@ -250,16 +253,20 @@ public class RESTApiJsonTest {
 
     @Test
     public void dropPartitionsResponseParseTest() throws Exception {
+        Map<String, String> dropped = new HashMap<>();
+        dropped.put("dt", "20260714");
+        dropped.put("region", "cn");
+        Map<String, String> missing = new HashMap<>();
+        missing.put("dt", "20260713");
+        missing.put("region", "us");
         DropPartitionsResponse response =
                 new DropPartitionsResponse(
-                        Arrays.asList("dt=20260714", "dt=20260715"),
-                        Collections.singletonList("dt=20260713"));
-
+                        Collections.singletonList(dropped), Collections.singletonList(missing));
         DropPartitionsResponse parsed =
                 RESTApi.fromJson(RESTApi.toJson(response), DropPartitionsResponse.class);
 
-        assertEquals(response.getDropped(), parsed.getDropped());
-        assertEquals(response.getMissing(), parsed.getMissing());
+        assertEquals(Collections.singletonList(dropped), parsed.getDropped());
+        assertEquals(Collections.singletonList(missing), parsed.getMissing());
     }
 
     @Test

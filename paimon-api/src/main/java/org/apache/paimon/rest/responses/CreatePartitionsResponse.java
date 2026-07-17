@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 /** Response for creating partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -35,26 +36,26 @@ public class CreatePartitionsResponse implements RESTResponse {
     private static final String FIELD_EXISTED = "existed";
 
     @JsonProperty(FIELD_CREATED)
-    private final List<String> created;
+    private final List<Map<String, String>> created;
 
     @JsonProperty(FIELD_EXISTED)
-    private final List<String> existed;
+    private final List<Map<String, String>> existed;
 
     @JsonCreator
     public CreatePartitionsResponse(
-            @JsonProperty(FIELD_CREATED) List<String> created,
-            @JsonProperty(FIELD_EXISTED) List<String> existed) {
+            @JsonProperty(FIELD_CREATED) List<Map<String, String>> created,
+            @JsonProperty(FIELD_EXISTED) List<Map<String, String>> existed) {
         this.created = created;
         this.existed = existed;
     }
 
     @JsonGetter(FIELD_CREATED)
-    public List<String> getCreated() {
+    public List<Map<String, String>> getCreated() {
         return created;
     }
 
     @JsonGetter(FIELD_EXISTED)
-    public List<String> getExisted() {
+    public List<Map<String, String>> getExisted() {
         return existed;
     }
 }

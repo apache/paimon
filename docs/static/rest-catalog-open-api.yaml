@@ -2457,11 +2457,15 @@ components:
         dropped:
           type: array
           items:
-            type: string
+            type: object
+            additionalProperties:
+              type: string
         missing:
           type: array
           items:
-            type: string
+            type: object
+            additionalProperties:
+              type: string
     CreatePartitionsRequest:
       type: object
       required:
@@ -2485,11 +2489,15 @@ components:
         created:
           type: array
           items:
-            type: string
+            type: object
+            additionalProperties:
+              type: string
         existed:
           type: array
           items:
-            type: string
+            type: object
+            additionalProperties:
+              type: string
     AlterTableRequest:
       type: object
       properties:

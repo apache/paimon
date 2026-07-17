@@ -1887,14 +1887,14 @@ public class RESTCatalogServer {
                         return mockResponse(response, 409);
                     }
                 }
-                List<String> created = new ArrayList<>();
-                List<String> existed = new ArrayList<>();
+                List<Map<String, String>> created = new ArrayList<>();
+                List<Map<String, String>> existed = new ArrayList<>();
                 for (Map<String, String> spec : request.getPartitionSpecs()) {
                     if (existingSpecs.add(spec)) {
                         storedPartitions.add(new Partition(spec, 0, 0, 0, 0, -1, false));
-                        created.add(PartitionUtils.buildPartitionName(spec));
+                        created.add(spec);
                     } else {
-                        existed.add(PartitionUtils.buildPartitionName(spec));
+                        existed.add(spec);
                     }
                 }
                 return mockResponse(new CreatePartitionsResponse(created, existed), 200);
@@ -1911,27 +1911,31 @@ public class RESTCatalogServer {
                         tableIdentifier.getFullName(), ignored -> new ArrayList<>());
         Set<Map<String, String>> existingSpecs =
                 storedPartitions.stream().map(Partition::spec).collect(Collectors.toSet());
-        List<String> missing = new ArrayList<>();
+        List<Map<String, String>> missing = new ArrayList<>();
         for (Map<String, String> spec : request.getPartitionSpecs()) {
             if (!existingSpecs.contains(spec)) {
-                missing.add(PartitionUtils.buildPartitionName(spec));
+                missing.add(spec);
             }
         }
         if (!request.ignoreIfNotExists() && !missing.isEmpty()) {
+            List<String> missingNames =
+                    missing.stream()
+                            .map(PartitionUtils::buildPartitionName)
+                            .collect(Collectors.toList());
             ErrorResponse response =
                     new ErrorResponse(
                             ErrorResponse.RESOURCE_TYPE_PARTITION,
-                            missing.get(0),
-                            String.format("Partitions %s do not exist.", missing),
+                            missingNames.get(0),
+                            String.format("Partitions %s do not exist.", missingNames),
                             404);
             return mockResponse(response, 404);
         }
-        List<String> dropped = new ArrayList<>();
+        List<Map<String, String>> dropped = new ArrayList<>();
         Set<Map<String, String>> toDrop = new HashSet<>(request.getPartitionSpecs());
         storedPartitions.removeIf(
                 partition -> {
                     if (toDrop.contains(partition.spec())) {
-                        dropped.add(PartitionUtils.buildPartitionName(partition.spec()));
+                        dropped.add(partition.spec());
                         return true;
                     }
                     return false;

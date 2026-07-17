@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 /** Response for dropping (unregistering) partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -35,26 +36,26 @@ public class DropPartitionsResponse implements RESTResponse {
     private static final String FIELD_MISSING = "missing";
 
     @JsonProperty(FIELD_DROPPED)
-    private final List<String> dropped;
+    private final List<Map<String, String>> dropped;
 
     @JsonProperty(FIELD_MISSING)
-    private final List<String> missing;
+    private final List<Map<String, String>> missing;
 
     @JsonCreator
     public DropPartitionsResponse(
-            @JsonProperty(FIELD_DROPPED) List<String> dropped,
-            @JsonProperty(FIELD_MISSING) List<String> missing) {
+            @JsonProperty(FIELD_DROPPED) List<Map<String, String>> dropped,
+            @JsonProperty(FIELD_MISSING) List<Map<String, String>> missing) {
         this.dropped = dropped;
         this.missing = missing;
     }
 
     @JsonGetter(FIELD_DROPPED)
-    public List<String> getDropped() {
+    public List<Map<String, String>> getDropped() {
         return dropped;
     }
 
     @JsonGetter(FIELD_MISSING)
-    public List<String> getMissing() {
+    public List<Map<String, String>> getMissing() {
         return missing;
     }
 }
