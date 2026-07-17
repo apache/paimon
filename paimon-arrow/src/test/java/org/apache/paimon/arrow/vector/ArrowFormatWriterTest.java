@@ -31,6 +31,8 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
@@ -145,6 +147,49 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testMissingMapColumnVectorizedRoundTrip() {
+        RowType inputRowType = RowType.builder().field("id", DataTypes.INT()).build();
+        RowType projectedRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("map", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+
+        try (ArrowFormatWriter inputWriter = new ArrowFormatWriter(inputRowType, 3, true);
+                ArrowFormatWriter outputWriter = new ArrowFormatWriter(projectedRowType, 3, true)) {
+            inputWriter.write(GenericRow.of(1));
+            inputWriter.write(GenericRow.of(2));
+            inputWriter.write(GenericRow.of(3));
+            inputWriter.flush();
+
+            ArrowBatchReader reader = new ArrowBatchReader(projectedRowType, true);
+            ColumnarRow row =
+                    (ColumnarRow)
+                            reader.readBatch(inputWriter.getVectorSchemaRoot()).iterator().next();
+            assertThat(row.batch().columns[1]).isSameAs(AllNullColumnVector.INSTANCE);
+
+            outputWriter.write(row.batch().columns, null, 0, 3);
+            outputWriter.flush();
+
+            VectorSchemaRoot output = outputWriter.getVectorSchemaRoot();
+            assertThat(output.getRowCount()).isEqualTo(3);
+            IntVector idVector = (IntVector) output.getVector("id");
+            assertThat(idVector.get(0)).isEqualTo(1);
+            assertThat(idVector.get(1)).isEqualTo(2);
+            assertThat(idVector.get(2)).isEqualTo(3);
+
+            MapVector mapVector = (MapVector) output.getVector("map");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+            assertThat(mapVector.isNull(2)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
         }
     }
 

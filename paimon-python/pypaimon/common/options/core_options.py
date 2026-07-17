@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import sys
 import warnings
 from datetime import timedelta
@@ -724,6 +725,34 @@ class CoreOptions:
         .with_description("Row count per shard for global index.")
     )
 
+    PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-vector.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated VECTOR columns indexed by primary-key vector indexes.")
+    )
+
+    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-btree.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
+    )
+
+    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-bitmap.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
+    )
+
+    PK_FULL_TEXT_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-full-text.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated character columns indexed by primary-key full-text indexes.")
+    )
+
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -854,13 +883,14 @@ class CoreOptions:
     READ_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.parallelism")
         .int_type()
-        .default_value(1)
+        .no_default_value()
         .with_description(
             "Parallelism for reading splits within a single TableRead call. "
-            "The value 1 (default) keeps reads serial. Values >= 2 enable a "
-            "thread pool that reads splits concurrently and assembles the "
-            "result in input order. Has no effect when fewer than 2 splits "
-            "are passed.")
+            "When unset (the default), reads auto-scale to "
+            "min(number of splits, CPU count). Set to 1 to force serial "
+            "reads, or to a specific value >= 1 to cap the thread pool that "
+            "reads splits concurrently and assembles the result in input "
+            "order. Has no effect when fewer than 2 splits are passed.")
     )
 
     ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
@@ -898,6 +928,13 @@ class CoreOptions:
             "\"type\":{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"age\","
             "\"type\":\"BIGINT\"}]}}]}'"
         )
+    )
+
+    QUERY_AUTH_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("query-auth.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable query auth.")
     )
 
     PARTITION_DEFAULT_NAME: ConfigOption[str] = (
@@ -1295,6 +1332,113 @@ class CoreOptions:
     def global_index_row_count_per_shard(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
 
+    def primary_key_btree_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
+
+    def primary_key_bitmap_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BITMAP_INDEX_COLUMNS)
+
+    def primary_key_vector_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_VECTOR_INDEX_COLUMNS)
+
+    def primary_key_full_text_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS)
+
+    def primary_key_vector_index_type(self, column: str):
+        return self.options.to_map().get(
+            "fields.%s.pk-vector.index.type" % column)
+
+    def primary_key_vector_index_options(self, column: str) -> Options:
+        index_type = self.primary_key_vector_index_type(column)
+        if index_type is None or not str(index_type).strip():
+            raise ValueError(
+                "fields.%s.pk-vector.index.type must be configured before "
+                "resolving index options." % column)
+        option_key = "fields.%s.pk-vector.index.options" % column
+        field_prefix = "fields.%s." % column
+        resolved = self._primary_key_json_options(
+            option_key,
+            lambda key: (key.startswith(str(index_type) + ".")
+                         or (key.startswith(field_prefix)
+                             and not key.startswith(field_prefix + "pk-vector."))),
+            str(index_type) + ".")
+        values = dict(resolved.to_map())
+        values[str(index_type) + ".metric"] = \
+            self.primary_key_vector_distance_metric(column)
+        return Options(values)
+
+    def primary_key_vector_distance_metric(self, column: str) -> str:
+        value = self.options.to_map().get(
+            "fields.%s.pk-vector.distance.metric" % column,
+            "inner_product")
+        return str(value).lower().replace('-', '_')
+
+    def primary_key_full_text_index_options(self, column: str) -> Options:
+        return self._primary_key_json_options(
+            "fields.%s.pk-full-text.index.options" % column,
+            lambda key: key.startswith("full-text."),
+            "full-text.")
+
+    def primary_key_btree_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-btree", "btree-index.")
+
+    def primary_key_bitmap_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-bitmap", "bitmap-index.")
+
+    def _primary_key_index_columns(self, option: ConfigOption[str]) -> List[str]:
+        columns = self.options.get(option)
+        if columns is None:
+            return []
+        return [column.strip() for column in columns.split(',')]
+
+    def _primary_key_sorted_index_options(
+            self, column: str, option_family: str, algorithm_prefix: str) -> Options:
+        resolved = dict(self.options.to_map())
+        resolved.pop("sorted-index.records-per-range", None)
+        option_key = "fields.%s.%s.index.options" % (column, option_family)
+        serialized = self.options.to_map().get(option_key)
+        if serialized is None or not str(serialized).strip():
+            return Options(resolved)
+        try:
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+        for key, value in parsed.items():
+            if not key or value is None:
+                raise ValueError("%s contains an invalid option." % option_key)
+            qualified = key if key.startswith((algorithm_prefix, "fields.")) \
+                else algorithm_prefix + key
+            previous = resolved.get(qualified)
+            if previous is not None and previous != value:
+                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+            resolved[qualified] = value
+        return Options(resolved)
+
+    def _primary_key_json_options(self, option_key, include, prefix):
+        resolved = {key: value for key, value in self.options.to_map().items()
+                    if include(key) and not key.startswith(option_key)}
+        serialized = self.options.to_map().get(option_key)
+        if serialized is None or not str(serialized).strip():
+            return Options(resolved)
+        try:
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+        for key, value in parsed.items():
+            if not key or value is None:
+                raise ValueError("%s contains an invalid option." % option_key)
+            qualified = key if (prefix is None
+                                or key.startswith((prefix, "fields."))) else prefix + key
+            previous = resolved.get(qualified)
+            if previous is not None and previous != str(value):
+                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+            resolved[qualified] = str(value)
+        return Options(resolved)
+
     def btree_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
             CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
@@ -1342,7 +1486,7 @@ class CoreOptions:
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
-    def read_parallelism(self, default=None) -> int:
+    def read_parallelism(self, default=None) -> Optional[int]:
         return self.options.get(CoreOptions.READ_PARALLELISM, default)
 
     def add_column_before_partition(self) -> bool:
@@ -1368,3 +1512,7 @@ class CoreOptions:
             .boolean_type()
             .default_value(False)
         )
+
+    @property
+    def query_auth_enabled(self) -> bool:
+        return self.options.get(CoreOptions.QUERY_AUTH_ENABLED)

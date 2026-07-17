@@ -112,6 +112,58 @@ def test_read_paimon_basic(catalog_options):
     }
 
 
+def test_read_paimon_data_evolution_merges_column_fragments(catalog_options):
+    pa_schema = pa.schema([
+        ("id", pa.int32()),
+        ("name", pa.string()),
+        ("score", pa.float64()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_data_evolution",
+        pa_schema,
+        options={
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+            "file.format": "parquet",
+        },
+    )
+    write_builder = table.new_batch_write_builder()
+    id_name_write = write_builder.new_write().with_write_type(["id", "name"])
+    score_write = write_builder.new_write().with_write_type(["score"])
+    table_commit = write_builder.new_commit()
+    try:
+        id_name_write.write_arrow(pa.table({
+            "id": pa.array([1, 2, 3], pa.int32()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+        }))
+        score_write.write_arrow(pa.table({
+            "score": pa.array([1.1, 2.2, 3.3], pa.float64()),
+        }))
+        commit_messages = id_name_write.prepare_commit() + score_write.prepare_commit()
+        # Both files are column fragments for the same logical row range.
+        for message in commit_messages:
+            for data_file in message.new_files:
+                data_file.first_row_id = 0
+        table_commit.commit(commit_messages)
+    finally:
+        id_name_write.close()
+        score_write.close()
+        table_commit.close()
+
+    splits = table.new_read_builder().new_scan().plan().splits()
+    assert len(splits) == 1
+    assert splits[0].raw_convertible is False
+
+    result = read_paimon(identifier, catalog_options).to_pydict()
+
+    assert result == {
+        "id": [1, 2, 3],
+        "name": ["a", "b", "c"],
+        "score": [1.1, 2.2, 3.3],
+    }
+
+
 def test_read_paimon_projection(catalog_options):
     data = pa.table(
         {

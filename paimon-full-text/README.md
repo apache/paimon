@@ -114,12 +114,10 @@ CREATE TABLE articles (
 );
 ```
 
-Paimon creates native archives from complete Level-1-or-higher `COMPACT` data files and
-incrementally consolidates them with the shared primary-key index LSM policy. One archive can
-cover multiple ordered source files; its row IDs concatenate their physical row positions. The
-shared `fields.<column>.pk-index.compaction.level-fanout` and
-`fields.<column>.pk-index.compaction.stale-ratio-threshold` options control size-tier and stale-
-source rebuilds.
+Paimon creates one native archive for the complete set of eligible `COMPACT` data files in each
+Level-1-or-higher data level. Data compaction replaces the affected level archive atomically. One
+archive can cover multiple ordered source files; its row IDs concatenate their physical row
+positions.
 
 Primary-key full-text search currently supports only `global-index.search-mode=fast`. Level-0 and
 other uncovered files are not searched; their rows become searchable after compaction publishes

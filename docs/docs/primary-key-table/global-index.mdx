@@ -234,8 +234,6 @@ schema validation.
 | `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
 | `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
 | `fields.<column>.pk-bitmap.index.options` | Not set | JSON object containing Bitmap build options. Unqualified keys are scoped to `bitmap-index`. |
-| `fields.<column>.pk-index.compaction.level-fanout` | `5` | Number of similarly sized index groups which triggers a rebuild and maximum row-count ratio within one size tier. Shared by all four families. Must be greater than `1`. |
-| `fields.<column>.pk-index.compaction.stale-ratio-threshold` | `0.2` | Ratio of rows from inactive source files which triggers a rebuild. Shared by all four families. Must be in `(0, 1]`. |
 | `global-index.search-mode` | `fast` | Search mode for primary-key Vector and Full Text queries. `fast` searches indexed data only, so uncovered files are omitted. For Vector, `full` and `detail` search uncovered files exactly. Primary-key Full Text supports only `fast`. |
 
 For algorithm-specific options, see the corresponding
@@ -259,17 +257,16 @@ inside real buckets. These rows become visible after batch compaction publishes 
 buckets. Indexes are created when that process physically rewrites the rows into eligible compact
 output; simply assigning or upgrading a pending file does not make it an index source.
 
-### Index LSM Maintenance
+### Data-Level Maintenance
 
-Each indexed column maintains its own immutable index groups. Maintenance uses the shared
-field-scoped compaction options:
+Each indexed column maintains one immutable index payload for the complete eligible source-file
+set in every non-zero data level. When data compaction changes a level, Paimon rebuilds that whole
+level payload, including files in the target level which were not direct compaction inputs. A
+level payload is used only when its ordered source names and row counts exactly match the current
+data level; partial, duplicate, stale, and cross-level payloads are rejected.
 
-- When at least `level-fanout` similarly sized groups exist, Paimon rebuilds them into a larger
-  group. The largest selected group can contain at most `level-fanout` times the rows of the
-  smallest group.
-- When the ratio of rows belonging to inactive source files reaches
-  `stale-ratio-threshold`, Paimon rebuilds the affected group from its remaining active sources.
-- A rebuild atomically replaces its input groups after the new group is complete.
+A rebuild atomically replaces the old payload after the complete new payload is ready. Unrelated
+data levels retain their existing payloads.
 
 Index construction can execute asynchronously inside the writer. A writer which waits for
 compaction also waits for active index maintenance; a non-blocking writer can complete maintenance

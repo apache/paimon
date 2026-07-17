@@ -20,6 +20,7 @@
 from typing import Optional
 
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -43,9 +44,11 @@ def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
         read_builder = read_builder.with_partition_filter(partition_filter)
 
     rows = RoaringBitmap64()
-    for split in read_builder.new_scan().plan().splits():
-        if isinstance(split, DataSplit):
-            rows = _add_live_rows(table, rows, split)
+    scan = read_builder.new_scan()
+    for split in scan.plan().splits():
+        inner = split.split if isinstance(split, QueryAuthSplit) else split
+        if isinstance(inner, DataSplit):
+            rows = _add_live_rows(table, rows, inner)
     return rows
 
 

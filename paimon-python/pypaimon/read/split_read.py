@@ -284,7 +284,7 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
-            blob_parallelism = getattr(self, '_blob_parallelism', 1)
+            blob_parallelism = self._blob_parallelism
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
@@ -832,6 +832,10 @@ class MergeFileSplitRead(SplitRead):
             outer_extract_name_paths: Optional[List[List[str]]] = None,
             outer_flat_read_type: Optional[List[DataField]] = None,
             limit: Optional[int] = None):
+        self.row_ranges = None
+        if isinstance(split, IndexedSplit):
+            self.row_ranges = split.row_ranges()
+            split = split.data_split()
         # Merge functions need full ROW sub-structures, so nested paths
         # are not pushed down here; sub-path extraction happens above
         # the merge via OuterProjectionRecordReader.
@@ -858,10 +862,22 @@ class MergeFileSplitRead(SplitRead):
 
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
+        selected_positions = None
+        if self.row_ranges is not None:
+            selected_positions = [
+                position
+                for row_range in self.row_ranges
+                for position in range(row_range.from_, row_range.to + 1)
+            ]
+            file_batch_reader = RowIdFilterRecordBatchReader(
+                file_batch_reader, 0, self.row_ranges)
         dv = dv_factory() if dv_factory else None
         if dv:
+            if selected_positions is not None:
+                dv = PositionMappedDeletionVector(
+                    dv, row_positions=selected_positions)
             return ApplyDeletionVectorReader(
-                KeyValueWrapReader(RowPositionReader(file_batch_reader),
+                KeyValueWrapReader(file_batch_reader,
                                    len(self.trimmed_primary_key), self.value_arity), dv)
         else:
             return KeyValueWrapReader(file_batch_reader, len(self.trimmed_primary_key), self.value_arity)
@@ -1005,7 +1021,7 @@ class DataEvolutionSplitRead(SplitRead):
                 self.table.options))
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
-            blob_parallelism = getattr(self, '_blob_parallelism', 1)
+            blob_parallelism = self._blob_parallelism
             reader = BlobInlineConvertReader(
                 reader, self.table,
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names),
@@ -1284,6 +1300,7 @@ class DataEvolutionSplitRead(SplitRead):
                         CoreOptions.blob_as_descriptor(self.table.options),
                         deletion_vector=deletion_vector,
                         batch_size=batch_size,
+                        blob_parallelism=self._blob_parallelism,
                     )
                 else:
                     # Create concatenated reader for multiple files
@@ -1328,7 +1345,7 @@ class DataEvolutionSplitRead(SplitRead):
                 return None
 
         file_path = file.external_path if file.external_path else file.file_path
-        blob_parallelism = getattr(self, '_blob_parallelism', 1)
+        blob_parallelism = self._blob_parallelism
         return FormatBlobReader(
             self.table.file_io,
             file_path,

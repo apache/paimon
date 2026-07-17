@@ -101,6 +101,25 @@ public class VortexFileFormatTest {
     }
 
     @Test
+    public void testValidateDataFields_UnsupportedTypeNestedInArray() {
+        VortexFileFormat format =
+                new VortexFileFormat(
+                        new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType =
+                RowType.of(DataTypes.ARRAY(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_SupportedTypeNestedInArray() {
+        VortexFileFormat format =
+                new VortexFileFormat(
+                        new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.INT())));
+        assertDoesNotThrow(() -> format.validateDataFields(rowType));
+    }
+
+    @Test
     public void testValidateDataFields_SupportedTypes() {
         VortexFileFormat format =
                 new VortexFileFormat(

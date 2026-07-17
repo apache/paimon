@@ -103,6 +103,38 @@ public class MapSharedShreddingUtils {
         return new RowType(logicalSchema.isNullable(), physicalFields);
     }
 
+    public static RowType buildPhysicalReadType(
+            RowType logicalReadType,
+            Map<String, MapSharedShreddingFieldMeta> sharedShreddingFieldMetas) {
+        if (sharedShreddingFieldMetas.isEmpty()) {
+            return logicalReadType;
+        }
+
+        List<DataField> physicalReadFields = new ArrayList<>();
+        boolean converted = false;
+        for (DataField logicalReadField : logicalReadType.getFields()) {
+            MapSharedShreddingFieldMeta fieldMeta =
+                    sharedShreddingFieldMetas.get(logicalReadField.name());
+            if (fieldMeta == null || !(logicalReadField.type() instanceof MapType)) {
+                physicalReadFields.add(logicalReadField);
+                continue;
+            }
+
+            MapType mapType = (MapType) logicalReadField.type();
+            DataType physicalType =
+                    buildSpecificPhysicalStructType(
+                                    mapType.getValueType(),
+                                    fieldMeta.numColumns(),
+                                    !fieldMeta.overflowFieldSet().isEmpty())
+                            .copy(logicalReadField.type().isNullable());
+            physicalReadFields.add(logicalReadField.newType(physicalType));
+            converted = true;
+        }
+        return converted
+                ? new RowType(logicalReadType.isNullable(), physicalReadFields)
+                : logicalReadType;
+    }
+
     public static Map<String, Integer> buildColumnToNumColumns(
             List<String> shreddingFieldNames, CoreOptions options) {
         Map<String, Integer> fieldToNumColumns = new HashMap<>();
@@ -219,6 +251,19 @@ public class MapSharedShreddingUtils {
             builder.field(MapSharedShreddingDefine.physicalColumnName(i), valueType);
         }
         builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        return builder.build();
+    }
+
+    private static RowType buildSpecificPhysicalStructType(
+            DataType valueType, int numColumns, boolean includeOverflow) {
+        RowType.Builder builder = RowType.builder();
+        builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));
+        for (int i = 0; i < numColumns; i++) {
+            builder.field(MapSharedShreddingDefine.physicalColumnName(i), valueType);
+        }
+        if (includeOverflow) {
+            builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        }
         return builder.build();
     }
 

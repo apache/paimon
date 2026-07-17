@@ -64,6 +64,10 @@ class ExplainSplitInfo:
     level_histogram: Dict[int, int]
     deletion_file_count: int
     file_paths: List[str]
+    # Per-file metadata (DataFileMeta) for consumers that need write_cols /
+    # row-id ranges, e.g. projection-aware reader routing. Optional so callers
+    # constructing ExplainSplitInfo without file objects stay compatible.
+    data_files: Optional[List[Any]] = None
 
 
 @dataclass
@@ -120,6 +124,8 @@ class ExplainResult:
     split_size_avg: float = 0.0
     split_size_p50: int = 0
     split_size_p95: int = 0
+
+    has_auth: bool = False
 
     # Verbose-only
     splits: Optional[List[ExplainSplitInfo]] = None

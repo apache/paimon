@@ -39,6 +39,7 @@ from pypaimon.daft.daft_explain import (
     READER_MODE_PYPAIMON_FALLBACK,
 )
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type
 
 if TYPE_CHECKING:
@@ -323,6 +324,78 @@ def _cast_blob_columns_to_file(
     return RecordBatch.from_pydict(columns)
 
 
+def _blob_native_covering_files(
+    files: list[DataFileMeta],
+    task_columns: list[str],
+    blob_column_names: set[str],
+    partition_keys: list[str],
+) -> list[DataFileMeta] | None:
+    """Return the parquet files that can serve a blob-table split via Daft's
+    native reader, or ``None`` if the split must use the pypaimon fallback.
+
+    A blob table stores each column bunch in its own file: scalar columns in
+    parquet, BLOB / ARRAY<BLOB> columns in ``.blob`` files, vector columns in
+    ``.vector`` files, aligned by row id. Reading the base parquet files
+    natively is only correct when every projected data column lives in parquet
+    files that each fully cover the projection over disjoint row-id ranges --
+    i.e. no blob / vector file carries a projected column, no cross-file field
+    merge is required, and no two covering files overlap. Partition columns are
+    path-derived, so they are excluded from file coverage. File-name
+    conventions mirror ``DataFileMeta.is_blob_file`` / ``is_vector_file``.
+    """
+    partitions = set(partition_keys)
+    projected = {c for c in task_columns if c not in partitions}
+    if projected & set(blob_column_names):
+        return None
+
+    covering: list[DataFileMeta] = []
+    for f in files:
+        name = f.file_name
+        write_cols = set(f.write_cols or [])
+        carried = write_cols & projected
+        if name.endswith(".blob") or ".vector." in name:
+            if carried:
+                return None  # a projected column lives in a blob/vector bunch
+            continue
+        if not name.endswith(".parquet"):
+            return None  # unknown bunch format; stay on the safe fallback path
+        if projected <= write_cols:
+            covering.append(f)
+        elif carried:
+            return None  # partial coverage -> cross-file field merge required
+        # else: parquet file irrelevant to the projection -> skip it
+
+    if not covering:
+        return None
+
+    # The covering parquet files must not overlap (else rows are duplicated)
+    # and together must span every row-id range present in the split. Otherwise
+    # a row-id range whose projected column is absent from any covering file --
+    # e.g. an older data-evolution range written before the column existed --
+    # would be silently dropped here, whereas the pypaimon fallback returns
+    # those rows with the column read as null via schema evolution.
+    covering_ranges = []
+    for f in covering:
+        if f.first_row_id is None:
+            return None
+        covering_ranges.append((f.first_row_id, f.first_row_id + f.row_count))
+    covering_ranges.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in covering_ranges:
+        if merged and start < merged[-1][1]:
+            return None
+        if merged and start == merged[-1][1]:
+            merged[-1] = (merged[-1][0], end)  # adjacent -> extend
+        else:
+            merged.append((start, end))
+
+    for f in files:
+        start, end = f.first_row_id, f.first_row_id + f.row_count
+        if not any(ms <= start and end <= me for ms, me in merged):
+            return None  # a present row-id range is not covered -> would drop rows
+    return covering
+
+
 class PaimonDataSource(DataSource):
     """DataSource for Apache Paimon tables.
 
@@ -527,21 +600,36 @@ class PaimonDataSource(DataSource):
             if self._partition_filter_skips_split(split, pushdowns, pv_cache):
                 continue
 
+            has_deletion_vectors = self._split_has_deletion_vectors(split)
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
-                has_deletion_vectors=self._split_has_deletion_vectors(split),
+                has_deletion_vectors=has_deletion_vectors,
+                has_auth=self._split_has_auth(split),
             )
 
-            if routing.use_native_reader:
+            native_files = (
+                split.files
+                if routing.use_native_reader
+                else self._blob_table_native_files(
+                    split.files, read_pushdowns.task_columns, has_deletion_vectors
+                )
+            )
+
+            if native_files is not None:
+                task_schema = (
+                    self._schema
+                    if routing.use_native_reader
+                    else self._project_schema(read_pushdowns.task_columns)
+                )
                 pv = None
                 if self._table.partition_keys:
                     pv = self._partition_values(split, pv_cache)
 
-                for data_file in split.files:
+                for data_file in native_files:
                     file_uri = self._build_file_uri(self._data_file_path(data_file))
                     yield DataSourceTask.parquet(
                         path=file_uri,
-                        schema=self._schema,
+                        schema=task_schema,
                         pushdowns=pushdowns,
                         num_rows=data_file.row_count,
                         size_bytes=data_file.file_size,
@@ -593,13 +681,47 @@ class PaimonDataSource(DataSource):
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
                 has_deletion_vectors=split.has_deletion_vectors,
+                has_auth=paimon_scan.has_auth,
             )
-            if routing.use_native_reader:
+            blob_native_files = (
+                None
+                if routing.use_native_reader
+                else self._blob_table_native_files(
+                    getattr(split, "data_files", None) or [],
+                    read_pushdowns.task_columns,
+                    split.has_deletion_vectors,
+                )
+            )
+
+            # For a blob-native split only the covering parquet files are read
+            # natively; report their counts so the verbose per-split detail
+            # matches the native_parquet_file_count aggregate (the skipped
+            # .blob / .vector files must not appear as natively read). The
+            # Paimon split row_count sums every bunch file, so it double-counts
+            # the same rows across the parquet and .blob bunches; the parquet
+            # reader only returns the covering files' rows.
+            split_file_count = split.file_count
+            split_file_size = split.file_size
+            split_file_paths = split.file_paths
+            split_row_count = split.row_count
+
+            if routing.use_native_reader or blob_native_files is not None:
                 native_split_count += 1
-                native_file_count += split.file_count
+                if blob_native_files is not None:
+                    split_file_count = len(blob_native_files)
+                    split_file_size = sum(f.file_size for f in blob_native_files)
+                    split_file_paths = [
+                        f.file_path for f in blob_native_files if f.file_path is not None
+                    ]
+                    split_row_count = sum(f.row_count for f in blob_native_files)
+                native_file_count += split_file_count
+                reader_mode = READER_MODE_NATIVE_PARQUET
+                fallback_reason = None
             else:
                 fallback_split_count += 1
-                fallback_file_count += split.file_count
+                fallback_file_count += split_file_count
+                reader_mode = routing.reader_mode
+                fallback_reason = routing.fallback_reason
                 reason = routing.fallback_reason or "unknown"
                 fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
 
@@ -608,12 +730,12 @@ class PaimonDataSource(DataSource):
                     PaimonReaderSplitExplain(
                         partition=split.partition,
                         bucket=split.bucket,
-                        file_count=split.file_count,
-                        row_count=split.row_count,
-                        file_size=split.file_size,
-                        reader_mode=routing.reader_mode,
-                        fallback_reason=routing.fallback_reason,
-                        file_paths=split.file_paths,
+                        file_count=split_file_count,
+                        row_count=split_row_count,
+                        file_size=split_file_size,
+                        reader_mode=reader_mode,
+                        fallback_reason=fallback_reason,
+                        file_paths=split_file_paths,
                     )
                 )
 
@@ -644,12 +766,14 @@ class PaimonDataSource(DataSource):
         self,
         raw_convertible: bool,
         has_deletion_vectors: bool,
+        has_auth: bool = False,
     ) -> _ReaderRouting:
         can_use_native_reader = (
             self._is_parquet
             and not self._has_blob_columns
-            and (not self._table.is_primary_key_table or raw_convertible)
+            and raw_convertible
             and not has_deletion_vectors
+            and not has_auth
         )
         if can_use_native_reader:
             return _ReaderRouting(READER_MODE_NATIVE_PARQUET, None)
@@ -658,16 +782,47 @@ class PaimonDataSource(DataSource):
             reason = "non-parquet format"
         elif self._has_blob_columns:
             reason = "blob columns present"
+        elif has_auth:
+            reason = "query auth active"
         elif has_deletion_vectors:
             reason = "deletion vectors present"
-        else:
+        elif self._table.is_primary_key_table:
             reason = "LSM merge required"
+        else:
+            reason = "data-evolution merge required"
         return _ReaderRouting(READER_MODE_PYPAIMON_FALLBACK, reason)
+
+    def _blob_table_native_files(
+        self,
+        files: list[DataFileMeta],
+        task_columns: list[str] | None,
+        has_deletion_vectors: bool,
+    ) -> list[DataFileMeta] | None:
+        """Files of a blob-table split that can be read via the native parquet
+        reader because no BLOB column is projected, or ``None`` to keep the
+        pypaimon fallback. Only applies to non-PK parquet blob tables without
+        deletion vectors and with an explicit projection."""
+        if (
+            not self._has_blob_columns
+            or not self._is_parquet
+            or has_deletion_vectors
+            or self._table.is_primary_key_table
+            or task_columns is None
+        ):
+            return None
+        blob_column_names = self._scalar_blob_column_names | self._array_blob_column_names
+        return _blob_native_covering_files(
+            files, task_columns, blob_column_names, self._table.partition_keys
+        )
 
     @staticmethod
     def _split_has_deletion_vectors(split: Split) -> bool:
         deletion_files = getattr(split, "data_deletion_files", None)
         return deletion_files is not None and any(df is not None for df in deletion_files)
+
+    @staticmethod
+    def _split_has_auth(split) -> bool:
+        return isinstance(split, QueryAuthSplit)
 
     def _partition_filter_skips_split(
         self,
