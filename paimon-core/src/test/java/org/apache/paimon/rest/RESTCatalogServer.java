@@ -56,9 +56,11 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -70,6 +72,8 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -207,6 +211,8 @@ public class RESTCatalogServer {
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
 
+    private volatile boolean partitionListingSupported = true;
+
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
         this.warehouse = warehouse;
@@ -267,6 +273,10 @@ public class RESTCatalogServer {
 
     public void removeDataToken(Identifier identifier) {
         DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
+    }
+
+    public void setPartitionListingSupported(boolean partitionListingSupported) {
+        this.partitionListingSupported = partitionListingSupported;
     }
 
     public void addNoPermissionDatabase(String database) {
@@ -449,6 +459,11 @@ public class RESTCatalogServer {
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "partitions".equals(resources[3])
                                         && "list-by-names".equals(resources[4]);
+                        boolean isDropPartitions =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "drop".equals(resources[4]);
 
                         boolean isBranches =
                                 resources.length >= 4
@@ -479,7 +494,7 @@ public class RESTCatalogServer {
                             }
                         }
                         // validate partition
-                        if (isPartitions || isMarkDonePartitions) {
+                        if (isPartitions || isMarkDonePartitions || isDropPartitions) {
                             String tableName = RESTUtil.decodeString(resources[2]);
                             Optional<MockResponse> error =
                                     checkTablePartitioned(
@@ -494,9 +509,18 @@ public class RESTCatalogServer {
                             catalog.markDonePartitions(
                                     identifier, markDonePartitionsRequest.getPartitionSpecs());
                             return new MockResponse().setResponseCode(200);
+                        } else if (!partitionListingSupported
+                                && ((isPartitions && "GET".equals(restAuthParameter.method()))
+                                        || isListPartitionsByNames)) {
+                            return mockResponse(new ErrorResponse(null, null, "", 501), 501);
+                        } else if (isDropPartitions) {
+                            return dropPartitionsHandle(restAuthParameter.data(), identifier);
                         } else if (isPartitions) {
                             return partitionsApiHandle(
-                                    restAuthParameter.method(), parameters, identifier);
+                                    restAuthParameter.method(),
+                                    restAuthParameter.data(),
+                                    parameters,
+                                    identifier);
                         } else if (isListPartitionsByNames) {
                             ListPartitionsByNamesRequest listPartitionsByNamesRequest =
                                     RESTApi.fromJson(data, ListPartitionsByNamesRequest.class);
@@ -1815,7 +1839,8 @@ public class RESTCatalogServer {
     }
 
     private MockResponse partitionsApiHandle(
-            String method, Map<String, String> parameters, Identifier tableIdentifier) {
+            String method, String data, Map<String, String> parameters, Identifier tableIdentifier)
+            throws Exception {
         String partitionNamePattern = parameters.get(PARTITION_NAME_PATTERN);
         switch (method) {
             case "GET":
@@ -1835,9 +1860,87 @@ public class RESTCatalogServer {
                     }
                 }
                 return generateFinalListPartitionsResponse(parameters, partitions);
+            case "POST":
+                CreatePartitionsRequest request =
+                        RESTApi.fromJson(data, CreatePartitionsRequest.class);
+                List<Partition> storedPartitions =
+                        tablePartitionsStore.computeIfAbsent(
+                                tableIdentifier.getFullName(), ignored -> new ArrayList<>());
+                Set<Map<String, String>> existingSpecs =
+                        storedPartitions.stream().map(Partition::spec).collect(Collectors.toSet());
+                if (!request.ignoreIfExists()) {
+                    Set<Map<String, String>> seenSpecs = new HashSet<>(existingSpecs);
+                    Optional<Map<String, String>> conflictingSpec =
+                            request.getPartitionSpecs().stream()
+                                    .filter(spec -> !seenSpecs.add(spec))
+                                    .findFirst();
+                    if (conflictingSpec.isPresent()) {
+                        String partitionName =
+                                PartitionUtils.buildPartitionName(conflictingSpec.get());
+                        ErrorResponse response =
+                                new ErrorResponse(
+                                        ErrorResponse.RESOURCE_TYPE_PARTITION,
+                                        partitionName,
+                                        String.format(
+                                                "Partition %s already exists.", partitionName),
+                                        409);
+                        return mockResponse(response, 409);
+                    }
+                }
+                List<Map<String, String>> created = new ArrayList<>();
+                List<Map<String, String>> existed = new ArrayList<>();
+                for (Map<String, String> spec : request.getPartitionSpecs()) {
+                    if (existingSpecs.add(spec)) {
+                        storedPartitions.add(new Partition(spec, 0, 0, 0, 0, -1, false));
+                        created.add(spec);
+                    } else {
+                        existed.add(spec);
+                    }
+                }
+                return mockResponse(new CreatePartitionsResponse(created, existed), 200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private MockResponse dropPartitionsHandle(String data, Identifier tableIdentifier)
+            throws Exception {
+        DropPartitionsRequest request = RESTApi.fromJson(data, DropPartitionsRequest.class);
+        List<Partition> storedPartitions =
+                tablePartitionsStore.computeIfAbsent(
+                        tableIdentifier.getFullName(), ignored -> new ArrayList<>());
+        Set<Map<String, String>> existingSpecs =
+                storedPartitions.stream().map(Partition::spec).collect(Collectors.toSet());
+        List<Map<String, String>> missing = new ArrayList<>();
+        for (Map<String, String> spec : request.getPartitionSpecs()) {
+            if (!existingSpecs.contains(spec)) {
+                missing.add(spec);
+            }
+        }
+        if (!request.ignoreIfNotExists() && !missing.isEmpty()) {
+            List<String> missingNames =
+                    missing.stream()
+                            .map(PartitionUtils::buildPartitionName)
+                            .collect(Collectors.toList());
+            ErrorResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_PARTITION,
+                            missingNames.get(0),
+                            String.format("Partitions %s do not exist.", missingNames),
+                            404);
+            return mockResponse(response, 404);
+        }
+        List<Map<String, String>> dropped = new ArrayList<>();
+        Set<Map<String, String>> toDrop = new HashSet<>(request.getPartitionSpecs());
+        storedPartitions.removeIf(
+                partition -> {
+                    if (toDrop.contains(partition.spec())) {
+                        dropped.add(partition.spec());
+                        return true;
+                    }
+                    return false;
+                });
+        return mockResponse(new DropPartitionsResponse(dropped, missing), 200);
     }
 
     private MockResponse listPartitionsByNames(

@@ -59,9 +59,11 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
@@ -726,6 +728,59 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        createPartitions(identifier, partitions, true);
+    }
+
+    @Override
+    public void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        try {
+            api.createPartitions(identifier, partitions, ignoreIfExists);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (AlreadyExistsException e) {
+            // Server contract: with ignoreIfExists=false the whole batch is rejected atomically.
+            throw new IllegalStateException(
+                    String.format(
+                            "Some partitions of table %s already exist: %s",
+                            identifier, e.getMessage()));
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        if (isCatalogManagedFormatTable(table)) {
+            // Managed format table: metadata-only unregistration on the server. Data deletion is
+            // the caller's responsibility (performed with the table FileIO afterwards).
+            try {
+                api.dropPartitions(identifier, partitions, true);
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            } catch (ForbiddenException e) {
+                throw new TableNoPermissionException(identifier, e);
+            } catch (BadRequestException e) {
+                throw new IllegalArgumentException(e.getMessage());
+            }
+            return;
+        }
+        // Non-managed tables keep the default truncate-based data semantics.
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
             return api.listPartitions(identifier);
@@ -734,8 +789,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return listPartitionsFromFileSystem(getTable(identifier));
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table);
         }
     }
 
@@ -753,8 +811,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return new PagedList<>(listPartitionsFromFileSystem(table), null);
         }
     }
 
@@ -769,7 +830,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            return listPartitionsFromFileSystem(getTable(identifier), partitions);
+            Table table = getTable(identifier);
+            if (isCatalogManagedFormatTable(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table, partitions);
         }
     }
 
@@ -836,6 +901,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean supportsPartitionModification() {
+        // Paimon tables use commit-based partition maintenance.
         return false;
     }
 
@@ -1255,6 +1321,11 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     RESTApi api() {
         return api;
+    }
+
+    private static boolean isCatalogManagedFormatTable(Table table) {
+        return table instanceof FormatTable
+                && new CoreOptions(table.options()).partitionedTableInMetastore();
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {

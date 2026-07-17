@@ -64,9 +64,13 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -106,6 +110,7 @@ import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
@@ -1527,6 +1532,111 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
+    }
+
+    @Test
+    void testCreatePartitionsForManagedFormatTable() throws Exception {
+        Identifier identifier = Identifier.create("format_partition_db", "managed_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        CreatePartitionsResponse response =
+                restCatalog.api().createPartitions(identifier, partitionSpecs);
+
+        assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
+        assertThat(response.getExisted()).isEmpty();
+
+        catalog.createPartitions(identifier, partitionSpecs);
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        List<Map<String, String>> conflictingSpecs =
+                Arrays.asList(partitionSpecs.get(0), singletonMap("dt", "20260716"));
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .createPartitions(identifier, conflictingSpecs, false))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("dt=20260714");
+
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
+    }
+
+    @Test
+    void testDropPartitionsForManagedFormatTable() throws Exception {
+        Identifier identifier = Identifier.create("format_partition_db", "managed_drop_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        DropPartitionsResponse response =
+                restCatalog
+                        .api()
+                        .dropPartitions(
+                                identifier,
+                                Arrays.asList(
+                                        singletonMap("dt", "20260714"),
+                                        singletonMap("dt", "20260799")),
+                                true);
+        assertThat(response.getDropped()).containsExactly(singletonMap("dt", "20260714"));
+        assertThat(response.getMissing()).containsExactly(singletonMap("dt", "20260799"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactly(singletonMap("dt", "20260715"));
+
+        // Catalog contract: dropPartitions ignores non-existent partitions and unregisters
+        // metadata only (no data deletion on the server).
+        catalog.dropPartitions(
+                identifier,
+                Arrays.asList(singletonMap("dt", "20260715"), singletonMap("dt", "20260799")));
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .dropPartitions(
+                                                identifier,
+                                                singletonList(singletonMap("dt", "20260799")),
+                                                false))
+                .isInstanceOf(NoSuchResourceException.class)
+                .hasMessageContaining("dt=20260799");
+    }
+
+    @Test
+    void testDropPartitionsLoadsNonManagedTableOnce() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "drop_partition_table");
+        createTable(identifier, emptyMap(), singletonList("col1"));
+        RESTCatalog catalogSpy = Mockito.spy(restCatalog);
+
+        catalogSpy.dropPartitions(identifier, singletonList(singletonMap("col1", "20260717")));
+
+        Mockito.verify(catalogSpy, Mockito.times(1)).getTable(identifier);
     }
 
     @Test
