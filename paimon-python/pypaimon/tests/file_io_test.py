@@ -71,7 +71,7 @@ class FileIOTest(unittest.TestCase):
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
             OssOptions.OSS_IMPL.key(): 'legacy',
         }))
-        # PyArrow <14 bakes the bucket into endpoint_override, so keys omit it.
+        # PyArrow <16 bakes the bucket into endpoint_override, so keys omit it.
         bucket_stripped = oss_io._oss_bucket_in_endpoint
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
         self.assertEqual(got, "path/to/file.txt" if bucket_stripped else "test-bucket/path/to/file.txt")
@@ -82,9 +82,9 @@ class FileIOTest(unittest.TestCase):
             manifest_uri = "oss://test-bucket/warehouse/db.db/table/manifest/manifest-list-abc-0"
             manifest_key = oss_io.to_filesystem_path(manifest_uri)
             self.assertEqual(manifest_key, "warehouse/db.db/table/manifest/manifest-list-abc-0",
-                             "OSS+PyArrow<14 must pass key only so manifest lands in the right bucket")
+                             "OSS+PyArrow<16 must pass key only so manifest lands in the right bucket")
             self.assertFalse(manifest_key.startswith("test-bucket/"),
-                             "path must not start with bucket or PyArrow <14 writes to wrong bucket")
+                             "path must not start with bucket or PyArrow <16 writes to wrong bucket")
         nf = MagicMock(type=pafs.FileType.NotFound)
         get_file_info_calls = []
 
@@ -110,7 +110,7 @@ class FileIOTest(unittest.TestCase):
                 for p in call_paths:
                     self.assertFalse(
                         p.startswith("test-bucket/"),
-                        "OSS+PyArrow<14 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                        "OSS+PyArrow<16 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
                     )
 
     def test_exists(self):

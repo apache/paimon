@@ -51,11 +51,11 @@ class PyArrowFileIO(FileIO):
         self.logger = logging.getLogger(__name__)
         self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
-        # force_virtual_addressing landed in PyArrow 14; below it the OSS bucket
+        # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
-        self._pyarrow_gte_14 = parse(pyarrow.__version__) >= parse("14.0.0")
-        self._oss_bucket_in_endpoint = not self._pyarrow_gte_14
+        self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
+        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
@@ -231,7 +231,7 @@ class PyArrowFileIO(FileIO):
             "session_token": session_token,
             "region": region,
         }
-        if self._pyarrow_gte_14:
+        if self._pyarrow_gte_16:
             path_style_access = (
                 self._get_s3_boolean_property("path-style-access") or
                 self._get_s3_boolean_property("path.style.access"))
