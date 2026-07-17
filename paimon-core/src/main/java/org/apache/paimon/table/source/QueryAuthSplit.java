@@ -49,6 +49,11 @@ public class QueryAuthSplit implements Split {
         return split;
     }
 
+    /** Unwraps one query authorization layer to expose the wrapped split. */
+    public static Split unwrap(Split split) {
+        return split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split;
+    }
+
     @Nullable
     public TableQueryAuthResult authResult() {
         return authResult;

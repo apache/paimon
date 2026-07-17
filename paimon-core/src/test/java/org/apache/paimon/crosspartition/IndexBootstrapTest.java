@@ -20,6 +20,7 @@ package org.apache.paimon.crosspartition;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -31,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -47,6 +49,7 @@ import java.util.function.Consumer;
 
 import static org.apache.paimon.crosspartition.IndexBootstrap.BUCKET_FIELD;
 import static org.apache.paimon.crosspartition.IndexBootstrap.filterSplit;
+import static org.apache.paimon.crosspartition.IndexBootstrap.unwrapDataSplit;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -127,6 +130,18 @@ public class IndexBootstrapTest extends TableTestBase {
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 230)).isTrue();
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 300)).isFalse();
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 200, 230)).isTrue();
+    }
+
+    @Test
+    public void testQueryAuthSplit() {
+        DataSplit dataSplit = newSplit(newFile(100), newFile(200));
+        QueryAuthSplit authSplit =
+                new QueryAuthSplit(
+                        dataSplit, new TableQueryAuthResult(Collections.emptyList(), null));
+
+        assertThat(unwrapDataSplit(authSplit)).isSameAs(dataSplit);
+        assertThat(filterSplit(authSplit, 50, 230)).isTrue();
+        assertThat(filterSplit(authSplit, 50, 300)).isFalse();
     }
 
     private DataSplit newSplit(DataFileMeta... files) {

@@ -29,6 +29,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -119,7 +120,7 @@ public class IndexBootstrap implements Serializable {
                 options.pageSize(),
                 options.crossPartitionUpsertBootstrapParallelism(),
                 split -> {
-                    DataSplit dataSplit = ((DataSplit) split);
+                    DataSplit dataSplit = unwrapDataSplit(split);
                     int bucket = dataSplit.bucket();
                     return partBucketConverter.toGenericRow(
                             new JoinedRow(dataSplit.partition(), GenericRow.of(bucket)));
@@ -129,7 +130,7 @@ public class IndexBootstrap implements Serializable {
 
     @VisibleForTesting
     static boolean filterSplit(Split split, long indexTtl, long currentTime) {
-        List<DataFileMeta> files = ((DataSplit) split).dataFiles();
+        List<DataFileMeta> files = unwrapDataSplit(split).dataFiles();
         for (DataFileMeta file : files) {
             long fileTime = file.creationTimeEpochMillis();
             if (currentTime <= fileTime + indexTtl) {
@@ -137,6 +138,11 @@ public class IndexBootstrap implements Serializable {
             }
         }
         return false;
+    }
+
+    @VisibleForTesting
+    static DataSplit unwrapDataSplit(Split split) {
+        return (DataSplit) QueryAuthSplit.unwrap(split);
     }
 
     public static RowType bootstrapType(TableSchema schema) {
