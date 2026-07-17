@@ -294,35 +294,32 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
-        boolean timingEnabled = LOG.isInfoEnabled();
-        long totalStart = timingEnabled ? System.nanoTime() : 0L;
+        long totalStart = System.nanoTime();
         Optional<GlobalIndexScanner> optionalScanner =
                 GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
-        long metadataDuration = timingEnabled ? System.nanoTime() - totalStart : 0L;
+        long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
-            long lookupStart = timingEnabled ? System.nanoTime() : 0L;
+            long lookupStart = System.nanoTime();
             Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
-            long lookupDuration = timingEnabled ? System.nanoTime() - lookupStart : 0L;
+            long lookupDuration = System.nanoTime() - lookupStart;
             if (result.isPresent()) {
-                long coverageStart = timingEnabled ? System.nanoTime() : 0L;
+                long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
                         result.get().or(scanner.unindexedRows(globalIndexFilter));
-                if (timingEnabled) {
-                    long coverageDuration = System.nanoTime() - coverageStart;
-                    long totalDuration = System.nanoTime() - totalStart;
-                    LOG.info(
-                            "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
-                            table.name(),
-                            options.globalIndexSearchMode(),
-                            totalDuration / 1_000_000,
-                            metadataDuration / 1_000_000,
-                            lookupDuration / 1_000_000,
-                            coverageDuration / 1_000_000);
-                }
+                long coverageDuration = System.nanoTime() - coverageStart;
+                long totalDuration = System.nanoTime() - totalStart;
+                LOG.info(
+                        "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
+                        table.name(),
+                        options.globalIndexSearchMode(),
+                        totalDuration / 1_000_000,
+                        metadataDuration / 1_000_000,
+                        lookupDuration / 1_000_000,
+                        coverageDuration / 1_000_000);
                 return Optional.of(finalResult);
             }
             return Optional.empty();

@@ -331,20 +331,18 @@ public class GlobalIndexScanner implements Closeable {
                 unionReader.add(future.join());
             }
             readers.add(
-                    LOG.isInfoEnabled()
-                            ? new UnionGlobalIndexReader(
-                                    unionReader,
-                                    duration ->
-                                            LOG.info(
-                                                    "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
-                                                    table.name(),
-                                                    indexType,
-                                                    group.fieldIds.stream()
-                                                            .map(rowType::getField)
-                                                            .map(DataField::name)
-                                                            .collect(Collectors.toList()),
-                                                    duration / 1_000_000))
-                            : new UnionGlobalIndexReader(unionReader));
+                    new UnionGlobalIndexReader(
+                            unionReader,
+                            duration ->
+                                    LOG.info(
+                                            "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                            table.name(),
+                                            indexType,
+                                            group.fieldIds.stream()
+                                                    .map(rowType::getField)
+                                                    .map(DataField::name)
+                                                    .collect(Collectors.toList()),
+                                            duration / 1_000_000)));
         }
 
         return readers;
