@@ -195,10 +195,8 @@ function pytest_check() {
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
 
-    # 3.6 and 3.7 run a curated core subset: their dependency ceiling (PyArrow
-    # <=12, pyroaring without BitMap64, no ray/lance/mosaic/daft wheels) rules
-    # out the vector / global-index / multimodal / blob feature suites. 3.10+
-    # run the full suite.
+    # 3.6/3.7 run a curated core subset (their dep ceiling rules out the
+    # vector/index/multimodal/blob suites); 3.10+ run the full suite.
     if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
@@ -253,6 +251,14 @@ function mixed_check() {
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
     print_function "STAGE" "mixed tests checks"
+
+    # The interop suite needs BitMap64/vector deps absent on 3.7; skip it there
+    # (3.7 runs only the core subset, like pytest_check).
+    if [ "$PYTHON_VERSION" = "3.7" ]; then
+        echo "Skipping mixed interop tests on Python $PYTHON_VERSION (core subset)"
+        print_function "STAGE" "mixed tests checks... [SKIPPED]"
+        return 0
+    fi
 
     # Path to the mixed tests script
     MIXED_TESTS_SCRIPT="$CURRENT_DIR/dev/run_mixed_tests.sh"
