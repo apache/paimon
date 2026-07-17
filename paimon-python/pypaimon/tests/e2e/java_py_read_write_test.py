@@ -39,7 +39,8 @@ else:
 
 
 def get_file_format_params():
-    if sys.version_info[:2] == (3, 6):
+    # lance has no wheel on Python < 3.8.
+    if sys.version_info[:2] < (3, 8):
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]

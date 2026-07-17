@@ -261,15 +261,19 @@ run_java_read_test() {
 
     echo ""
 
-    # Run Java test for lance format in paimon-lance
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java read lance test failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java read lance test failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -876,14 +880,18 @@ run_data_evolution_py_write_test() {
         core_result=1
     fi
 
-    # Java read data evolution table (lance)
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
@@ -1309,16 +1317,10 @@ main() {
 
     echo ""
 
-    # Data evolution exercises the Lance variant, which needs the lance wheel
-    # (Python >= 3.8).
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
-        # Run data evolution test (Java write, Python read)
-        if ! run_data_evolution_test; then
-            data_evolution_result=1
-        fi
-    else
-        echo -e "${YELLOW}⏭ Skipping Data Evolution Test (needs lance, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
-        data_evolution_result=0
+    # Run data evolution test (Java write, Python read). Lance variant skips
+    # itself on <3.8 (get_file_format_params + gated Java lance read).
+    if ! run_data_evolution_test; then
+        data_evolution_result=1
     fi
 
     echo ""
@@ -1330,14 +1332,9 @@ main() {
 
     echo ""
 
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
-        # Run data evolution test (Python write, Java read)
-        if ! run_data_evolution_py_write_test; then
-            data_evolution_py_write_result=1
-        fi
-    else
-        echo -e "${YELLOW}⏭ Skipping Data Evolution Test (Python write) (needs lance, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
-        data_evolution_py_write_result=0
+    # Run data evolution test (Python write, Java read)
+    if ! run_data_evolution_py_write_test; then
+        data_evolution_py_write_result=1
     fi
 
     echo ""

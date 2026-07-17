@@ -92,6 +92,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install paimon-full-text dependency
+        shell: bash
         run: |
           # 3.7 runs no native full-text tests; the Java artifact is enough.
           if [[ "${{ matrix.python-version }}" == "3.7" ]]; then
