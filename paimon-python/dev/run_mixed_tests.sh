@@ -1151,22 +1151,31 @@ main() {
 
     echo ""
 
-    # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
-    if ! run_btree_raw_fallback_test; then
-        btree_raw_fallback_result=1
-    fi
+    # Raw fallback / bitmap / global index need pyroaring BitMap64 (>=1.0,
+    # Python >=3.8) on the Python read side; skip on older interpreters.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
+        if ! run_btree_raw_fallback_test; then
+            btree_raw_fallback_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Bitmap index test (Java write, Python read)
-    if ! run_bitmap_index_test; then
-        bitmap_index_result=1
-    fi
+        # Run Bitmap index test (Java write, Python read)
+        if ! run_bitmap_index_test; then
+            bitmap_index_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    if ! run_compressed_global_index_test; then
-        compressed_global_index_result=1
+        if ! run_compressed_global_index_test; then
+            compressed_global_index_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping BTree raw fallback / bitmap / global index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        btree_raw_fallback_result=0
+        bitmap_index_result=0
+        compressed_global_index_result=0
     fi
 
     echo ""
@@ -1233,16 +1242,23 @@ main() {
 
     echo ""
 
-    # Run Lumina vector index test (Java write, Python read)
-    if ! run_lumina_vector_test; then
-        lumina_vector_result=1
-    fi
+    # Lumina vector index needs BitMap64 (Python >= 3.8) on the read side.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run Lumina vector index test (Java write, Python read)
+        if ! run_lumina_vector_test; then
+            lumina_vector_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Lumina vector + BTree pre-filter test (Java write, Python read)
-    if ! run_lumina_vector_btree_test; then
-        lumina_vector_btree_result=1
+        # Run Lumina vector + BTree pre-filter test (Java write, Python read)
+        if ! run_lumina_vector_btree_test; then
+            lumina_vector_btree_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Lumina Vector Index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        lumina_vector_result=0
+        lumina_vector_btree_result=0
     fi
 
     echo ""
@@ -1293,9 +1309,16 @@ main() {
 
     echo ""
 
-    # Run data evolution test (Java write, Python read)
-    if ! run_data_evolution_test; then
-        data_evolution_result=1
+    # Data evolution exercises the Lance variant, which needs the lance wheel
+    # (Python >= 3.8).
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run data evolution test (Java write, Python read)
+        if ! run_data_evolution_test; then
+            data_evolution_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Data Evolution Test (needs lance, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        data_evolution_result=0
     fi
 
     echo ""
@@ -1307,9 +1330,14 @@ main() {
 
     echo ""
 
-    # Run data evolution test (Python write, Java read)
-    if ! run_data_evolution_py_write_test; then
-        data_evolution_py_write_result=1
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run data evolution test (Python write, Java read)
+        if ! run_data_evolution_py_write_test; then
+            data_evolution_py_write_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Data Evolution Test (Python write) (needs lance, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        data_evolution_py_write_result=0
     fi
 
     echo ""
