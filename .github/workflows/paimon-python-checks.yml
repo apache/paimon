@@ -114,8 +114,7 @@ jobs:
           echo "✓ dev/requirements.txt can be resolved on this Python"
 
       - name: Build Java
-        # 3.7 runs a Python-only core subset (mixed tests skipped), so it does
-        # not need the Java modules built.
+        # 3.7 runs a Python-only subset; no Java modules needed.
         if: matrix.python-version != '3.7'
         run: |
           echo "Start compiling modules"
