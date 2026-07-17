@@ -142,9 +142,9 @@ class PredicateTest(unittest.TestCase):
         self.assertEqual(len(actual_df), 0)
 
     def test_all_field_types_with_equal(self):
-        import sys
-        if sys.version_info < (3, 8):
-            self.skipTest("float16 cast unsupported on pyarrow<13 (Python 3.7)")
+        from packaging.version import parse
+        if parse(pa.__version__) < parse("13.0.0"):
+            self.skipTest("float16 cast requires pyarrow>=13")
         pa_schema = pa.schema([
             # int
             ('_tinyint', pa.int8()),

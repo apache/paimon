@@ -87,9 +87,14 @@ if _absent:
         if _top_import.search(_src):
             _ignore(_path)
 
-# A test may only reach a missing optional dependency (or pyroaring.BitMap64)
-# at runtime, where collect_ignore cannot help. Turn those specific import
-# failures into skips so the supported-feature suite stays green.
+# In PR CI this branch is merged with master, whose newer feature tests are not
+# present here to add pytest.importorskip to; this hook is the only branch-level
+# place that can reach them. A test that fails *only* because an optional
+# dependency (or pyroaring.BitMap64) is missing at runtime is turned into a
+# skip. Matching is deliberately narrow -- a structured ImportError.name, or the
+# two symbol/message cases that carry no usable .name -- and every downgrade is
+# logged, so a genuine "core hard-imports an optional dep" regression on 3.7
+# stays visible rather than being silently swallowed.
 _RUNTIME_OPTIONAL = ("ray", "daft", "datafusion", "pypaimon_rust", "mosaic",
                      "lance", "vortex", "duckdb", "snappy")
 
@@ -98,23 +103,20 @@ def _optional_absence_reason(exc):
     _seen = set()
     while exc is not None and id(exc) not in _seen:
         _seen.add(id(exc))
-        _msg = str(exc)
         if isinstance(exc, ImportError):
             _name = (getattr(exc, "name", None) or "").split(".")[0]
             if _name in _RUNTIME_OPTIONAL:
                 return "optional dependency %r unavailable" % _name
-            if "BitMap64" in _msg:
+            if "BitMap64" in str(exc):  # ImportError.name here is 'pyroaring'
                 return "pyroaring BitMap64 requires Python >= 3.8"
-        for _dep in _RUNTIME_OPTIONAL:
-            if "No module named '%s'" % _dep in _msg:
-                return "optional dependency %r unavailable" % _dep
-        if "python-snappy" in _msg:
+        elif isinstance(exc, ValueError) and "python-snappy" in str(exc):
             return "python-snappy not installed"
         exc = exc.__cause__ or exc.__context__
     return None
 
 
-if _absent or not _has_bitmap64():
+if _absent or not _has_bitmap64() or _is_missing("duckdb") or _is_missing("snappy"):
+    import sys
     import pytest
 
     @pytest.hookimpl(hookwrapper=True)
@@ -127,9 +129,10 @@ if _absent or not _has_bitmap64():
             _reason = _optional_absence_reason(call.excinfo.value)
             if _reason:
                 rep.outcome = "skipped"
-                rep.longrepr = (str(item.location[0]),
-                                item.location[1] or 0,
+                rep.longrepr = (str(item.location[0]), item.location[1] or 0,
                                 "Skipped: " + _reason)
+                sys.stderr.write("\n[conftest] downgraded to SKIP (%s): %s\n"
+                                 % (_reason, item.nodeid))
         except Exception:
             # Never let the skip-shim itself break test reporting.
             return

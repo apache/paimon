@@ -318,7 +318,8 @@ class LocalFileIO(FileIO):
             
             with open(file_path, 'wb') as f:
                 # ORC compression= was added in PyArrow 7.0; 6.x (Python 3.6/3.7) lacks it.
-                if int(pyarrow.__version__.split(".")[0]) < 7:
+                from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
+                if _pyarrow_lt_7():
                     orc.write_table(data, f, **kwargs)
                 else:
                     orc.write_table(data, f, compression=compression, **kwargs)
