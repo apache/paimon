@@ -22,6 +22,11 @@ from urllib.parse import urlparse
 
 from daft.io import IOConfig, S3Config
 
+try:
+    from daft.io import JindoConfig
+except ImportError:
+    JindoConfig = None
+
 
 def serialize_io_config(io_config: IOConfig) -> bytes:
     """Serialize an IOConfig to the bytes Daft's File struct embeds, via its __reduce__."""
@@ -50,6 +55,7 @@ def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]
     if scheme == "oss":
         parsed = urlparse(warehouse)
         oss_cfg: dict[str, str] = {}
+        jindo_cfg = None
 
         bucket = parsed.netloc
         if bucket:
@@ -77,7 +83,21 @@ def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]
         if token:
             oss_cfg["security_token"] = token
 
-        return IOConfig(opendal_backends={"oss": oss_cfg}) if oss_cfg else None
+        if JindoConfig is not None and oss_cfg:
+            jindo_cfg = JindoConfig(
+                endpoint=catalog_options.get("fs.oss.endpoint"),
+                region=region,
+                access_key_id=key_id,
+                access_key_secret=key_secret,
+                security_token=token,
+            )
+
+        if not oss_cfg:
+            return None
+        io_config_kwargs = {"opendal_backends": {"oss": oss_cfg}}
+        if jindo_cfg is not None:
+            io_config_kwargs["jindo"] = jindo_cfg
+        return IOConfig(**io_config_kwargs)
 
     # S3-compatible (s3://, s3a://, s3n://)
     any_props_set = False
