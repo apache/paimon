@@ -139,6 +139,7 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
+        long start = durationConsumer == null ? 0L : System.nanoTime();
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
@@ -160,6 +161,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                 }
                             }
                             return result;
+                        })
+                .whenComplete(
+                        (ignored, throwable) -> {
+                            if (durationConsumer != null) {
+                                durationConsumer.accept(System.nanoTime() - start);
+                            }
                         });
     }
 
