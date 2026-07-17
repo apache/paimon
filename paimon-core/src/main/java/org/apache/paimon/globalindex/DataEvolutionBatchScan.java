@@ -296,10 +296,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         boolean timingEnabled = LOG.isInfoEnabled();
         long totalStart = timingEnabled ? System.nanoTime() : 0L;
-        long metadataStart = totalStart;
         Optional<GlobalIndexScanner> optionalScanner =
                 GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
-        long metadataDuration = timingEnabled ? System.nanoTime() - metadataStart : 0L;
+        long metadataDuration = timingEnabled ? System.nanoTime() - totalStart : 0L;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }

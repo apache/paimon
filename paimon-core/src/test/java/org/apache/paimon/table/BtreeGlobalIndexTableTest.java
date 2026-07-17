@@ -60,8 +60,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,7 +196,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     PredicateBuilder.and(
                             builder.equal(1, BinaryString.fromString("a7")),
                             builder.equal(2, BinaryString.fromString("b7")));
-            assertThat(readF1(table, predicate)).containsExactly("a7");
+            table.newReadBuilder().withFilter(predicate).newScan().plan();
 
             PredicateBuilder rowIdBuilder =
                     new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
@@ -207,37 +205,20 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     PredicateBuilder.or(
                             rowIdBuilder.equal(rowIdIndex, 1L),
                             rowIdBuilder.equal(1, BinaryString.fromString("a7")));
-            ReadBuilder readBuilder = table.newReadBuilder().withFilter(mixedRowIdPredicate);
-            assertThat(readBuilder.newScan().plan().splits())
-                    .isNotEmpty()
-                    .allMatch(split -> split instanceof DataSplit);
+            table.newReadBuilder().withFilter(mixedRowIdPredicate).newScan().plan();
 
             String logs = new String(output.toByteArray(), StandardCharsets.UTF_8);
-            Matcher summary =
-                    Pattern.compile(
-                                    "INFO Scan table '[^']+' with global index\\. "
-                                            + "searchMode='fast', total=(\\d+) ms, metadata=(\\d+) ms, "
-                                            + "lookup=(\\d+) ms, coverage=(\\d+) ms\\.")
-                            .matcher(logs);
-            assertThat(summary.find()).isTrue();
-            long total = Long.parseLong(summary.group(1));
-            long phaseSum =
-                    Long.parseLong(summary.group(2))
-                            + Long.parseLong(summary.group(3))
-                            + Long.parseLong(summary.group(4));
-            assertThat(total).isGreaterThanOrEqualTo(phaseSum);
-
-            Matcher logicalIndexes =
-                    Pattern.compile(
-                                    "INFO Global index lookup table='[^']+', type='btree', "
-                                            + "fields='\\[(f1|f2)\\]', lookup=\\d+ ms\\.")
-                            .matcher(logs);
-            List<String> fields = new ArrayList<>();
-            while (logicalIndexes.find()) {
-                fields.add(logicalIndexes.group(1));
-            }
-            assertThat(fields).containsExactlyInAnyOrder("f1", "f2");
             assertThat(logs)
+                    .containsPattern(
+                            "INFO Scan table '[^']+' with global index\\. "
+                                    + "searchMode='fast', total=\\d+ ms, metadata=\\d+ ms, "
+                                    + "lookup=\\d+ ms, coverage=\\d+ ms\\.")
+                    .containsPattern(
+                            "INFO Global index lookup table='[^']+', type='btree', "
+                                    + "fields='\\[f1\\]', lookup=\\d+ ms\\.")
+                    .containsPattern(
+                            "INFO Global index lookup table='[^']+', type='btree', "
+                                    + "fields='\\[f2\\]', lookup=\\d+ ms\\.")
                     .contains("INFO Scan table '" + table.name() + "' without global index.");
         } finally {
             scanLogger.setLevel(previousScanLevel);

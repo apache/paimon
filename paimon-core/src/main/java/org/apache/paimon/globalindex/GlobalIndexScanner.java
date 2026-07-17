@@ -54,7 +54,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.LongAdder;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
@@ -76,7 +75,6 @@ public class GlobalIndexScanner implements Closeable {
     private final IndexPathFactory indexPathFactory;
     private final GlobalIndexCoverage coverage;
     private final FileStoreTable table;
-    private final Map<IndexMetaFileGroup, Map<String, LongAdder>> lookupDurations;
 
     private GlobalIndexScanner(
             FileStoreTable table,
@@ -94,7 +92,6 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         this.coverage = new GlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
-        this.lookupDurations = LOG.isInfoEnabled() ? new HashMap<>() : null;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
@@ -285,23 +282,7 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        Optional<GlobalIndexResult> result = globalIndexEvaluator.evaluate(predicate);
-        if (lookupDurations != null) {
-            lookupDurations.forEach(
-                    (group, durations) ->
-                            durations.forEach(
-                                    (indexType, duration) ->
-                                            LOG.info(
-                                                    "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
-                                                    table.name(),
-                                                    indexType,
-                                                    group.fieldIds.stream()
-                                                            .map(rowType::getField)
-                                                            .map(DataField::name)
-                                                            .collect(Collectors.toList()),
-                                                    duration.sum() / 1_000_000)));
-        }
-        return result;
+        return globalIndexEvaluator.evaluate(predicate);
     }
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {
@@ -349,15 +330,21 @@ public class GlobalIndexScanner implements Closeable {
             for (CompletableFuture<GlobalIndexReader> future : futures) {
                 unionReader.add(future.join());
             }
-            if (lookupDurations == null) {
-                readers.add(new UnionGlobalIndexReader(unionReader));
-            } else {
-                LongAdder duration =
-                        lookupDurations
-                                .computeIfAbsent(group, ignored -> new HashMap<>())
-                                .computeIfAbsent(indexType, ignored -> new LongAdder());
-                readers.add(new UnionGlobalIndexReader(unionReader, duration::add));
-            }
+            readers.add(
+                    LOG.isInfoEnabled()
+                            ? new UnionGlobalIndexReader(
+                                    unionReader,
+                                    duration ->
+                                            LOG.info(
+                                                    "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                                    table.name(),
+                                                    indexType,
+                                                    group.fieldIds.stream()
+                                                            .map(rowType::getField)
+                                                            .map(DataField::name)
+                                                            .collect(Collectors.toList()),
+                                                    duration / 1_000_000))
+                            : new UnionGlobalIndexReader(unionReader));
         }
 
         return readers;
