@@ -51,6 +51,8 @@ class PyArrowFileIO(FileIO):
         self.logger = logging.getLogger(__name__)
         self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
+        # S3FileSystem's force_virtual_addressing kwarg was added in 14.0.0.
+        self._pyarrow_gte_14 = parse(pyarrow.__version__) >= parse("14.0.0")
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
@@ -185,7 +187,7 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
-        if self._pyarrow_gte_7:
+        if self._pyarrow_gte_14:
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
@@ -226,7 +228,7 @@ class PyArrowFileIO(FileIO):
             "session_token": session_token,
             "region": region,
         }
-        if self._pyarrow_gte_7:
+        if self._pyarrow_gte_14:
             path_style_access = (
                 self._get_s3_boolean_property("path-style-access") or
                 self._get_s3_boolean_property("path.style.access"))

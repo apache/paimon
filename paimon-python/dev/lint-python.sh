@@ -195,30 +195,16 @@ function pytest_check() {
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
 
-    # 3.6 uses the minimal py36 subset. 3.7+ run the full suite; tests reaching
-    # an optional dep at runtime are skipped by tests/conftest.py.
-    if [ "$PYTHON_VERSION" = "3.6" ]; then
+    # 3.6 and 3.7 run a curated core subset: their dependency ceiling (PyArrow
+    # <=12, pyroaring without BitMap64, no ray/lance/mosaic/daft wheels) rules
+    # out the vector / global-index / multimodal / blob feature suites. 3.10+
+    # run the full suite.
+    if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else
-        IGNORES="--ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
-        if [ "$PYTHON_VERSION" = "3.7" ]; then
-            # Feature areas that cannot run on 3.7's dependency ceiling: pyarrow
-            # 12 lacks RecordBatch.set_column and S3 force_virtual_addressing
-            # (>=14), the list->fixed_size_list / float16 casts (>=13); and the
-            # sorted-index path needs pyroaring BitMap64 (Python>=3.8). Runtime
-            # optional-dep / BitMap64 failures elsewhere skip via conftest.py.
-            IGNORES="$IGNORES --ignore=pypaimon/tests/multimodal_table_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/lance_utils_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/test_ray_shuffle_helper.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/pvfs_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/auth_masking_reader_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/blob_table_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/file_io_test.py"
-            IGNORES="$IGNORES --ignore=pypaimon/tests/primary_key_sorted_index_scan_test.py"
-        fi
-        TEST_DIR="pypaimon/tests pypaimon/acceptance $IGNORES"
-        echo "Running tests for Python $PYTHON_VERSION: pypaimon/tests pypaimon/acceptance $IGNORES"
+        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        echo "Running tests for Python $PYTHON_VERSION (excluding py36): $TEST_DIR"
     fi
 
     # the return value of a pipeline is the status of the last command to exit
