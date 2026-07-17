@@ -45,6 +45,8 @@ from pypaimon.daft.daft_datasource import (
     READER_MODE_NATIVE_PARQUET,
     _blob_native_covering_files,
 )
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 
 
 @dataclass
@@ -212,6 +214,39 @@ class DaftBlobNativeReadE2ETest(unittest.TestCase):
                .select(col("id"), col("name")).to_pylist())
         got = {r["id"]: r["name"] for r in out}
         self.assertEqual(got, {i: f"n{i}" for i in range(6)})
+
+    def test_drop_readd_scalar_projection_falls_back(self):
+        self.catalog.alter_table(
+            self.table,
+            [SchemaChange.drop_column("name")],
+            ignore_if_not_exists=False,
+        )
+        self.catalog.alter_table(
+            self.table,
+            [SchemaChange.add_column("name", AtomicType("STRING"))],
+            ignore_if_not_exists=False,
+        )
+
+        result = explain_paimon_scan(
+            self.table,
+            self.catalog_options,
+            columns=["id", "name"],
+            verbose=True,
+        )
+        out = (
+            read_paimon(self.table, self.catalog_options)
+            .select(col("id"), col("name"))
+            .sort("id")
+            .to_pydict()
+        )
+
+        self.assertEqual(result.native_parquet_split_count, 0)
+        self.assertGreater(result.pypaimon_fallback_split_count, 0)
+        self.assertIn(
+            "schema evolution requires PyPaimon normalization",
+            result.fallback_reasons,
+        )
+        self.assertEqual(out, {"id": list(range(6)), "name": [None] * 6})
 
     def test_blob_projection_falls_back(self):
         result = explain_paimon_scan(
