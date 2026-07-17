@@ -160,24 +160,57 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
             ScalarSearch scalarSearch) {
-        return unionAsync(reader -> reader.visitScalarSearch(scalarSearch));
+        // Scalar results from child readers cover different row ranges. Returning a partial union
+        // could drop the actual TopN rows, so every child must support and complete the search.
+        return unionAsync(
+                reader -> reader.visitScalarSearch(scalarSearch),
+                true,
+                scalarSearch.maxResultSize());
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
+        return unionAsync(visitor, false, Long.MAX_VALUE);
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
+            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor,
+            boolean requireAllReaders,
+            long maxResultSize) {
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            futures.add(visitor.apply(reader));
+            try {
+                futures.add(visitor.apply(reader));
+            } catch (UnsupportedOperationException e) {
+                if (requireAllReaders) {
+                    return CompletableFuture.completedFuture(Optional.empty());
+                }
+                throw e;
+            }
         }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
                             Optional<GlobalIndexResult> result = Optional.empty();
+                            boolean exact = true;
+                            long resultSize = 0;
                             for (CompletableFuture<Optional<GlobalIndexResult>> f : futures) {
                                 Optional<GlobalIndexResult> current = f.join();
                                 if (!current.isPresent()) {
+                                    if (requireAllReaders) {
+                                        return Optional.empty();
+                                    }
+                                    exact = false;
                                     continue;
+                                }
+                                long currentSize = current.get().results().getLongCardinality();
+                                if (Long.MAX_VALUE - resultSize < currentSize) {
+                                    return Optional.empty();
+                                }
+                                resultSize += currentSize;
+                                if (resultSize > maxResultSize) {
+                                    return Optional.empty();
                                 }
                                 if (!result.isPresent()) {
                                     result = current;
@@ -185,7 +218,11 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                     result = Optional.of(result.get().or(current.get()));
                                 }
                             }
-                            return result;
+                            if (!result.isPresent()) {
+                                return result;
+                            }
+                            return Optional.of(
+                                    result.get().withExact(exact && result.get().isExact()));
                         });
     }
 

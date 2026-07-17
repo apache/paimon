@@ -26,11 +26,15 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.PriorityQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -41,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
 
     private final KeySerializer keySerializer;
+    private final Comparator<Object> comparator;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
 
@@ -55,6 +60,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.comparator = keySerializer.createComparator();
     }
 
     @Override
@@ -139,9 +145,12 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
-    public java.util.concurrent.CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+    public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
             ScalarSearch scalarSearch) {
-        return visitAllFiles(reader -> reader.visitScalarSearch(scalarSearch));
+        if (scalarSearch.includeRowIds() != null && scalarSearch.includeRowIds().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return visitAllReaders(readers -> scalarSearch(readers, scalarSearch));
     }
 
     @Override
@@ -165,5 +174,151 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
 
     private RoaringNavigableMap64 bitmap(Optional<GlobalIndexResult> result) {
         return result.get().results();
+    }
+
+    private Optional<GlobalIndexResult> scalarSearch(
+            List<BTreeIndexReader> readers, ScalarSearch scalarSearch) {
+        int limit = scalarSearch.topN().limit();
+        BTreeIndexReader.ScalarSearchResultAccumulator result =
+                new BTreeIndexReader.ScalarSearchResultAccumulator(scalarSearch.maxResultSize());
+        if (limit == 0) {
+            return Optional.of(GlobalIndexResult.create(result.rowIds()));
+        }
+
+        SortValue order = scalarSearch.topN().orders().get(0);
+        if (order.nullOrdering() == SortValue.NullOrdering.NULLS_FIRST) {
+            if (!addNullRows(readers, scalarSearch, result)) {
+                return Optional.empty();
+            }
+            if (result.cardinality() >= limit) {
+                return Optional.of(GlobalIndexResult.create(result.rowIds()));
+            }
+        }
+
+        if (!addNonNullRows(readers, scalarSearch, order, result)) {
+            return Optional.empty();
+        }
+        if (order.nullOrdering() == SortValue.NullOrdering.NULLS_LAST
+                && result.cardinality() < limit
+                && !addNullRows(readers, scalarSearch, result)) {
+            return Optional.empty();
+        }
+        return Optional.of(GlobalIndexResult.create(result.rowIds()));
+    }
+
+    private boolean addNullRows(
+            List<BTreeIndexReader> readers,
+            ScalarSearch scalarSearch,
+            BTreeIndexReader.ScalarSearchResultAccumulator result) {
+        RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
+        for (BTreeIndexReader reader : readers) {
+            for (long rowId : reader.nullRowIds()) {
+                if (includeRowIds == null || includeRowIds.contains(rowId)) {
+                    if (!result.add(rowId)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean addNonNullRows(
+            List<BTreeIndexReader> readers,
+            ScalarSearch scalarSearch,
+            SortValue order,
+            BTreeIndexReader.ScalarSearchResultAccumulator result) {
+        Comparator<EntryCursor> cursorComparator =
+                (left, right) -> comparator.compare(left.current().key(), right.current().key());
+        if (order.direction() == SortValue.SortDirection.DESCENDING) {
+            cursorComparator = cursorComparator.reversed();
+        }
+
+        PriorityQueue<EntryCursor> cursors = new PriorityQueue<>(cursorComparator);
+        try {
+            for (BTreeIndexReader reader : readers) {
+                EntryCursor cursor = new EntryCursor(reader, order.direction());
+                if (cursor.advance()) {
+                    cursors.offer(cursor);
+                }
+            }
+
+            while (!cursors.isEmpty()) {
+                Object currentKey = cursors.peek().current().key();
+                boolean matched = false;
+                while (!cursors.isEmpty()
+                        && comparator.compare(cursors.peek().current().key(), currentKey) == 0) {
+                    EntryCursor cursor = cursors.poll();
+                    matched |= addRows(cursor.current().rowIds(), scalarSearch, result);
+                    if (result.exceededMaxResultSize()) {
+                        return false;
+                    }
+                    if (cursor.advance()) {
+                        cursors.offer(cursor);
+                    }
+                }
+                if (matched && result.cardinality() >= scalarSearch.topN().limit()) {
+                    break;
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to scan BTree index files for scalar TopN.", e);
+        }
+    }
+
+    private boolean addRows(
+            long[] rowIds,
+            ScalarSearch scalarSearch,
+            BTreeIndexReader.ScalarSearchResultAccumulator result) {
+        boolean matched = false;
+        RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
+        for (long rowId : rowIds) {
+            if (includeRowIds == null || includeRowIds.contains(rowId)) {
+                matched = true;
+                if (!result.add(rowId)) {
+                    return true;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private static class EntryCursor {
+        private final SortValue.SortDirection direction;
+        private final BTreeIndexReader.EntryIterator forwardIterator;
+        private final BTreeIndexReader.ReverseEntryIterator reverseIterator;
+        private BTreeIndexReader.KeyRowIds current;
+
+        private EntryCursor(BTreeIndexReader reader, SortValue.SortDirection direction) {
+            this.direction = direction;
+            this.forwardIterator =
+                    direction == SortValue.SortDirection.ASCENDING ? reader.entryIterator() : null;
+            this.reverseIterator =
+                    direction == SortValue.SortDirection.DESCENDING
+                            ? reader.reverseEntryIterator()
+                            : null;
+        }
+
+        private boolean advance() throws IOException {
+            if (direction == SortValue.SortDirection.ASCENDING) {
+                if (!forwardIterator.hasNext()) {
+                    current = null;
+                    return false;
+                }
+                current = forwardIterator.next();
+                return true;
+            }
+            if (!reverseIterator.hasNext()) {
+                current = null;
+                return false;
+            }
+            current = reverseIterator.next();
+            return true;
+        }
+
+        private BTreeIndexReader.KeyRowIds current() {
+            return current;
+        }
     }
 }

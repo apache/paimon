@@ -81,6 +81,7 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
@@ -363,6 +364,83 @@ public abstract class AbstractIndexReaderTest {
                                                     >= 0)
                             .map(Pair::getValue)
                             .collect(Collectors.toList()));
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchWithNullsFirst() throws Exception {
+        data.get(dataNum - 1).setLeft(null);
+        data.get(dataNum - 2).setLeft(null);
+
+        Comparator<Object> nullsFirstComparator = Comparator.nullsFirst(comparator);
+        List<Pair<Object, Long>> sorted = new ArrayList<>(data);
+        sorted.sort((left, right) -> nullsFirstComparator.compare(left.getKey(), right.getKey()));
+
+        int limit = 5;
+        Object boundary = sorted.get(limit - 1).getKey();
+        List<Long> expected =
+                sorted.stream()
+                        .filter(pair -> nullsFirstComparator.compare(pair.getKey(), boundary) <= 0)
+                        .map(Pair::getValue)
+                        .collect(Collectors.toList());
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result =
+                    reader.visitScalarSearch(
+                                    new ScalarSearch(new TopN(ref, ASCENDING, NULLS_FIRST, limit)))
+                            .join()
+                            .get();
+            assertResult(result, expected);
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchWithEmptyCandidateRows() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result =
+                    reader.visitScalarSearch(
+                                    new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, 1))
+                                            .withIncludeRowIds(candidates))
+                            .join()
+                            .get();
+            assertThat(result.results()).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchWithZeroLimit() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result =
+                    reader.visitScalarSearch(
+                                    new ScalarSearch(new TopN(ref, ASCENDING, NULLS_LAST, 0)))
+                            .join()
+                            .get();
+            assertThat(result.results()).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testScalarSearchFallsBackWhenBoundaryTiesExceedBudget() throws Exception {
+        Object repeatedKey = data.get(0).getKey();
+        for (Pair<Object, Long> pair : data) {
+            pair.setLeft(repeatedKey);
+        }
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            assertThat(
+                            reader.visitScalarSearch(
+                                            new ScalarSearch(
+                                                            new TopN(ref, ASCENDING, NULLS_LAST, 1))
+                                                    .withMaxResultSize(5))
+                                    .join())
+                    .isEmpty();
         }
     }
 

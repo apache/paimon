@@ -308,14 +308,6 @@ public class GlobalIndexScanner implements Closeable {
         return GlobalIndexResult.create(rows);
     }
 
-    public GlobalIndexResult unindexedRows(int fieldId) {
-        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(fieldId)) {
-            rows.addRange(range);
-        }
-        return GlobalIndexResult.create(rows);
-    }
-
     public GlobalIndexResult unindexedRowsForCorrectness(Predicate predicate) {
         return unindexedRowsForCorrectness(collectFieldIds(rowType, predicate));
     }

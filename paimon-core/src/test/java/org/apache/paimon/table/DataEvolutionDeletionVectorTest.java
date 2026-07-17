@@ -34,6 +34,7 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -42,6 +43,8 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -74,6 +77,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -246,6 +251,24 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         "7|name-7|base-7|7",
                         "8|name-8|base-8|8",
                         "9|name-9|base-9|9");
+    }
+
+    @Test
+    public void testTopNFallsBackWhenDeletionVectorsEnabled() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        createBTreeIndex(table, "f0");
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(10, 14), 14)));
+
+        table = getTableDefault();
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).isNotEmpty();
+        assertThat(plan.splits()).allMatch(split -> split instanceof DataSplit);
+        assertThat(readRows(readBuilder, plan)).contains("13|name-13|base-13|13");
     }
 
     @Test
@@ -667,6 +690,25 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 new DataEvolutionCompactionCommitPreparation(table, snapshot)
                         .prepare(commitMessages));
         commit(table, commitMessages);
+    }
+
+    private void createBTreeIndex(FileStoreTable table, String fieldName) throws Exception {
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField(fieldName);
+        List<DataSplit> dataSplits =
+                builder.scan()
+                        .map(org.apache.paimon.utils.Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result when building index."));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
     }
 
     private void commitDeletionVectors(FileStoreTable table, List<DvSpec> deletionVectorSpecs)

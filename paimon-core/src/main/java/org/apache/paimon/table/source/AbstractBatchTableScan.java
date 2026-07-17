@@ -206,6 +206,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
                 || pushDownLimit != null
                 || snapshotReader.hasNonPartitionFilter()
                 || authHasNonPartitionFilter
+                || options().deletionVectorsEnabled()
                 || !schema.primaryKeys().isEmpty()) {
             return Optional.empty();
         }

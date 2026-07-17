@@ -196,6 +196,9 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
+        checkState(
+                topNRowIdFilter == null || topN != null,
+                "TopN row ID filter requires a TopN definition.");
         InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
             tableScan.withLimit(limit);

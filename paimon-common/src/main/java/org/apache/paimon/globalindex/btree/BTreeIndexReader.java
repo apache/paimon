@@ -277,6 +277,10 @@ public class BTreeIndexReader implements Closeable {
         }
     }
 
+    RoaringNavigableMap64 nullRowIds() {
+        return nullBitmap.get();
+    }
+
     public Optional<GlobalIndexResult> visitIsNotNull() {
         return createResult(this::allNonNullRows);
     }
@@ -306,15 +310,15 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitEndsWith(Object literal) {
-        return createResult(this::allNonNullRows);
+        return createResult(this::allNonNullRows, false);
     }
 
     public Optional<GlobalIndexResult> visitContains(Object literal) {
-        return createResult(this::allNonNullRows);
+        return createResult(this::allNonNullRows, false);
     }
 
     public Optional<GlobalIndexResult> visitLike(Object literal) {
-        return createResult(this::allNonNullRows);
+        return createResult(this::allNonNullRows, false);
     }
 
     public Optional<GlobalIndexResult> visitLessThan(Object literal) {
@@ -375,96 +379,149 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitScalarSearch(ScalarSearch scalarSearch) {
-        return createResult(() -> scalarSearch(scalarSearch));
+        try {
+            return Optional.of(GlobalIndexResult.create(scalarSearch(scalarSearch)));
+        } catch (ScalarSearchResultTooLargeException ignored) {
+            return Optional.empty();
+        } catch (IOException e) {
+            throw new RuntimeException("fail to read btree index file.", e);
+        }
     }
 
-    private RoaringNavigableMap64 scalarSearch(ScalarSearch scalarSearch) throws IOException {
+    private RoaringNavigableMap64 scalarSearch(ScalarSearch scalarSearch)
+            throws IOException, ScalarSearchResultTooLargeException {
         SortValue order = scalarSearch.topN().orders().get(0);
         int limit = scalarSearch.topN().limit();
         RoaringNavigableMap64 includeRowIds = scalarSearch.includeRowIds();
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        ScalarSearchResultAccumulator result =
+                new ScalarSearchResultAccumulator(scalarSearch.maxResultSize());
+        if (limit == 0) {
+            return result.rowIds();
+        }
 
         if (order.nullOrdering() == SortValue.NullOrdering.NULLS_FIRST) {
-            result.or(matchingNullRows(includeRowIds));
-            if (result.getLongCardinality() >= limit) {
-                return result;
+            addMatchingNullRows(result, includeRowIds);
+            if (result.cardinality() >= limit) {
+                return result.rowIds();
             }
-            result.or(
-                    matchingNonNullRows(
-                            order.direction(), limit - result.getLongCardinality(), includeRowIds));
-            return result;
+            addMatchingNonNullRows(result, order.direction(), limit, includeRowIds);
+            return result.rowIds();
         }
 
-        result.or(matchingNonNullRows(order.direction(), limit, includeRowIds));
-        if (result.getLongCardinality() < limit) {
-            result.or(matchingNullRows(includeRowIds));
+        addMatchingNonNullRows(result, order.direction(), limit, includeRowIds);
+        if (result.cardinality() < limit) {
+            addMatchingNullRows(result, includeRowIds);
         }
-        return result;
+        return result.rowIds();
     }
 
-    private RoaringNavigableMap64 matchingNonNullRows(
+    private void addMatchingNonNullRows(
+            ScalarSearchResultAccumulator result,
             SortValue.SortDirection direction,
-            long limit,
+            long targetCardinality,
             @Nullable RoaringNavigableMap64 includeRowIds)
-            throws IOException {
-        if (limit <= 0 || minKey == null) {
-            return new RoaringNavigableMap64();
+            throws IOException, ScalarSearchResultTooLargeException {
+        if (targetCardinality <= 0 || minKey == null) {
+            return;
         }
 
         if (direction == SortValue.SortDirection.ASCENDING) {
-            RoaringNavigableMap64 result = new RoaringNavigableMap64();
             EntryIterator iterator = entryIterator();
             while (iterator.hasNext()) {
-                RoaringNavigableMap64 group = matchingRows(iterator.next().rowIds(), includeRowIds);
-                if (group.isEmpty()) {
+                if (!addMatchingRows(result, iterator.next().rowIds(), includeRowIds)) {
                     continue;
                 }
-                result.or(group);
-                if (result.getLongCardinality() >= limit) {
+                if (result.cardinality() >= targetCardinality) {
                     break;
                 }
             }
-            return result;
+            return;
         }
 
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
         ReverseEntryIterator iterator = reverseEntryIterator();
         while (iterator.hasNext()) {
-            RoaringNavigableMap64 group = matchingRows(iterator.next().rowIds(), includeRowIds);
-            if (group.isEmpty()) {
+            if (!addMatchingRows(result, iterator.next().rowIds(), includeRowIds)) {
                 continue;
             }
-            result.or(group);
-            if (result.getLongCardinality() >= limit) {
+            if (result.cardinality() >= targetCardinality) {
                 break;
             }
         }
-        return result;
     }
 
-    private RoaringNavigableMap64 matchingNullRows(@Nullable RoaringNavigableMap64 includeRowIds) {
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        result.or(nullBitmap.get());
-        if (includeRowIds != null) {
-            result.and(includeRowIds);
-        }
-        return result;
-    }
-
-    private RoaringNavigableMap64 matchingRows(
-            long[] rowIds, @Nullable RoaringNavigableMap64 includeRowIds) {
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        for (long rowId : rowIds) {
+    private void addMatchingNullRows(
+            ScalarSearchResultAccumulator result, @Nullable RoaringNavigableMap64 includeRowIds)
+            throws ScalarSearchResultTooLargeException {
+        for (long rowId : nullBitmap.get()) {
             if (includeRowIds == null || includeRowIds.contains(rowId)) {
-                result.add(rowId);
+                if (!result.add(rowId)) {
+                    throw new ScalarSearchResultTooLargeException();
+                }
             }
         }
-        return result;
+    }
+
+    private boolean addMatchingRows(
+            ScalarSearchResultAccumulator result,
+            long[] rowIds,
+            @Nullable RoaringNavigableMap64 includeRowIds)
+            throws ScalarSearchResultTooLargeException {
+        boolean matched = false;
+        for (long rowId : rowIds) {
+            if (includeRowIds == null || includeRowIds.contains(rowId)) {
+                matched = true;
+                if (!result.add(rowId)) {
+                    throw new ScalarSearchResultTooLargeException();
+                }
+            }
+        }
+        return matched;
+    }
+
+    static class ScalarSearchResultAccumulator {
+        private final RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
+        private final long maxResultSize;
+        private long cardinality;
+        private boolean exceededMaxResultSize;
+
+        ScalarSearchResultAccumulator(long maxResultSize) {
+            this.maxResultSize = maxResultSize;
+        }
+
+        boolean add(long rowId) {
+            if (rowIds.contains(rowId)) {
+                return true;
+            }
+            if (cardinality >= maxResultSize) {
+                exceededMaxResultSize = true;
+                return false;
+            }
+            rowIds.add(rowId);
+            cardinality++;
+            return true;
+        }
+
+        long cardinality() {
+            return cardinality;
+        }
+
+        boolean exceededMaxResultSize() {
+            return exceededMaxResultSize;
+        }
+
+        RoaringNavigableMap64 rowIds() {
+            return rowIds;
+        }
     }
 
     private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {
+        return createResult(supplier, true);
+    }
+
+    private Optional<GlobalIndexResult> createResult(
+            IOSupplier<RoaringNavigableMap64> supplier, boolean exact) {
         try {
-            return Optional.of(GlobalIndexResult.create(supplier.get()));
+            return Optional.of(GlobalIndexResult.create(supplier.get(), exact));
         } catch (IOException e) {
             throw new RuntimeException("fail to read btree index file.", e);
         }
@@ -473,6 +530,10 @@ public class BTreeIndexReader implements Closeable {
     @FunctionalInterface
     private interface IOSupplier<T> {
         T get() throws IOException;
+    }
+
+    private static class ScalarSearchResultTooLargeException extends Exception {
+        private static final long serialVersionUID = 1L;
     }
 
     private RoaringNavigableMap64 allNonNullRows() throws IOException {

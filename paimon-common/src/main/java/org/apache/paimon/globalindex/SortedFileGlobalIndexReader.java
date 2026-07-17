@@ -294,9 +294,21 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         return Optional.of(GlobalIndexResult.create(bitmap));
     }
 
-    protected CompletableFuture<Optional<GlobalIndexResult>> visitAllFiles(
-            Function<R, Optional<GlobalIndexResult>> visitor) {
-        return visitSelectedFiles(Optional.of(fileSelector.allFiles()), visitor);
+    protected CompletableFuture<Optional<GlobalIndexResult>> visitAllReaders(
+            Function<List<R>, Optional<GlobalIndexResult>> visitor) {
+        List<GlobalIndexIOMeta> files = fileSelector.allFiles();
+        if (files.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    List<R> readers = new ArrayList<>(files.size());
+                    for (GlobalIndexIOMeta file : files) {
+                        readers.add(getOrCreateReader(file));
+                    }
+                    return visitor.apply(readers);
+                },
+                executor);
     }
 
     protected abstract R openReader(GlobalIndexIOMeta meta);
@@ -396,20 +408,25 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
                 .thenApply(v -> unionResults(futures));
     }
 
-    private R getOrCreateReader(GlobalIndexIOMeta meta) {
+    protected R getOrCreateReader(GlobalIndexIOMeta meta) {
         return readerCache.computeIfAbsent(meta.filePath(), ignored -> openReader(meta));
     }
 
     private Optional<GlobalIndexResult> unionResults(
             List<CompletableFuture<Optional<GlobalIndexResult>>> futures) {
         Optional<GlobalIndexResult> result = Optional.empty();
+        boolean exact = true;
         for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
             Optional<GlobalIndexResult> current = future.join();
             if (!current.isPresent()) {
+                exact = false;
                 continue;
             }
             result = result.isPresent() ? Optional.of(result.get().or(current.get())) : current;
         }
-        return result;
+        if (!result.isPresent()) {
+            return result;
+        }
+        return Optional.of(result.get().withExact(exact && result.get().isExact()));
     }
 }

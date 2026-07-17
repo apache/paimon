@@ -18,19 +18,25 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
@@ -42,6 +48,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,6 +118,69 @@ public class DataEvolutionBatchScanTest {
 
         assertThat(returned).isSameAs(scan);
         verify(batchScan).withShard(0, 2);
+    }
+
+    @Test
+    public void testTopNFallsBackWhenQueryAuthEnabled() {
+        CoreOptions options = mock(CoreOptions.class);
+        when(options.globalIndexEnabled()).thenReturn(true);
+        when(options.queryAuthEnabled()).thenReturn(true);
+
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.coreOptions()).thenReturn(options);
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        TableScan.Plan fallbackPlan = mock(TableScan.Plan.class);
+        when(batchScan.plan()).thenReturn(fallbackPlan);
+
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        DataEvolutionBatchScan scan = new DataEvolutionBatchScan(table, batchScan);
+        scan.withTopN(topN);
+
+        assertThat(scan.plan()).isSameAs(fallbackPlan);
+        verify(batchScan).withTopN(topN);
+    }
+
+    @Test
+    public void testTopNFallsBackWhenLimitIsAlsoPushed() {
+        CoreOptions options = mock(CoreOptions.class);
+        when(options.globalIndexEnabled()).thenReturn(true);
+
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.coreOptions()).thenReturn(options);
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        TableScan.Plan fallbackPlan = mock(TableScan.Plan.class);
+        when(batchScan.plan()).thenReturn(fallbackPlan);
+
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        DataEvolutionBatchScan scan = new DataEvolutionBatchScan(table, batchScan);
+        scan.withLimit(1).withTopN(topN);
+
+        assertThat(scan.plan()).isSameAs(fallbackPlan);
+        verify(batchScan).withLimit(1);
+        verify(batchScan).withTopN(topN);
+    }
+
+    @Test
+    public void testSmallExplicitCandidateSetSkipsIndexEvaluationWithFilter() {
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        mockSnapshotReader(batchScan);
+        when(batchScan.withRowRangeIndex(any(RowRangeIndex.class))).thenReturn(batchScan);
+        when(batchScan.plan()).thenReturn(() -> Collections.emptyList());
+
+        Predicate filter = new PredicateBuilder(rowTypeWithRowId()).greaterThan(0, 5);
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+        candidates.add(1L);
+
+        DataEvolutionBatchScan scan = new DataEvolutionBatchScan(null, batchScan);
+        scan.withFilter(filter).withTopN(topN).withTopNRowIdFilter(candidates);
+
+        assertThat(scan.plan().splits()).isEmpty();
+        ArgumentCaptor<RowRangeIndex> captor = ArgumentCaptor.forClass(RowRangeIndex.class);
+        verify(batchScan).withRowRangeIndex(captor.capture());
+        assertThat(captor.getValue().ranges()).containsExactly(new Range(1L, 1L));
     }
 
     @Test

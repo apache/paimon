@@ -33,12 +33,24 @@ public class ScalarSearch implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final TopN topN;
-
-    @Nullable private RoaringNavigableMap64 includeRowIds;
+    @Nullable private final RoaringNavigableMap64 includeRowIds;
+    private final long maxResultSize;
 
     public ScalarSearch(TopN topN) {
+        this(topN, null, Long.MAX_VALUE);
+    }
+
+    private ScalarSearch(
+            TopN topN, @Nullable RoaringNavigableMap64 includeRowIds, long maxResultSize) {
         this.topN = checkNotNull(topN);
-        checkArgument(topN.limit() > 0, "Limit must be positive, got: %s", topN.limit());
+        checkArgument(topN.limit() >= 0, "Limit must not be negative, got: %s", topN.limit());
+        checkArgument(
+                maxResultSize >= topN.limit(),
+                "Max result size %s must not be smaller than limit %s.",
+                maxResultSize,
+                topN.limit());
+        this.includeRowIds = includeRowIds;
+        this.maxResultSize = maxResultSize;
     }
 
     public TopN topN() {
@@ -51,20 +63,31 @@ public class ScalarSearch implements Serializable {
     }
 
     public ScalarSearch withIncludeRowIds(@Nullable RoaringNavigableMap64 includeRowIds) {
-        this.includeRowIds = includeRowIds;
-        return this;
+        return new ScalarSearch(topN, includeRowIds, maxResultSize);
+    }
+
+    public long maxResultSize() {
+        return maxResultSize;
+    }
+
+    public ScalarSearch withMaxResultSize(long maxResultSize) {
+        return new ScalarSearch(topN, includeRowIds, maxResultSize);
     }
 
     public ScalarSearch offsetRange(long from, long to) {
         if (includeRowIds == null) {
             return this;
         }
-        return new ScalarSearch(topN)
-                .withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
+        return new ScalarSearch(
+                topN, VectorSearchUtils.offsetRowIds(includeRowIds, from, to), maxResultSize);
     }
 
     @Override
     public String toString() {
-        return topN.toString();
+        return String.format(
+                "%s, IncludeRows(%s), MaxResultSize(%s)",
+                topN,
+                includeRowIds == null ? "ALL" : includeRowIds.getLongCardinality(),
+                maxResultSize);
     }
 }

@@ -29,6 +29,15 @@ public interface GlobalIndexResult {
     /** Returns the bitmap representing row ids. */
     RoaringNavigableMap64 results();
 
+    /** Whether the bitmap is the exact predicate result instead of a pruning candidate set. */
+    default boolean isExact() {
+        return true;
+    }
+
+    default GlobalIndexResult withExact(boolean exact) {
+        return exact == isExact() ? this : create(results(), exact);
+    }
+
     default GlobalIndexResult offset(long startOffset) {
         if (startOffset == 0) {
             return this;
@@ -39,15 +48,19 @@ public interface GlobalIndexResult {
         for (long rowId : roaringNavigableMap64) {
             roaringNavigableMap64Offset.add(rowId + startOffset);
         }
-        return create(roaringNavigableMap64Offset);
+        return create(roaringNavigableMap64Offset, isExact());
     }
 
     default GlobalIndexResult and(GlobalIndexResult other) {
-        return create(RoaringNavigableMap64.and(this.results(), other.results()));
+        return create(
+                RoaringNavigableMap64.and(this.results(), other.results()),
+                this.isExact() && other.isExact());
     }
 
     default GlobalIndexResult or(GlobalIndexResult other) {
-        return create(RoaringNavigableMap64.or(this.results(), other.results()));
+        return create(
+                RoaringNavigableMap64.or(this.results(), other.results()),
+                this.isExact() && other.isExact());
     }
 
     /** Returns an empty {@link GlobalIndexResult}. */
@@ -57,7 +70,22 @@ public interface GlobalIndexResult {
 
     /** Returns a new {@link GlobalIndexResult} from bitmap. */
     static GlobalIndexResult create(RoaringNavigableMap64 bitmap) {
-        return () -> bitmap;
+        return create(bitmap, true);
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from bitmap with exactness metadata. */
+    static GlobalIndexResult create(RoaringNavigableMap64 bitmap, boolean exact) {
+        return new GlobalIndexResult() {
+            @Override
+            public RoaringNavigableMap64 results() {
+                return bitmap;
+            }
+
+            @Override
+            public boolean isExact() {
+                return exact;
+            }
+        };
     }
 
     /** Returns a new {@link GlobalIndexResult} from {@link Range}. */

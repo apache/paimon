@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -60,11 +61,14 @@ import java.util.function.Function;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Scan for data evolution table. */
 public class DataEvolutionBatchScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
+    private static final int MAX_SCALAR_TOPN_LIMIT = 100;
+    private static final long MAX_SCALAR_TOPN_RESULT_SIZE = 10_000L;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -72,6 +76,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private Predicate filter;
     private TopN topN;
     private RoaringNavigableMap64 topNRowIdFilter;
+    private boolean pushedLimit;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -176,6 +181,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        this.pushedLimit = true;
         batchScan.withLimit(limit);
         return this;
     }
@@ -263,6 +269,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public Plan plan() {
+        checkState(
+                topNRowIdFilter == null || topN != null,
+                "TopN row ID filter requires a TopN definition.");
+        checkState(topN == null || topN.limit() >= 0, "TopN limit must not be negative.");
+        if (topN != null && topN.limit() == 0) {
+            return () -> Collections.emptyList();
+        }
+
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;
 
@@ -278,6 +292,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (rowRangeIndex == null && topNRowIdFilter != null) {
                 rowRangeIndex = RowRangeIndex.create(topNRowIdFilter.toRangeList());
             }
+        }
+
+        if (rowRangeIndex != null && rowRangeIndex.ranges().isEmpty()) {
+            return () -> Collections.emptyList();
         }
 
         if (rowRangeIndex == null) {
@@ -296,8 +314,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (filter == null && topN == null) {
             return Optional.empty();
         }
+        if (topN != null
+                && topNRowIdFilter != null
+                && topNRowIdFilter.getLongCardinality() <= topN.limit()) {
+            return Optional.of(GlobalIndexResult.create(copy(topNRowIdFilter)));
+        }
         CoreOptions options = table.coreOptions();
         if (!options.globalIndexEnabled()) {
+            return Optional.empty();
+        }
+        if (topN != null && !canUseScalarTopN(options)) {
             return Optional.empty();
         }
         Predicate globalIndexFilter = filter == null ? null : rowIdSafeResidualFilter(filter);
@@ -322,6 +348,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 if (globalIndexFilter != null) {
                     Optional<GlobalIndexResult> filterResult = scanner.scan(globalIndexFilter);
                     if (!filterResult.isPresent()
+                            || !filterResult.get().isExact()
                             || intersectsUnindexedRows(
                                     includeRowIds,
                                     scanner.unindexedRowsForCorrectness(globalIndexFilter))) {
@@ -334,6 +361,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
                     }
                 }
 
+                if (includeRowIds != null && includeRowIds.getLongCardinality() <= topN.limit()) {
+                    return Optional.of(GlobalIndexResult.create(includeRowIds));
+                }
+
                 String orderFieldName = topN.orders().get(0).field().name();
                 int orderFieldId = table.rowType().getField(orderFieldName).id();
                 if (intersectsUnindexedRows(
@@ -342,7 +373,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 }
 
                 Optional<GlobalIndexResult> result =
-                        scanner.scan(new ScalarSearch(topN).withIncludeRowIds(includeRowIds));
+                        scanner.scan(
+                                new ScalarSearch(topN)
+                                        .withIncludeRowIds(includeRowIds)
+                                        .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE));
                 if (result.isPresent()) {
                     LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
                 }
@@ -358,6 +392,20 @@ public class DataEvolutionBatchScan implements DataTableScan {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private boolean canUseScalarTopN(CoreOptions options) {
+        return topN.orders().size() == 1
+                && topN.limit() <= MAX_SCALAR_TOPN_LIMIT
+                && !pushedLimit
+                && !options.queryAuthEnabled()
+                && !options.deletionVectorsEnabled();
+    }
+
+    private RoaringNavigableMap64 copy(RoaringNavigableMap64 rowIds) {
+        RoaringNavigableMap64 copy = new RoaringNavigableMap64();
+        copy.or(rowIds);
+        return copy;
     }
 
     private boolean intersectsUnindexedRows(
@@ -378,14 +426,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> Collections.singletonList(wrapSplit(split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
+    }
+
+    private static Split wrapSplit(
+            Split split, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthSplit(
+                    wrapSplit(authSplit.split(), rowRangeIndex, scoreGetter),
+                    authSplit.authResult());
+        }
+        if (split instanceof IndexedSplit) {
+            return split;
+        }
+        return wrap((DataSplit) split, rowRangeIndex, scoreGetter);
     }
 
     private static IndexedSplit wrap(

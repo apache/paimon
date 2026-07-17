@@ -684,6 +684,67 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testScalarSearchRequiresEveryReader() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Arrays.asList(
+                                        scalarReaderReturning(resultOf(1, 2)),
+                                        new StubGlobalIndexReader(null)));
+        ScalarSearch search =
+                new ScalarSearch(
+                        new TopN(new FieldRef(1, "b", DataTypes.INT()), DESCENDING, NULLS_LAST, 2));
+
+        assertThat(evaluator.evaluateScalarSearch(search)).isEmpty();
+        evaluator.close();
+    }
+
+    @Test
+    void testScalarSearchHonorsResultBudget() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Arrays.asList(
+                                        scalarReaderReturning(resultOf(1, 2)),
+                                        scalarReaderReturning(resultOf(3, 4))));
+        ScalarSearch search =
+                new ScalarSearch(
+                                new TopN(
+                                        new FieldRef(1, "b", DataTypes.INT()),
+                                        DESCENDING,
+                                        NULLS_LAST,
+                                        2))
+                        .withMaxResultSize(3);
+
+        assertThat(evaluator.evaluateScalarSearch(search)).isEmpty();
+        evaluator.close();
+    }
+
+    @Test
+    void testPartialAndResultIsInexact() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        new StubGlobalIndexReader(resultOf(1, 2, 3))));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = PredicateBuilder.and(builder.equal(0, 42), builder.greaterThan(0, 0));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
+        assertThat(result.get().isExact()).isFalse();
+        evaluator.close();
+    }
+
+    @Test
     void testUnionReaderClosesRemainingReadersAfterFailure() {
         AtomicBoolean secondClosed = new AtomicBoolean();
         GlobalIndexReader failingReader =

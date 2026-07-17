@@ -42,12 +42,14 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 
@@ -60,6 +62,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for BTree indexed batch scan. */
@@ -198,6 +201,102 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(indexedRanges(plan)).containsExactly(new Range(100L, 100L));
         assertThat(readF1(readBuilder, plan)).containsExactly("a100");
+    }
+
+    @Test
+    public void testBTreeTopNFallsBackForResidualPredicate() throws Exception {
+        write(3L);
+        createIndex("f0");
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).endsWith(1, BinaryString.fromString("0"));
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof DataSplit);
+        assertThat(readF1(readBuilder, plan)).contains("a0");
+    }
+
+    @Test
+    public void testBTreeTopNWithZeroLimitReturnsEmptyPlan() throws Exception {
+        write(3L);
+        createIndex("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 0);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).isEmpty();
+        assertThat(readF1(readBuilder, plan)).isEmpty();
+    }
+
+    @Test
+    public void testBTreeTopNWithEmptyCandidatesReturnsEmptyPlan() throws Exception {
+        write(3L);
+        createIndex("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withTopN(topN)
+                        .withTopNRowIdFilter(new RoaringNavigableMap64());
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).isEmpty();
+        assertThat(readF1(readBuilder, plan)).isEmpty();
+    }
+
+    @Test
+    public void testBTreeTopNSkipsScalarPushdownForLargeLimit() throws Exception {
+        write(200L);
+        createIndex("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.INT()), DESCENDING, NULLS_LAST, 101);
+        TableScan.Plan plan = table.newReadBuilder().withTopN(topN).newScan().plan();
+
+        assertThat(plan.splits()).isNotEmpty();
+        assertThat(plan.splits()).allMatch(split -> split instanceof DataSplit);
+    }
+
+    @Test
+    public void testTopNRowIdFilterRequiresTopN() throws Exception {
+        write(3L);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        RoaringNavigableMap64 candidateRows = new RoaringNavigableMap64();
+        candidateRows.add(1L);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopNRowIdFilter(candidateRows);
+
+        assertThatThrownBy(readBuilder::newScan)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires a TopN definition");
+    }
+
+    @Test
+    public void testWrapToIndexSplitsPreservesQueryAuthSplit() throws Exception {
+        write(3L);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        List<Split> authSplits =
+                table.newScan().plan().splits().stream()
+                        .map(split -> new QueryAuthSplit(split, null))
+                        .collect(Collectors.toList());
+        TableScan.Plan plan =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                        authSplits,
+                        RowRangeIndex.create(Collections.singletonList(new Range(1L, 1L))),
+                        null);
+
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(plan.splits().get(0)).isInstanceOf(QueryAuthSplit.class);
+        assertThat(((QueryAuthSplit) plan.splits().get(0)).split())
+                .isInstanceOf(IndexedSplit.class);
     }
 
     @Test

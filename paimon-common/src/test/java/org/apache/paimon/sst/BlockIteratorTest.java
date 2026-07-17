@@ -87,6 +87,7 @@ public class BlockIteratorTest {
 
         // 3. test reverse iteration
         iterator.seekToLast();
+        Assertions.assertFalse(iterator.hasNext());
         int expected = ROW_NUM - 1;
         while (iterator.hasPrevious()) {
             Map.Entry<MemorySlice, MemorySlice> reverseEntry = iterator.previous();
@@ -97,6 +98,12 @@ public class BlockIteratorTest {
             expected--;
         }
         Assertions.assertEquals(-1, expected);
+
+        keyOut.reset();
+        keyOut.writeInt(0);
+        iterator.seekTo(keyOut.toSlice());
+        Assertions.assertFalse(iterator.hasPrevious());
+        Assertions.assertTrue(iterator.hasNext());
     }
 
     private MemorySlice writeBlock(boolean aligned) throws IOException {

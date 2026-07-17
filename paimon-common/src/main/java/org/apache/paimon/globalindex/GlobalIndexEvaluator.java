@@ -95,7 +95,7 @@ public class GlobalIndexEvaluator implements Closeable {
             try {
                 futures.add(reader.visitScalarSearch(scalarSearch));
             } catch (UnsupportedOperationException ignored) {
-                // Try another index implementation for the same field.
+                return Optional.empty();
             }
         }
         if (futures.isEmpty()) {
@@ -105,10 +105,19 @@ public class GlobalIndexEvaluator implements Closeable {
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
             Optional<GlobalIndexResult> result = Optional.empty();
+            long resultSize = 0;
             for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
                 Optional<GlobalIndexResult> current = future.join();
                 if (!current.isPresent()) {
-                    continue;
+                    return Optional.empty();
+                }
+                long currentSize = current.get().results().getLongCardinality();
+                if (Long.MAX_VALUE - resultSize < currentSize) {
+                    return Optional.empty();
+                }
+                resultSize += currentSize;
+                if (resultSize > scalarSearch.maxResultSize()) {
+                    return Optional.empty();
                 }
                 result = result.isPresent() ? Optional.of(result.get().or(current.get())) : current;
             }
@@ -147,16 +156,23 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            readerFutures.add(predicate.function().visit(reader, fieldRef, predicate.literals()));
+            try {
+                readerFutures.add(
+                        predicate.function().visit(reader, fieldRef, predicate.literals()));
+            } catch (UnsupportedOperationException ignored) {
+                readerFutures.add(CompletableFuture.completedFuture(Optional.empty()));
+            }
         }
 
         return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
                             Optional<GlobalIndexResult> compoundResult = Optional.empty();
+                            boolean exact = true;
                             for (CompletableFuture<Optional<GlobalIndexResult>> f : readerFutures) {
                                 Optional<GlobalIndexResult> childResult = f.join();
                                 if (!childResult.isPresent()) {
+                                    exact = false;
                                     continue;
                                 }
                                 if (compoundResult.isPresent()) {
@@ -167,10 +183,23 @@ public class GlobalIndexEvaluator implements Closeable {
                                     compoundResult = childResult;
                                 }
                                 if (compoundResult.get().results().isEmpty()) {
-                                    return compoundResult;
+                                    return Optional.of(
+                                            compoundResult
+                                                    .get()
+                                                    .withExact(
+                                                            exact
+                                                                    && compoundResult
+                                                                            .get()
+                                                                            .isExact()));
                                 }
                             }
-                            return compoundResult;
+                            if (!compoundResult.isPresent()) {
+                                return compoundResult;
+                            }
+                            return Optional.of(
+                                    compoundResult
+                                            .get()
+                                            .withExact(exact && compoundResult.get().isExact()));
                         });
     }
 
@@ -208,6 +237,7 @@ public class GlobalIndexEvaluator implements Closeable {
             return Optional.of(compoundResult);
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
+            boolean exact = true;
             for (Optional<GlobalIndexResult> childResult : results) {
                 if (childResult.isPresent()) {
                     if (compoundResult.isPresent()) {
@@ -215,12 +245,21 @@ public class GlobalIndexEvaluator implements Closeable {
                     } else {
                         compoundResult = childResult;
                     }
+                } else {
+                    exact = false;
                 }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
+                    return Optional.of(
+                            compoundResult
+                                    .get()
+                                    .withExact(exact && compoundResult.get().isExact()));
                 }
             }
-            return compoundResult;
+            if (!compoundResult.isPresent()) {
+                return compoundResult;
+            }
+            return Optional.of(
+                    compoundResult.get().withExact(exact && compoundResult.get().isExact()));
         }
     }
 
