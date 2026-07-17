@@ -77,7 +77,7 @@ public class SortCompactCommitter extends StoreCommitter {
             throw e;
         } catch (RuntimeException e) {
             maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
-            throw rewriter.maybeWrapDvConflict(e);
+            throw e;
         }
     }
 
@@ -116,7 +116,7 @@ public class SortCompactCommitter extends StoreCommitter {
             committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
         } catch (RuntimeException e) {
             maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
-            throw rewriter.maybeWrapDvConflict(e);
+            throw e;
         }
         calcNumBytesAndRecordsOut(rewritten);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
@@ -138,7 +138,7 @@ public class SortCompactCommitter extends StoreCommitter {
         } catch (RuntimeException e) {
             maybeAbortAfterFailedCommit(
                     Collections.emptyList(), rewritten, snapshotIdBeforeCommit, e);
-            throw rewriter.maybeWrapDvConflict(e);
+            throw e;
         }
         calcNumBytesAndRecordsOut(rewritten);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);

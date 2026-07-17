@@ -44,14 +44,14 @@ final class SortCompactSparkCommit {
         long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
         try {
             tableCommitter.commitTable(compactMessages);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             // TableCommitImpl commits the snapshot before maintenance/close. Aborting write output
             // after a successful snapshot commit would delete files referenced by the COMPACT
             // snapshot and corrupt the table.
             if (!rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages)) {
                 abortQuietly(rewriter, writtenMessages, e);
             }
-            throw rewriter.maybeWrapDvConflict(e);
+            throw e;
         }
 
         try {

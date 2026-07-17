@@ -808,29 +808,6 @@ public class SortCompactCommitMessageRewriterTest {
     }
 
     @Test
-    public void testMaybeWrapDvConflict() throws Exception {
-        FileStoreTable table =
-                createAppendTable(
-                        Collections.singletonMap(
-                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
-        SortCompactCommitMessageRewriter rewriter =
-                new SortCompactCommitMessageRewriter(table, 0L, Collections.emptyList());
-
-        RuntimeException wrapped =
-                rewriter.maybeWrapDvConflict(
-                        new RuntimeException(
-                                "File deletion conflicts detected! Give up committing."));
-        assertThat(wrapped.getMessage())
-                .contains("conflict on input files after the base snapshot");
-        assertThat(wrapped.getMessage()).contains("deletion vectors");
-        assertThat(wrapped.getMessage()).contains("Please retry");
-        assertThat(wrapped.getCause()).hasMessageContaining("File deletion conflicts");
-
-        RuntimeException unrelated = new RuntimeException("other failure");
-        assertThat(rewriter.maybeWrapDvConflict(unrelated)).isSameAs(unrelated);
-    }
-
-    @Test
     public void testRewriteInputOnlyGroupWithDeletionVectors() throws Exception {
         TestAppendFileStore store =
                 createAppendStore(

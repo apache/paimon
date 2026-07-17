@@ -159,55 +159,6 @@ public class SortCompactSparkCommitTest {
     }
 
     @Test
-    public void testTableCommitDeletionConflictIsWrappedWithHint() throws Exception {
-        FileStoreTable table =
-                createAppendTable(
-                        Collections.singletonMap(
-                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
-        DataFileMeta old = newFile("data-0.orc", 0, 0, 100, 100);
-        DataFileMeta sorted = newFile("sorted-0.orc", 0, 0, 100, 100);
-        DataSplit split =
-                DataSplit.builder()
-                        .withPartition(BinaryRow.EMPTY_ROW)
-                        .withBucket(0)
-                        .withBucketPath("bucket-0")
-                        .withDataFiles(Collections.singletonList(old))
-                        .build();
-        CommitMessageImpl written =
-                new CommitMessageImpl(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        table.coreOptions().bucket(),
-                        new DataIncrement(
-                                Collections.singletonList(sorted),
-                                Collections.emptyList(),
-                                Collections.emptyList()),
-                        CompactIncrement.emptyIncrement());
-        SortCompactCommitMessageRewriter rewriter =
-                new SortCompactCommitMessageRewriter(table, 0L, Collections.singletonList(split)) {
-                    @Override
-                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {}
-                };
-
-        assertThatThrownBy(
-                        () ->
-                                SortCompactSparkCommit.commit(
-                                        rewriter,
-                                        compactMessages -> {
-                                            throw new RuntimeException(
-                                                    "File deletion conflicts detected! Give up committing.");
-                                        },
-                                        compactMessages -> {},
-                                        Collections.singletonList(written)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("conflict on input files after the base snapshot")
-                .hasMessageContaining("deletion vectors")
-                .hasMessageContaining("Please retry")
-                .cause()
-                .hasMessageContaining("File deletion conflicts");
-    }
-
-    @Test
     public void testTableCommitFailureAfterSnapshotDoesNotAbortWrittenMessages() throws Exception {
         TestAppendFileStore store = createAppendStore(Collections.emptyMap());
         FileStoreTable table =

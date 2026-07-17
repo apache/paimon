@@ -49,7 +49,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -72,8 +71,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
  * from the base snapshot are cleaned up, mirroring {@link
  * org.apache.paimon.append.AppendCompactTask}. Concurrent deletion-vector writes after the base
  * snapshot are <b>not</b> merged into cleanup; if deletion vectors on input files changed, rewrite
- * fails with an explicit error (or commit conflict wrapping as a fallback) so the job can be
- * retried.
+ * or commit conflict detection fails with an explicit error so the job can be retried.
  */
 public class SortCompactCommitMessageRewriter {
 
@@ -250,7 +248,7 @@ public class SortCompactCommitMessageRewriter {
         }
 
         // Without a known base DV state we cannot tell whether DVs changed; skip the proactive
-        // check and rely on commit conflict wrapping.
+        // check and rely on commit conflict detection.
         if (!baseDeletionVectorStateKnown) {
             return;
         }
@@ -319,52 +317,6 @@ public class SortCompactCommitMessageRewriter {
                 + ", latestSnapshotId="
                 + latestSnapshotId
                 + ". Please retry the sort compact job after concurrent deletes/updates have finished.";
-    }
-
-    /**
-     * Hint used when a generic file-deletion conflict is caught at commit time (TOCTOU after the
-     * rewrite-time DV drift check).
-     *
-     * <p>On deletion-vector tables, {@code File deletion conflicts} covers both concurrent DV
-     * changes and unrelated removals of the same input files, so this hint must not claim that DVs
-     * definitely changed.
-     */
-    public static String sortCompactDvConflictHint() {
-        return "Sort compact cannot commit due to a conflict on input files after the base snapshot. "
-                + "On deletion-vector tables this often means concurrent deletes/updates changed deletion vectors "
-                + "on those inputs (committing could drop newer deletion vectors and restore deleted rows), "
-                + "or another job already compacted/removed the same files. "
-                + "A concurrent write may have raced between rewrite and commit. "
-                + "Please retry the sort compact job after concurrent deletes/updates have finished.";
-    }
-
-    /** Whether {@code cause} looks like a file / deletion-vector conflict from commit. */
-    public static boolean isDeletionConflict(Throwable cause) {
-        for (Throwable t = cause; t != null; t = t.getCause()) {
-            String message = t.getMessage();
-            if (message == null) {
-                continue;
-            }
-            if (message.contains("File deletion conflicts")
-                    || message.toLowerCase(Locale.ROOT).contains("deletion vector")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Wrap a commit failure with {@link #sortCompactDvConflictHint()} when the table has deletion
-     * vectors enabled and the failure looks like a deletion conflict.
-     */
-    public RuntimeException maybeWrapDvConflict(Exception cause) {
-        if (table.coreOptions().deletionVectorsEnabled() && isDeletionConflict(cause)) {
-            return new RuntimeException(sortCompactDvConflictHint(), cause);
-        }
-        if (cause instanceof RuntimeException) {
-            return (RuntimeException) cause;
-        }
-        return new RuntimeException(cause);
     }
 
     /** Abort newly written files when sort compact rewrite or commit fails. */

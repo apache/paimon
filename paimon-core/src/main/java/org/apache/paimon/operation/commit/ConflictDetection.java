@@ -186,7 +186,8 @@ public class ConflictDetection {
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
                 return Optional.of(
-                        conflictException(commitUser, baseEntries, deltaEntries).apply(e));
+                        conflictException(commitUser, baseEntries, deltaEntries, commitKind)
+                                .apply(e));
             }
         }
 
@@ -201,7 +202,7 @@ public class ConflictDetection {
         }
 
         Function<Throwable, RuntimeException> conflictException =
-                conflictException(baseCommitUser, baseEntries, deltaEntries);
+                conflictException(baseCommitUser, baseEntries, deltaEntries, commitKind);
 
         try {
             // check the delta, it is important not to delete and add the same file. Since scan
@@ -409,11 +410,12 @@ public class ConflictDetection {
     private Function<Throwable, RuntimeException> conflictException(
             String baseCommitUser,
             List<SimpleFileEntry> baseEntries,
-            List<SimpleFileEntry> deltaEntries) {
+            List<SimpleFileEntry> deltaEntries,
+            CommitKind commitKind) {
         return e -> {
             Pair<RuntimeException, RuntimeException> conflictException =
                     createConflictException(
-                            "File deletion conflicts detected! Give up committing.",
+                            fileDeletionConflictMessage(commitKind),
                             baseCommitUser,
                             baseEntries,
                             deltaEntries,
@@ -421,6 +423,22 @@ public class ConflictDetection {
             LOG.warn("", conflictException.getLeft());
             return conflictException.getRight();
         };
+    }
+
+    private String fileDeletionConflictMessage(CommitKind commitKind) {
+        String message = "File deletion conflicts detected! Give up committing.";
+        if (deletionVectorsEnabled
+                && bucketMode == BucketMode.BUCKET_UNAWARE
+                && commitKind == CommitKind.COMPACT) {
+            return message
+                    + " The compact commit conflicts with changes to its input files after they "
+                    + "were read. On a deletion-vector table, concurrent deletes or updates may "
+                    + "have changed deletion vectors on those files; committing could then drop "
+                    + "newer deletion vectors and restore deleted rows. Another job may also have "
+                    + "compacted or removed the same files. Please retry the compaction after the "
+                    + "concurrent operations have finished.";
+        }
+        return message;
     }
 
     private Optional<RuntimeException> checkDeleteInEntries(
