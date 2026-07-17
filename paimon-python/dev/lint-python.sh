@@ -252,14 +252,6 @@ function mixed_check() {
     echo "Detected Python version: $PYTHON_VERSION"
     print_function "STAGE" "mixed tests checks"
 
-    # The interop suite needs BitMap64/vector deps absent on 3.7; skip it there
-    # (3.7 runs only the core subset, like pytest_check).
-    if [ "$PYTHON_VERSION" = "3.7" ]; then
-        echo "Skipping mixed interop tests on Python $PYTHON_VERSION (core subset)"
-        print_function "STAGE" "mixed tests checks... [SKIPPED]"
-        return 0
-    fi
-
     # Path to the mixed tests script
     MIXED_TESTS_SCRIPT="$CURRENT_DIR/dev/run_mixed_tests.sh"
 
