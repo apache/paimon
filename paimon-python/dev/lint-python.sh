@@ -203,13 +203,19 @@ function pytest_check() {
     else
         IGNORES="--ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
         if [ "$PYTHON_VERSION" = "3.7" ]; then
-            # Feature areas that need pyarrow>=13 (list->fixed_size_list cast,
-            # S3 force_virtual_addressing) or otherwise cannot run on 3.7's
-            # dependency set. BitMap64 / optional-dep tests skip via conftest.py.
+            # Feature areas that cannot run on 3.7's dependency ceiling: pyarrow
+            # 12 lacks RecordBatch.set_column and S3 force_virtual_addressing
+            # (>=14), the list->fixed_size_list / float16 casts (>=13); and the
+            # sorted-index path needs pyroaring BitMap64 (Python>=3.8). Runtime
+            # optional-dep / BitMap64 failures elsewhere skip via conftest.py.
             IGNORES="$IGNORES --ignore=pypaimon/tests/multimodal_table_test.py"
             IGNORES="$IGNORES --ignore=pypaimon/tests/lance_utils_test.py"
             IGNORES="$IGNORES --ignore=pypaimon/tests/test_ray_shuffle_helper.py"
             IGNORES="$IGNORES --ignore=pypaimon/tests/pvfs_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/auth_masking_reader_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/blob_table_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/file_io_test.py"
+            IGNORES="$IGNORES --ignore=pypaimon/tests/primary_key_sorted_index_scan_test.py"
         fi
         TEST_DIR="pypaimon/tests pypaimon/acceptance $IGNORES"
         echo "Running tests for Python $PYTHON_VERSION: pypaimon/tests pypaimon/acceptance $IGNORES"
