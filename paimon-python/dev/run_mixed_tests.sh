@@ -193,15 +193,17 @@ run_java_write_test() {
 
     echo ""
 
-    # Run the Java test method for lance format
-    echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Run the Java test method for lance format (readers skipped on <3.8).
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
-        echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Java write lance test failed${NC}"
-        lance_result=1
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+            echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java write lance test failed${NC}"
+            lance_result=1
+        fi
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
