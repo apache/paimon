@@ -804,13 +804,15 @@ run_data_evolution_test() {
             core_result=1
         fi
 
-        # Java write data evolution table (lance)
-        echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
-            echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
-            lance_result=1
+        # Java write data evolution table (lance) -- only read back on >=3.8.
+        if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+            echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
+            if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
+                echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
+            else
+                echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
+                lance_result=1
+            fi
         fi
     fi
 
