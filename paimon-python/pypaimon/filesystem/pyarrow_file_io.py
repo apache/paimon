@@ -49,7 +49,6 @@ class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
         # goes into endpoint_override, so keys must omit it (init + path share
@@ -564,7 +563,7 @@ class PyArrowFileIO(FileIO):
             data = self._cast_time_columns_for_orc(data)
 
             with self.new_output_stream(path) as output_stream:
-                # ORC compression= was added in PyArrow 7.0; 6.x (Python 3.6/3.7) lacks it.
+                # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
                 if _pyarrow_lt_7():
                     orc.write_table(data, output_stream, **kwargs)
                 else:

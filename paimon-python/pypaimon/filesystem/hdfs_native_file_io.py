@@ -567,7 +567,7 @@ class HdfsNativeFileIO(FileIO):
             with self.new_output_stream(path) as raw_stream:
                 stream = pyarrow.PythonFile(raw_stream, mode='wb')
                 try:
-                    # ORC compression= was added in PyArrow 7.0; 6.x (Python 3.6/3.7) lacks it.
+                    # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
                     from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
                     if _pyarrow_lt_7():
                         orc.write_table(data, stream, **kwargs)
