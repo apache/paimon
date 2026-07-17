@@ -159,7 +159,10 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                             selected.withColumn(
                                     encodedCol,
                                     encodedSortKeyUdf(sortKeySerializer.get())
-                                            .apply(functions.col(indexField.name())));
+                                            .apply(
+                                                    functions
+                                                            .col(indexField.name())
+                                                            .cast(DataTypes.BinaryType)));
                     sortFields = new Column[] {functions.col(encodedCol)};
                 } else {
                     sortFields = sortColumns.stream().map(functions::col).toArray(Column[]::new);
@@ -204,11 +207,13 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
     }
 
     private static UserDefinedFunction encodedSortKeyUdf(KeySerializer sortKeySerializer) {
-        UDF1<String, byte[]> udf =
+        // The column is cast to binary before this UDF, so the serializer sees the exact
+        // bytes of the value instead of a lossy UTF8String -> java String conversion.
+        UDF1<byte[], byte[]> udf =
                 value ->
                         value == null
                                 ? null
-                                : sortKeySerializer.serialize(BinaryString.fromString(value));
+                                : sortKeySerializer.serialize(BinaryString.fromBytes(value));
         return functions.udf(udf, DataTypes.BinaryType);
     }
 

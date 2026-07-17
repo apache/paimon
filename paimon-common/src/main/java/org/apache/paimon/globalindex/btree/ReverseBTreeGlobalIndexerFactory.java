@@ -22,6 +22,9 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeFamily;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for {@link ReverseBTreeGlobalIndexer}. */
 public class ReverseBTreeGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -35,6 +38,12 @@ public class ReverseBTreeGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(DataField dataField, Options options) {
+        checkArgument(
+                dataField.type().is(DataTypeFamily.CHARACTER_STRING),
+                "Index type '%s' only supports CHAR/VARCHAR columns, but column '%s' is %s.",
+                IDENTIFIER,
+                dataField.name(),
+                dataField.type());
         return new ReverseBTreeGlobalIndexer(dataField, options);
     }
 }

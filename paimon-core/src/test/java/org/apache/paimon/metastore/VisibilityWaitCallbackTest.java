@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
@@ -167,7 +168,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
 
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : scan.get().getRight()) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+            commitMessages.addAll(
+                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, "f1", dataSplit));
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
@@ -185,7 +187,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
 
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : scan.get().getRight()) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+            commitMessages.addAll(
+                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, "f1", dataSplit));
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

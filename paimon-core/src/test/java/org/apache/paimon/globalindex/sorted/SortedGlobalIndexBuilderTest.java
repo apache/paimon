@@ -122,7 +122,8 @@ public class SortedGlobalIndexBuilderTest extends TableTestBase {
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : dataSplits) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+            commitMessages.addAll(
+                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, "f0", dataSplit));
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

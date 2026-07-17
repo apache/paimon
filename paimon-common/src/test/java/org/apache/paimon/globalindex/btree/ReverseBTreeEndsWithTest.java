@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ReversedKeySerializer;
@@ -37,6 +38,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
@@ -54,6 +56,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ReverseBTreeGlobalIndexer}. */
 public class ReverseBTreeEndsWithTest {
@@ -105,6 +108,18 @@ public class ReverseBTreeEndsWithTest {
             assertThat(reader.visitBetween(REF, probe, BinaryString.fromString("row9")).join())
                     .isEmpty();
         }
+    }
+
+    @Test
+    public void testNonStringColumnRejected() {
+        assertThatThrownBy(
+                        () ->
+                                GlobalIndexer.create(
+                                        ReverseBTreeGlobalIndexerFactory.IDENTIFIER,
+                                        new DataField(1, "f", DataTypes.INT()),
+                                        new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only supports CHAR/VARCHAR");
     }
 
     @Test

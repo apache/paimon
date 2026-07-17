@@ -26,6 +26,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -333,7 +334,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : indexSplits(table, rowRanges, dataSplits)) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+            commitMessages.addAll(
+                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, fieldName, dataSplit));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
