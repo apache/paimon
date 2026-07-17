@@ -134,12 +134,21 @@ public class CompactorSourceBuilder {
 
         CompactBucketsTable compactBucketsTable = new CompactBucketsTable(table, isContinuous);
         RowType produceType = compactBucketsTable.rowType();
+        Integer parallelism =
+                sourceParallelism(Options.fromMap(table.options()), bucketDistributionStrategy);
         DataStreamSource<RowData> dataStream =
                 env.fromSource(
                         buildSource(compactBucketsTable),
                         WatermarkStrategy.noWatermarks(),
                         tableIdentifier + "-compact-source",
                         InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
+        if (parallelism != null) {
+            // Size-aware assignment depends on source-reader to writer alignment. Set the
+            // parallelism on the original source before adding downstream filters; otherwise the
+            // configured parallelism may only apply to a filter and source-to-filter redistribution
+            // could break grouped bucket assignment.
+            dataStream.setParallelism(parallelism);
+        }
         if (isContinuous) {
             Preconditions.checkArgument(
                     partitionIdleTime == null, "Streaming mode does not support partitionIdleTime");
@@ -157,6 +166,9 @@ public class CompactorSourceBuilder {
                                 BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
                                 return partitionInfo.get(partition) <= historyMilli;
                             });
+            if (parallelism != null) {
+                filterStream.setParallelism(parallelism);
+            }
             dataStream = new DataStreamSource<>(filterStream);
         }
         CoreOptions coreOptions = table.coreOptions();
@@ -177,12 +189,10 @@ public class CompactorSourceBuilder {
                                 BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
                                 return !expireStrategy.isExpired(expireDateTime, partition);
                             });
+            if (parallelism != null) {
+                filterStream.setParallelism(parallelism);
+            }
             dataStream = new DataStreamSource<>(filterStream);
-        }
-        Integer parallelism =
-                sourceParallelism(Options.fromMap(table.options()), bucketDistributionStrategy);
-        if (parallelism != null) {
-            dataStream.setParallelism(parallelism);
         }
         return dataStream;
     }

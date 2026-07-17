@@ -42,6 +42,10 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamEdge;
+import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.apache.flink.streaming.api.graph.StreamNode;
+import org.apache.flink.streaming.runtime.partitioner.ForwardPartitioner;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
@@ -286,6 +290,52 @@ public class CompactorSourceITCase extends AbstractTestBase {
         it.close();
     }
 
+    @Test
+    public void testSizeAwareSourceAndFilterKeepSameParallelismWithoutShuffle() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable()
+                        .copy(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("sink.parallelism", "4");
+                                        put("scan.parallelism", "2");
+                                        put(
+                                                "compaction.bucket-distribution-strategy",
+                                                "size-aware-batch");
+                                    }
+                                });
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        new CompactorSourceBuilder("test", table)
+                .withContinuousMode(false)
+                .withPartitionIdleTime(Duration.ofMillis(1))
+                .withEnv(env)
+                .build();
+
+        StreamGraph streamGraph = env.getStreamGraph(false);
+        StreamNode sourceNode = findStreamNode(streamGraph, "test-compact-source");
+        StreamNode filterNode = findStreamNode(streamGraph, "Filter");
+        assertThat(sourceNode.getParallelism()).isEqualTo(4);
+        assertThat(filterNode.getParallelism()).isEqualTo(4);
+
+        StreamEdge sourceToFilterEdge =
+                sourceNode.getOutEdges().stream()
+                        .filter(edge -> edge.getTargetId() == filterNode.getId())
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("Source to filter edge not found"));
+        assertThat(sourceToFilterEdge.getPartitioner()).isInstanceOf(ForwardPartitioner.class);
+
+        write.close();
+        commit.close();
+    }
+
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
     public void testHistoryPartitionRead(boolean defaultOptions) throws Exception {
@@ -332,6 +382,14 @@ public class CompactorSourceITCase extends AbstractTestBase {
         write.close();
         commit.close();
         it.close();
+    }
+
+    private StreamNode findStreamNode(StreamGraph streamGraph, String operatorNameContains) {
+        return streamGraph.getStreamNodes().stream()
+                .filter(node -> node.getOperatorName().contains(operatorNameContains))
+                .findFirst()
+                .orElseThrow(
+                        () -> new AssertionError("Stream node not found: " + operatorNameContains));
     }
 
     private String toString(RowData rowData) {
