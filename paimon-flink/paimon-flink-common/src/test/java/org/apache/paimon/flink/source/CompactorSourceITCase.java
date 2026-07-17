@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributionStrategy;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -315,6 +316,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         new CompactorSourceBuilder("test", table)
                 .withContinuousMode(false)
+                .withBucketDistributionStrategy(
+                        CompactionBucketDistributionStrategy.SIZE_AWARE_BATCH)
                 .withPartitionIdleTime(Duration.ofMillis(1))
                 .withEnv(env)
                 .build();
