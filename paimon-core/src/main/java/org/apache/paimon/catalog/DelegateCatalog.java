@@ -317,8 +317,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean supportsManagedPartitionListing() {
-        return wrapped.supportsManagedPartitionListing();
+    public boolean supportsManagedFormatTablePartitions() {
+        return wrapped.supportsManagedFormatTablePartitions();
     }
 
     @Override

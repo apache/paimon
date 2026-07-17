@@ -110,6 +110,7 @@ import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
@@ -1626,6 +1627,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                                 false))
                 .isInstanceOf(NoSuchResourceException.class)
                 .hasMessageContaining("dt=20260799");
+    }
+
+    @Test
+    void testDropPartitionsLoadsNonManagedTableOnce() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "drop_partition_table");
+        createTable(identifier, emptyMap(), singletonList("col1"));
+        RESTCatalog catalogSpy = Mockito.spy(restCatalog);
+
+        catalogSpy.dropPartitions(identifier, singletonList(singletonMap("col1", "20260717")));
+
+        Mockito.verify(catalogSpy, Mockito.times(1)).getTable(identifier);
     }
 
     @Test

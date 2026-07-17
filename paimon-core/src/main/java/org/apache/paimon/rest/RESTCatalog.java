@@ -63,6 +63,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
@@ -773,7 +774,11 @@ public class RESTCatalog implements Catalog {
             return;
         }
         // Non-managed tables keep the default truncate-based data semantics.
-        Catalog.super.dropPartitions(identifier, partitions);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -913,13 +918,13 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean supportsPartitionModification() {
-        // Upstream parity: REST paimon tables keep commit-based partition maintenance. Managed
-        // format table partition DDL is capability-gated by supportsManagedPartitionListing().
+        // Paimon tables use commit-based partition maintenance. Managed Format Tables use the
+        // separate catalog-owned partition contract.
         return false;
     }
 
     @Override
-    public boolean supportsManagedPartitionListing() {
+    public boolean supportsManagedFormatTablePartitions() {
         return true;
     }
 

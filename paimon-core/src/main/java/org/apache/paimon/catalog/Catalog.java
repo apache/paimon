@@ -1063,7 +1063,7 @@ public interface Catalog extends AutoCloseable {
      * #dropPartitions(Identifier, List)} registration DDL for such tables, independent of {@link
      * #supportsPartitionModification()}.
      */
-    default boolean supportsManagedPartitionListing() {
+    default boolean supportsManagedFormatTablePartitions() {
         return false;
     }
 
