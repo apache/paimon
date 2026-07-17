@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -238,7 +239,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         }
 
         // 1. Read delta branch data at the pinned snapshot, grouped by partition.
-        Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition;
+        Map<BinaryRow, List<Split>> deltaSplitsByPartition;
         if (deltaLatestId != null) {
             FileStoreTable pinnedDelta = deltaTable.copy(pinnedOptions(deltaLatestId));
             DataTableScan pinnedDeltaScan = pinnedDelta.newScan();
@@ -273,7 +274,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         // 3. Scan file splits for latest snapshot partitions only, at the pinned snapshot.
         //    Reuse the pinnedSnapshot from step 2 to avoid redundant copy operations.
         List<BinaryRow> latestPartitions = new ArrayList<>(latestChainPartitionPerGroup.values());
-        Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition;
+        Map<BinaryRow, List<Split>> snapshotSplitsByPartition;
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
             DataTableScan snapshotScan = pinnedSnapshot.newScan();
             snapshotScan.withPartitionFilter(latestPartitions);
@@ -332,13 +333,16 @@ public class ChainTableStreamScan implements StreamDataTableScan {
             Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
-        for (Map.Entry<BinaryRow, List<DataSplit>> entry : snapshotSplitsByPartition.entrySet()) {
-            for (DataSplit ds : entry.getValue()) {
-                allSplits.add(ChainSplit.from(ds, snapshotBranch));
+        for (Map.Entry<BinaryRow, List<Split>> entry : snapshotSplitsByPartition.entrySet()) {
+            for (Split split : entry.getValue()) {
+                DataSplit dataSplit = unwrapDataSplit(split);
+                allSplits.add(
+                        QueryAuthSplit.retainAuth(
+                                split, ChainSplit.from(dataSplit, snapshotBranch)));
             }
         }
 
-        for (Map.Entry<BinaryRow, List<DataSplit>> entry : deltaSplitsByPartition.entrySet()) {
+        for (Map.Entry<BinaryRow, List<Split>> entry : deltaSplitsByPartition.entrySet()) {
             BinaryRow partition = entry.getKey();
             Object groupKey = toGroupKey(partition);
             BinaryRow latestPartition = latestChainPartitionPerGroup.get(groupKey);
@@ -350,8 +354,11 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                                     partitionProjector.extractChainPartition(partition),
                                     partitionProjector.extractChainPartition(latestPartition))
                             > 0) {
-                for (DataSplit ds : entry.getValue()) {
-                    allSplits.add(ChainSplit.from(ds, deltaBranch));
+                for (Split split : entry.getValue()) {
+                    DataSplit dataSplit = unwrapDataSplit(split);
+                    allSplits.add(
+                            QueryAuthSplit.retainAuth(
+                                    split, ChainSplit.from(dataSplit, deltaBranch)));
                 }
             }
         }
@@ -477,13 +484,17 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     }
 
     /** Plans a scan and groups the resulting splits by partition. */
-    private static Map<BinaryRow, List<DataSplit>> groupByPartition(DataTableScan scan) {
-        Map<BinaryRow, List<DataSplit>> grouped = new LinkedHashMap<>();
-        for (Split s : scan.plan().splits()) {
-            DataSplit ds = (DataSplit) s;
-            grouped.computeIfAbsent(ds.partition(), k -> new ArrayList<>()).add(ds);
+    private static Map<BinaryRow, List<Split>> groupByPartition(DataTableScan scan) {
+        Map<BinaryRow, List<Split>> grouped = new LinkedHashMap<>();
+        for (Split split : scan.plan().splits()) {
+            DataSplit dataSplit = unwrapDataSplit(split);
+            grouped.computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>()).add(split);
         }
         return grouped;
+    }
+
+    private static DataSplit unwrapDataSplit(Split split) {
+        return (DataSplit) QueryAuthSplit.unwrap(split);
     }
 
     /**

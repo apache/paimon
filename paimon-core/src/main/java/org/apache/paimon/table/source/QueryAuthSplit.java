@@ -54,6 +54,14 @@ public class QueryAuthSplit implements Split {
         return split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split;
     }
 
+    /** Retains the source split's query authorization result on a replacement split. */
+    public static Split retainAuth(Split source, Split replacement) {
+        if (source instanceof QueryAuthSplit) {
+            return new QueryAuthSplit(replacement, ((QueryAuthSplit) source).authResult());
+        }
+        return replacement;
+    }
+
     @Nullable
     public TableQueryAuthResult authResult() {
         return authResult;

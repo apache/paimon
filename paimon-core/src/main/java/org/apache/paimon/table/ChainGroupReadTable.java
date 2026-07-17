@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -36,6 +37,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -60,6 +62,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Chain table which mainly read from the snapshot branch. However, if the snapshot branch does not
@@ -494,25 +497,40 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
 
             for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = (DataSplit) split;
+                DataSplit dataSplit = unwrapDataSplit(split);
                 HashMap<String, String> fileBucketPathMapping = new HashMap<>();
                 HashMap<String, String> fileBranchMapping = new HashMap<>();
                 for (DataFileMeta file : dataSplit.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
+                    fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
                     fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
                 }
                 splits.add(
-                        new ChainSplit(
-                                dataSplit.partition(),
-                                dataSplit.dataFiles(),
-                                fileBranchMapping,
-                                fileBucketPathMapping));
+                        QueryAuthSplit.retainAuth(
+                                split,
+                                new ChainSplit(
+                                        dataSplit.partition(),
+                                        dataSplit.dataFiles(),
+                                        fileBranchMapping,
+                                        fileBucketPathMapping)));
             }
 
             snapshotPartitions.addAll(
                     newChainPartitionListingScan(true, getMainPartitionPredicate())
                             .listPartitions());
             return snapshotPartitions;
+        }
+
+        private static DataSplit unwrapDataSplit(Split split) {
+            return (DataSplit) QueryAuthSplit.unwrap(split);
+        }
+
+        private static Split retainQueryAuth(List<Split> sourceSplits, Split replacement) {
+            for (Split sourceSplit : sourceSplits) {
+                if (sourceSplit instanceof QueryAuthSplit) {
+                    return QueryAuthSplit.retainAuth(sourceSplit, replacement);
+                }
+            }
+            return replacement;
         }
 
         private DataTableScan newFilteredScan(boolean snapshot) {
@@ -582,7 +600,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (split instanceof ChainSplit || split instanceof DataSplit) {
+            Split wrappedSplit = QueryAuthSplit.unwrap(split);
+            if (wrappedSplit instanceof ChainSplit || wrappedSplit instanceof DataSplit) {
                 return fallbackRead.createReader(split);
             }
             throw new IllegalArgumentException(
