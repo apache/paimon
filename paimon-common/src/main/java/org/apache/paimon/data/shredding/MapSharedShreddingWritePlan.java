@@ -32,17 +32,12 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
 
     private final RowType logicalRowType;
     private final MapSharedShreddingRowConverter converter;
-    @Nullable private final MapSharedShreddingContext context;
-
     @Nullable private Map<String, Map<String, String>> fieldMetadata;
 
     public MapSharedShreddingWritePlan(
-            RowType logicalRowType,
-            Map<String, Integer> fieldToNumColumns,
-            @Nullable MapSharedShreddingContext context) {
+            RowType logicalRowType, Map<String, Integer> fieldToNumColumns) {
         this.logicalRowType = logicalRowType;
         this.converter = new MapSharedShreddingRowConverter(logicalRowType, fieldToNumColumns);
-        this.context = context;
     }
 
     @Override
@@ -75,10 +70,6 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
             Map<String, String> fieldMetadata = new LinkedHashMap<>();
             MapSharedShreddingUtils.serializeMetadata(fieldMeta, compression, fieldMetadata);
             metadata.put(fieldName, Collections.unmodifiableMap(fieldMetadata));
-
-            if (context != null) {
-                context.reportFileStats(fieldName, fieldMeta.maxRowWidth());
-            }
         }
         return Collections.unmodifiableMap(metadata);
     }

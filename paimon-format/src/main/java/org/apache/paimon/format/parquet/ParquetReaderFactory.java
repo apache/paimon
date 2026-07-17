@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.shredding.MapSharedShreddingReadPlanFactory;
 import org.apache.paimon.data.shredding.ShreddingReadPlan;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -60,6 +61,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -130,7 +132,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ShreddingReadPlan readPlan =
                 ShreddingReadPlanFactories.createReadPlan(
                         readType,
-                        Collections.emptyMap(),
+                        readFieldMetadata(reader),
                         fileSchema,
                         shreddingReadPlanFactories(readType));
         DataField[] physicalReadFields = readFields(readPlan.physicalRowType());
@@ -181,7 +183,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private List<ShreddingReadPlanFactory> shreddingReadPlanFactories(RowType readType) {
-        return Collections.<ShreddingReadPlanFactory>singletonList(
+        return Arrays.<ShreddingReadPlanFactory>asList(
+                new MapSharedShreddingReadPlanFactory(readType),
                 new VariantShreddingReadPlanFactory(readType, caseSensitive));
     }
 
