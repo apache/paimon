@@ -72,9 +72,12 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         this.hasNext = true;
         this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
+            // Incremental scans read the delta or changelog files of historical snapshots, which
+            // are always recorded at level 0. Skipping level 0 would drop all of their input.
             if (options.toConfiguration()
-                    .get(CoreOptions.BATCH_SCAN_MODE)
-                    .equals(CoreOptions.BatchScanMode.NONE)) {
+                            .get(CoreOptions.BATCH_SCAN_MODE)
+                            .equals(CoreOptions.BatchScanMode.NONE)
+                    && options.startupMode() != CoreOptions.StartupMode.INCREMENTAL) {
                 snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
             }
         }
