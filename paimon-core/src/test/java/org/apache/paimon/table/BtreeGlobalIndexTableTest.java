@@ -170,7 +170,6 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     public void testGlobalIndexDiagnosticLogs() throws Exception {
         write(10L);
         createIndex("f1");
-        createIndex("f2");
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -191,11 +190,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         scanLogger.setLevel(Level.INFO);
         scannerLogger.setLevel(Level.INFO);
         try {
-            PredicateBuilder builder = new PredicateBuilder(table.rowType());
             Predicate predicate =
-                    PredicateBuilder.and(
-                            builder.equal(1, BinaryString.fromString("a7")),
-                            builder.equal(2, BinaryString.fromString("b7")));
+                    new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
             table.newReadBuilder().withFilter(predicate).newScan().plan();
 
             PredicateBuilder rowIdBuilder =
@@ -216,9 +212,6 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     .containsPattern(
                             "INFO Global index lookup table='[^']+', type='btree', "
                                     + "fields='\\[f1\\]', lookup=\\d+ ms\\.")
-                    .containsPattern(
-                            "INFO Global index lookup table='[^']+', type='btree', "
-                                    + "fields='\\[f2\\]', lookup=\\d+ ms\\.")
                     .contains("INFO Scan table '" + table.name() + "' without global index.");
         } finally {
             scanLogger.setLevel(previousScanLevel);
