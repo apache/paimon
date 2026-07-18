@@ -19,6 +19,7 @@ import json as _json
 from typing import Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
+from pypaimon.common.identifier import UNKNOWN_DATABASE
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -56,7 +57,9 @@ class TableScan:
         # auth-aware file scanner; fall back to the normal path otherwise.
         if (auth_result is None and self.table.options.native_plan_enabled()
                 and self._native_plan_supported()):
-            return self._native_plan()
+            native_plan = self._try_native_plan()
+            if native_plan is not None:
+                return native_plan
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
@@ -65,19 +68,38 @@ class TableScan:
     def _native_plan_supported(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
-        drops L0), non-main branch, time-travel, incremental, or a catalog loader
-        without context(). Deny-list -- keep in sync when adding scan features."""
+        drops L0), query auth, non-main branch, time-travel, incremental, or a
+        catalog / identifier Rust cannot reconstruct. Keep this capability gate
+        in sync when adding scan features."""
         fs = self.file_scanner
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
                 or getattr(fs, 'start_pos_of_this_subtask', None) is not None
                 or getattr(fs, 'chunk_shuffle', None) is not None
                 or getattr(fs, '_global_index_result', None) is not None):
             return False
-        loader = getattr(getattr(self.table, 'catalog_environment', None),
-                         'catalog_loader', None)
-        if loader is None or not hasattr(loader, 'context'):
+        loader = getattr(
+            getattr(self.table, 'catalog_environment', None),
+            'catalog_loader',
+            None,
+        )
+        context_fn = getattr(loader, 'context', None)
+        if not callable(context_fn):
             return False
-        if self.table.options.merge_engine() == 'first-row' \
+        from pypaimon.read.native_plan import _catalog_metastore
+        if _catalog_metastore(loader) is None:
+            return False
+        context = context_fn()
+        catalog_options = getattr(context, 'options', None)
+        if catalog_options is None:
+            return False
+        if any(getattr(context, attr, None) is not None for attr in (
+                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+            return False
+        database_name = self.table.identifier.get_database_name()
+        if not database_name or database_name == UNKNOWN_DATABASE or '.' in database_name:
+            return False
+        if self.table.options.query_auth_enabled \
+                or self.table.options.merge_engine() == 'first-row' \
                 or self.table.current_branch() != 'main':
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -86,18 +108,19 @@ class TableScan:
             return False
         return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 
-    def _native_plan(self) -> Plan:
+    def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         The predicate is not pushed to the native planner, so this may read more
-        files; the reader's row filter/limit still apply, so results match.
+        files; the reader's row filter/limit still apply, so results match. Return
+        None when Rust finds no splits so the caller can use the matching Python
+        fallback (with scan stats when requested).
         """
         from pypaimon.read.native_plan import native_plan
 
         splits = native_plan(self.table)
-        # Empty: fall back for an atomic (plan, snapshot-id) from one scan.
         if not splits:
-            return self.file_scanner.scan()
+            return None
         snapshot_id = splits[0].snapshot_id
         partition_predicate = self.file_scanner.partition_key_predicate
         if partition_predicate is not None:
@@ -125,7 +148,9 @@ class TableScan:
         auth_result = self.__auth_query()
         if (auth_result is None and self.table.options.native_plan_enabled()
                 and self._native_plan_supported()):
-            return self._native_plan(), None
+            native_plan = self._try_native_plan()
+            if native_plan is not None:
+                return native_plan, None
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()

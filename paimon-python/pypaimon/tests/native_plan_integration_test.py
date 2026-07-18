@@ -131,6 +131,18 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.snapshot_id, normal.snapshot_id)
         self.assertIn('native', str(native))   # render shows the Planner line
 
+    def test_empty_table_explain_reflects_python_fallback(self):
+        self.cat.create_table(
+            'default.empty_t', Schema.from_pyarrow_schema(self.schema), False)
+        normal = self.cat.get_table('default.empty_t').new_read_builder().explain()
+        fallback = self.cat.get_table('default.empty_t').copy(
+            {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
+
+        self.assertFalse(fallback.native_planned)
+        self.assertEqual(fallback.snapshot_id, normal.snapshot_id)
+        self.assertEqual(fallback.split_count, 0)
+        self.assertNotIn('Planner:', str(fallback))
+
 
 if __name__ == '__main__':
     unittest.main()

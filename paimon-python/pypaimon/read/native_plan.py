@@ -22,8 +22,10 @@ The predicate is applied pypaimon-side (partition pruning + row/limit filter),
 so results match the normal path.
 """
 
-from typing import List
+from typing import List, Optional
 
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import deserialize_split_v1
 
@@ -35,12 +37,33 @@ def _partition_fields(table):
     return [by_name[name] for name in schema.partition_keys]
 
 
+def _catalog_metastore(loader) -> Optional[str]:
+    """Return the Rust catalog kind represented by a supported loader."""
+    from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+
+    if isinstance(loader, FileSystemCatalogLoader):
+        return 'filesystem'
+    if isinstance(loader, RESTCatalogLoader):
+        return 'rest'
+    return None
+
+
 def _catalog_options(table) -> dict:
     """Catalog options that built this table, to reconstruct the Rust catalog."""
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
     if loader is None:
         raise ValueError("native_plan requires a catalog-backed table (no catalog loader)")
-    return dict(loader.context().options.to_map())
+    options = loader.context().options.to_map()
+    normalized = {
+        str(key): OptionsUtils.convert_to_string(value)
+        for key, value in options.items()
+        if value is not None
+    }
+    metastore = _catalog_metastore(loader)
+    if metastore is not None:
+        normalized[CatalogOptions.METASTORE.key()] = metastore
+    return normalized
 
 
 def native_plan(table) -> List[Split]:

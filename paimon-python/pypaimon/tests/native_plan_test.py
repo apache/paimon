@@ -20,9 +20,14 @@ import unittest
 from types import ModuleType
 from unittest.mock import Mock, patch
 
+from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
+from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
+from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.read.native_plan import native_plan
+from pypaimon.read.native_plan import _catalog_options, native_plan
+from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
 
 
@@ -34,7 +39,11 @@ def _scan(native_enabled, file_scanner):
     scan.table.options.options.contains_key.return_value = False   # no time-travel
     scan.table.options.options.contains.return_value = False       # no incremental
     scan.table.options.merge_engine.return_value = None            # not first-row
+    scan.table.options.query_auth_enabled = False
     scan.table.current_branch.return_value = 'main'
+    scan.table.identifier.get_database_name.return_value = 'default'
+    scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+        CatalogContext.create_from_options(Options({})))           # filesystem catalog
     file_scanner.idx_of_this_subtask = None       # no shard
     file_scanner.start_pos_of_this_subtask = None  # no slice
     file_scanner.chunk_shuffle = None              # no chunk-shuffle
@@ -103,9 +112,17 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
+        check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
         check(lambda s, fs: s.table.current_branch.__setattr__('return_value', 'b1'))
+        check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(
+            'return_value', 'db.name'))
+        check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(
+            'return_value', 'unknown'))
         check(lambda s, fs: setattr(
             s.table.catalog_environment, 'catalog_loader', object()))   # no context()
+        for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
+            check(lambda s, fs, attr=attr: setattr(
+                s.table.catalog_environment.catalog_loader.context(), attr, object()))
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'return_value', True))          # time-travel
         check(lambda s, fs: s.table.options.options.contains.__setattr__(
@@ -120,6 +137,65 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_plan', return_value=[]):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
+
+    def test_plan_falls_back_for_jdbc_catalog_loader(self):
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table.catalog_environment.catalog_loader = JdbcCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        with patch('pypaimon.read.native_plan.native_plan') as np:
+            self.assertIs(scan.plan(), sentinel)
+
+        np.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_scan_with_stats_native_empty_uses_fallback_stats(self):
+        fs = Mock(partition_key_predicate=None)
+        fallback_plan = object()
+        fallback_stats = ScanStats(manifest_files_total=7)
+        fs.scan_with_stats.return_value = (fallback_plan, fallback_stats)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[]) as np:
+            plan, stats = scan.scan_with_stats()
+
+        self.assertIs(plan, fallback_plan)
+        self.assertIs(stats, fallback_stats)
+        np.assert_called_once_with(scan.table)
+        fs.scan_with_stats.assert_called_once_with()
+        fs.scan.assert_not_called()
+
+    def test_catalog_options_are_normalized_for_rust(self):
+        table = Mock()
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({
+                'warehouse': '/tmp/warehouse',
+                'data-token.enabled': True,
+                'retry-count': 3,
+                'unset': None,
+            })))
+
+        self.assertEqual(_catalog_options(table), {
+            'warehouse': '/tmp/warehouse',
+            'data-token.enabled': 'True',
+            'retry-count': '3',
+            'metastore': 'filesystem',
+        })
+
+    def test_catalog_options_use_actual_rest_loader_type(self):
+        table = Mock()
+        table.catalog_environment.catalog_loader = RESTCatalogLoader(
+            CatalogContext.create_from_options(Options({
+                'uri': 'http://localhost:8181',
+            })))
+
+        self.assertEqual(_catalog_options(table), {
+            'uri': 'http://localhost:8181',
+            'metastore': 'rest',
+        })
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
