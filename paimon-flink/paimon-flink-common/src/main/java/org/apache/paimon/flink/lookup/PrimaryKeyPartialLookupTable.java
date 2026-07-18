@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.query.RemoteTableQuery;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -53,6 +54,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
@@ -217,6 +219,16 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             File tempPath,
             List<String> joinKey,
             Set<Integer> requireCachedBucketIds) {
+        return createLocalTable(table, projection, tempPath, joinKey, requireCachedBucketIds, null);
+    }
+
+    public static PrimaryKeyPartialLookupTable createLocalTable(
+            FileStoreTable table,
+            int[] projection,
+            File tempPath,
+            List<String> joinKey,
+            Set<Integer> requireCachedBucketIds,
+            @Nullable Supplier<PartialLookupMetrics> metricsSupplier) {
         return new PrimaryKeyPartialLookupTable(
                 (filter, cacheRowFilter) ->
                         new LocalQueryExecutor(
@@ -225,7 +237,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                                 tempPath,
                                 filter,
                                 requireCachedBucketIds,
-                                cacheRowFilter),
+                                cacheRowFilter,
+                                metricsSupplier == null ? null : metricsSupplier.get()),
                 table,
                 joinKey);
     }
@@ -273,11 +286,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 File tempPath,
                 @Nullable Predicate filter,
                 Set<Integer> requireCachedBucketIds,
-                @Nullable Filter<InternalRow> cacheRowFilter) {
+                @Nullable Filter<InternalRow> cacheRowFilter,
+                @Nullable PartialLookupMetrics metrics) {
             this.tableQuery =
                     table.newLocalTableQuery()
                             .withValueProjection(projection)
-                            .withIOManager(new IOManagerImpl(tempPath.toString()));
+                            .withIOManager(new IOManagerImpl(tempPath.toString()))
+                            .withMetrics(metrics);
 
             if (cacheRowFilter != null) {
                 this.tableQuery.withCacheRowFilter(cacheRowFilter);

@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -88,6 +89,8 @@ public class LocalTableQuery implements TableQuery {
     private final FileIO fileIO;
 
     @Nullable private Filter<InternalRow> cacheRowFilter;
+
+    @Nullable private PartialLookupMetrics partialLookupMetrics;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
@@ -221,6 +224,25 @@ public class LocalTableQuery implements TableQuery {
     @Nullable
     @Override
     public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
+        PartialLookupMetrics currentMetrics = partialLookupMetrics;
+        LookupLevels.LookupContext context =
+                currentMetrics == null ? null : new LookupLevels.LookupContext();
+        try {
+            return lookup(partition, bucket, key, context);
+        } finally {
+            if (currentMetrics != null) {
+                currentMetrics.reportLookup(context != null && context.remoteAccessed());
+            }
+        }
+    }
+
+    @Nullable
+    private InternalRow lookup(
+            BinaryRow partition,
+            int bucket,
+            InternalRow key,
+            @Nullable LookupLevels.LookupContext context)
+            throws IOException {
         Map<Integer, BucketLookupState> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;
@@ -237,7 +259,7 @@ public class LocalTableQuery implements TableQuery {
                 return null;
             }
 
-            KeyValue kv = lookupLevels.lookup(key, startLevel);
+            KeyValue kv = lookupLevels.lookup(key, startLevel, context);
             if (kv == null || kv.valueKind().isRetract()) {
                 return null;
             } else {
@@ -261,6 +283,11 @@ public class LocalTableQuery implements TableQuery {
 
     public LocalTableQuery withCacheRowFilter(Filter<InternalRow> cacheRowFilter) {
         this.cacheRowFilter = cacheRowFilter;
+        return this;
+    }
+
+    public LocalTableQuery withMetrics(@Nullable PartialLookupMetrics metrics) {
+        this.partialLookupMetrics = metrics;
         return this;
     }
 
