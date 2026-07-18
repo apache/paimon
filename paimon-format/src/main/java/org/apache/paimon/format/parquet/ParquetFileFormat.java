@@ -38,7 +38,6 @@ import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.ParquetReadOptions;
-import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
@@ -85,8 +84,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new ParquetReaderFactory(
-                options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
+        return new ParquetReaderFactory(options, projectedRowType, readBatchSize, filters);
     }
 
     @Override
