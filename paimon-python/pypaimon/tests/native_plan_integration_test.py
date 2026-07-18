@@ -101,10 +101,11 @@ class NativePlanIntegrationTest(unittest.TestCase):
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
-        native = native_table.new_read_builder().new_scan().plan()
+        native = native_table.new_read_builder().explain()
 
-        self.assertEqual(len(native.splits()), len(normal.splits()))
-        self.assertGreater(len(native.splits()), 1)
+        self.assertTrue(native.native_planned)
+        self.assertEqual(native.split_count, len(normal.splits()))
+        self.assertGreater(native.split_count, 1)
 
     def test_dynamic_split_open_file_cost_matches_normal_plan(self):
         stored_options = {
@@ -122,11 +123,12 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         baseline = base_table.new_read_builder().new_scan().plan()
         normal = normal_table.new_read_builder().new_scan().plan()
-        native = native_table.new_read_builder().new_scan().plan()
+        native = native_table.new_read_builder().explain()
 
         self.assertEqual(len(baseline.splits()), 1)
         self.assertGreater(len(normal.splits()), len(baseline.splits()))
-        self.assertEqual(len(native.splits()), len(normal.splits()))
+        self.assertTrue(native.native_planned)
+        self.assertEqual(native.split_count, len(normal.splits()))
 
     def test_dynamic_split_option_reset_matches_normal_plan(self):
         stored_options = {
@@ -145,10 +147,11 @@ class NativePlanIntegrationTest(unittest.TestCase):
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
-        native = native_table.new_read_builder().new_scan().plan()
+        native = native_table.new_read_builder().explain()
 
-        self.assertEqual(len(native.splits()), len(normal.splits()))
-        self.assertEqual(len(native.splits()), 1)
+        self.assertTrue(native.native_planned)
+        self.assertEqual(native.split_count, len(normal.splits()))
+        self.assertEqual(native.split_count, 1)
 
     def test_partitioned_table_and_partition_filter(self):
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])
