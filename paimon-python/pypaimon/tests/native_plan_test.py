@@ -34,7 +34,7 @@ def _scan(native_enabled, file_scanner):
     scan.table.options.options.contains_key.return_value = False   # no time-travel
     scan.table.options.options.contains.return_value = False       # no incremental
     scan.table.options.merge_engine.return_value = None            # not first-row
-    scan.table.options.branch.return_value = 'main'
+    scan.table.current_branch.return_value = 'main'
     file_scanner.idx_of_this_subtask = None       # no shard
     file_scanner.start_pos_of_this_subtask = None  # no slice
     file_scanner.chunk_shuffle = None              # no chunk-shuffle
@@ -103,11 +103,23 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
-        check(lambda s, fs: s.table.options.branch.__setattr__('return_value', 'b1'))
+        check(lambda s, fs: s.table.current_branch.__setattr__('return_value', 'b1'))
+        check(lambda s, fs: setattr(
+            s.table.catalog_environment, 'catalog_loader', object()))   # no context()
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'return_value', True))          # time-travel
         check(lambda s, fs: s.table.options.options.contains.__setattr__(
             'return_value', True))          # incremental
+
+    def test_plan_native_empty_falls_back(self):
+        # Empty native result -> fall back for an atomic snapshot id.
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[]):
+            self.assertIs(scan.plan(), sentinel)
+        fs.scan.assert_called_once_with()
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the

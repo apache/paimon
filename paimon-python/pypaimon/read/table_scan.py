@@ -65,19 +65,23 @@ class TableScan:
     def _native_plan_supported(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
-        drops L0), non-main branch, time-travel, incremental. Deny-list -- keep
-        in sync when adding scan features."""
+        drops L0), non-main branch, time-travel, incremental, or a catalog loader
+        without context(). Deny-list -- keep in sync when adding scan features."""
         fs = self.file_scanner
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
                 or getattr(fs, 'start_pos_of_this_subtask', None) is not None
                 or getattr(fs, 'chunk_shuffle', None) is not None
                 or getattr(fs, '_global_index_result', None) is not None):
             return False
-        opts = self.table.options
-        if opts.merge_engine() == 'first-row' or (opts.branch() or 'main') != 'main':
+        loader = getattr(getattr(self.table, 'catalog_environment', None),
+                         'catalog_loader', None)
+        if loader is None or not hasattr(loader, 'context'):
+            return False
+        if self.table.options.merge_engine() == 'first-row' \
+                or self.table.current_branch() != 'main':
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        options = opts.options
+        options = self.table.options.options
         if any(options.contains_key(k) for k in SCAN_KEYS):
             return False
         return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
@@ -91,14 +95,10 @@ class TableScan:
         from pypaimon.read.native_plan import native_plan
 
         splits = native_plan(self.table)
-        # Preserve the scanned snapshot id (row-id conflict detection needs it).
-        # Rust exposes it per-split only, so fall back to the latest snapshot
-        # when the plan is empty.
-        if splits:
-            snapshot_id = splits[0].snapshot_id
-        else:
-            latest = self.table.snapshot_manager().get_latest_snapshot()
-            snapshot_id = latest.id if latest else None
+        # Empty: fall back for an atomic (plan, snapshot-id) from one scan.
+        if not splits:
+            return self.file_scanner.scan()
+        snapshot_id = splits[0].snapshot_id
         partition_predicate = self.file_scanner.partition_key_predicate
         if partition_predicate is not None:
             splits = [s for s in splits
