@@ -394,6 +394,12 @@ class RowType(DataType):
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
 
+    def get_field_index(self, field_name: str) -> int:
+        for index, field in enumerate(self.fields):
+            if field.name == field_name:
+                return index
+        raise ValueError("Field {} not found in {}".format(field_name, self))
+
 
 def reassign_field_id(data_type: DataType, field_id: "AtomicInteger") -> DataType:
     """Return a copy of *data_type* with every nested field id reassigned from

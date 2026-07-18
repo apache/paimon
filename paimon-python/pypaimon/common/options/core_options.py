@@ -98,6 +98,13 @@ class GlobalIndexSearchMode(str, Enum):
     DETAIL = "detail"
 
 
+class NestedKeyNullStrategy(str, Enum):
+    """Strategy for handling rows whose nested-key contains null values."""
+    MERGE = "merge"
+    IGNORE = "ignore"
+    ERROR = "error"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
 
@@ -142,6 +149,10 @@ class CoreOptions:
     FIELDS_PREFIX = "fields"
     DISTINCT = "distinct"
     LIST_AGG_DELIMITER = "list-agg-delimiter"
+    NESTED_KEY = "nested-key"
+    NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
+    NESTED_SEQUENCE_FIELD = "nested-sequence-field"
+    COUNT_LIMIT = "count-limit"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -1511,6 +1522,50 @@ class CoreOptions:
             )
             .boolean_type()
             .default_value(False)
+        )
+
+    def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_sequence_field(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_SEQUENCE_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_key_null_strategy(self, field_name: str) -> NestedKeyNullStrategy:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY_NULL_STRATEGY}'
+            )
+            .enum_type(NestedKeyNullStrategy)
+            .default_value(NestedKeyNullStrategy.MERGE)
+        )
+
+    def field_nested_update_agg_count_limit(self, field_name: str) -> int:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.COUNT_LIMIT}'
+            )
+            .int_type()
+            .default_value(2147483647)  # Integer.MAX_VALUE
         )
 
     @property
