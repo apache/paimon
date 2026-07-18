@@ -43,14 +43,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Lint + test on 3.6 and 3.10 only (not every Python version).
+  # Lint + test on selected versions only (3.6 / 3.7 low end, 3.10 / 3.11 current), not every Python version.
   lint-python:
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.6.15', '3.10', '3.11' ]
+        python-version: [ '3.6.15', '3.7', '3.10', '3.11' ]
 
     steps:
       - name: Checkout code
@@ -86,13 +86,20 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
+        if: matrix.python-version != '3.7'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Install paimon-full-text native dependency
+      - name: Install paimon-full-text dependency
+        shell: bash
         run: |
-          bash .github/workflows/install-paimon-full-text.sh native
+          # 3.7 runs no native full-text tests; the Java artifact is enough.
+          if [[ "${{ matrix.python-version }}" == "3.7" ]]; then
+            bash .github/workflows/install-paimon-full-text.sh java
+          else
+            bash .github/workflows/install-paimon-full-text.sh native
+          fi
 
       - name: Verify Python version
         run: python --version
@@ -125,6 +132,13 @@ jobs:
             python --version
             python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 2>&1 >/dev/null
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
+          elif [[ "${{ matrix.python-version }}" == "3.7" ]]; then
+            # 3.7 installs the version-pinned set declared for 3.7 in dev/requirements.txt.
+            # ray/lance/daft/torch have no 3.7 wheels; those tests are importorskip-ed (as on 3.6.15).
+            python -m pip install --upgrade pip
+            python -m pip install -r paimon-python/dev/requirements.txt
+            python -m pip install flake8==4.0.1 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0
+            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
           else
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -138,7 +152,7 @@ jobs:
           df -h
 
       - name: Install paimon-full-text Python dependency
-        if: matrix.python-version != '3.6.15'
+        if: matrix.python-version != '3.6.15' && matrix.python-version != '3.7'
         shell: bash
         run: |
           python -m pip install "${PAIMON_FULL_TEXT_DIR}/python"

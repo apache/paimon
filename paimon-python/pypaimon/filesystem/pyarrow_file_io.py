@@ -49,8 +49,12 @@ class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
+        # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
+        # goes into endpoint_override, so keys must omit it (init + path share
+        # this flag so they can't drift).
+        self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
+        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
@@ -185,7 +189,7 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
-        if self._pyarrow_gte_7:
+        if not self._oss_bucket_in_endpoint:
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
@@ -226,7 +230,7 @@ class PyArrowFileIO(FileIO):
             "session_token": session_token,
             "region": region,
         }
-        if self._pyarrow_gte_7:
+        if self._pyarrow_gte_16:
             path_style_access = (
                 self._get_s3_boolean_property("path-style-access") or
                 self._get_s3_boolean_property("path.style.access"))
@@ -346,8 +350,8 @@ class PyArrowFileIO(FileIO):
 
         if self._use_jindo:
             pass
-        elif self._is_oss and not self._pyarrow_gte_7:
-            # For PyArrow 6.x + OSS, path_str is already just the key part
+        elif self._is_oss and self._oss_bucket_in_endpoint:
+            # OSS with bucket baked into endpoint: path_str is already the key
             if '/' in path_str:
                 parent_dir = '/'.join(path_str.split('/')[:-1])
             else:
@@ -554,15 +558,13 @@ class PyArrowFileIO(FileIO):
             (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
             instead of the specified level.
             """
-            import sys
-
             import pyarrow.orc as orc
 
             data = self._cast_time_columns_for_orc(data)
 
             with self.new_output_stream(path) as output_stream:
-                # Check Python version - if 3.6, don't use compression parameter
-                if sys.version_info[:2] == (3, 6):
+                # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
+                if _pyarrow_lt_7():
                     orc.write_table(data, output_stream, **kwargs)
                 else:
                     orc.write_table(
@@ -732,8 +734,8 @@ class PyArrowFileIO(FileIO):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
-                    # OSS+PyArrow<7: endpoint_override has bucket, pass key only.
-                    if self._is_oss and not self._pyarrow_gte_7:
+                    # OSS with bucket baked into endpoint: pass key only.
+                    if self._is_oss and self._oss_bucket_in_endpoint:
                         return path_part if path_part else '.'
                     result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
                     return result
