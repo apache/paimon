@@ -845,7 +845,9 @@ class GlobalIndexEvaluatorTest {
                         .withMaxIndexBytes(1200)
                         .withMaxConcurrentReaders(4);
 
-        assertThat(reader.visitScalarSearch(search).join()).isPresent();
+        Optional<GlobalIndexResult> result = reader.visitScalarSearch(search).join();
+        assertThat(result).isPresent();
+        assertThat(result.get().isExact()).isFalse();
         assertThat(received[0].maxResultSize()).isEqualTo(4);
         assertThat(received[1].maxResultSize()).isEqualTo(4);
         assertThat(received[0].maxScannedRowIds()).isEqualTo(10);
