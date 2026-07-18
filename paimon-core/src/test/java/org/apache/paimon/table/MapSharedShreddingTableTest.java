@@ -21,6 +21,8 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -35,8 +37,11 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.SupportsFieldMetadata;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -46,14 +51,19 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -61,7 +71,9 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Table-level tests for MAP shared-shredding. */
@@ -132,6 +144,37 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 .containsEntry(1, javaMapOf("x", 21L, "y", 22L, "z", 23L))
                 .containsEntry(2, javaMapOf())
                 .containsEntry(3, javaMapOf("x", 41L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testAppendOnlyCompaction(String format) throws Exception {
+        Table table = createCompactingAppendOnlyTable(format);
+
+        write(table, GenericRow.of(1, mapOf("a", 11L, "b", 12L)));
+        write(table, GenericRow.of(2, mapOf("c", 21L)));
+        write(table, GenericRow.of(3, mapOf("d", 31L, "e", 32L, "f", 33L, "g", 34L)));
+        compact(table, BinaryRow.EMPTY_ROW, 0);
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).dataFile.fileSource()).hasValue(FileSource.COMPACT);
+        MapSharedShreddingFieldMeta compactedMeta =
+                readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
+        assertThat(compactedMeta.numColumns()).isEqualTo(2);
+        assertThat(compactedMeta.maxRowWidth()).isEqualTo(4);
+        assertThat(compactedMeta.nameToId()).containsOnlyKeys("a", "b", "c", "d", "e", "f", "g");
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), toJavaMap(row.getMap(1)));
+        }
+        assertThat(actual)
+                .containsOnlyKeys(1, 2, 3)
+                .containsEntry(1, javaMapOf("a", 11L, "b", 12L))
+                .containsEntry(2, javaMapOf("c", 21L))
+                .containsEntry(3, javaMapOf("d", 31L, "e", 32L, "f", 33L, "g", 34L));
     }
 
     @ParameterizedTest
@@ -318,6 +361,311 @@ public class MapSharedShreddingTableTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
+    public void testPrimaryKeyWriteOnlyReadWrite(String format, boolean thinMode) throws Exception {
+        Table table = createPrimaryKeyTable(format, thinMode, 2);
+
+        write(
+                table,
+                GenericRow.of(1, mapOf("a", 11L, "b", 12L, "c", 13L)),
+                GenericRow.of(2, null),
+                GenericRow.of(3, mapOf()));
+        write(
+                table,
+                GenericRow.of(1, mapOf("x", null, "y", 42L, "z", null)),
+                GenericRow.of(4, mapOf("d", 44L)));
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), row.isNullAt(1) ? null : toJavaMap(row.getMap(1)));
+        }
+
+        assertThat(actual)
+                .containsOnlyKeys(1, 2, 3, 4)
+                .containsEntry(1, javaMapOf("x", null, "y", 42L, "z", null))
+                .containsEntry(2, null)
+                .containsEntry(3, javaMapOf())
+                .containsEntry(4, javaMapOf("d", 44L));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"orc,parquet", "parquet,orc"})
+    public void testPrimaryKeyInputChangelog(String dataFileFormat, String changelogFileFormat)
+            throws Exception {
+        Table table = createPrimaryKeyInputChangelogTable(dataFileFormat, changelogFileFormat);
+
+        List<CommitMessage> messages =
+                writeAndCommit(
+                        table,
+                        GenericRow.ofKind(RowKind.INSERT, 1, mapOf("a", 11L, "b", 12L)),
+                        GenericRow.ofKind(RowKind.INSERT, 2, mapOf("c", 21L)),
+                        GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, mapOf("a", 11L, "b", 12L)),
+                        GenericRow.ofKind(
+                                RowKind.UPDATE_AFTER,
+                                1,
+                                mapOf("x", 31L, "y", 32L, "overflow", 33L)),
+                        GenericRow.ofKind(RowKind.DELETE, 2, mapOf("c", 21L)));
+
+        List<DataFileWithSplit> changelogFiles = new ArrayList<>();
+        for (CommitMessage message : messages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            for (DataFileMeta file : commitMessage.newFilesIncrement().changelogFiles()) {
+                changelogFiles.add(
+                        new DataFileWithSplit(
+                                commitMessage.partition(), commitMessage.bucket(), file));
+            }
+        }
+        assertThat(changelogFiles).hasSize(1);
+        DataFileWithSplit changelogFile = changelogFiles.get(0);
+        assertThat(changelogFile.dataFile.fileFormat()).isEqualTo(changelogFileFormat);
+        assertThat(changelogFile.dataFile.fileName())
+                .startsWith(((FileStoreTable) table).coreOptions().changelogFilePrefix());
+
+        MapSharedShreddingFieldMeta changelogMeta =
+                readSharedShreddingFieldMeta((FileStoreTable) table, changelogFile, "metrics");
+        assertThat(changelogMeta.numColumns()).isEqualTo(2);
+        assertThat(changelogMeta.maxRowWidth()).isEqualTo(3);
+        assertThat(changelogMeta.nameToId()).containsOnlyKeys("a", "b", "c", "x", "y", "overflow");
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<Split> changelogSplits =
+                fileStoreTable.newSnapshotReader().withMode(ScanMode.CHANGELOG).read().splits();
+        Map<String, Map<String, Long>> actualChangelog = new LinkedHashMap<>();
+        try (RecordReader<InternalRow> reader =
+                fileStoreTable.newRead().createReader(changelogSplits)) {
+            reader.forEachRemaining(
+                    row ->
+                            actualChangelog.put(
+                                    row.getRowKind().shortString() + ":" + row.getInt(0),
+                                    toJavaMap(row.getMap(1))));
+        }
+        assertThat(actualChangelog)
+                .containsEntry("+I:1", javaMapOf("a", 11L, "b", 12L))
+                .containsEntry("+I:2", javaMapOf("c", 21L))
+                .containsEntry("-U:1", javaMapOf("a", 11L, "b", 12L))
+                .containsEntry("+U:1", javaMapOf("x", 31L, "y", 32L, "overflow", 33L))
+                .containsEntry("-D:2", javaMapOf("c", 21L));
+
+        assertThat(readMapsById(table.newReadBuilder()))
+                .containsOnlyKeys(1)
+                .containsEntry(1, javaMapOf("x", 31L, "y", 32L, "overflow", 33L));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
+    public void testPrimaryKeyMergeMapAggregation(String format, boolean thinMode)
+            throws Exception {
+        Table table = createPrimaryKeyAggregationTable(format, thinMode);
+
+        write(table, GenericRow.of(1, mapOf("a", 11L, "b", 12L)), GenericRow.of(2, null));
+        write(
+                table,
+                GenericRow.of(1, mapOf("b", 22L, "c", 23L)),
+                GenericRow.of(2, mapOf("x", 31L)));
+
+        assertThat(readMapsById(table.newReadBuilder()))
+                .containsOnlyKeys(1, 2)
+                .containsEntry(1, javaMapOf("a", 11L, "b", 22L, "c", 23L))
+                .containsEntry(2, javaMapOf("x", 31L));
+
+        compact(table, BinaryRow.EMPTY_ROW, 0);
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).dataFile.fileSource()).hasValue(FileSource.COMPACT);
+        assertThat(readMapsById(table.newReadBuilder()))
+                .containsOnlyKeys(1, 2)
+                .containsEntry(1, javaMapOf("a", 11L, "b", 22L, "c", 23L))
+                .containsEntry(2, javaMapOf("x", 31L));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
+    public void testPrimaryKeyExternalSpillReadWrite(String format, boolean thinMode)
+            throws Exception {
+        Table table = createPrimaryKeyTable(format, thinMode, 2);
+        Map<String, String> spillOptions = new LinkedHashMap<>();
+        spillOptions.put(CoreOptions.PAGE_SIZE.key(), "4 kb");
+        spillOptions.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "12 kb");
+        spillOptions.put(CoreOptions.WRITE_BUFFER_SPILLABLE.key(), "true");
+        table = table.copy(spillOptions);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
+            for (int i = 0; i < 1000; i++) {
+                write.write(
+                        GenericRow.of(
+                                i % 100,
+                                mapOf("a", (long) i, "b", (long) i + 1, "overflow", (long) -i)));
+            }
+            assertThat(numberOfSpillFiles()).isGreaterThan(0);
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), toJavaMap(row.getMap(1)));
+        }
+
+        assertThat(actual).hasSize(100);
+        for (int id = 0; id < 100; id++) {
+            long lastValue = 900L + id;
+            assertThat(actual)
+                    .containsEntry(
+                            id,
+                            javaMapOf("a", lastValue, "b", lastValue + 1, "overflow", -lastValue));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
+    public void testPrimaryKeyCompaction(String format, boolean thinMode) throws Exception {
+        Table table = createPrimaryKeyTable(format, thinMode, 2, false);
+
+        write(
+                table,
+                GenericRow.of(1, mapOf("old", 11L)),
+                GenericRow.of(2, mapOf("a", 21L, "b", 22L, "overflow", 23L)));
+        write(
+                table,
+                GenericRow.of(1, mapOf("x", 31L, "y", 32L, "overflow", 33L)),
+                GenericRow.of(3, null));
+        compact(table, BinaryRow.EMPTY_ROW, 0);
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).dataFile.fileSource()).hasValue(FileSource.COMPACT);
+        MapSharedShreddingFieldMeta compactedMeta =
+                readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
+        assertThat(compactedMeta.numColumns()).isEqualTo(2);
+        assertThat(compactedMeta.maxRowWidth()).isEqualTo(3);
+        assertThat(compactedMeta.nameToId()).containsOnlyKeys("a", "b", "overflow", "x", "y");
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), row.isNullAt(1) ? null : toJavaMap(row.getMap(1)));
+        }
+        assertThat(actual)
+                .containsOnlyKeys(1, 2, 3)
+                .containsEntry(1, javaMapOf("x", 31L, "y", 32L, "overflow", 33L))
+                .containsEntry(2, javaMapOf("a", 21L, "b", 22L, "overflow", 23L))
+                .containsEntry(3, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testPrimaryKeyDeletionVectorCompaction(String format) throws Exception {
+        Table table = createPrimaryKeyTable(format, false, 2, false, true);
+        String padding = String.join("", Collections.nCopies(2048, "X"));
+
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, mapOf("a", 10L, "b", 20L), BinaryString.fromString(padding)),
+                GenericRow.of(2, mapOf("c", 30L), BinaryString.fromString(padding)),
+                GenericRow.of(3, mapOf("d", 40L), BinaryString.fromString(padding)),
+                GenericRow.of(4, null, BinaryString.fromString(padding)),
+                GenericRow.of(6, mapOf("j", 60L, "k", 70L), BinaryString.fromString(padding)),
+                GenericRow.of(
+                        7, mapOf("l", 80L, "m", 90L, "n", 100L), BinaryString.fromString(padding)),
+                GenericRow.of(8, mapOf("o", 110L), BinaryString.fromString(padding)));
+        List<CommitMessage> upgradeMessages = compactAndCommit(table, BinaryRow.EMPTY_ROW, 0, true);
+        assertThat(upgradeMessages)
+                .allSatisfy(
+                        message ->
+                                assertThat(
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement()
+                                                        .newIndexFiles())
+                                        .isEmpty());
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> upgradedFiles = currentDataFiles(fileStoreTable);
+        assertThat(upgradedFiles).hasSize(1);
+        assertThat(upgradedFiles.get(0).dataFile.fileSize())
+                .isGreaterThan(fileStoreTable.coreOptions().compactionFileSize(true));
+
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        compactMessages.addAll(
+                writeAndCommit(
+                        table,
+                        GenericRow.of(
+                                1, mapOf("a", 100L, "e", 500L), BinaryString.fromString("u1")),
+                        GenericRow.of(5, mapOf("h", 80L), BinaryString.fromString("u5"))));
+        compactMessages.addAll(
+                writeAndCommit(
+                        table,
+                        GenericRow.of(
+                                2,
+                                mapOf("c", 300L, "f", 600L, "g", 700L),
+                                BinaryString.fromString("u2")),
+                        GenericRow.of(
+                                5,
+                                mapOf("h", 800L, "i", 900L),
+                                BinaryString.fromString("u5-new"))));
+        compactMessages.addAll(compactAndCommit(table, BinaryRow.EMPTY_ROW, 0, false));
+        List<IndexFileMeta> deletionVectorFiles = new ArrayList<>();
+        for (CommitMessage message : compactMessages) {
+            deletionVectorFiles.addAll(
+                    ((CommitMessageImpl) message).compactIncrement().newIndexFiles());
+        }
+        assertThat(deletionVectorFiles)
+                .isNotEmpty()
+                .allSatisfy(file -> assertThat(file.indexType()).isEqualTo(DELETION_VECTORS_INDEX));
+        assertThat(deletionVectorFiles)
+                .anySatisfy(file -> assertThat(file.dvRanges()).isNotEmpty());
+
+        Map<Integer, Map<String, Long>> actual = readMapsById(table.newReadBuilder());
+        assertThat(actual)
+                .containsOnlyKeys(1, 2, 3, 4, 5, 6, 7, 8)
+                .containsEntry(1, javaMapOf("a", 100L, "e", 500L))
+                .containsEntry(2, javaMapOf("c", 300L, "f", 600L, "g", 700L))
+                .containsEntry(3, javaMapOf("d", 40L))
+                .containsEntry(4, null)
+                .containsEntry(5, javaMapOf("h", 800L, "i", 900L))
+                .containsEntry(6, javaMapOf("j", 60L, "k", 70L))
+                .containsEntry(7, javaMapOf("l", 80L, "m", 90L, "n", 100L))
+                .containsEntry(8, javaMapOf("o", 110L));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
+    public void testPrimaryKeyInfersColumnCountPerFile(String format, boolean thinMode)
+            throws Exception {
+        Table table = createPrimaryKeyTable(format, thinMode, 8);
+
+        write(table, GenericRow.of(1, mapOf("a", 11L, "b", 12L)));
+        write(table, GenericRow.of(2, mapOf("c", 22L)));
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
+        files.sort(Comparator.comparingLong(file -> file.dataFile.minSequenceNumber()));
+        assertThat(files).hasSize(2);
+
+        MapSharedShreddingFieldMeta firstFileMeta =
+                readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
+        assertThat(firstFileMeta.numColumns()).isEqualTo(2);
+        assertThat(firstFileMeta.maxRowWidth()).isEqualTo(2);
+
+        MapSharedShreddingFieldMeta secondFileMeta =
+                readSharedShreddingFieldMeta(fileStoreTable, files.get(1), "metrics");
+        assertThat(secondFileMeta.numColumns()).isEqualTo(1);
+        assertThat(secondFileMeta.maxRowWidth()).isEqualTo(1);
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), toJavaMap(row.getMap(1)));
+        }
+        assertThat(actual)
+                .containsEntry(1, javaMapOf("a", 11L, "b", 12L))
+                .containsEntry(2, javaMapOf("c", 22L));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet"})
     public void testSwitchMapLayoutAndInferColumns(String format) throws Exception {
         Table table =
@@ -462,6 +810,87 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                         102, Arrays.asList(javaMapOf("new-b", 222L), javaMapOf("label-b", 102L)));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testSharedShreddingWithBlobAndVector(String format) throws Exception {
+        Table table = createBlobAndVectorTable(format);
+
+        write(
+                table,
+                GenericRow.of(
+                        1,
+                        mapOf("a", 11L, "b", 12L, "overflow", 13L),
+                        new BlobData(new byte[] {1, 2, 3}),
+                        BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f})),
+                GenericRow.of(2, null, null, null),
+                GenericRow.of(
+                        3,
+                        mapOf(),
+                        new BlobData(new byte[] {4, 5}),
+                        BinaryVector.fromPrimitiveArray(new float[] {4.0f, 5.0f, 6.0f})));
+
+        Map<Integer, Map<String, Long>> initialMaps = new LinkedHashMap<>();
+        for (InternalRow row : read(table, new int[] {0, 1})) {
+            initialMaps.put(row.getInt(0), row.isNullAt(1) ? null : toJavaMap(row.getMap(1)));
+        }
+        assertThat(initialMaps)
+                .containsEntry(1, javaMapOf("a", 11L, "b", 12L, "overflow", 13L))
+                .containsEntry(2, null)
+                .containsEntry(3, javaMapOf());
+
+        RowType rowType = table.rowType();
+        writeWithWriteType(
+                table,
+                rowType.project(Collections.singletonList("metrics")),
+                0L,
+                GenericRow.of(mapOf("updated", 101L)),
+                GenericRow.of(mapOf("updated", 102L)),
+                GenericRow.of(mapOf("updated", 103L)));
+
+        Map<Integer, Map<String, Long>> maps = new LinkedHashMap<>();
+        Map<Integer, byte[]> blobs = new LinkedHashMap<>();
+        Map<Integer, float[]> vectors = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            int id = row.getInt(0);
+            maps.put(id, toJavaMap(row.getMap(1)));
+            blobs.put(id, row.isNullAt(2) ? null : row.getBlob(2).toData());
+            vectors.put(id, row.isNullAt(3) ? null : row.getVector(3).toFloatArray());
+        }
+
+        assertThat(maps)
+                .containsEntry(1, javaMapOf("updated", 101L))
+                .containsEntry(2, javaMapOf("updated", 102L))
+                .containsEntry(3, javaMapOf("updated", 103L));
+        assertThat(blobs.get(1)).containsExactly(1, 2, 3);
+        assertThat(blobs.get(2)).isNull();
+        assertThat(blobs.get(3)).containsExactly(4, 5);
+        assertThat(vectors.get(1)).containsExactly(1.0f, 2.0f, 3.0f);
+        assertThat(vectors.get(2)).isNull();
+        assertThat(vectors.get(3)).containsExactly(4.0f, 5.0f, 6.0f);
+
+        Map<Integer, Map<String, Long>> projectedMaps = new LinkedHashMap<>();
+        for (InternalRow row : read(table, new int[] {0, 1})) {
+            projectedMaps.put(row.getInt(0), toJavaMap(row.getMap(1)));
+        }
+        assertThat(projectedMaps).isEqualTo(maps);
+
+        for (InternalRow row : read(table, new int[] {0, 2, 3})) {
+            int id = row.getInt(0);
+            byte[] expectedBlob = blobs.get(id);
+            if (expectedBlob == null) {
+                assertThat(row.isNullAt(1)).isTrue();
+            } else {
+                assertThat(row.getBlob(1).toData()).containsExactly(expectedBlob);
+            }
+            float[] expectedVector = vectors.get(id);
+            if (expectedVector == null) {
+                assertThat(row.isNullAt(2)).isTrue();
+            } else {
+                assertThat(row.getVector(2).toFloatArray()).containsExactly(expectedVector);
+            }
+        }
+    }
+
     private Table createTable(String format, String... sharedShreddingFields) throws Exception {
         return createTable(format, 2, sharedShreddingFields);
     }
@@ -513,6 +942,179 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         }
         catalog.createTable(identifier(format), builder.build(), true);
         return catalog.getTable(identifier(format));
+    }
+
+    private Table createBlobAndVectorTable(String format) throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                        .column("payload", DataTypes.BLOB())
+                        .column("embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .option("bucket", "-1")
+                        .option("file.format", format)
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(format));
+    }
+
+    private Table createCompactingAppendOnlyTable(String format) throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                        .option("bucket", "1")
+                        .option("bucket-key", "id")
+                        .option("file.format", format)
+                        .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "99")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "64")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(format));
+    }
+
+    private Table createPrimaryKeyTable(String format, boolean thinMode, int maxColumns)
+            throws Exception {
+        return createPrimaryKeyTable(format, thinMode, maxColumns, true);
+    }
+
+    private Table createPrimaryKeyTable(
+            String format, boolean thinMode, int maxColumns, boolean writeOnly) throws Exception {
+        return createPrimaryKeyTable(format, thinMode, maxColumns, writeOnly, false);
+    }
+
+    private Table createPrimaryKeyTable(
+            String format,
+            boolean thinMode,
+            int maxColumns,
+            boolean writeOnly,
+            boolean deletionVectors)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()));
+        if (deletionVectors) {
+            builder.column("padding", DataTypes.STRING())
+                    .option(CoreOptions.TARGET_FILE_SIZE.key(), "1 kb")
+                    .option(CoreOptions.FILE_COMPRESSION.key(), "none");
+        }
+        builder.primaryKey("id")
+                .option("bucket", "1")
+                .option("bucket-key", "id")
+                .option("file.format", format)
+                .option(CoreOptions.WRITE_ONLY.key(), String.valueOf(writeOnly))
+                .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), String.valueOf(deletionVectors))
+                .option(CoreOptions.DATA_FILE_THIN_MODE.key(), String.valueOf(thinMode))
+                .option("fields.metrics.map.storage-layout", "shared-shredding")
+                .option(
+                        "fields.metrics.map.shared-shredding.max-columns",
+                        String.valueOf(maxColumns));
+        catalog.createTable(identifier(format), builder.build(), true);
+        return catalog.getTable(identifier(format));
+    }
+
+    private Table createPrimaryKeyInputChangelogTable(
+            String dataFileFormat, String changelogFileFormat) throws Exception {
+        catalog.createTable(
+                identifier(dataFileFormat),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                        .primaryKey("id")
+                        .option("bucket", "1")
+                        .option("bucket-key", "id")
+                        .option("file.format", dataFileFormat)
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option(CoreOptions.CHANGELOG_FILE_FORMAT.key(), changelogFileFormat)
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "zstd")
+                        .option(CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), "zstd")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(dataFileFormat));
+    }
+
+    private Table createPrimaryKeyAggregationTable(String format, boolean thinMode)
+            throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                        .primaryKey("id")
+                        .option("bucket", "1")
+                        .option("bucket-key", "id")
+                        .option("file.format", format)
+                        .option(CoreOptions.DATA_FILE_THIN_MODE.key(), String.valueOf(thinMode))
+                        .option(CoreOptions.MERGE_ENGINE.key(), "aggregation")
+                        .option("fields.metrics.aggregate-function", "merge_map")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(format));
+    }
+
+    private Map<Integer, Map<String, Long>> readMapsById(ReadBuilder readBuilder) throws Exception {
+        Map<Integer, Map<String, Long>> result = new LinkedHashMap<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            result.put(
+                                    row.getInt(0),
+                                    row.isNullAt(1) ? null : toJavaMap(row.getMap(1))));
+        }
+        return result;
+    }
+
+    private List<CommitMessage> compactAndCommit(
+            Table table, BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
+            write.compact(partition, bucket, fullCompaction);
+            List<CommitMessage> messages = write.prepareCommit();
+            commit.commit(messages);
+            return messages;
+        }
+    }
+
+    private List<CommitMessage> writeAndCommit(Table table, InternalRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
+            for (InternalRow row : rows) {
+                write.write(row);
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            commit.commit(messages);
+            return messages;
+        }
     }
 
     private Table createComplexValueTable(String format) throws Exception {
@@ -820,6 +1422,14 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                     map.valueArray().isNullAt(i) ? null : map.valueArray().getLong(i));
         }
         return result;
+    }
+
+    private long numberOfSpillFiles() throws Exception {
+        try (Stream<java.nio.file.Path> paths = Files.walk(tempPath)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".channel"))
+                    .count();
+        }
     }
 
     private Map<String, Long> javaMapOf(Object... entries) {

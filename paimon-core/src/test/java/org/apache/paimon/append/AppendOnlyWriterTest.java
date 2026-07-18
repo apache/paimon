@@ -76,6 +76,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -617,6 +619,62 @@ public class AppendOnlyWriterTest {
                                 3));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapWithBlob(String fileFormat) throws Exception {
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "tags",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT())),
+                        DataTypes.FIELD(2, "payload", new BlobType()));
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        BlobFileContext blobContext =
+                BlobFileContext.create(writeType, new CoreOptions(rawOptions));
+        assertThat(blobContext).isNotNull();
+
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(), blobContext);
+
+        writer.write(
+                sharedShreddingLogicalRow(1, map("a", 10L), new BlobData(new byte[] {1, 2, 3})));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(2);
+        DataFileMeta mainFile =
+                increment.newFilesIncrement().newFiles().stream()
+                        .filter(file -> fileFormat.equals(file.fileFormat()))
+                        .findFirst()
+                        .orElseThrow(AssertionError::new);
+        assertThat(readSharedShreddingFieldMeta(context, mainFile, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(
+                                nameToId("a", 0),
+                                fieldToColumns(0, columns(0)),
+                                overflowFields(),
+                                1,
+                                1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapAllowsForceBufferSpill(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+
+        Assertions.assertThatCode(writer::toBufferedWriter).doesNotThrowAnyException();
+        writer.close();
+    }
+
     @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
@@ -947,6 +1005,17 @@ public class AppendOnlyWriterTest {
             long schemaId,
             long maxSequenceNumber,
             FileIndexOptions fileIndexOptions) {
+        return createSharedShreddingAppendWriter(
+                writeType, context, schemaId, maxSequenceNumber, fileIndexOptions, null);
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber,
+            FileIndexOptions fileIndexOptions,
+            @Nullable BlobFileContext blobContext) {
         return new AppendOnlyWriter(
                 context.fileIO,
                 null,
@@ -975,7 +1044,7 @@ public class AppendOnlyWriterTest {
                 false,
                 context.options.dataEvolutionEnabled(),
                 null,
-                null);
+                blobContext);
     }
 
     private DataFileMeta writeSharedShreddingFile(AppendOnlyWriter writer, InternalRow... rows)

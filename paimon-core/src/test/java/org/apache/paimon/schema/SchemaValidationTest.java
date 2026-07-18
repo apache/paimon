@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -526,15 +527,11 @@ class SchemaValidationTest {
         assertMapSharedShreddingValidationFailed(
                 mapValueFields(DataTypes.BLOB()),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
+                "MAP shared-shredding currently cannot contain BLOB fields.");
         assertMapSharedShreddingValidationFailed(
                 nestedMapValueFields(DataTypes.BLOB()),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
-        assertMapSharedShreddingValidationFailed(
-                topLevelPayloadFields(DataTypes.BLOB()),
-                mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
+                "MAP shared-shredding currently cannot contain BLOB fields.");
 
         DataType multisetType = DataTypes.MULTISET(DataTypes.INT());
         assertMapSharedShreddingValidationFailed(
@@ -554,11 +551,7 @@ class SchemaValidationTest {
         assertMapSharedShreddingValidationFailed(
                 mapValueFields(vectorType),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with VECTOR fields.");
-        assertMapSharedShreddingValidationFailed(
-                topLevelPayloadFields(vectorType),
-                mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with VECTOR fields.");
+                "MAP shared-shredding currently cannot contain VECTOR fields.");
     }
 
     @Test
@@ -595,12 +588,11 @@ class SchemaValidationTest {
         vectorFormatOptions.put(DATA_EVOLUTION_ENABLED.key(), "true");
         vectorFormatOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         vectorFormatOptions.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
-        assertThatThrownBy(
+        assertThatCode(
                         () ->
                                 validateTableSchema(
                                         mapSharedShreddingSchema(vectorFormatOptions, emptyList())))
-                .hasMessageContaining(
-                        "MAP shared-shredding only supports parquet/orc file formats, but vector.file.format is json.");
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -651,23 +643,40 @@ class SchemaValidationTest {
     public void testMapSharedShreddingTableModeValidation() {
         Map<String, String> primaryKeyOptions = mapSharedShreddingOptions();
         primaryKeyOptions.put(BUCKET.key(), "-1");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))));
+
+        primaryKeyOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))));
+
+        Map<String, String> postponeBucketOptions = mapSharedShreddingOptions();
+        postponeBucketOptions.put(BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET));
+        postponeBucketOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
                                         mapSharedShreddingSchema(
-                                                primaryKeyOptions, singletonList("id"))))
+                                                postponeBucketOptions, singletonList("id"))))
                 .hasMessageContaining(
-                        "MAP shared-shredding currently only supports append-only tables.");
+                        "MAP shared-shredding currently does not support postpone bucket mode.");
 
         Map<String, String> fixedBucketOptions = mapSharedShreddingOptions();
         fixedBucketOptions.put(BUCKET.key(), "1");
         fixedBucketOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
-        assertThatThrownBy(
+        assertThatNoException()
+                .isThrownBy(
                         () ->
                                 validateTableSchema(
-                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())));
 
         Map<String, String> writeOnlyOptions = mapSharedShreddingOptions();
         writeOnlyOptions.put(BUCKET.key(), "1");
