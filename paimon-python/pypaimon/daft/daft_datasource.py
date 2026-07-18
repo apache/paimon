@@ -269,15 +269,26 @@ def _load_table(
 
 
 def _build_storage_config(
+    table: FileStoreTable,
     catalog_options: dict[str, Any],
     multithreaded_io: bool,
+    explicit_io_config_bytes: bytes | None,
 ) -> StorageConfig:
     from daft import context
     from daft.daft import StorageConfig
 
     from pypaimon.daft.daft_io_config import _convert_paimon_catalog_options_to_io_config
 
-    io_config = _convert_paimon_catalog_options_to_io_config(catalog_options)
+    if explicit_io_config_bytes is not None:
+        from daft.io import IOConfig
+
+        io_config = IOConfig._from_serialized(explicit_io_config_bytes)
+    else:
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+
+        io_config = _convert_paimon_catalog_options_to_io_config(
+            _enrich_options_with_rest_token(catalog_options, table)
+        )
     io_config = io_config or context.get_context().daft_planning_config.default_io_config
     return StorageConfig(multithreaded_io, io_config)
 
@@ -577,16 +588,18 @@ class PaimonDataSource(DataSource):
         self._pushed_filters = state.get("_pushed_filters")
         self._paimon_predicate = state["_paimon_predicate"]
         self._remaining_filters = state["_remaining_filters"]
-        self._storage_config = _build_storage_config(
-            self._table_catalog_options,
-            state["_multithreaded_io"],
-        )
 
         table = _load_table(
             self._table_catalog_options,
             self._table_identifier,
             self._table_path,
             self._table_options,
+        )
+        self._storage_config = _build_storage_config(
+            table,
+            self._table_catalog_options,
+            state["_multithreaded_io"],
+            self._explicit_io_config_bytes,
         )
         self._init_table(table)
 
