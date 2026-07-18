@@ -86,8 +86,7 @@ class Decimal:
         """
         if self.decimal_val is None:
             self.decimal_val = (
-                    BigDecimal(self.long_val)
-                    / BigDecimal(self.POW10[self.scale])
+                BigDecimal(self.long_val) / BigDecimal(self.POW10[self.scale])
             )
         return self.decimal_val
 
