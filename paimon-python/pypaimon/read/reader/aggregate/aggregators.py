@@ -64,7 +64,7 @@ NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
 
 
-# Min/Max values for each numeric type
+# Integer range limits used for overflow checking.
 _BYTE_MIN = -128
 _BYTE_MAX = 127
 _SHORT_MIN = -32768
@@ -82,8 +82,14 @@ _NUMERIC_BASE_TYPES = frozenset([
     "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "DEC",
 ])
 
+# SQL type names treated as decimal. NUMERIC / DEC are SQL
+# synonyms accepted by the parser; treat them the same as DECIMAL.
 _DECIMAL_TYPES = frozenset({"DECIMAL", "NUMERIC", "DEC"})
+
+# SQL type names treated as integer.
 _INT_TYPES = frozenset({"INT", "INTEGER"})
+
+# SQL type names treated as floating-point.
 _FLOAT_TYPES = frozenset({"FLOAT", "DOUBLE"})
 
 
@@ -388,21 +394,12 @@ class FieldProductAgg(FieldAggregator):
             return accumulator if input_field is None else input_field
 
         if self._base_type in _DECIMAL_TYPES:
-            merge_field = Decimal.from_big_decimal(accumulator, self._precision, self._scale)
-            input_field = Decimal.from_big_decimal(input_field, self._precision, self._scale)
-
-            assert merge_field.scale == input_field.scale, "Inconsistent scale of aggregate Decimal!"
-            assert merge_field.precision == input_field.precision, "Inconsistent precision of aggregate Decimal!"
-
-            big_decimal = merge_field.to_big_decimal()
-            input_big_decimal = input_field.to_big_decimal()
-            result = big_decimal * input_big_decimal
-
-            return Decimal.from_big_decimal(
-                result,
-                merge_field.precision,
-                merge_field.scale,
-            ).to_big_decimal()
+            value = Decimal.from_big_decimal(
+                accumulator * input_field,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
 
         elif self._base_type == "TINYINT":
             value = accumulator * input_field
@@ -448,21 +445,12 @@ class FieldProductAgg(FieldAggregator):
             return accumulator
 
         if self._base_type in _DECIMAL_TYPES:
-            merge_field = Decimal.from_big_decimal(accumulator, self._precision, self._scale)
-            input_field = Decimal.from_big_decimal(input_field, self._precision, self._scale)
-
-            assert merge_field.scale == input_field.scale, "Inconsistent scale of aggregate Decimal!"
-            assert merge_field.precision == input_field.precision, "Inconsistent precision of aggregate Decimal!"
-
-            big_decimal = merge_field.to_big_decimal()
-            input_big_decimal = input_field.to_big_decimal()
-            result = big_decimal / input_big_decimal
-
-            return Decimal.from_big_decimal(
-                result,
-                merge_field.precision,
-                merge_field.scale,
-            ).to_big_decimal()
+            value = Decimal.from_big_decimal(
+                accumulator / input_field,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
 
         elif self._base_type == "TINYINT":
             value = int(accumulator / input_field)
