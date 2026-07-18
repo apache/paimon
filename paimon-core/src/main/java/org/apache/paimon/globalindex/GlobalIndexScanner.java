@@ -36,6 +36,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -62,6 +65,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
 public class GlobalIndexScanner implements Closeable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexScanner.class);
 
     private final Options options;
     private final RowType rowType;
@@ -325,7 +330,19 @@ public class GlobalIndexScanner implements Closeable {
             for (CompletableFuture<GlobalIndexReader> future : futures) {
                 unionReader.add(future.join());
             }
-            readers.add(new UnionGlobalIndexReader(unionReader));
+            readers.add(
+                    new UnionGlobalIndexReader(
+                            unionReader,
+                            duration ->
+                                    LOG.info(
+                                            "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                            table.name(),
+                                            indexType,
+                                            group.fieldIds.stream()
+                                                    .map(rowType::getField)
+                                                    .map(DataField::name)
+                                                    .collect(Collectors.toList()),
+                                            duration / 1_000_000)));
         }
 
         return readers;
