@@ -51,7 +51,7 @@ class FullTextScan(ABC):
         pass
 
 
-class FullTextScanImpl(FullTextScan):
+class DataEvolutionFullTextScan(FullTextScan):
     """Implementation for FullTextScan."""
 
     def __init__(

@@ -39,6 +39,26 @@ from pypaimon.utils.range import Range
 
 class GlobalIndexTest(unittest.TestCase):
 
+    def test_primary_key_sorted_index_columns_preserve_java_split_semantics(self):
+        options = CoreOptions(Options({
+            "pk-btree.index.columns": "name, id",
+            "pk-bitmap.index.columns": "category",
+        }))
+
+        self.assertEqual(["name", "id"], options.primary_key_btree_index_columns())
+        self.assertEqual(["category"], options.primary_key_bitmap_index_columns())
+
+    def test_global_index_meta_preserves_primary_key_source_meta(self):
+        source_meta = b"\x00\x00\x00\x01source-file"
+        meta = GlobalIndexMeta(
+            row_range_start=0,
+            row_range_end=2,
+            index_field_id=1,
+            source_meta=source_meta,
+        )
+
+        self.assertEqual(source_meta, meta.source_meta)
+
     def test_chained_or(self):
         result = GlobalIndexResult.create_empty()
         for i in range(600):

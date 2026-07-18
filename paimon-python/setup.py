@@ -152,7 +152,7 @@ setup(
     },
     extras_require={
         'ray': [
-            'ray>=2.10,<3; python_version>="3.7"',
+            'ray>=2.10,<3; python_version>="3.8"',
         ],
         'torch': [
             'torch',
@@ -175,7 +175,7 @@ setup(
             'vortex-data==0.70.0; python_version>="3.11"',
         ],
         'mosaic': [
-            'paimon-mosaic>=0.1.0',
+            'paimon-mosaic>=0.1.0; python_version>="3.9"',
         ],
         'lumina': [
             'lumina-data>=0.1.0'

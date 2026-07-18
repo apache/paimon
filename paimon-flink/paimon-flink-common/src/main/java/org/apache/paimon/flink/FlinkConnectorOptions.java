@@ -84,6 +84,16 @@ public class FlinkConnectorOptions {
                                     + "This eliminates data transfer overhead when the source already "
                                     + "provides suitable data distribution (e.g., Kafka partitions).");
 
+    public static final ConfigOption<CompactionBucketDistributionStrategy>
+            COMPACTION_BUCKET_DISTRIBUTION_STRATEGY =
+                    ConfigOptions.key("compaction.bucket-distribution-strategy")
+                            .enumType(CompactionBucketDistributionStrategy.class)
+                            .defaultValue(CompactionBucketDistributionStrategy.LINEAR)
+                            .withDescription(
+                                    "Defines how dedicated bucket compaction jobs distribute compact buckets to writers. "
+                                            + "'linear' uses the existing stable partition-plus-bucket mapping. "
+                                            + "'size-aware-batch' assigns bounded full-compaction bucket splits by total data file size and forwards them to writers to reduce compaction long tail.");
+
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()
@@ -629,6 +639,34 @@ public class FlinkConnectorOptions {
         private final String description;
 
         WatermarkEmitStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Bucket distribution strategy for dedicated compaction jobs. */
+    public enum CompactionBucketDistributionStrategy implements DescribedEnum {
+        LINEAR(
+                "linear",
+                "Distribute compact buckets by the existing stable partition-plus-bucket channel mapping."),
+        SIZE_AWARE_BATCH(
+                "size-aware-batch",
+                "For bounded full compaction, assign compact bucket splits by total data file size and forward them to writers to reduce long-tail compaction tasks.");
+
+        private final String value;
+        private final String description;
+
+        CompactionBucketDistributionStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

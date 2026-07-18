@@ -45,7 +45,8 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldPrimaryKeyAgg,
     FieldSumAgg,
     FieldListaggAgg,
-    FieldNestedUpdateAgg, FieldNestedPartialUpdateAgg,
+    FieldNestedUpdateAgg,
+    FieldNestedPartialUpdateAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType
 from pypaimon.table.row.generic_row import GenericRow

@@ -47,8 +47,15 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.OutputStreamAppender;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -157,6 +164,62 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(splits).isNotEmpty();
         assertThat(splits).allMatch(split -> split instanceof DataSplit);
+    }
+
+    @Test
+    public void testGlobalIndexDiagnosticLogs() throws Exception {
+        write(10L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OutputStreamAppender appender =
+                OutputStreamAppender.newBuilder()
+                        .setName("global-index-diagnostic-test")
+                        .setTarget(output)
+                        .setLayout(PatternLayout.newBuilder().withPattern("%level %msg%n").build())
+                        .build();
+        Logger scanLogger = (Logger) LogManager.getLogger(DataEvolutionBatchScan.class);
+        Logger scannerLogger = (Logger) LogManager.getLogger(GlobalIndexScanner.class);
+        Level previousScanLevel = scanLogger.getLevel();
+        Level previousScannerLevel = scannerLogger.getLevel();
+
+        appender.start();
+        scanLogger.addAppender(appender);
+        scannerLogger.addAppender(appender);
+        scanLogger.setLevel(Level.INFO);
+        scannerLogger.setLevel(Level.INFO);
+        try {
+            Predicate predicate =
+                    new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
+            table.newReadBuilder().withFilter(predicate).newScan().plan();
+
+            PredicateBuilder rowIdBuilder =
+                    new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
+            int rowIdIndex = table.rowType().getFieldCount();
+            Predicate mixedRowIdPredicate =
+                    PredicateBuilder.or(
+                            rowIdBuilder.equal(rowIdIndex, 1L),
+                            rowIdBuilder.equal(1, BinaryString.fromString("a7")));
+            table.newReadBuilder().withFilter(mixedRowIdPredicate).newScan().plan();
+
+            String logs = new String(output.toByteArray(), StandardCharsets.UTF_8);
+            assertThat(logs)
+                    .containsPattern(
+                            "INFO Scan table '[^']+' with global index\\. "
+                                    + "searchMode='fast', total=\\d+ ms, metadata=\\d+ ms, "
+                                    + "lookup=\\d+ ms, coverage=\\d+ ms\\.")
+                    .containsPattern(
+                            "INFO Global index lookup table='[^']+', type='btree', "
+                                    + "fields='\\[f1\\]', lookup=\\d+ ms\\.")
+                    .contains("INFO Scan table '" + table.name() + "' without global index.");
+        } finally {
+            scanLogger.setLevel(previousScanLevel);
+            scannerLogger.setLevel(previousScannerLevel);
+            scanLogger.removeAppender(appender);
+            scannerLogger.removeAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test

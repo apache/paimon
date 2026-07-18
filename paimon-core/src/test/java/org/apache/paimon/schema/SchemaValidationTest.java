@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -387,7 +388,9 @@ class SchemaValidationTest {
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
                         new DataField(
-                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                                1,
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.INT())),
                         new DataField(
                                 2, "codes", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())));
 
@@ -465,10 +468,29 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining(
-                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.");
+                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING NOT NULL, T>.");
 
         options.remove("fields.codes.map.storage-layout");
         options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        List<DataField> nullableKeyFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                nullableKeyFields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'metrics' is configured with map.storage-layout=shared-shredding but its map key type is nullable.");
+
         options.put("fields.metrics.map.shared-shredding.max-columns", "0");
         assertThatThrownBy(
                         () ->
@@ -505,15 +527,11 @@ class SchemaValidationTest {
         assertMapSharedShreddingValidationFailed(
                 mapValueFields(DataTypes.BLOB()),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
+                "MAP shared-shredding currently cannot contain BLOB fields.");
         assertMapSharedShreddingValidationFailed(
                 nestedMapValueFields(DataTypes.BLOB()),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
-        assertMapSharedShreddingValidationFailed(
-                topLevelPayloadFields(DataTypes.BLOB()),
-                mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with BLOB fields.");
+                "MAP shared-shredding currently cannot contain BLOB fields.");
 
         DataType multisetType = DataTypes.MULTISET(DataTypes.INT());
         assertMapSharedShreddingValidationFailed(
@@ -533,11 +551,7 @@ class SchemaValidationTest {
         assertMapSharedShreddingValidationFailed(
                 mapValueFields(vectorType),
                 mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with VECTOR fields.");
-        assertMapSharedShreddingValidationFailed(
-                topLevelPayloadFields(vectorType),
-                mapSharedShreddingOptions(),
-                "MAP shared-shredding currently cannot be used with VECTOR fields.");
+                "MAP shared-shredding currently cannot contain VECTOR fields.");
     }
 
     @Test
@@ -574,12 +588,11 @@ class SchemaValidationTest {
         vectorFormatOptions.put(DATA_EVOLUTION_ENABLED.key(), "true");
         vectorFormatOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         vectorFormatOptions.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
-        assertThatThrownBy(
+        assertThatCode(
                         () ->
                                 validateTableSchema(
                                         mapSharedShreddingSchema(vectorFormatOptions, emptyList())))
-                .hasMessageContaining(
-                        "MAP shared-shredding only supports parquet/orc file formats, but vector.file.format is json.");
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -630,23 +643,40 @@ class SchemaValidationTest {
     public void testMapSharedShreddingTableModeValidation() {
         Map<String, String> primaryKeyOptions = mapSharedShreddingOptions();
         primaryKeyOptions.put(BUCKET.key(), "-1");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))));
+
+        primaryKeyOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))));
+
+        Map<String, String> postponeBucketOptions = mapSharedShreddingOptions();
+        postponeBucketOptions.put(BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET));
+        postponeBucketOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
                                         mapSharedShreddingSchema(
-                                                primaryKeyOptions, singletonList("id"))))
+                                                postponeBucketOptions, singletonList("id"))))
                 .hasMessageContaining(
-                        "MAP shared-shredding currently only supports append-only tables.");
+                        "MAP shared-shredding currently does not support postpone bucket mode.");
 
         Map<String, String> fixedBucketOptions = mapSharedShreddingOptions();
         fixedBucketOptions.put(BUCKET.key(), "1");
         fixedBucketOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
-        assertThatThrownBy(
+        assertThatNoException()
+                .isThrownBy(
                         () ->
                                 validateTableSchema(
-                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())));
 
         Map<String, String> writeOnlyOptions = mapSharedShreddingOptions();
         writeOnlyOptions.put(BUCKET.key(), "1");
@@ -1431,7 +1461,8 @@ class SchemaValidationTest {
     private List<DataField> mapValueFields(DataType valueType) {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT()),
-                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), valueType)));
+                new DataField(
+                        1, "metrics", DataTypes.MAP(DataTypes.STRING().notNull(), valueType)));
     }
 
     private List<DataField> nestedMapValueFields(DataType valueType) {
@@ -1441,14 +1472,15 @@ class SchemaValidationTest {
                         1,
                         "metrics",
                         DataTypes.MAP(
-                                DataTypes.STRING(),
+                                DataTypes.STRING().notNull(),
                                 DataTypes.ROW(DataTypes.FIELD(0, "payload", valueType)))));
     }
 
     private List<DataField> topLevelPayloadFields(DataType payloadType) {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT()),
-                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                new DataField(
+                        1, "metrics", DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.INT())),
                 new DataField(2, "payload", payloadType));
     }
 

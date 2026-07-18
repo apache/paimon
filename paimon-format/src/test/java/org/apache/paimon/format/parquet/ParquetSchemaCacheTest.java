@@ -30,7 +30,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.parquet.filter2.compat.FilterCompat;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -61,8 +60,7 @@ public class ParquetSchemaCacheTest {
 
     @Test
     void testCacheIsEmptyBeforeFirstRead() throws Exception {
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         assertThat(getSchemaCacheSize(factory)).isEqualTo(0);
     }
@@ -71,8 +69,7 @@ public class ParquetSchemaCacheTest {
     void testCacheIsPopulatedAfterFirstRead() throws Exception {
         Path path = writeSingleFile();
 
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         readAll(factory, path);
 
@@ -89,8 +86,7 @@ public class ParquetSchemaCacheTest {
         Path path2 = writeSingleFile();
         Path path3 = writeSingleFile();
 
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         readAll(factory, path1);
         readAll(factory, path2);
@@ -108,8 +104,7 @@ public class ParquetSchemaCacheTest {
     void testDataReadCorrectlyOnFirstRead() throws Exception {
         Path path = writeSingleFile();
 
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         assertThat(countRows(factory, path)).isEqualTo(3);
     }
@@ -118,8 +113,7 @@ public class ParquetSchemaCacheTest {
     void testDataReadCorrectlyOnSubsequentCachedReads() throws Exception {
         Path path = writeSingleFile();
 
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         assertThat(countRows(factory, path)).isEqualTo(3);
         assertThat(countRows(factory, path)).isEqualTo(3);
@@ -131,8 +125,7 @@ public class ParquetSchemaCacheTest {
         Path path1 = writeSingleFile();
         Path path2 = writeSingleFile();
 
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         assertThat(countRows(factory, path1)).isEqualTo(3);
         assertThat(countRows(factory, path2)).isEqualTo(3);
@@ -147,9 +140,9 @@ public class ParquetSchemaCacheTest {
         Path path = writeSingleFile();
 
         ParquetReaderFactory factory1 =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
         ParquetReaderFactory factory2 =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         readAll(factory1, path);
 

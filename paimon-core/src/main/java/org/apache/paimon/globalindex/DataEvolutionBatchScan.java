@@ -264,6 +264,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
+            } else if (filter != null) {
+                LOG.info("Scan table '{}' without global index.", table.name());
             }
         }
 
@@ -292,17 +294,33 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
+        long totalStart = System.nanoTime();
         Optional<GlobalIndexScanner> optionalScanner =
                 GlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+        long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
+            long lookupStart = System.nanoTime();
             Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
+            long lookupDuration = System.nanoTime() - lookupStart;
             if (result.isPresent()) {
-                LOG.info("Scan table '{}' with global index.", table.name());
-                return Optional.of(result.get().or(scanner.unindexedRows(globalIndexFilter)));
+                long coverageStart = System.nanoTime();
+                GlobalIndexResult finalResult =
+                        result.get().or(scanner.unindexedRows(globalIndexFilter));
+                long coverageDuration = System.nanoTime() - coverageStart;
+                long totalDuration = System.nanoTime() - totalStart;
+                LOG.info(
+                        "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
+                        table.name(),
+                        options.globalIndexSearchMode(),
+                        totalDuration / 1_000_000,
+                        metadataDuration / 1_000_000,
+                        lookupDuration / 1_000_000,
+                        coverageDuration / 1_000_000);
+                return Optional.of(finalResult);
             }
             return Optional.empty();
         } catch (IOException e) {

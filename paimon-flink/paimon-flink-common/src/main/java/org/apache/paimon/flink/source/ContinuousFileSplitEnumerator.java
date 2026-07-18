@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -327,13 +328,26 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
+        int task;
         if (split.split() instanceof DataSplit) {
-            return assignSuggestedTask((DataSplit) split.split());
+            task = assignSuggestedTask((DataSplit) split.split());
         } else if (split.split() instanceof ChainSplit) {
-            return assignSuggestedTask((ChainSplit) split.split());
+            task = assignSuggestedTask((ChainSplit) split.split());
         } else {
-            return assignSuggestedTask((IncrementalSplit) split.split());
+            task = assignSuggestedTask((IncrementalSplit) split.split());
         }
+
+        // Split assigners keep splits in a map keyed by task, but only ever hand out splits for
+        // tasks within the parallelism, so a task outside of it silently strands the split instead
+        // of failing.
+        int parallelism = context.currentParallelism();
+        checkArgument(
+                task >= 0 && task < parallelism,
+                "Split %s is suggested to task %s, which is out of the parallelism [0, %s). This is unexpected.",
+                split.splitId(),
+                task,
+                parallelism);
+        return task;
     }
 
     protected int assignSuggestedTask(DataSplit split) {
@@ -358,8 +372,17 @@ public class ContinuousFileSplitEnumerator
     protected int assignSuggestedTask(IncrementalSplit split) {
         int parallelism = context.currentParallelism();
 
-        // TODO how to deal with postpone bucket?
-        int bucketId = split.bucket();
+        int bucketId;
+        if (split.bucket() == BucketMode.POSTPONE_BUCKET) {
+            // A diff which only removes files has no after files, so fall back to the before files.
+            List<DataFileMeta> files =
+                    split.afterFiles().isEmpty() ? split.beforeFiles() : split.afterFiles();
+            bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(files.get(0).fileName()) % parallelism;
+        } else {
+            bucketId = split.bucket();
+        }
+
         if (shuffleBucketWithPartition) {
             return ChannelComputer.select(split.partition(), bucketId, parallelism);
         } else {

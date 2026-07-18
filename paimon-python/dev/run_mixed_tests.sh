@@ -118,10 +118,13 @@ run_batched_java_write_tests() {
         result=1
     fi
 
-    local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
-    lance_tests="${lance_tests}+testDataEvolutionWriteLance"
-    if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
-        result=1
+    # lance has no Python wheel on <3.8; its readers are all skipped there.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
+        lance_tests="${lance_tests}+testDataEvolutionWriteLance"
+        if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 11 ]]; then
@@ -142,10 +145,13 @@ run_batched_java_write_tests() {
         fi
     fi
 
-    local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
-    lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
-    if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
-        result=1
+    # Lumina vector reads need BitMap64 (>=3.8); skip the write below it too.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
+        lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
+        if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 9 ]]; then
@@ -187,15 +193,17 @@ run_java_write_test() {
 
     echo ""
 
-    # Run the Java test method for lance format
-    echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Run the Java test method for lance format (readers skipped on <3.8).
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
-        echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Java write lance test failed${NC}"
-        lance_result=1
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+            echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java write lance test failed${NC}"
+            lance_result=1
+        fi
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -261,15 +269,19 @@ run_java_read_test() {
 
     echo ""
 
-    # Run Java test for lance format in paimon-lance
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java read lance test failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java read lance test failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -800,13 +812,15 @@ run_data_evolution_test() {
             core_result=1
         fi
 
-        # Java write data evolution table (lance)
-        echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
-            echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
-            lance_result=1
+        # Java write data evolution table (lance) -- only read back on >=3.8.
+        if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+            echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
+            if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
+                echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
+            else
+                echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
+                lance_result=1
+            fi
         fi
     fi
 
@@ -876,14 +890,18 @@ run_data_evolution_py_write_test() {
         core_result=1
     fi
 
-    # Java read data evolution table (lance)
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
@@ -1151,22 +1169,31 @@ main() {
 
     echo ""
 
-    # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
-    if ! run_btree_raw_fallback_test; then
-        btree_raw_fallback_result=1
-    fi
+    # Raw fallback / bitmap / global index need pyroaring BitMap64 (>=1.0,
+    # Python >=3.8) on the Python read side; skip on older interpreters.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
+        if ! run_btree_raw_fallback_test; then
+            btree_raw_fallback_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Bitmap index test (Java write, Python read)
-    if ! run_bitmap_index_test; then
-        bitmap_index_result=1
-    fi
+        # Run Bitmap index test (Java write, Python read)
+        if ! run_bitmap_index_test; then
+            bitmap_index_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    if ! run_compressed_global_index_test; then
-        compressed_global_index_result=1
+        if ! run_compressed_global_index_test; then
+            compressed_global_index_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping BTree raw fallback / bitmap / global index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        btree_raw_fallback_result=0
+        bitmap_index_result=0
+        compressed_global_index_result=0
     fi
 
     echo ""
@@ -1233,16 +1260,23 @@ main() {
 
     echo ""
 
-    # Run Lumina vector index test (Java write, Python read)
-    if ! run_lumina_vector_test; then
-        lumina_vector_result=1
-    fi
+    # Lumina vector index needs BitMap64 (Python >= 3.8) on the read side.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run Lumina vector index test (Java write, Python read)
+        if ! run_lumina_vector_test; then
+            lumina_vector_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Lumina vector + BTree pre-filter test (Java write, Python read)
-    if ! run_lumina_vector_btree_test; then
-        lumina_vector_btree_result=1
+        # Run Lumina vector + BTree pre-filter test (Java write, Python read)
+        if ! run_lumina_vector_btree_test; then
+            lumina_vector_btree_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Lumina Vector Index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        lumina_vector_result=0
+        lumina_vector_btree_result=0
     fi
 
     echo ""
@@ -1293,7 +1327,8 @@ main() {
 
     echo ""
 
-    # Run data evolution test (Java write, Python read)
+    # Run data evolution test (Java write, Python read). Lance variant skips
+    # itself on <3.8 (get_file_format_params + gated Java lance read).
     if ! run_data_evolution_test; then
         data_evolution_result=1
     fi

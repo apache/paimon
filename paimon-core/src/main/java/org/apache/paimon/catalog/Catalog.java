@@ -1035,6 +1035,27 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
+     * Create partitions of the specify table with explicit existence semantics.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        if (!ignoreIfExists) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Catalog %s does not support createPartitions without ignoreIfExists.",
+                            getClass().getName()));
+        }
+        createPartitions(identifier, partitions);
+    }
+
+    /**
      * Drop partitions of the specify table. Ignore non-existent partitions.
      *
      * @param identifier path of the table to drop partitions

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import datetime
+import decimal
 import time
 
 import pyarrow as pa
@@ -31,8 +32,10 @@ daft = pytest.importorskip("daft")
 
 from daft import col
 
-from pypaimon.daft import read_paimon, write_paimon
+from pypaimon.daft import explain_paimon_scan, read_paimon, write_paimon
 from pypaimon.daft.daft_paimon import _timestamp_scan_option
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import Move, SchemaChange
 
 
 @pytest.fixture
@@ -110,6 +113,421 @@ def test_read_paimon_basic(catalog_options):
         "name": ["alice", "bob", "carol"],
         "value": [10, 20, 30],
     }
+
+
+def test_read_paimon_data_evolution_merges_column_fragments(catalog_options):
+    pa_schema = pa.schema([
+        ("id", pa.int32()),
+        ("name", pa.string()),
+        ("score", pa.float64()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_data_evolution",
+        pa_schema,
+        options={
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+            "file.format": "parquet",
+        },
+    )
+    write_builder = table.new_batch_write_builder()
+    id_name_write = write_builder.new_write().with_write_type(["id", "name"])
+    score_write = write_builder.new_write().with_write_type(["score"])
+    table_commit = write_builder.new_commit()
+    try:
+        id_name_write.write_arrow(pa.table({
+            "id": pa.array([1, 2, 3], pa.int32()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+        }))
+        score_write.write_arrow(pa.table({
+            "score": pa.array([1.1, 2.2, 3.3], pa.float64()),
+        }))
+        commit_messages = id_name_write.prepare_commit() + score_write.prepare_commit()
+        # Both files are column fragments for the same logical row range.
+        for message in commit_messages:
+            for data_file in message.new_files:
+                data_file.first_row_id = 0
+        table_commit.commit(commit_messages)
+    finally:
+        id_name_write.close()
+        score_write.close()
+        table_commit.close()
+
+    splits = table.new_read_builder().new_scan().plan().splits()
+    assert len(splits) == 1
+    assert splits[0].raw_convertible is False
+
+    result = read_paimon(identifier, catalog_options).to_pydict()
+
+    assert result == {
+        "id": [1, 2, 3],
+        "name": ["a", "b", "c"],
+        "score": [1.1, 2.2, 3.3],
+    }
+
+
+def test_read_paimon_renamed_column_from_old_schema_file(catalog_options):
+    old_schema = pa.schema([
+        ("id", pa.int64()),
+        ("value", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_renamed_column",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    old_schema_id = table.table_schema.id
+    _write_arrow(
+        table,
+        pa.table({"id": [1, 2], "value": ["a", "b"]}, schema=old_schema),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.rename_column("value", "renamed")],
+        ignore_if_not_exists=False,
+    )
+    table = catalog.get_table(identifier)
+    splits = table.new_read_builder().new_scan().plan().splits()
+
+    assert all(split.raw_convertible for split in splits)
+    assert table.table_schema.id != old_schema_id
+    assert {
+        data_file.schema_id
+        for split in splits
+        for data_file in split.files
+    } == {old_schema_id}
+
+    projected_result = (
+        read_paimon(identifier, catalog_options)
+        .select("id")
+        .sort("id")
+        .to_pydict()
+    )
+    result = read_paimon(identifier, catalog_options).sort("id").to_pydict()
+
+    assert projected_result == {"id": [1, 2]}
+    assert result == {
+        "id": [1, 2],
+        "renamed": ["a", "b"],
+    }
+
+
+def test_read_paimon_renamed_nested_field_from_old_schema_file(catalog_options):
+    old_schema = pa.schema([
+        ("id", pa.int64()),
+        ("payload", pa.struct([
+            ("value", pa.string()),
+            ("count", pa.int32()),
+        ])),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_renamed_nested_field",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(
+        table,
+        pa.Table.from_pylist(
+            [
+                {"id": 1, "payload": {"value": "a", "count": 10}},
+                {"id": 2, "payload": {"value": "b", "count": 20}},
+            ],
+            schema=old_schema,
+        ),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.rename_column(["payload", "value"], "renamed")],
+        ignore_if_not_exists=False,
+    )
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+    result = read_paimon(identifier, catalog_options).sort("id").to_pydict()
+
+    assert explain.pypaimon_fallback_split_count == 1
+    assert explain.native_parquet_split_count == 0
+    assert result == {
+        "id": [1, 2],
+        "payload": [
+            {"renamed": "a", "count": 10},
+            {"renamed": "b", "count": 20},
+        ],
+    }
+
+
+def test_read_paimon_drop_readd_same_column_isolates_field_ids(
+    catalog_options,
+):
+    old_schema = pa.schema([
+        ("id", pa.int64()),
+        ("value", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_drop_readd_column",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    old_value_field = table.fields[1]
+    _write_arrow(
+        table,
+        pa.table({"id": [1, 2], "value": ["a", "b"]}, schema=old_schema),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.drop_column("value")],
+        ignore_if_not_exists=False,
+    )
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.add_column("value", AtomicType("STRING"))],
+        ignore_if_not_exists=False,
+    )
+    table = catalog.get_table(identifier)
+    new_value_field = table.fields[1]
+
+    assert new_value_field.name == old_value_field.name
+    assert new_value_field.type == old_value_field.type
+    assert new_value_field.id != old_value_field.id
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+
+    assert explain.pypaimon_fallback_split_count == 1
+    assert explain.native_parquet_split_count == 0
+
+    result = read_paimon(identifier, catalog_options).sort("id").to_pydict()
+
+    assert result == {
+        "id": [1, 2],
+        "value": [None, None],
+    }
+
+
+def test_native_read_handles_name_aligned_schema_evolution(catalog_options):
+    old_schema = pa.schema([
+        pa.field("id", pa.int32(), nullable=False),
+        pa.field("value", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_native_schema_evolution",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(
+        table,
+        pa.table({"id": [1, 2], "value": ["a", "b"]}, schema=old_schema),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [
+            SchemaChange.add_column("added", AtomicType("STRING")),
+            SchemaChange.update_column_position(Move.first("added")),
+            SchemaChange.update_column_nullability("id", True),
+            SchemaChange.update_column_type("id", AtomicType("BIGINT")),
+            SchemaChange.drop_column("value"),
+        ],
+        ignore_if_not_exists=False,
+    )
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+    result = read_paimon(identifier, catalog_options).sort("id").to_pydict()
+    filtered_result = (
+        read_paimon(identifier, catalog_options)
+        .where(col("id") == 2)
+        .select("id")
+        .to_pydict()
+    )
+
+    assert explain.native_parquet_split_count == 1
+    assert explain.pypaimon_fallback_split_count == 0
+    assert explain.fallback_reasons == {}
+    assert result == {
+        "added": [None, None],
+        "id": [1, 2],
+    }
+    assert filtered_result == {"id": [2]}
+
+
+def test_native_read_handles_nested_type_widening(catalog_options):
+    old_schema = pa.schema([
+        ("id", pa.int64()),
+        ("payload", pa.struct([
+            ("value", pa.int32()),
+            ("label", pa.string()),
+        ])),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_nested_type_widening",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(
+        table,
+        pa.Table.from_pylist(
+            [
+                {"id": 1, "payload": {"value": 10, "label": "a"}},
+                {"id": 2, "payload": {"value": 20, "label": "b"}},
+            ],
+            schema=old_schema,
+        ),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.update_column_type(["payload", "value"], AtomicType("BIGINT"))],
+        ignore_if_not_exists=False,
+    )
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+    result = read_paimon(identifier, catalog_options).sort("id").to_arrow()
+
+    assert explain.native_parquet_split_count == 1
+    assert explain.pypaimon_fallback_split_count == 0
+    assert explain.fallback_reasons == {}
+    assert result.schema.field("payload").type.field("value").type == pa.int64()
+    assert result.to_pydict() == {
+        "id": [1, 2],
+        "payload": [
+            {"value": 10, "label": "a"},
+            {"value": 20, "label": "b"},
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "case_name",
+        "old_type",
+        "pypaimon_type",
+        "daft_type",
+        "new_paimon_type",
+        "values",
+        "expected",
+    ),
+    [
+        pytest.param(
+            "decimal_scale_down",
+            pa.decimal128(10, 4),
+            pa.decimal128(10, 2),
+            pa.decimal128(10, 2),
+            AtomicType("DECIMAL(10, 2)"),
+            [decimal.Decimal("1.2355"), decimal.Decimal("-4.5678")],
+            [decimal.Decimal("1.23"), decimal.Decimal("-4.56")],
+            id="decimal-scale-down",
+        ),
+        pytest.param(
+            "timestamp_to_time",
+            pa.timestamp("ms"),
+            pa.time32("ms"),
+            pa.time64("us"),
+            AtomicType("TIME(3)"),
+            [
+                datetime.datetime(2025, 1, 2, 3, 4, 5, 678000),
+                datetime.datetime(1999, 12, 31, 23, 59, 58, 987000),
+            ],
+            [
+                datetime.time(3, 4, 5, 678000),
+                datetime.time(23, 59, 58, 987000),
+            ],
+            id="timestamp-to-time",
+        ),
+    ],
+)
+def test_read_paimon_falls_back_for_native_cast_semantic_mismatch(
+    catalog_options,
+    case_name,
+    old_type,
+    pypaimon_type,
+    daft_type,
+    new_paimon_type,
+    values,
+    expected,
+):
+    old_schema = pa.schema([("id", pa.int64()), ("value", old_type)])
+    identifier, table = _create_table(
+        catalog_options,
+        f"read_{case_name}",
+        old_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(
+        table,
+        pa.table({"id": [1, 2], "value": values}, schema=old_schema),
+    )
+
+    catalog = pypaimon.CatalogFactory.create(catalog_options)
+    catalog.alter_table(
+        identifier,
+        [SchemaChange.update_column_type("value", new_paimon_type)],
+        ignore_if_not_exists=False,
+    )
+    table = catalog.get_table(identifier)
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+    daft_result = read_paimon(identifier, catalog_options).sort("id").to_arrow()
+    read_builder = table.new_read_builder()
+    pypaimon_result = read_builder.new_read().to_arrow(
+        read_builder.new_scan().plan().splits()
+    ).sort_by([("id", "ascending")])
+    expected_result = pa.table(
+        {"id": [1, 2], "value": expected},
+        schema=pa.schema([("id", pa.int64()), ("value", pypaimon_type)]),
+    )
+
+    assert explain.pypaimon_fallback_split_count == 1
+    assert explain.native_parquet_split_count == 0
+    assert daft_result.schema == pa.schema(
+        [("id", pa.int64()), ("value", daft_type)]
+    )
+    assert daft_result.to_pydict() == pypaimon_result.to_pydict()
+    assert pypaimon_result.equals(expected_result)
+
+
+def test_read_paimon_time_uses_pypaimon_fallback(catalog_options):
+    schema = pa.schema([("id", pa.int64()), ("value", pa.time32("ms"))])
+    values = [
+        datetime.time(3, 4, 5, 678000),
+        datetime.time(23, 59, 58, 987000),
+    ]
+    identifier, table = _create_table(
+        catalog_options,
+        "read_time",
+        schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(
+        table,
+        pa.table({"id": [1, 2], "value": values}, schema=schema),
+    )
+
+    explain = explain_paimon_scan(identifier, catalog_options, verbose=True)
+    daft_result = read_paimon(identifier, catalog_options).sort("id").to_arrow()
+    read_builder = table.new_read_builder()
+    pypaimon_result = read_builder.new_read().to_arrow(
+        read_builder.new_scan().plan().splits()
+    ).sort_by([("id", "ascending")])
+
+    assert explain.pypaimon_fallback_split_count == 1
+    assert explain.native_parquet_split_count == 0
+    assert daft_result.schema == pa.schema(
+        [("id", pa.int64()), ("value", pa.time64("us"))]
+    )
+    assert pypaimon_result.schema == schema
+    assert daft_result.to_pydict() == pypaimon_result.to_pydict()
 
 
 def test_read_paimon_projection(catalog_options):

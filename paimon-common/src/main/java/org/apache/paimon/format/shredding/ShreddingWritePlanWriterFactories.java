@@ -18,32 +18,56 @@
 
 package org.apache.paimon.format.shredding;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.shredding.MapSharedShreddingContext;
-import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.data.shredding.MapSharedShreddingWritePlanFactory;
-import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
-/** Helpers for composing per-file shredding writer factories. */
+import java.util.Set;
+
+/** Creates the single active shredding write plan factory for a format writer. */
 public class ShreddingWritePlanWriterFactories {
 
     private ShreddingWritePlanWriterFactories() {}
 
-    public static FormatWriterFactory wrapMapSharedShredding(
-            FormatWriterFactory delegate, RowType rowType, CoreOptions options) {
-        List<String> shreddingFields =
-                MapSharedShreddingUtils.detectShreddingColumns(rowType, options);
-        if (shreddingFields.isEmpty()) {
-            return delegate;
+    @Nullable
+    public static ShreddingWritePlanFactory createWritePlanFactory(
+            RowType rowType,
+            Options options,
+            Set<ShreddingWritePlanType> supportedTypes,
+            String formatIdentifier) {
+        ShreddingWritePlanFactory activeFactory = null;
+        ShreddingWritePlanType activeType = null;
+
+        VariantShreddingWritePlanFactory variantFactory =
+                new VariantShreddingWritePlanFactory(rowType, options);
+        if (variantFactory.shouldCreateWritePlan()) {
+            activeFactory = variantFactory;
+            activeType = ShreddingWritePlanType.VARIANT;
         }
 
-        MapSharedShreddingContext context =
-                new MapSharedShreddingContext(
-                        MapSharedShreddingUtils.buildColumnToNumColumns(shreddingFields, options));
-        return new ShreddingWritePlanWriterFactory(
-                delegate, new MapSharedShreddingWritePlanFactory(rowType, context));
+        MapSharedShreddingWritePlanFactory mapFactory =
+                new MapSharedShreddingWritePlanFactory(rowType, options);
+        if (mapFactory.shouldCreateWritePlan()) {
+            if (activeFactory != null) {
+                throw new UnsupportedOperationException(
+                        "Composing multiple active shredding write plans is not supported.");
+            }
+            activeFactory = mapFactory;
+            activeType = ShreddingWritePlanType.MAP_SHARED_SHREDDING;
+        }
+
+        if (activeFactory == null) {
+            return null;
+        }
+        if (!supportedTypes.contains(activeType)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "File format '%s' does not support %s write plans.",
+                            formatIdentifier, activeType));
+        }
+        return activeFactory;
     }
 }

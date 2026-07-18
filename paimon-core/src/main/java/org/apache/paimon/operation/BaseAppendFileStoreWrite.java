@@ -33,6 +33,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -148,6 +149,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             ExecutorService compactExecutor,
             @Nullable BucketedDvMaintainer dvMaintainer,
             boolean ignorePreviousFiles) {
+        DataFilePathFactory dataPathFactory =
+                pathFactory.createDataFilePathFactory(partition, bucket);
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -164,7 +167,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 // it is only for new files, no dv
                 files -> createFilesIterator(partition, bucket, files, null),
                 options.commitForceCompact(),
-                pathFactory.createDataFilePathFactory(partition, bucket),
+                dataPathFactory,
                 restoreIncrement,
                 options.useWriteBufferForAppend() || forceBufferSpill,
                 options.writeBufferSpillable() || forceBufferSpill,

@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -679,6 +680,26 @@ class GlobalIndexEvaluatorTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("expected close failure");
         assertThat(secondClosed).isTrue();
+    }
+
+    @Test
+    void testUnionReaderReportsVectorSearchDuration() {
+        AtomicInteger callbacks = new AtomicInteger();
+        GlobalIndexReader reader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+                            VectorSearch vectorSearch) {
+                        return CompletableFuture.completedFuture(Optional.empty());
+                    }
+                };
+        UnionGlobalIndexReader union =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(reader), ignored -> callbacks.incrementAndGet());
+
+        union.visitVectorSearch(new VectorSearch(new float[] {1}, 1, "test")).join();
+
+        assertThat(callbacks).hasValue(1);
     }
 
     private static void assertBitmapContainsExactly(
