@@ -273,8 +273,11 @@ WHEN MATCHED AND s.op = 'update' THEN UPDATE SET t.b = t.b + 10
 WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
 ```
 
-The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later. Currently,
-only Spark supports writing deletes for Data Evolution tables.
+The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later.
+
+Flink SQL does not currently support `DELETE FROM` for Data Evolution tables,
+but Flink users can submit the
+[`data_evolution_delete` action](../flink/action-jars#deleting-from-a-data-evolution-table).
 
 ## Self Updates
 

@@ -259,6 +259,108 @@ For more information of 'delete', see
     delete --help
 ```
 
+## Deleting from a Data Evolution table
+
+For a non-primary-key append table in
+[Data Evolution](../multimodal-table/data-evolution) mode, Paimon supports
+logically deleting matching rows through the `data_evolution_delete` action.
+
+The action evaluates the filter against a fixed snapshot of the
+`$row_tracking` system table and records matched rows in deletion vectors. It
+does not rewrite existing data files or dedicated BLOB files.
+
+:::info
+
+The target table must:
+
+1. have no primary key;
+2. use bucket-unaware mode (`bucket = -1`);
+3. enable `row-tracking.enabled`;
+4. enable `data-evolution.enabled`;
+5. enable `deletion-vectors.enabled`.
+
+:::
+
+Run the following command to submit a `data_evolution_delete` job:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    data_evolution_delete \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--source_sql <sql> [--source_sql <sql> ...]] \
+    --where "<filter_spec>" \
+    [--sink_parallelism <sink-parallelism>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+`filter_spec` uses Flink SQL expression syntax and is equivalent to the
+predicate in a SQL `WHERE` clause. For example:
+
+```text
+last_access_time < TIMESTAMP '2026-07-01 00:00:00'
+status = 'expired'
+id >= 100 AND id < 200
+```
+
+`source_sql` is repeatable. Each statement is executed in order before the
+target query, so a bounded external table and optional views can be registered
+and referenced from a subquery in `filter_spec`. The corresponding connector
+must be available in the action job's classpath. For example:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    data_evolution_delete \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    --source_sql "CREATE TEMPORARY TABLE deletion_candidates (
+        url STRING
+    ) WITH (
+        'connector' = 'jdbc',
+        'url' = '<jdbc-url>',
+        'table-name' = '<candidate-table>'
+    )" \
+    --where "url IN (SELECT url FROM deletion_candidates)" \
+    --sink_parallelism 8
+```
+
+Using a subquery avoids copying a large candidate set into a temporary Paimon
+table. The external source must be bounded so the action can finish and commit
+one delete snapshot.
+
+:::warning
+
+- This action performs a logical delete. Physical data and BLOB file
+  reclamation still depends on subsequent Data Evolution compaction with
+  `data-evolution.compaction.rewrite-row-ids=true` and snapshot expiration.
+- Do not run multiple delete actions, or concurrent `APPEND`, `COMPACT`, or
+  `OVERWRITE` operations, against the same table. A conflicting
+  commit causes the action to fail instead of silently overwriting deletion
+  vectors.
+- Row positions are aggregated in parallel per anchor file. Deletion vectors
+  are then written in parallel across independent rewrite groups. One existing
+  deletion-vector index file is an atomic rewrite group and always has a single
+  writer owner, because it can contain deletion vectors for several anchor
+  files.
+- Split large deletes into bounded batches to limit row-tracking planning,
+  deletion-vector memory usage, and external-source scan size.
+- Snapshot retention must preserve the action's fixed base snapshot until the
+  job finishes.
+
+:::
+
+For more information, run:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    data_evolution_delete --help
+```
+
 ## Drop Partition
 
 Run the following command to submit a 'drop_partition' job for the table.

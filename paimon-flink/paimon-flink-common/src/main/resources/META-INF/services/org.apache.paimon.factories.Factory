@@ -50,6 +50,7 @@ org.apache.paimon.flink.action.ClearConsumerActionFactory
 org.apache.paimon.flink.action.RescaleActionFactory
 org.apache.paimon.flink.action.CloneActionFactory
 org.apache.paimon.flink.action.DataEvolutionMergeIntoActionFactory
+org.apache.paimon.flink.action.DataEvolutionDeleteActionFactory
 org.apache.paimon.flink.action.ReassignRowIdActionFactory
 org.apache.paimon.flink.action.CompactChainTableActionFactory
 
