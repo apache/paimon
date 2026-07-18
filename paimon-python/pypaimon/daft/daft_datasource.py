@@ -40,7 +40,17 @@ from pypaimon.daft.daft_explain import (
 )
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.schema.data_types import is_array_blob_type, is_blob_type
+from pypaimon.schema.data_types import (
+    ArrayType,
+    AtomicType,
+    DataField,
+    DataType,
+    MapType,
+    RowType,
+    VectorType,
+    is_array_blob_type,
+    is_blob_type,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -61,6 +71,117 @@ PAIMON_FILE_FORMAT_ORC = "orc"
 PAIMON_FILE_FORMAT_AVRO = "avro"
 
 _PaimonIdentifier = tuple[str, str, str | None]
+
+# Daft's Parquet reader applies casts independently of PyPaimon. Keep this
+# list limited to promotions whose results are covered by end-to-end parity
+# tests; logical schema-change support alone is not sufficient.
+_NATIVE_READ_ATOMIC_PROMOTIONS = frozenset({("INT", "BIGINT")})
+
+
+def _promote_time32_type_for_daft(data_type: pa.DataType) -> pa.DataType:
+    """Use Daft's supported time representation without changing values."""
+    if pa.types.is_time32(data_type):
+        return pa.time64("us")
+    if pa.types.is_struct(data_type):
+        fields = [_promote_time32_field_for_daft(field) for field in data_type]
+        return data_type if fields == list(data_type) else pa.struct(fields)
+    if pa.types.is_list(data_type):
+        value_field = _promote_time32_field_for_daft(data_type.value_field)
+        return data_type if value_field == data_type.value_field else pa.list_(value_field)
+    if pa.types.is_map(data_type):
+        key_type = _promote_time32_type_for_daft(data_type.key_type)
+        item_type = _promote_time32_type_for_daft(data_type.item_type)
+        return (
+            data_type
+            if key_type == data_type.key_type and item_type == data_type.item_type
+            else pa.map_(key_type, item_type, keys_sorted=data_type.keys_sorted)
+        )
+    return data_type
+
+
+def _promote_time32_field_for_daft(field: pa.Field) -> pa.Field:
+    data_type = _promote_time32_type_for_daft(field.type)
+    if data_type == field.type:
+        return field
+    return pa.field(
+        field.name,
+        data_type,
+        nullable=field.nullable,
+        metadata=field.metadata,
+    )
+
+
+def _promote_time32_schema_for_daft(schema: pa.Schema) -> pa.Schema:
+    fields = [_promote_time32_field_for_daft(field) for field in schema]
+    if fields == list(schema):
+        return schema
+    return pa.schema(fields, metadata=schema.metadata)
+
+
+def _promote_time32_batch_for_daft(batch: pa.RecordBatch) -> pa.RecordBatch:
+    schema = _promote_time32_schema_for_daft(batch.schema)
+    return batch if schema == batch.schema else batch.cast(schema, safe=False)
+
+
+def _native_read_fields_compatible(
+    file_fields: list[DataField],
+    current_fields: list[DataField],
+) -> bool:
+    """Whether Daft can align the selected current fields by physical name."""
+    file_fields_by_id = {field.id: field for field in file_fields}
+    file_fields_by_name = {field.name: field for field in file_fields}
+
+    for current_field in current_fields:
+        file_field = file_fields_by_id.get(current_field.id)
+        if file_field is None:
+            # A missing nullable field is a later addition and Daft fills it
+            # with NULL. The same physical name under another id is instead a
+            # drop-then-readd and must be resolved by PyPaimon.
+            if (
+                current_field.name in file_fields_by_name
+                or not current_field.type.nullable
+            ):
+                return False
+            continue
+        if file_field.name != current_field.name:
+            return False
+        if not _native_read_types_compatible(file_field.type, current_field.type):
+            return False
+    return True
+
+
+def _native_read_types_compatible(
+    file_type: DataType,
+    current_type: DataType,
+) -> bool:
+    if file_type.nullable and not current_type.nullable:
+        return False
+    if type(file_type) is not type(current_type):
+        return False
+    if isinstance(file_type, RowType) and isinstance(current_type, RowType):
+        return _native_read_fields_compatible(file_type.fields, current_type.fields)
+    if isinstance(file_type, ArrayType) and isinstance(current_type, ArrayType):
+        return _native_read_types_compatible(file_type.element, current_type.element)
+    if isinstance(file_type, VectorType) and isinstance(current_type, VectorType):
+        return (
+            file_type.length == current_type.length
+            and _native_read_types_compatible(file_type.element, current_type.element)
+        )
+    if isinstance(file_type, MapType) and isinstance(current_type, MapType):
+        return (
+            _native_read_types_compatible(file_type.key, current_type.key)
+            and _native_read_types_compatible(file_type.value, current_type.value)
+        )
+    if not isinstance(file_type, AtomicType):
+        return False
+    file_type_name = file_type.type.upper()
+    current_type_name = current_type.type.upper()
+    if file_type_name == "TIME" or file_type_name.startswith("TIME("):
+        return False
+    return (
+        file_type_name == current_type_name
+        or (file_type_name, current_type_name) in _NATIVE_READ_ATOMIC_PROMOTIONS
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +356,7 @@ class _PaimonPKSplitTask(DataSourceTask):
                     blob_io_config_bytes,
                     self._array_blob_column_names,
                 )
+            batch = _promote_time32_batch_for_daft(batch)
             rb = RecordBatch.from_arrow_record_batches([batch], batch.schema)
             if has_blob_columns:
                 rb = _cast_blob_columns_to_file(
@@ -473,7 +595,9 @@ class PaimonDataSource(DataSource):
 
         from pypaimon.schema.data_types import PyarrowFieldParser
 
-        pa_schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+        pa_schema = _promote_time32_schema_for_daft(
+            PyarrowFieldParser.from_paimon_schema(table.fields)
+        )
 
         self._scalar_blob_column_names = {
             field.name for field in table.fields if is_blob_type(field.type)
@@ -513,7 +637,12 @@ class PaimonDataSource(DataSource):
         self._is_parquet = self._file_format == PAIMON_FILE_FORMAT_PARQUET
 
         self._partition_field_arrow_types: dict[str, pa.DataType] = (
-            {f.name: PyarrowFieldParser.from_paimon_type(f.type) for f in table.partition_keys_fields}
+            {
+                f.name: _promote_time32_type_for_daft(
+                    PyarrowFieldParser.from_paimon_type(f.type)
+                )
+                for f in table.partition_keys_fields
+            }
             if table.partition_keys
             else {}
         )
@@ -595,16 +724,18 @@ class PaimonDataSource(DataSource):
         plan = read_builder.new_scan().plan()
 
         pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None] = {}
+        schema_incompatibility_cache: dict[int, bool] = {}
 
         for split in plan.splits():
             if self._partition_filter_skips_split(split, pushdowns, pv_cache):
                 continue
 
             has_deletion_vectors = self._split_has_deletion_vectors(split)
+            has_auth = self._split_has_auth(split)
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
                 has_deletion_vectors=has_deletion_vectors,
-                has_auth=self._split_has_auth(split),
+                has_auth=has_auth,
             )
 
             native_files = (
@@ -614,6 +745,19 @@ class PaimonDataSource(DataSource):
                     split.files, read_pushdowns.task_columns, has_deletion_vectors
                 )
             )
+            if native_files is not None and self._has_incompatible_file_schema(
+                read_table,
+                [data_file.schema_id for data_file in native_files],
+                read_pushdowns.task_columns,
+                schema_incompatibility_cache,
+            ):
+                native_files = None
+                routing = self._reader_routing(
+                    raw_convertible=split.raw_convertible,
+                    has_deletion_vectors=has_deletion_vectors,
+                    has_auth=has_auth,
+                    has_incompatible_schema=True,
+                )
 
             if native_files is not None:
                 task_schema = (
@@ -673,6 +817,7 @@ class PaimonDataSource(DataSource):
         fallback_reasons: dict[str, int] = {}
         explained_splits: list[PaimonReaderSplitExplain] | None = [] if verbose else None
         pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None] = {}
+        schema_incompatibility_cache: dict[int, bool] = {}
 
         for split in split_details:
             if self._partition_filter_skips_explain_split(split, pushdowns, pv_cache):
@@ -692,6 +837,27 @@ class PaimonDataSource(DataSource):
                     split.has_deletion_vectors,
                 )
             )
+            candidate_files = (
+                getattr(split, "data_files", None)
+                if routing.use_native_reader
+                else blob_native_files
+            )
+            candidate_schema_ids = [
+                data_file.schema_id for data_file in candidate_files or []
+            ]
+            if candidate_schema_ids and self._has_incompatible_file_schema(
+                read_table,
+                candidate_schema_ids,
+                read_pushdowns.task_columns,
+                schema_incompatibility_cache,
+            ):
+                blob_native_files = None
+                routing = self._reader_routing(
+                    raw_convertible=split.raw_convertible,
+                    has_deletion_vectors=split.has_deletion_vectors,
+                    has_auth=paimon_scan.has_auth,
+                    has_incompatible_schema=True,
+                )
 
             # For a blob-native split only the covering parquet files are read
             # natively; report their counts so the verbose per-split detail
@@ -767,6 +933,7 @@ class PaimonDataSource(DataSource):
         raw_convertible: bool,
         has_deletion_vectors: bool,
         has_auth: bool = False,
+        has_incompatible_schema: bool = False,
     ) -> _ReaderRouting:
         can_use_native_reader = (
             self._is_parquet
@@ -774,20 +941,27 @@ class PaimonDataSource(DataSource):
             and raw_convertible
             and not has_deletion_vectors
             and not has_auth
+            and not has_incompatible_schema
         )
         if can_use_native_reader:
             return _ReaderRouting(READER_MODE_NATIVE_PARQUET, None)
 
         if not self._is_parquet:
             reason = "non-parquet format"
+        elif has_incompatible_schema:
+            reason = "schema evolution requires PyPaimon normalization"
         elif self._has_blob_columns:
             reason = "blob columns present"
         elif has_auth:
             reason = "query auth active"
         elif has_deletion_vectors:
             reason = "deletion vectors present"
-        elif self._table.is_primary_key_table:
-            reason = "LSM merge required"
+        elif not raw_convertible:
+            reason = (
+                "LSM merge required"
+                if self._table.is_primary_key_table
+                else "data-evolution merge required"
+            )
         else:
             reason = "data-evolution merge required"
         return _ReaderRouting(READER_MODE_PYPAIMON_FALLBACK, reason)
@@ -814,6 +988,38 @@ class PaimonDataSource(DataSource):
         return _blob_native_covering_files(
             files, task_columns, blob_column_names, self._table.partition_keys
         )
+
+    @staticmethod
+    def _has_incompatible_file_schema(
+        table: FileStoreTable,
+        schema_ids: list[int],
+        task_columns: list[str] | None,
+        cache: dict[int, bool],
+    ) -> bool:
+        current_schema = table.table_schema
+        if task_columns is None:
+            current_fields = current_schema.fields
+        else:
+            task_column_set = set(task_columns)
+            current_fields = [
+                field
+                for field in current_schema.fields
+                if field.name in task_column_set
+            ]
+        for schema_id in schema_ids:
+            if schema_id not in cache:
+                file_schema = (
+                    current_schema
+                    if schema_id == current_schema.id
+                    else table.schema_manager.get_schema(schema_id)
+                )
+                cache[schema_id] = not _native_read_fields_compatible(
+                    file_schema.fields,
+                    current_fields,
+                )
+            if cache[schema_id]:
+                return True
+        return False
 
     @staticmethod
     def _split_has_deletion_vectors(split: Split) -> bool:
