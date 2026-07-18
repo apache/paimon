@@ -43,7 +43,12 @@ import static java.time.temporal.ChronoField.MONTH_OF_YEAR;
 import static java.time.temporal.ChronoField.SECOND_OF_MINUTE;
 import static java.time.temporal.ChronoField.YEAR;
 
-/** Time extractor to extract time from partition values. */
+/**
+ * Time extractor to extract time from partition values.
+ *
+ * @deprecated Use {@link PartitionTimeResolver}
+ */
+@Deprecated
 public class PartitionTimeExtractor implements Serializable {
 
     private static final long serialVersionUID = 1L;
