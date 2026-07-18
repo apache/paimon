@@ -166,8 +166,16 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
         if (readers.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
+        int concurrency = Math.min(readers.size(), scalarSearch.maxConcurrentReaders());
+        if (concurrency == 0) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
         long childMaxResultSize = scalarSearch.maxResultSize() / readers.size();
         long childMaxScannedRowIds = scalarSearch.maxScannedRowIds() / readers.size();
+        int childMaxIndexFiles = scalarSearch.maxIndexFiles() / readers.size();
+        long childMaxIndexBytes = scalarSearch.maxIndexBytes() / readers.size();
+        int childMaxConcurrentReaders =
+                Math.max(1, scalarSearch.maxConcurrentReaders() / concurrency);
         if (childMaxResultSize < scalarSearch.topN().limit()
                 || childMaxScannedRowIds < scalarSearch.topN().limit()) {
             return CompletableFuture.completedFuture(Optional.empty());
@@ -175,11 +183,32 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
         ScalarSearch childSearch =
                 scalarSearch
                         .withMaxResultSize(childMaxResultSize)
-                        .withMaxScannedRowIds(childMaxScannedRowIds);
-        ScalarUnionAccumulator accumulator = new ScalarUnionAccumulator();
+                        .withMaxScannedRowIds(childMaxScannedRowIds)
+                        .withMaxIndexFiles(childMaxIndexFiles)
+                        .withMaxIndexBytes(childMaxIndexBytes)
+                        .withMaxConcurrentReaders(childMaxConcurrentReaders);
+        List<CompletableFuture<ScalarUnionAccumulator>> futures = new ArrayList<>(concurrency);
+        for (int lane = 0; lane < concurrency; lane++) {
+            futures.add(
+                    visitScalarLane(childSearch, scalarSearch.maxResultSize(), lane, concurrency));
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            ScalarUnionAccumulator accumulator = new ScalarUnionAccumulator();
+                            for (CompletableFuture<ScalarUnionAccumulator> future : futures) {
+                                accumulator.merge(future.join(), scalarSearch.maxResultSize());
+                            }
+                            return accumulator.result();
+                        });
+    }
+
+    private CompletableFuture<ScalarUnionAccumulator> visitScalarLane(
+            ScalarSearch childSearch, long maxResultSize, int start, int stride) {
         CompletableFuture<ScalarUnionAccumulator> future =
-                CompletableFuture.completedFuture(accumulator);
-        for (GlobalIndexReader reader : readers) {
+                CompletableFuture.completedFuture(new ScalarUnionAccumulator());
+        for (int i = start; i < readers.size(); i += stride) {
+            GlobalIndexReader reader = readers.get(i);
             future =
                     future.thenCompose(
                             current -> {
@@ -190,9 +219,7 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                     return reader.visitScalarSearch(childSearch)
                                             .thenApply(
                                                     child -> {
-                                                        current.add(
-                                                                child,
-                                                                scalarSearch.maxResultSize());
+                                                        current.add(child, maxResultSize);
                                                         return current;
                                                     });
                                 } catch (UnsupportedOperationException ignored) {
@@ -201,7 +228,7 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                 }
                             });
         }
-        return future.thenApply(ScalarUnionAccumulator::result);
+        return future;
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
@@ -238,7 +265,6 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     private static class ScalarUnionAccumulator {
         private final RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
-        private boolean exact = true;
         private boolean hasResult;
         private boolean failed;
         private long resultSize;
@@ -259,15 +285,31 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                 return;
             }
             rowIds.or(result.get().results());
-            exact &= result.get().isExact();
             hasResult = true;
+        }
+
+        private void merge(ScalarUnionAccumulator other, long maxResultSize) {
+            if (failed) {
+                return;
+            }
+            if (other.failed || Long.MAX_VALUE - resultSize < other.resultSize) {
+                failed = true;
+                return;
+            }
+            resultSize += other.resultSize;
+            if (resultSize > maxResultSize) {
+                failed = true;
+                return;
+            }
+            rowIds.or(other.rowIds);
+            hasResult |= other.hasResult;
         }
 
         private Optional<GlobalIndexResult> result() {
             if (failed || !hasResult) {
                 return Optional.empty();
             }
-            return Optional.of(GlobalIndexResult.create(rowIds, exact));
+            return Optional.of(GlobalIndexResult.create(rowIds));
         }
     }
 

@@ -119,9 +119,13 @@ public class GlobalIndexCoverage {
         }
 
         List<Range> indexedRanges = Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
+        List<Range> snapshotGaps = new Range(0, snapshot.nextRowId() - 1).exclude(indexedRanges);
+        if (snapshotGaps.isEmpty()) {
+            return Collections.emptyList();
+        }
         List<Range> dataRanges = dataRangesByDataFiles();
         if (!dataRangesComplete) {
-            return new Range(0, snapshot.nextRowId() - 1).exclude(indexedRanges);
+            return snapshotGaps;
         }
 
         List<Range> unindexedRanges = new ArrayList<>();

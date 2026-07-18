@@ -71,6 +71,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static final long MAX_SCALAR_TOPN_RESULT_SIZE = 10_000L;
     private static final long MAX_SCALAR_TOPN_SCANNED_ROW_IDS = 100_000L;
     private static final long MAX_SCALAR_TOPN_READ_BLOCK_SIZE = 1024L * 1024L;
+    private static final int MAX_SCALAR_TOPN_INDEX_FILES = 128;
+    private static final long MAX_SCALAR_TOPN_INDEX_BYTES = 1024L * 1024L * 1024L;
+    private static final int MAX_SCALAR_TOPN_CONCURRENT_READERS = 8;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -409,7 +412,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                     .withIncludeRowIds(includeRowIds)
                                     .withMaxResultSize(MAX_SCALAR_TOPN_RESULT_SIZE)
                                     .withMaxScannedRowIds(MAX_SCALAR_TOPN_SCANNED_ROW_IDS)
-                                    .withMaxReadBlockSize(MAX_SCALAR_TOPN_READ_BLOCK_SIZE));
+                                    .withMaxReadBlockSize(MAX_SCALAR_TOPN_READ_BLOCK_SIZE)
+                                    .withMaxIndexFiles(MAX_SCALAR_TOPN_INDEX_FILES)
+                                    .withMaxIndexBytes(MAX_SCALAR_TOPN_INDEX_BYTES)
+                                    .withMaxConcurrentReaders(MAX_SCALAR_TOPN_CONCURRENT_READERS));
             if (result.isPresent()) {
                 LOG.info("Scan table '{}' with scalar global index TopN.", table.name());
                 return result;

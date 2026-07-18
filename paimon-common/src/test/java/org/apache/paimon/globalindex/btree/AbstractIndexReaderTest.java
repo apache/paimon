@@ -347,6 +347,7 @@ public abstract class AbstractIndexReaderTest {
                                                     <= 0)
                             .map(Pair::getValue)
                             .collect(Collectors.toList()));
+            assertThat(ascending.isExact()).isFalse();
 
             Object descendingBoundary = selected.get(selected.size() - limit).getKey();
             GlobalIndexResult descending =
@@ -364,6 +365,7 @@ public abstract class AbstractIndexReaderTest {
                                                     >= 0)
                             .map(Pair::getValue)
                             .collect(Collectors.toList()));
+            assertThat(descending.isExact()).isFalse();
         }
     }
 
@@ -392,6 +394,7 @@ public abstract class AbstractIndexReaderTest {
                             .join()
                             .get();
             assertResult(result, expected);
+            assertThat(result.isExact()).isFalse();
         }
     }
 

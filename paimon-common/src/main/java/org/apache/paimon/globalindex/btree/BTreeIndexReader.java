@@ -317,10 +317,6 @@ public class BTreeIndexReader implements Closeable {
         return new EntryIterator(maxReadBlockSize);
     }
 
-    public ReverseEntryIterator reverseEntryIterator() {
-        return reverseEntryIterator(Long.MAX_VALUE);
-    }
-
     ReverseEntryIterator reverseEntryIterator(long maxReadBlockSize) {
         return new ReverseEntryIterator(maxReadBlockSize);
     }
@@ -330,10 +326,6 @@ public class BTreeIndexReader implements Closeable {
         for (long rowId : nullBitmap.get()) {
             consumer.accept(rowId);
         }
-    }
-
-    RoaringNavigableMap64 nullRowIds() {
-        return nullBitmap.get();
     }
 
     Optional<RoaringNavigableMap64> nullRowIds(long maxReadBlockSize) {

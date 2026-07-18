@@ -155,6 +155,8 @@ public class SstFileReader implements Closeable {
         if (blockTrailer.getCompressionType() == BlockCompressionType.NONE) {
             return blockHandle.size();
         }
+        // Read only the length prefix so an oversized compressed block is rejected before the
+        // full block is loaded, decompressed, or inserted into the cache.
         int prefixLength = Math.min(MAX_VAR_INT_SIZE, blockHandle.size());
         byte[] prefix = blockCache.read(blockHandle.offset(), prefixLength);
         return MemorySlice.wrap(prefix).toInput().readVarLenInt();
@@ -284,19 +286,6 @@ public class SstFileReader implements Closeable {
             }
 
             return getNextBlock(indexIterator, maxUncompressedBlockSize);
-        }
-
-        public BlockIterator readBatchReverse() throws IOException {
-            if (!indexIterator.hasPrevious()) {
-                return null;
-            }
-
-            MemorySlice blockHandle = indexIterator.previous().getValue();
-            BlockReader dataBlock =
-                    readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
-            BlockIterator iterator = dataBlock.iterator();
-            iterator.seekToLast();
-            return iterator;
         }
 
         public BlockIterator readBatchReverse(long maxUncompressedBlockSize) throws IOException {

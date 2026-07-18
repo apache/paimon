@@ -256,6 +256,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     @Test
     public void testBTreeTopNPushdownAcrossIndexRangesWithBoundaryTies() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.options(schemaDefault().options());
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.STRING());
@@ -300,6 +301,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     @Test
     public void testBTreeTopNUsesPartitionScopedCoverage() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.options(schemaDefault().options());
         schemaBuilder.column("pt", DataTypes.STRING());
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());

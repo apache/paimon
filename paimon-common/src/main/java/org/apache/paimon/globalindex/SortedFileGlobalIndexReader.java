@@ -295,10 +295,15 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     }
 
     protected CompletableFuture<Optional<GlobalIndexResult>> visitAllReaders(
+            int maxIndexFiles,
+            long maxIndexBytes,
             Function<List<R>, Optional<GlobalIndexResult>> visitor) {
         List<GlobalIndexIOMeta> files = fileSelector.allFiles();
         if (files.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        if (files.size() > maxIndexFiles || !withinSizeLimit(files, maxIndexBytes)) {
+            return CompletableFuture.completedFuture(Optional.empty());
         }
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -342,7 +347,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         return fallbackScanMaxSize > 0 && literal != null;
     }
 
-    private static boolean fallbackScanEnabled(List<GlobalIndexIOMeta> files, long maxSize) {
+    private static boolean withinSizeLimit(List<GlobalIndexIOMeta> files, long maxSize) {
         if (maxSize <= 0) {
             return false;
         }
@@ -380,7 +385,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         if (selected.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
         }
-        if (!fallbackScanEnabled(selected, fallbackScanMaxSize)) {
+        if (!withinSizeLimit(selected, fallbackScanMaxSize)) {
             return unsupported();
         }
         return visitSelectedFiles(selectedOpt, visitor);

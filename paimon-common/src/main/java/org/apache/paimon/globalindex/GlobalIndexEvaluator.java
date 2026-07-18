@@ -99,6 +99,8 @@ public class GlobalIndexEvaluator implements Closeable {
         }
         long readerMaxResultSize = scalarSearch.maxResultSize() / readers.size();
         long readerMaxScannedRowIds = scalarSearch.maxScannedRowIds() / readers.size();
+        int readerMaxIndexFiles = scalarSearch.maxIndexFiles() / readers.size();
+        long readerMaxIndexBytes = scalarSearch.maxIndexBytes() / readers.size();
         if (readerMaxResultSize < scalarSearch.topN().limit()
                 || readerMaxScannedRowIds < scalarSearch.topN().limit()) {
             return Optional.empty();
@@ -106,9 +108,10 @@ public class GlobalIndexEvaluator implements Closeable {
         ScalarSearch readerSearch =
                 scalarSearch
                         .withMaxResultSize(readerMaxResultSize)
-                        .withMaxScannedRowIds(readerMaxScannedRowIds);
+                        .withMaxScannedRowIds(readerMaxScannedRowIds)
+                        .withMaxIndexFiles(readerMaxIndexFiles)
+                        .withMaxIndexBytes(readerMaxIndexBytes);
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        boolean exact = true;
         long resultSize = 0;
         try {
             for (GlobalIndexReader reader : readers) {
@@ -130,9 +133,8 @@ public class GlobalIndexEvaluator implements Closeable {
                     return Optional.empty();
                 }
                 result.or(current.get().results());
-                exact &= current.get().isExact();
             }
-            return Optional.of(GlobalIndexResult.create(result, exact));
+            return Optional.of(GlobalIndexResult.create(result));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during scalar index evaluation", e);

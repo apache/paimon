@@ -27,6 +27,8 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.ScalarSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
@@ -52,6 +54,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -91,6 +95,26 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
             }
         }
         return -1;
+    }
+
+    @TestTemplate
+    public void testScalarSearchFallsBackForIndexFileBudgets() throws Exception {
+        List<GlobalIndexIOMeta> written = writeData();
+        long totalSize = 0;
+        for (GlobalIndexIOMeta meta : written) {
+            totalSize += meta.fileSize();
+        }
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            ScalarSearch fileLimited = new ScalarSearch(topN).withMaxIndexFiles(written.size() - 1);
+            assertThat(reader.visitScalarSearch(fileLimited).join()).isEmpty();
+
+            ScalarSearch byteLimited = new ScalarSearch(topN).withMaxIndexBytes(totalSize - 1);
+            assertThat(reader.visitScalarSearch(byteLimited).join()).isEmpty();
+        }
     }
 
     @TestTemplate

@@ -27,7 +27,10 @@ import java.io.Serializable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** A scalar TopN search optionally restricted to a set of candidate row IDs. */
+/**
+ * A scalar TopN search optionally restricted to candidate row IDs and planner-provided resource
+ * bounds.
+ */
 public class ScalarSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -37,9 +40,20 @@ public class ScalarSearch implements Serializable {
     private final long maxResultSize;
     private final long maxScannedRowIds;
     private final long maxReadBlockSize;
+    private final int maxIndexFiles;
+    private final long maxIndexBytes;
+    private final int maxConcurrentReaders;
 
     public ScalarSearch(TopN topN) {
-        this(topN, null, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
+        this(
+                topN,
+                null,
+                Long.MAX_VALUE,
+                Long.MAX_VALUE,
+                Long.MAX_VALUE,
+                Integer.MAX_VALUE,
+                Long.MAX_VALUE,
+                Integer.MAX_VALUE);
     }
 
     private ScalarSearch(
@@ -47,7 +61,10 @@ public class ScalarSearch implements Serializable {
             @Nullable RoaringNavigableMap64 includeRowIds,
             long maxResultSize,
             long maxScannedRowIds,
-            long maxReadBlockSize) {
+            long maxReadBlockSize,
+            int maxIndexFiles,
+            long maxIndexBytes,
+            int maxConcurrentReaders) {
         this.topN = checkNotNull(topN);
         checkArgument(topN.limit() >= 0, "Limit must not be negative, got: %s", topN.limit());
         checkArgument(
@@ -63,10 +80,21 @@ public class ScalarSearch implements Serializable {
                 maxReadBlockSize >= 0,
                 "Max read block size must not be negative, got: %s",
                 maxReadBlockSize);
+        checkArgument(
+                maxIndexFiles >= 0, "Max index files must not be negative, got: %s", maxIndexFiles);
+        checkArgument(
+                maxIndexBytes >= 0, "Max index bytes must not be negative, got: %s", maxIndexBytes);
+        checkArgument(
+                maxConcurrentReaders >= 0,
+                "Max concurrent readers must not be negative, got: %s",
+                maxConcurrentReaders);
         this.includeRowIds = includeRowIds;
         this.maxResultSize = maxResultSize;
         this.maxScannedRowIds = maxScannedRowIds;
         this.maxReadBlockSize = maxReadBlockSize;
+        this.maxIndexFiles = maxIndexFiles;
+        this.maxIndexBytes = maxIndexBytes;
+        this.maxConcurrentReaders = maxConcurrentReaders;
     }
 
     public TopN topN() {
@@ -80,7 +108,14 @@ public class ScalarSearch implements Serializable {
 
     public ScalarSearch withIncludeRowIds(@Nullable RoaringNavigableMap64 includeRowIds) {
         return new ScalarSearch(
-                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 
     public long maxResultSize() {
@@ -89,7 +124,14 @@ public class ScalarSearch implements Serializable {
 
     public ScalarSearch withMaxResultSize(long maxResultSize) {
         return new ScalarSearch(
-                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 
     public long maxScannedRowIds() {
@@ -98,7 +140,14 @@ public class ScalarSearch implements Serializable {
 
     public ScalarSearch withMaxScannedRowIds(long maxScannedRowIds) {
         return new ScalarSearch(
-                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 
     public long maxReadBlockSize() {
@@ -107,7 +156,62 @@ public class ScalarSearch implements Serializable {
 
     public ScalarSearch withMaxReadBlockSize(long maxReadBlockSize) {
         return new ScalarSearch(
-                topN, includeRowIds, maxResultSize, maxScannedRowIds, maxReadBlockSize);
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
+    }
+
+    public int maxIndexFiles() {
+        return maxIndexFiles;
+    }
+
+    public ScalarSearch withMaxIndexFiles(int maxIndexFiles) {
+        return new ScalarSearch(
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
+    }
+
+    public long maxIndexBytes() {
+        return maxIndexBytes;
+    }
+
+    public ScalarSearch withMaxIndexBytes(long maxIndexBytes) {
+        return new ScalarSearch(
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
+    }
+
+    public int maxConcurrentReaders() {
+        return maxConcurrentReaders;
+    }
+
+    public ScalarSearch withMaxConcurrentReaders(int maxConcurrentReaders) {
+        return new ScalarSearch(
+                topN,
+                includeRowIds,
+                maxResultSize,
+                maxScannedRowIds,
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 
     public ScalarSearch offsetRange(long from, long to) {
@@ -119,17 +223,25 @@ public class ScalarSearch implements Serializable {
                 VectorSearchUtils.offsetRowIds(includeRowIds, from, to),
                 maxResultSize,
                 maxScannedRowIds,
-                maxReadBlockSize);
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "%s, IncludeRows(%s), MaxResultSize(%s), MaxScannedRowIds(%s), MaxReadBlockSize(%s)",
+                "%s, IncludeRows(%s), MaxResultSize(%s), MaxScannedRowIds(%s), "
+                        + "MaxReadBlockSize(%s), MaxIndexFiles(%s), MaxIndexBytes(%s), "
+                        + "MaxConcurrentReaders(%s)",
                 topN,
                 includeRowIds == null ? "ALL" : includeRowIds.getLongCardinality(),
                 maxResultSize,
                 maxScannedRowIds,
-                maxReadBlockSize);
+                maxReadBlockSize,
+                maxIndexFiles,
+                maxIndexBytes,
+                maxConcurrentReaders);
     }
 }

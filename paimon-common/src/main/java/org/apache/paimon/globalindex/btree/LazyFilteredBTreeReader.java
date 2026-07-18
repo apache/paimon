@@ -148,10 +148,16 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
             ScalarSearch scalarSearch) {
+        if (scalarSearch.topN().orders().size() != 1) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
         if (scalarSearch.includeRowIds() != null && scalarSearch.includeRowIds().isEmpty()) {
             return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
         }
-        return visitAllReaders(readers -> scalarSearch(readers, scalarSearch));
+        return visitAllReaders(
+                scalarSearch.maxIndexFiles(),
+                scalarSearch.maxIndexBytes(),
+                readers -> scalarSearch(readers, scalarSearch));
     }
 
     @Override
@@ -184,7 +190,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 new BTreeIndexReader.ScalarSearchResultAccumulator(
                         scalarSearch.maxResultSize(), scalarSearch.maxScannedRowIds());
         if (limit == 0) {
-            return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
+            return Optional.of(GlobalIndexResult.createEmpty());
         }
 
         SortValue order = scalarSearch.topN().orders().get(0);
@@ -193,7 +199,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 return Optional.empty();
             }
             if (result.cardinality() >= limit) {
-                return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
+                return Optional.of(GlobalIndexResult.create(result.rowIds()));
             }
         }
 
@@ -205,7 +211,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 && !addNullRows(readers, scalarSearch, result)) {
             return Optional.empty();
         }
-        return Optional.of(GlobalIndexResult.createExact(result.rowIds()));
+        return Optional.of(GlobalIndexResult.create(result.rowIds()));
     }
 
     private boolean addNullRows(

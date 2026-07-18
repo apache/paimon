@@ -689,6 +689,7 @@ class GlobalIndexEvaluatorTest {
         assertThat(requestedField.get()).isEqualTo(1);
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L, 4L);
+        assertThat(result.get().isExact()).isFalse();
         evaluator.close();
     }
 
@@ -801,7 +802,10 @@ class GlobalIndexEvaluatorTest {
                                         2))
                         .withMaxResultSize(8)
                         .withMaxScannedRowIds(20)
-                        .withMaxReadBlockSize(1024);
+                        .withMaxReadBlockSize(1024)
+                        .withMaxIndexFiles(6)
+                        .withMaxIndexBytes(1200)
+                        .withMaxConcurrentReaders(4);
 
         assertThat(evaluator.evaluateScalarSearch(search)).isPresent();
         assertThat(received[0].maxResultSize()).isEqualTo(4);
@@ -810,6 +814,12 @@ class GlobalIndexEvaluatorTest {
         assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
         assertThat(received[0].maxReadBlockSize()).isEqualTo(1024);
         assertThat(received[1].maxReadBlockSize()).isEqualTo(1024);
+        assertThat(received[0].maxIndexFiles()).isEqualTo(3);
+        assertThat(received[1].maxIndexFiles()).isEqualTo(3);
+        assertThat(received[0].maxIndexBytes()).isEqualTo(600);
+        assertThat(received[1].maxIndexBytes()).isEqualTo(600);
+        assertThat(received[0].maxConcurrentReaders()).isEqualTo(4);
+        assertThat(received[1].maxConcurrentReaders()).isEqualTo(4);
         evaluator.close();
     }
 
@@ -830,7 +840,10 @@ class GlobalIndexEvaluatorTest {
                                         2))
                         .withMaxResultSize(8)
                         .withMaxScannedRowIds(20)
-                        .withMaxReadBlockSize(1024);
+                        .withMaxReadBlockSize(1024)
+                        .withMaxIndexFiles(6)
+                        .withMaxIndexBytes(1200)
+                        .withMaxConcurrentReaders(4);
 
         assertThat(reader.visitScalarSearch(search).join()).isPresent();
         assertThat(received[0].maxResultSize()).isEqualTo(4);
@@ -839,17 +852,27 @@ class GlobalIndexEvaluatorTest {
         assertThat(received[1].maxScannedRowIds()).isEqualTo(10);
         assertThat(received[0].maxReadBlockSize()).isEqualTo(1024);
         assertThat(received[1].maxReadBlockSize()).isEqualTo(1024);
+        assertThat(received[0].maxIndexFiles()).isEqualTo(3);
+        assertThat(received[1].maxIndexFiles()).isEqualTo(3);
+        assertThat(received[0].maxIndexBytes()).isEqualTo(600);
+        assertThat(received[1].maxIndexBytes()).isEqualTo(600);
+        assertThat(received[0].maxConcurrentReaders()).isEqualTo(2);
+        assertThat(received[1].maxConcurrentReaders()).isEqualTo(2);
     }
 
     @Test
-    void testUnionScalarSearchStartsReadersSequentially() {
+    void testUnionScalarSearchBoundsConcurrency() {
         CompletableFuture<Optional<GlobalIndexResult>> first = new CompletableFuture<>();
+        CompletableFuture<Optional<GlobalIndexResult>> second = new CompletableFuture<>();
+        AtomicBoolean firstStarted = new AtomicBoolean();
         AtomicBoolean secondStarted = new AtomicBoolean();
+        AtomicBoolean thirdStarted = new AtomicBoolean();
         GlobalIndexReader firstReader =
                 new StubGlobalIndexReader(null) {
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
                             ScalarSearch scalarSearch) {
+                        firstStarted.set(true);
                         return first;
                     }
                 };
@@ -859,11 +882,20 @@ class GlobalIndexEvaluatorTest {
                     public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
                             ScalarSearch scalarSearch) {
                         secondStarted.set(true);
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(2)));
+                        return second;
+                    }
+                };
+        GlobalIndexReader thirdReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
+                            ScalarSearch scalarSearch) {
+                        thirdStarted.set(true);
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(3)));
                     }
                 };
         UnionGlobalIndexReader reader =
-                new UnionGlobalIndexReader(Arrays.asList(firstReader, secondReader));
+                new UnionGlobalIndexReader(Arrays.asList(firstReader, secondReader, thirdReader));
         ScalarSearch search =
                 new ScalarSearch(
                                 new TopN(
@@ -871,14 +903,18 @@ class GlobalIndexEvaluatorTest {
                                         DESCENDING,
                                         NULLS_LAST,
                                         1))
-                        .withMaxResultSize(2);
+                        .withMaxResultSize(3)
+                        .withMaxConcurrentReaders(2);
 
         CompletableFuture<Optional<GlobalIndexResult>> result = reader.visitScalarSearch(search);
-        assertThat(secondStarted).isFalse();
+        assertThat(firstStarted).isTrue();
+        assertThat(secondStarted).isTrue();
+        assertThat(thirdStarted).isFalse();
 
         first.complete(Optional.of(resultOf(1)));
+        assertThat(thirdStarted).isTrue();
+        second.complete(Optional.of(resultOf(2)));
         assertThat(result.join()).isPresent();
-        assertThat(secondStarted).isTrue();
     }
 
     @Test

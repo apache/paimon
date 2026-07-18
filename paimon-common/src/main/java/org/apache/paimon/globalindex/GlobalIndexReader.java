@@ -63,6 +63,7 @@ public interface GlobalIndexReader
         throw new UnsupportedOperationException();
     }
 
+    /** Returns a bounded candidate superset for scalar TopN, not an exact predicate result. */
     default CompletableFuture<Optional<GlobalIndexResult>> visitScalarSearch(
             ScalarSearch scalarSearch) {
         throw new UnsupportedOperationException();

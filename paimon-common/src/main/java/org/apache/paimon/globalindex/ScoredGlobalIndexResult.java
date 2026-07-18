@@ -119,7 +119,7 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
         return create(new RoaringNavigableMap64(), rowId -> 0, true);
     }
 
-    /** Returns a new {@link ScoredGlobalIndexResult} from bitmap. */
+    /** Returns a new exact ranked-search result from bitmap. */
     static ScoredGlobalIndexResult create(RoaringNavigableMap64 bitmap, ScoreGetter scoreGetter) {
         return create(bitmap, scoreGetter, true);
     }
