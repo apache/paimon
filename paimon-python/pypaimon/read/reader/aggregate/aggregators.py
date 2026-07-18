@@ -408,7 +408,7 @@ class FieldProductAgg(FieldAggregator):
             value = accumulator * input_field
             if value < _BYTE_MIN or value > _BYTE_MAX:
                 raise ArithmeticError(
-                    "byte overflow: {} * {}".format(accumulator, input_field)
+                    "byte overflow: {} * {} = {}".format(accumulator, input_field, value)
                 )
             return value
 
@@ -416,7 +416,7 @@ class FieldProductAgg(FieldAggregator):
             value = accumulator * input_field
             if value < _SHORT_MIN or value > _SHORT_MAX:
                 raise ArithmeticError(
-                    "short overflow: {} * {}".format(accumulator, input_field)
+                    "short overflow: {} * {} = {}".format(accumulator, input_field, value)
                 )
             return value
 
@@ -468,9 +468,7 @@ class FieldProductAgg(FieldAggregator):
             value = int(accumulator / input_field)
             if value > _BYTE_MAX or value < _BYTE_MIN:
                 raise ArithmeticError(
-                    "byte overflow: {} / {} = {}".format(
-                        accumulator, input_field, value
-                    )
+                    "byte overflow: {} / {} = {}".format(accumulator, input_field, value)
                 )
             return value
 
@@ -478,27 +476,21 @@ class FieldProductAgg(FieldAggregator):
             value = int(accumulator / input_field)
             if value > _SHORT_MAX or value < _SHORT_MIN:
                 raise ArithmeticError(
-                    "short overflow: {} / {} = {}".format(
-                        accumulator, input_field, value
-                    )
+                    "short overflow: {} / {} = {}".format(accumulator, input_field, value)
                 )
             return value
 
         elif self._base_type in _INT_TYPES:
             if accumulator == _INT_MIN and input_field == -1:
                 raise ArithmeticError(
-                    "int overflow: {} / {}".format(
-                        accumulator, input_field
-                    )
+                    "int overflow: {} / {}".format(accumulator, input_field)
                 )
             return int(accumulator / input_field)
 
         elif self._base_type == "BIGINT":
             if accumulator == _LONG_MIN and input_field == -1:
                 raise ArithmeticError(
-                    "long overflow: {} / {}".format(
-                        accumulator, input_field
-                    )
+                    "long overflow: {} / {}".format(accumulator, input_field)
                 )
 
             # Java integer division truncates toward zero, while Python's "//"
