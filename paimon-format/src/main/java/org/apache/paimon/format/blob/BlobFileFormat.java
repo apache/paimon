@@ -53,6 +53,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
+    private final int copyBufferSize;
     private boolean writeNullOnMissingFile;
     private boolean writeNullOnFetchFailure;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
@@ -64,8 +65,13 @@ public class BlobFileFormat extends FileFormat {
     }
 
     public BlobFileFormat(boolean blobAsDescriptor) {
+        this(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
+
+    public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
+        this.copyBufferSize = copyBufferSize;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -132,7 +138,8 @@ public class BlobFileFormat extends FileFormat {
                     type,
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
-                    blobFetchMetricReporter);
+                    blobFetchMetricReporter,
+                    copyBufferSize);
         }
     }
 

@@ -830,6 +830,13 @@ public class CoreOptions implements Serializable {
                                             "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
 
+    public static final ConfigOption<MemorySize> BLOB_COPY_BUFFER_SIZE =
+            key("blob.copy-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription(
+                            "Buffer size used when copying BLOB payloads into BLOB files.");
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -3284,6 +3291,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(BLOB_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public int blobCopyBufferSize() {
+        return Math.toIntExact(options.get(BLOB_COPY_BUFFER_SIZE).getBytes());
     }
 
     public boolean blobSplitByFileSize() {
