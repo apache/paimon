@@ -52,10 +52,59 @@ class TableScan:
 
     def plan(self) -> Plan:
         auth_result = self.__auth_query()
+        # Native planning covers only a plain full-snapshot scan and bypasses the
+        # auth-aware file scanner; fall back to the normal path otherwise.
+        if (auth_result is None and self.table.options.native_plan_enabled()
+                and self._native_plan_supported()):
+            return self._native_plan()
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
+
+    def _native_plan_supported(self) -> bool:
+        """Fall back to the Python scanner for scans native can't carry:
+        shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
+        drops L0), non-main branch, time-travel, incremental. Deny-list -- keep
+        in sync when adding scan features."""
+        fs = self.file_scanner
+        if (getattr(fs, 'idx_of_this_subtask', None) is not None
+                or getattr(fs, 'start_pos_of_this_subtask', None) is not None
+                or getattr(fs, 'chunk_shuffle', None) is not None
+                or getattr(fs, '_global_index_result', None) is not None):
+            return False
+        opts = self.table.options
+        if opts.merge_engine() == 'first-row' or (opts.branch() or 'main') != 'main':
+            return False
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        options = opts.options
+        if any(options.contains_key(k) for k in SCAN_KEYS):
+            return False
+        return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+
+    def _native_plan(self) -> Plan:
+        """Plan via pypaimon_rust, then drop partitions the predicate rejects.
+
+        The predicate is not pushed to the native planner, so this may read more
+        files; the reader's row filter/limit still apply, so results match.
+        """
+        from pypaimon.read.native_plan import native_plan
+
+        splits = native_plan(self.table)
+        # Preserve the scanned snapshot id (row-id conflict detection needs it).
+        # Rust exposes it per-split only, so fall back to the latest snapshot
+        # when the plan is empty.
+        if splits:
+            snapshot_id = splits[0].snapshot_id
+        else:
+            latest = self.table.snapshot_manager().get_latest_snapshot()
+            snapshot_id = latest.id if latest else None
+        partition_predicate = self.file_scanner.partition_key_predicate
+        if partition_predicate is not None:
+            splits = [s for s in splits
+                      if getattr(s, 'partition', None) is None
+                      or partition_predicate.test(s.partition)]
+        return Plan(splits, snapshot_id=snapshot_id)
 
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
@@ -65,13 +114,18 @@ class TableScan:
     def __auth_query(self):
         return resolve_auth_result(self._query_auth_fn, self._read_type)
 
-    def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
+    def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         """Run :meth:`plan` while recording manifest / pruning counters.
 
         Only used by :meth:`ReadBuilder.explain`; the regular read path
-        keeps going through :meth:`plan`.
+        keeps going through :meth:`plan`. Native planning is not tracked, so
+        stats is None on the native path -- explain reflects the real plan and
+        marks the pruning funnel as untracked.
         """
         auth_result = self.__auth_query()
+        if (auth_result is None and self.table.options.native_plan_enabled()
+                and self._native_plan_supported()):
+            return self._native_plan(), None
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()
