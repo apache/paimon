@@ -307,7 +307,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
     def test_out_of_scope_default_aggregator_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_default_collect',
-            {'fields.default-aggregate-function': 'product'},
+            {'fields.default-aggregate-function': 'collect'},
             'fields.default-aggregate-function',
         )
 
