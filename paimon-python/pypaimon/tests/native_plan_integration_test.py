@@ -91,6 +91,46 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
+    def test_dynamic_split_options_match_normal_plan(self):
+        self.cat.create_table(
+            'default.split_t', Schema.from_pyarrow_schema(self.schema), False)
+        self._write('split_t', [{'k': 1, 'v': 'a'}])
+        self._write('split_t', [{'k': 2, 'v': 'b'}])
+        options = {
+            'source.split.target-size': '1b',
+            'source.split.open-file-cost': '1b',
+        }
+        normal_table = self.cat.get_table('default.split_t').copy(options)
+        native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
+
+        normal = normal_table.new_read_builder().new_scan().plan()
+        native = native_table.new_read_builder().new_scan().plan()
+
+        self.assertEqual(len(native.splits()), len(normal.splits()))
+        self.assertGreater(len(native.splits()), 1)
+
+    def test_dynamic_split_option_reset_matches_normal_plan(self):
+        stored_options = {
+            'source.split.target-size': '1b',
+            'source.split.open-file-cost': '1b',
+        }
+        self.cat.create_table('default.split_reset_t', Schema.from_pyarrow_schema(
+            self.schema, options=stored_options), False)
+        self._write('split_reset_t', [{'k': 1, 'v': 'a'}])
+        self._write('split_reset_t', [{'k': 2, 'v': 'b'}])
+        reset_options = {
+            'source.split.target-size': None,
+            'source.split.open-file-cost': None,
+        }
+        normal_table = self.cat.get_table('default.split_reset_t').copy(reset_options)
+        native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
+
+        normal = normal_table.new_read_builder().new_scan().plan()
+        native = native_table.new_read_builder().new_scan().plan()
+
+        self.assertEqual(len(native.splits()), len(normal.splits()))
+        self.assertEqual(len(native.splits()), 1)
+
     def test_partitioned_table_and_partition_filter(self):
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])
         self.cat.create_table('default.pt_t', Schema.from_pyarrow_schema(

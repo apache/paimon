@@ -152,6 +152,30 @@ class NativePlanTest(unittest.TestCase):
         np.assert_not_called()
         fs.scan.assert_called_once_with()
 
+    def test_plan_falls_back_for_builtin_catalog_loader_subclasses(self):
+        class RoutedFileSystemLoader(FileSystemCatalogLoader):
+            def load(self):
+                return object()
+
+        class RoutedRESTLoader(RESTCatalogLoader):
+            def load(self):
+                return object()
+
+        for loader_class in (RoutedFileSystemLoader, RoutedRESTLoader):
+            with self.subTest(loader_class=loader_class.__name__):
+                fs = Mock(partition_key_predicate=None)
+                sentinel = object()
+                fs.scan.return_value = sentinel
+                scan = _scan(native_enabled=True, file_scanner=fs)
+                scan.table.catalog_environment.catalog_loader = loader_class(
+                    CatalogContext.create_from_options(Options({})))
+
+                with patch('pypaimon.read.native_plan.native_plan') as np:
+                    self.assertIs(scan.plan(), sentinel)
+
+                np.assert_not_called()
+                fs.scan.assert_called_once_with()
+
     def test_scan_with_stats_native_empty_uses_fallback_stats(self):
         fs = Mock(partition_key_predicate=None)
         fallback_plan = object()
@@ -197,12 +221,25 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'rest',
         })
 
+    def test_catalog_options_reject_loader_subclass(self):
+        class RoutedFileSystemLoader(FileSystemCatalogLoader):
+            pass
+
+        table = Mock()
+        table.catalog_environment.catalog_loader = RoutedFileSystemLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        with self.assertRaisesRegex(ValueError, 'exact built-in catalog loader'):
+            _catalog_options(table)
+
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
         # deserializer so per-file min/max keys are decoded for merge-on-read.
         kfields = [object()]
         table = Mock(trimmed_primary_keys_fields=kfields)
         table.table_schema = Mock(fields=[], partition_keys=[])
+        table.options.source_split_target_size.return_value = 1024
+        table.options.source_split_open_file_cost.return_value = 128
         split = Mock()
         split.serialize.return_value = b'bytes'
         rt = Mock()
@@ -224,6 +261,10 @@ class NativePlanTest(unittest.TestCase):
             result = native_plan(table)
 
         self.assertEqual(result, ['decoded'])
+        rt.new_read_builder.assert_called_once_with({
+            CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
+            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '128',
+        })
         des.assert_called_once_with(b'bytes', [], kfields)
 
     def test_native_plan_requires_split_api(self):

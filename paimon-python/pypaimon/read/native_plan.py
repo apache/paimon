@@ -25,6 +25,7 @@ so results match the normal path.
 from typing import List, Optional
 
 from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import deserialize_split_v1
@@ -38,13 +39,15 @@ def _partition_fields(table):
 
 
 def _catalog_metastore(loader) -> Optional[str]:
-    """Return the Rust catalog kind represented by a supported loader."""
+    """Return the Rust catalog kind for an exact built-in loader."""
     from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 
-    if isinstance(loader, FileSystemCatalogLoader):
+    # Subclasses may override load() with routing or option semantics which
+    # cannot be reproduced from context().options alone.
+    if type(loader) is FileSystemCatalogLoader:
         return 'filesystem'
-    if isinstance(loader, RESTCatalogLoader):
+    if type(loader) is RESTCatalogLoader:
         return 'rest'
     return None
 
@@ -61,9 +64,20 @@ def _catalog_options(table) -> dict:
         if value is not None
     }
     metastore = _catalog_metastore(loader)
-    if metastore is not None:
-        normalized[CatalogOptions.METASTORE.key()] = metastore
+    if metastore is None:
+        raise ValueError("native_plan requires an exact built-in catalog loader")
+    normalized[CatalogOptions.METASTORE.key()] = metastore
     return normalized
+
+
+def _read_options(table) -> dict:
+    """Effective split-shaping options, including FileStoreTable.copy overrides."""
+    return {
+        CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): str(
+            table.options.source_split_target_size()),
+        CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
+            table.options.source_split_open_file_cost()),
+    }
 
 
 def native_plan(table) -> List[Split]:
@@ -78,7 +92,7 @@ def native_plan(table) -> List[Split]:
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
 
     rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
-    rust_splits = rt.new_read_builder().new_scan().plan().splits()
+    rust_splits = rt.new_read_builder(_read_options(table)).new_scan().plan().splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
