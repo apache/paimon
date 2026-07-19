@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -176,6 +177,25 @@ public class HttpClientUtilsTest {
         assertThatThrownBy(() -> HttpClientUtils.getAsInputStream(url("/get-missing")))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("HTTP error code: 404");
+    }
+
+    @Test
+    public void testInvalidUriExceptionDoesNotLeakCredentials() {
+        String uri = "https://alice:secret@host/bad path?sig=QUERY_SECRET";
+        for (ThrowableAssert.ThrowingCallable call :
+                new ThrowableAssert.ThrowingCallable[] {
+                    () -> HttpClientUtils.exists(uri), () -> HttpClientUtils.getAsInputStream(uri)
+                }) {
+            assertThatThrownBy(call)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasNoCause()
+                    .matches(e -> HttpClientUtils.isInvalidUriException(e))
+                    .satisfies(
+                            e -> {
+                                assertThat(String.valueOf(e)).doesNotContain("secret");
+                                assertThat(String.valueOf(e)).doesNotContain("QUERY_SECRET");
+                            });
+        }
     }
 
     @Test

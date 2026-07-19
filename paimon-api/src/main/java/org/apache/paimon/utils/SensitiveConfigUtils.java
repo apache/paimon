@@ -170,11 +170,14 @@ public class SensitiveConfigUtils {
         return text;
     }
 
+    /** Placeholder for a URI that cannot be parsed and thus cannot be safely sanitized. */
+    public static final String INVALID_URI = "<invalid-uri>";
+
     /**
      * Strips the query string and user-info from a URI so signed-URL credentials (AWS/GCS
      * signature, Azure SAS {@code sig}, an embedded {@code user:password}) never reach logs or
-     * exceptions. Returns {@code scheme://host[:port]/path}; falls back to the substring before
-     * {@code '?'} when the URI cannot be parsed.
+     * exceptions. Returns {@code scheme://host[:port]/path}. Fail-closed: an unparseable URI is
+     * replaced by {@link #INVALID_URI} instead of guessing at its structure.
      */
     public static String sanitizeUri(String uri) {
         if (uri == null || uri.isEmpty()) {
@@ -182,6 +185,10 @@ public class SensitiveConfigUtils {
         }
         try {
             URI parsed = new URI(uri);
+            // Host unresolved but '@' present: credentials may hide elsewhere -> fail closed.
+            if (parsed.getHost() == null && uri.indexOf('@') >= 0) {
+                return INVALID_URI;
+            }
             StringBuilder sb = new StringBuilder();
             if (parsed.getScheme() != null) {
                 sb.append(parsed.getScheme()).append("://");
@@ -195,17 +202,10 @@ public class SensitiveConfigUtils {
             if (parsed.getRawPath() != null) {
                 sb.append(parsed.getRawPath());
             }
-            return sb.length() == 0 ? stripQuery(uri) : sb.toString();
+            return sb.length() == 0 ? INVALID_URI : sb.toString();
         } catch (URISyntaxException e) {
-            return stripQuery(uri);
+            return INVALID_URI;
         }
-    }
-
-    private static String stripQuery(String uri) {
-        int queryStart = uri.indexOf('?');
-        String base = queryStart >= 0 ? uri.substring(0, queryStart) : uri;
-        // A malformed URI may keep an embedded user:password@; drop it too.
-        return base.replaceAll("://[^/@]*@", "://");
     }
 
     /**

@@ -161,8 +161,20 @@ class SensitiveConfigUtilsTest {
                 .isEqualTo("https://host:443/p");
         assertThat(SensitiveConfigUtils.sanitizeUri("https://alice:secret@host/p?sig=x"))
                 .isEqualTo("https://host/p");
-        assertThat(SensitiveConfigUtils.sanitizeUri("https://alice:secret@host/bad path?sig=x"))
-                .doesNotContain("secret")
-                .doesNotContain("sig=");
+    }
+
+    @Test
+    void testSanitizeUriFailsClosedOnUnparseableUri() {
+        for (String uri :
+                new String[] {
+                    "https://alice:secret@host/bad path?sig=x",
+                    "https://alice:se/cret@host/bad path?sig=x",
+                    "https://alice:se@cret@host/bad path?sig=x",
+                    "https://alice:se/cret@host/p?sig=x"
+                }) {
+            assertThat(SensitiveConfigUtils.sanitizeUri(uri))
+                    .as(uri)
+                    .isEqualTo(SensitiveConfigUtils.INVALID_URI);
+        }
     }
 }

@@ -86,8 +86,11 @@ public class HttpClientUtils {
         return connectionManagerBuilder.build();
     }
 
+    /** Message prefix of the safe exception thrown for an unparseable URI. */
+    public static final String INVALID_URI_MESSAGE_PREFIX = "Invalid HTTP URI: ";
+
     public static InputStream getAsInputStream(String uri) throws IOException {
-        HttpGet httpGet = new HttpGet(uri);
+        HttpGet httpGet = newHttpGet(uri);
         CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet);
         int statusCode = response.getCode();
         if (statusCode != HttpStatus.SC_OK) {
@@ -140,7 +143,8 @@ public class HttpClientUtils {
             }
             if (current instanceof IllegalArgumentException
                     && current.getMessage() != null
-                    && current.getMessage().contains("Illegal character")) {
+                    && (current.getMessage().contains("Illegal character")
+                            || current.getMessage().startsWith(INVALID_URI_MESSAGE_PREFIX))) {
                 return true;
             }
             current = current.getCause();
@@ -186,18 +190,40 @@ public class HttpClientUtils {
     }
 
     private static int headStatusCode(String uri) throws IOException {
-        HttpHead httpHead = new HttpHead(uri);
+        HttpHead httpHead = newHttpHead(uri);
         try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpHead)) {
             return response.getCode();
         }
     }
 
     private static int getRangeStatusCode(String uri) throws IOException {
-        HttpGet httpGet = new HttpGet(uri);
+        HttpGet httpGet = newHttpGet(uri);
         httpGet.addHeader("Range", "bytes=0-0");
         try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet)) {
             return response.getCode();
         }
+    }
+
+    private static HttpGet newHttpGet(String uri) {
+        try {
+            return new HttpGet(uri);
+        } catch (RuntimeException e) {
+            throw invalidUri(uri);
+        }
+    }
+
+    private static HttpHead newHttpHead(String uri) {
+        try {
+            return new HttpHead(uri);
+        } catch (RuntimeException e) {
+            throw invalidUri(uri);
+        }
+    }
+
+    // No cause: the original exception echoes the raw URI, which may hold credentials.
+    private static IllegalArgumentException invalidUri(String uri) {
+        return new IllegalArgumentException(
+                INVALID_URI_MESSAGE_PREFIX + SensitiveConfigUtils.sanitizeUri(uri));
     }
 
     private static RuntimeException httpError(int statusCode) {
