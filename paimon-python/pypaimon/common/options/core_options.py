@@ -1120,9 +1120,11 @@ class CoreOptions:
 
     def blob_copy_buffer_size(self):
         size = self.options.get(CoreOptions.BLOB_COPY_BUFFER_SIZE, None).get_bytes()
-        if size <= 0:
+        # Upper bound mirrors the Java int copy buffer (Integer.MAX_VALUE).
+        if not 1 <= size <= 2 ** 31 - 1:
             raise ValueError(
-                f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be positive, but was {size} bytes.")
+                f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be between 1 byte and "
+                f"{2 ** 31 - 1} bytes, but was {size} bytes.")
         return size
 
     def vector_file_format(self, default=None):
