@@ -82,9 +82,11 @@ class TableScan:
         (dedicated split generator), postpone bucket (drops synthetic buckets),
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; native may mark splits raw-convertible and skip merge), dynamic
-        bucket / cross-partition PK tables (unconfirmed Rust parity), copy()
-        overrides Rust does not see (e.g. a removed scan.snapshot-id), query
-        auth, non-main branch, time-travel, incremental, a missing/old
+        bucket / cross-partition PK tables (unconfirmed Rust parity), any
+        partitioned table (Rust bucket_path vs the writer's str(value) can
+        diverge), a stale schema (Rust reloads the latest), copy() overrides
+        Rust does not see (e.g. a removed scan.snapshot-id), query auth,
+        non-main branch, time-travel, scan.version, incremental, a missing/old
         pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
         this capability gate in sync when adding scan features."""
         from pypaimon.read.native_plan import native_runtime_available
@@ -132,13 +134,21 @@ class TableScan:
         from pypaimon.table.bucket_mode import BucketMode
         if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
             return False
+        # Rust bucket_path vs the writer's unescaped str(value) can diverge -> fall back.
+        if self.table.partition_keys:
+            return False
+        # Rust reloads the latest schema; fall back if this table's schema is stale.
+        latest_schema = self.table.schema_manager.latest()
+        if latest_schema is not None and latest_schema.id != self.table.table_schema.id:
+            return False
         # copy() overrides Rust can't see (e.g. removed scan.snapshot-id) -> fall back.
         overrides = set(getattr(self.table, '_applied_dynamic_options', {}) or {})
         if overrides - _NATIVE_FORWARDED_OPTIONS:
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         options = self.table.options.options
-        if any(options.contains_key(k) for k in SCAN_KEYS):
+        if any(options.contains_key(k) for k in SCAN_KEYS) \
+                or options.contains_key('scan.version'):
             return False
         return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 

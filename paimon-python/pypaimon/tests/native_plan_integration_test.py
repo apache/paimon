@@ -182,7 +182,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.split_count, len(normal.splits()))
         self.assertEqual(native.split_count, 1)
 
-    def test_partitioned_table_and_partition_filter(self):
+    def test_partitioned_table_falls_back(self):
+        # Rust bucket_path can diverge from the writer's str(value) partition dir -> fall back.
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])
         self.cat.create_table('default.pt_t', Schema.from_pyarrow_schema(
             schema, partition_keys=['p']), False)
@@ -195,19 +196,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
         w.close()
         c.close()
 
-        def read(native, filtered):
-            tt = self.cat.get_table('default.pt_t')
-            if native:
-                tt = tt.copy({'scan.native-plan.enabled': 'true'})
-            rb = tt.new_read_builder()
-            if filtered:
-                rb.with_filter(rb.new_predicate_builder().equal('p', 'a'))
-            rows = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
-            return sorted((r['k'], r['p']) for r in rows)
-
-        self.assertEqual(read(True, False), read(False, False))
-        self.assertEqual(read(True, True), read(False, True))
-        self.assertEqual(read(True, True), [(1, 'a'), (2, 'a')])
+        native_table = self.cat.get_table('default.pt_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        self.assertFalse(native_table.new_read_builder().explain().native_planned)
 
     def test_explain_reflects_native_plan(self):
         self.cat.create_table(

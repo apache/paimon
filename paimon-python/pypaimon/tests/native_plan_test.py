@@ -46,6 +46,9 @@ def _scan(native_enabled, file_scanner):
     scan.table.trimmed_primary_keys = ['k']        # non-empty trimmed pk
     scan.table.bucket_mode.return_value = BucketMode.HASH_FIXED
     scan.table._applied_dynamic_options = {}       # no copy() overrides
+    scan.table.partition_keys = []                 # not partitioned
+    scan.table.table_schema.id = 1
+    scan.table.schema_manager.latest.return_value.id = 1   # loaded schema is latest
     scan.table.identifier.get_database_name.return_value = 'default'
     scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
         CatalogContext.create_from_options(Options({})))           # filesystem catalog
@@ -145,6 +148,10 @@ class NativePlanTest(unittest.TestCase):
             'return_value', BucketMode.CROSS_PARTITION))
         check(lambda s, fs: setattr(
             s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
+        check(lambda s, fs: setattr(s.table, 'partition_keys', ['dt']))
+        check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
+        check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
+            'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
