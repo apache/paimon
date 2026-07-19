@@ -41,6 +41,16 @@ case class PaimonFormatTable(table: FormatTable)
   with SupportsRead
   with SupportsWrite {
 
+  // Driver-only gateway owned and injected by SparkCatalog. It is intentionally transient.
+  @transient private var driverPartitionCatalog: FormatTablePartitionCatalog = null
+
+  def this(table: FormatTable, partitionCatalog: FormatTablePartitionCatalog) = {
+    this(table)
+    driverPartitionCatalog = partitionCatalog
+  }
+
+  override def partitionCatalog: FormatTablePartitionCatalog = driverPartitionCatalog
+
   override def capabilities(): util.Set[TableCapability] = {
     util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
   }

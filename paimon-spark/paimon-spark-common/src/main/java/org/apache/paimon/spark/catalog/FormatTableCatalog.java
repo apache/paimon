@@ -24,6 +24,7 @@ import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.SparkTypeUtils;
+import org.apache.paimon.spark.format.FormatTablePartitionCatalog;
 import org.apache.paimon.spark.format.PaimonFormatTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.utils.TypeUtils;
@@ -60,10 +61,17 @@ public interface FormatTableCatalog {
     }
 
     default Table toSparkFormatTable(Identifier ident, FormatTable formatTable) {
+        return toSparkFormatTable(ident, formatTable, null);
+    }
+
+    default Table toSparkFormatTable(
+            Identifier ident,
+            FormatTable formatTable,
+            @Nullable FormatTablePartitionCatalog partitionCatalog) {
         Map<String, String> optionsMap = formatTable.options();
         CoreOptions coreOptions = new CoreOptions(optionsMap);
         if (coreOptions.formatTableImplementationIsPaimon()) {
-            return new PaimonFormatTable(formatTable);
+            return new PaimonFormatTable(formatTable, partitionCatalog);
         } else {
             SparkSession spark = PaimonSparkSession$.MODULE$.active();
             List<String> pathList = new ArrayList<>();

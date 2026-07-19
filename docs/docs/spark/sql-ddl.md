@@ -206,6 +206,52 @@ CREATE TABLE my_table (
 );
 ```
 
+### Manage Format Table Partitions
+
+For managed Format Tables, whose `metastore.partitioned-table` option is `true`, partition
+metadata is stored in the catalog and Spark supports the standard partition DDL:
+
+```sql
+ALTER TABLE my_table ADD PARTITION (dt='2025-01-01');
+ALTER TABLE my_table DROP PARTITION (dt='2025-01-01');
+MSCK REPAIR TABLE my_table;
+SHOW PARTITIONS my_table;
+```
+
+On a Format Table that is not managed, `ADD PARTITION`, `DROP PARTITION` and
+`MSCK REPAIR TABLE` fail with an error.
+
+`SHOW PARTITIONS` throws an error when the number of partitions exceeds
+`spark.paimon.format-table.show-partitions.max-results` (default: 10000). For larger tables, use
+`CALL sys.list_format_table_partitions` to list partitions page by page.
+
+`ADD PARTITION` creates the partition directory and registers the partition; querying a newly
+added partition before any data is written returns no rows. `DROP PARTITION` unregisters the
+partition and deletes its directory.
+
+:::info
+
+`metastore.partitioned-table = true` enables catalog-managed partitions, which requires an
+internal Format Table in a catalog that supports it (currently the REST catalog) and cannot be
+combined with `format-table.implementation = engine`. The REST catalog validates this
+combination on `CREATE TABLE`, with catalog-level table defaults
+(`spark.sql.catalog.paimon.table-default.*`) participating in the effective options: a default
+that makes the combination invalid fails the DDL. Other catalogs treat the option as inert.
+
+A table that carries `metastore.partitioned-table = true` where it cannot be honored (a non-REST
+catalog, or an external table) loads as an unmanaged Format Table and a warning is logged. To
+remove the option, use `ALTER TABLE my_table UNSET TBLPROPERTIES ('metastore.partitioned-table')`.
+On a REST catalog, an existing Format Table whose partitions were never registered reads as empty
+until you register them with `MSCK REPAIR TABLE my_table` or
+`CALL sys.sync_format_table_metadata`.
+
+Mixed-version note: only writers that support catalog-managed partitions register the partitions
+they produce. During a rolling upgrade, upgrade all writers before relying on managed reads, or
+run `MSCK REPAIR TABLE` / `CALL sys.sync_format_table_metadata` afterwards, since data written by
+an older writer is not visible to a managed read until its partitions are registered.
+
+:::
+
 ### Create External Table
 
 When the catalog's `metastore` type is `hive`, if the `location` is specified when creating a table, that table will be considered an external table; otherwise, it will be a managed table. 

@@ -36,6 +36,8 @@ import org.apache.paimon.spark.catalog.SupportV1Function;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.functions.FunctionIdentifierConverter;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
+import org.apache.paimon.spark.format.CatalogFormatTablePartitionCatalog;
+import org.apache.paimon.spark.format.FormatTablePartitionCatalog;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.iceberg.IcebergTable;
@@ -805,7 +807,12 @@ public class SparkCatalog extends SparkBaseCatalog
                     copyWithSQLConf(
                             catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);
             if (table instanceof FormatTable) {
-                return toSparkFormatTable(ident, (FormatTable) table);
+                FormatTable formatTable = (FormatTable) table;
+                FormatTablePartitionCatalog partitionCatalog =
+                        formatTable.catalogProvider() != null
+                                ? new CatalogFormatTablePartitionCatalog(catalog, tblIdent)
+                                : null;
+                return toSparkFormatTable(ident, formatTable, partitionCatalog);
             } else if (table instanceof IcebergTable) {
                 return new SparkIcebergTable(table);
             } else if (table instanceof LanceTable) {

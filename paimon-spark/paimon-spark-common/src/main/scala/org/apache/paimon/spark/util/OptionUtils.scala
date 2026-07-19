@@ -19,10 +19,10 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.catalog.{CatalogUtils, Identifier}
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{FormatTable, Table}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
@@ -186,7 +186,41 @@ object OptionUtils extends SQLConfHelper with Logging {
     if (mergedOptions.isEmpty) {
       table
     } else {
+      normalizeManagedFormatTableDynamicOptions(table, mergedOptions)
       table.copy(mergedOptions).asInstanceOf[T]
+    }
+  }
+
+  /**
+   * Whether a format table is catalog-managed is a persisted property and cannot be flipped by a
+   * dynamic option. A dynamic {@code metastore.partitioned-table} (typically a session-global
+   * {@code spark.paimon.*} config that used to be a harmless no-op) is dropped so the persisted
+   * value always wins, warning only when it actually disagrees, instead of failing every format
+   * table load in that session.
+   */
+  private def normalizeManagedFormatTableDynamicOptions(
+      table: Table,
+      dynamicOptions: JMap[String, String]): Unit = {
+    table match {
+      case formatTable: FormatTable =>
+        val managedKey = CoreOptions.METASTORE_PARTITIONED_TABLE.key()
+        val persistedManaged = new CoreOptions(formatTable.options()).partitionedTableInMetastore()
+        if (dynamicOptions.containsKey(managedKey)) {
+          val dynamicManaged = new CoreOptions(dynamicOptions).partitionedTableInMetastore()
+          if (dynamicManaged != persistedManaged) {
+            logWarning(s"Ignoring dynamic option '$managedKey=$dynamicManaged' for format table " +
+              s"${formatTable.fullName()}: whether a format table is catalog-managed is fixed " +
+              s"at creation time (persisted value: $persistedManaged). Use ALTER TABLE to change it.")
+          }
+          dynamicOptions.remove(managedKey)
+        }
+
+        if (persistedManaged) {
+          val effectiveOptions = new JHashMap[String, String](formatTable.options())
+          effectiveOptions.putAll(dynamicOptions)
+          CatalogUtils.validateManagedFormatTableOptions(effectiveOptions)
+        }
+      case _ =>
     }
   }
 
