@@ -66,6 +66,7 @@ class NativePlanTest(unittest.TestCase):
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_df.PaimonCatalog = type(
             'PaimonCatalog', (), {'get_table': lambda self, name: None})
+        fake_df.Split = type('Split', (), {'serialize': lambda self: b''})
         fake_mod = ModuleType('pypaimon_rust')
         fake_mod.datafusion = fake_df
         patcher = patch.dict(
@@ -285,6 +286,7 @@ class NativePlanTest(unittest.TestCase):
 
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_df.PaimonCatalog = Mock(return_value=catalog)
+        fake_df.Split = type('Split', (), {'serialize': lambda self: b''})
         fake_mod = ModuleType('pypaimon_rust')
         fake_mod.datafusion = fake_df
 
@@ -303,15 +305,26 @@ class NativePlanTest(unittest.TestCase):
         des.assert_called_once_with(b'bytes', [], kfields)
 
     def test_native_plan_requires_split_api(self):
-        # Old pypaimon-rust (0.2) has no get_table -> clear error, not AttributeError.
-        fake_df = ModuleType('pypaimon_rust.datafusion')
-        fake_df.PaimonCatalog = type('PaimonCatalog', (), {})
-        fake_mod = ModuleType('pypaimon_rust')
-        fake_mod.datafusion = fake_df
-        with patch.dict(sys.modules,
+        # An intermediate pypaimon-rust missing either get_table or Split.serialize
+        # must raise a clear error, not an AttributeError mid-plan.
+        split_ok = type('Split', (), {'serialize': lambda self: b''})
+        catalog_ok = type('PaimonCatalog', (), {'get_table': lambda self, name: None})
+        cases = {
+            'no get_table': (type('PaimonCatalog', (), {}), split_ok),
+            'no serialize': (catalog_ok, type('Split', (), {})),
+        }
+        for label, (catalog_cls, split_cls) in cases.items():
+            with self.subTest(case=label):
+                fake_df = ModuleType('pypaimon_rust.datafusion')
+                fake_df.PaimonCatalog = catalog_cls
+                fake_df.Split = split_cls
+                fake_mod = ModuleType('pypaimon_rust')
+                fake_mod.datafusion = fake_df
+                with patch.dict(
+                        sys.modules,
                         {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}):
-            with self.assertRaisesRegex(RuntimeError, '0.3.0'):
-                native_plan(Mock())
+                    with self.assertRaisesRegex(RuntimeError, '0.3.0'):
+                        native_plan(Mock())
 
 
 if __name__ == '__main__':

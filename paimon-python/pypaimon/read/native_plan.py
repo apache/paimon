@@ -32,12 +32,17 @@ from pypaimon.read.split_serializer import deserialize_split_v1
 
 
 def native_runtime_available() -> bool:
-    """Whether an installed pypaimon-rust exposes the split-planning API."""
+    """Whether an installed pypaimon-rust exposes the full split-planning API.
+
+    Both entry points used by :func:`native_plan` are probed: ``PaimonCatalog.
+    get_table`` (0.3.0) and ``Split.serialize`` (the split wire format). An
+    intermediate build missing either must fall back, not fail mid-plan.
+    """
     try:
-        from pypaimon_rust.datafusion import PaimonCatalog
+        from pypaimon_rust.datafusion import PaimonCatalog, Split
     except ImportError:
         return False
-    return hasattr(PaimonCatalog, 'get_table')
+    return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
 
 
 def _partition_fields(table):
