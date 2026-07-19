@@ -830,6 +830,9 @@ public class CoreOptions implements Serializable {
                                             "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
 
+    // Safety ceiling for blob.copy-buffer-size (allocated as new byte[size] per writer).
+    public static final int MAX_BLOB_COPY_BUFFER_SIZE = 256 * 1024 * 1024;
+
     // Keep this default in sync with BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE (= 4 * 1024).
     public static final ConfigOption<MemorySize> BLOB_COPY_BUFFER_SIZE =
             key("blob.copy-buffer-size")
@@ -3301,10 +3304,10 @@ public class CoreOptions implements Serializable {
     /** Validates {@link #BLOB_COPY_BUFFER_SIZE} bytes and narrows to a positive int. */
     public static int checkedBlobCopyBufferSize(long bytes) {
         checkArgument(
-                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                bytes > 0 && bytes <= MAX_BLOB_COPY_BUFFER_SIZE,
                 "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
                 BLOB_COPY_BUFFER_SIZE.key(),
-                Integer.MAX_VALUE,
+                MAX_BLOB_COPY_BUFFER_SIZE,
                 bytes);
         return (int) bytes;
     }

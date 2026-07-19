@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.blob;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobConsumer;
@@ -132,7 +133,11 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
-        checkArgument(copyBufferSize > 0, "BLOB copy buffer size must be positive.");
+        checkArgument(
+                copyBufferSize > 0 && copyBufferSize <= CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE,
+                "BLOB copy buffer size must be between 1 and %s, but was %s.",
+                CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE,
+                copyBufferSize);
         this.out = out;
         this.writeConsumer = writeConsumer;
         this.blobFetchMetricReporter = blobFetchMetricReporter;

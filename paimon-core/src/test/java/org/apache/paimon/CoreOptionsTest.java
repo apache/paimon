@@ -174,7 +174,16 @@ public class CoreOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
 
-        // oversized (> Integer.MAX_VALUE) is rejected instead of throwing ArithmeticException.
+        // the max (256 MiB) is accepted, just above it is rejected.
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("256 mb"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize())
+                .isEqualTo(CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE);
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("512 mb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob.copy-buffer-size");
+
+        // way oversized is rejected instead of throwing ArithmeticException / OOM.
         conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("3 gb"));
         assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
                 .isInstanceOf(IllegalArgumentException.class)
