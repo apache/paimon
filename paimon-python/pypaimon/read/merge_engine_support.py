@@ -64,6 +64,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "bool_or", "bool_and",
     "listagg",
     "nested_update",
+    "rbm32", "rbm64",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
@@ -211,7 +212,7 @@ def check_supported(table) -> None:
                 "fields.<f>.ignore-retract) "
                 "and other aggregators (product / listagg / collect / "
                 "merge_map* / nested_update* / theta_sketch / "
-                "hll_sketch / roaring_bitmap_*) are not yet supported. "
+                "hll_sketch) are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
                     ", ".join(sorted(_AGGREGATION_SUPPORTED_AGG_FUNCS)),
