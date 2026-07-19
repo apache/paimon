@@ -36,7 +36,7 @@ public class BlobFileFormatFactory implements FileFormatFactory {
     public FileFormat create(FormatContext formatContext) {
         boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
         int copyBufferSize =
-                Math.toIntExact(
+                CoreOptions.checkedBlobCopyBufferSize(
                         formatContext.options().get(CoreOptions.BLOB_COPY_BUFFER_SIZE).getBytes());
         return new BlobFileFormat(blobAsDescriptor, copyBufferSize);
     }

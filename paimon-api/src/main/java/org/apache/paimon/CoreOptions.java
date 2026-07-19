@@ -830,6 +830,7 @@ public class CoreOptions implements Serializable {
                                             "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
 
+    // Keep this default in sync with BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE (= 4 * 1024).
     public static final ConfigOption<MemorySize> BLOB_COPY_BUFFER_SIZE =
             key("blob.copy-buffer-size")
                     .memoryType()
@@ -3294,7 +3295,18 @@ public class CoreOptions implements Serializable {
     }
 
     public int blobCopyBufferSize() {
-        return Math.toIntExact(options.get(BLOB_COPY_BUFFER_SIZE).getBytes());
+        return checkedBlobCopyBufferSize(options.get(BLOB_COPY_BUFFER_SIZE).getBytes());
+    }
+
+    /** Validates {@link #BLOB_COPY_BUFFER_SIZE} bytes and narrows to a positive int. */
+    public static int checkedBlobCopyBufferSize(long bytes) {
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                BLOB_COPY_BUFFER_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public boolean blobSplitByFileSize() {

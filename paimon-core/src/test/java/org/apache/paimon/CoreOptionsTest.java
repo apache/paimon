@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -156,5 +157,27 @@ public class CoreOptionsTest {
         final CoreOptions negativeMaxColumnsOptions = new CoreOptions(conf);
         assertThatThrownBy(() -> negativeMaxColumnsOptions.mapSharedShreddingMaxColumns("metrics"))
                 .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+    }
+
+    @Test
+    public void testBlobCopyBufferSize() {
+        Options conf = new Options();
+        // default preserves the historical 4 KiB buffer.
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("64 kb"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(64 * 1024);
+
+        // zero is rejected early with an option-named message.
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob.copy-buffer-size");
+
+        // oversized (> Integer.MAX_VALUE) is rejected instead of throwing ArithmeticException.
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("3 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob.copy-buffer-size");
     }
 }

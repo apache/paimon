@@ -582,7 +582,6 @@ public class BlobFormatWriterTest {
 
         private final Map<String, byte[]> files;
         private final List<CountingSeekableInputStream> opened = new ArrayList<>();
-        private int openCount;
 
         private RecordingUriReader(Map<String, byte[]> files) {
             this.files = files;
@@ -594,7 +593,6 @@ public class BlobFormatWriterTest {
             if (data == null) {
                 throw new IllegalArgumentException("Unknown uri: " + uri);
             }
-            openCount++;
             CountingSeekableInputStream stream = new CountingSeekableInputStream(data);
             opened.add(stream);
             return stream;
@@ -606,7 +604,6 @@ public class BlobFormatWriterTest {
 
         private final byte[] data;
         private int pos;
-        private int closeCount;
         private int maxReadRequest;
 
         private CountingSeekableInputStream(byte[] data) {
@@ -634,10 +631,10 @@ public class BlobFormatWriterTest {
 
         @Override
         public int read(byte[] b, int off, int len) {
-            maxReadRequest = Math.max(maxReadRequest, len);
             if (len == 0) {
                 return 0;
             }
+            maxReadRequest = Math.max(maxReadRequest, len);
             if (pos >= data.length) {
                 return -1;
             }
@@ -648,9 +645,7 @@ public class BlobFormatWriterTest {
         }
 
         @Override
-        public void close() {
-            closeCount++;
-        }
+        public void close() {}
     }
 
     private static void assertBlobPayload(Blob blob, byte[] expected) throws Exception {
