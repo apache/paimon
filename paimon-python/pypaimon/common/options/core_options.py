@@ -264,6 +264,24 @@ class CoreOptions:
         .with_description("Specify the message format of data files.")
     )
 
+    PARQUET_METADATA_CACHE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("parquet.metadata-cache-enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Cache immutable Parquet file metadata across reads in the current process."
+        )
+    )
+
+    PARQUET_METADATA_CACHE_SIZE: ConfigOption[int] = (
+        ConfigOptions.key("parquet.metadata-cache-size")
+        .int_type()
+        .default_value(256)
+        .with_description(
+            "Maximum number of Parquet metadata entries cached in the current process."
+        )
+    )
+
     FILE_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("file.compression")
         .string_type()
@@ -1022,6 +1040,12 @@ class CoreOptions:
 
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)
+
+    def parquet_metadata_cache_enabled(self) -> bool:
+        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_ENABLED, False)
+
+    def parquet_metadata_cache_size(self) -> int:
+        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_SIZE, 256)
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)

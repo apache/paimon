@@ -15,7 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict, List, Optional
+import os
+import threading
+from collections import OrderedDict
+from concurrent.futures import Future
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -34,6 +38,105 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 
 
+class _ParquetDatasetCache:
+    def __init__(self, max_entries: int):
+        self.max_entries = max_entries
+        self._entries = OrderedDict()
+        self._loads = {}
+        self._lock = threading.Lock()
+
+    def get_or_load(self, key: Tuple[int, str], loader: Callable[[], Any]):
+        with self._lock:
+            dataset = self._entries.get(key)
+            if dataset is not None:
+                self._entries.move_to_end(key)
+                return dataset
+
+            future = self._loads.get(key)
+            if future is None:
+                future = Future()
+                self._loads[key] = future
+                should_load = True
+            else:
+                should_load = False
+
+        if not should_load:
+            return future.result()
+
+        try:
+            dataset = loader()
+        except BaseException as exception:
+            with self._lock:
+                self._loads.pop(key, None)
+            future.set_exception(exception)
+            raise
+
+        with self._lock:
+            self._entries[key] = dataset
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+            self._loads.pop(key, None)
+        future.set_result(dataset)
+        return dataset
+
+    def resize(self, max_entries: int):
+        with self._lock:
+            self.max_entries = max_entries
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+
+
+_PARQUET_DATASET_CACHE = None
+_PARQUET_DATASET_CACHE_LOCK = threading.Lock()
+_PARQUET_DATASET_CACHE_PID = os.getpid()
+
+
+def _ensure_parquet_dataset_cache_process():
+    global _PARQUET_DATASET_CACHE
+    global _PARQUET_DATASET_CACHE_LOCK
+    global _PARQUET_DATASET_CACHE_PID
+    current_pid = os.getpid()
+    if current_pid != _PARQUET_DATASET_CACHE_PID:
+        _PARQUET_DATASET_CACHE = None
+        _PARQUET_DATASET_CACHE_LOCK = threading.Lock()
+        _PARQUET_DATASET_CACHE_PID = current_pid
+
+
+def _global_parquet_dataset_cache(max_entries: int) -> _ParquetDatasetCache:
+    global _PARQUET_DATASET_CACHE
+    _ensure_parquet_dataset_cache_process()
+    with _PARQUET_DATASET_CACHE_LOCK:
+        if _PARQUET_DATASET_CACHE is None:
+            _PARQUET_DATASET_CACHE = _ParquetDatasetCache(max_entries)
+        elif _PARQUET_DATASET_CACHE.max_entries != max_entries:
+            _PARQUET_DATASET_CACHE.resize(max_entries)
+        return _PARQUET_DATASET_CACHE
+
+
+def _reset_parquet_dataset_cache():
+    global _PARQUET_DATASET_CACHE
+    _ensure_parquet_dataset_cache_process()
+    with _PARQUET_DATASET_CACHE_LOCK:
+        _PARQUET_DATASET_CACHE = None
+
+
+def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
+                     cache_size: int):
+    file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+    filesystem = file_io.filesystem
+
+    def load():
+        return ds.dataset(
+            file_path_for_pyarrow, format='parquet', filesystem=filesystem)
+
+    if not cache_enabled or cache_size <= 0:
+        return load()
+
+    key = (id(filesystem), file_path_for_pyarrow)
+    return _global_parquet_dataset_cache(cache_size).get_or_load(key, load)
+
+
 class FormatPyArrowReader(RecordBatchReader):
     """
     A Format Reader that reads record batch from a Parquet or ORC file using PyArrow,
@@ -49,8 +152,22 @@ class FormatPyArrowReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  options: CoreOptions = None,
                  nested_name_paths: Optional[List[List[str]]] = None):
-        file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        if file_format == 'parquet':
+            cache_enabled = (
+                options.parquet_metadata_cache_enabled()
+                if options is not None else False
+            )
+            cache_size = (
+                options.parquet_metadata_cache_size()
+                if options is not None else 256
+            )
+            self.dataset = _parquet_dataset(
+                file_io, file_path, cache_enabled, cache_size)
+        else:
+            file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+            self.dataset = ds.dataset(
+                file_path_for_pyarrow, format=file_format,
+                filesystem=file_io.filesystem)
         self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
