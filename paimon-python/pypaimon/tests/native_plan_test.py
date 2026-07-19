@@ -150,6 +150,8 @@ class NativePlanTest(unittest.TestCase):
             s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
         check(lambda s, fs: setattr(s.table, 'partition_keys', ['dt']))
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
+        check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
+            'side_effect', RuntimeError('metadata read failed')))
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(

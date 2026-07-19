@@ -76,6 +76,14 @@ class TableScan:
         return wrap_plan_with_auth(auth_result, plan)
 
     def _native_plan_supported(self) -> bool:
+        # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
+        try:
+            return self._native_plan_supported_impl()
+        except Exception as e:
+            logger.warning("Native-plan capability probe failed, falling back: %s", e)
+            return False
+
+    def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
         drops L0), deletion vectors (Python drops L0), data evolution
