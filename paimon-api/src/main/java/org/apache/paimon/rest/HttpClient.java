@@ -64,7 +64,7 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
         Header[] authHeaders = getHeaders(path, "GET", "", restAuthFunction);
-        HttpGet httpGet = new HttpGet(getRequestUrl(path, null));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, null));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
     }
@@ -76,7 +76,7 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
         Header[] authHeaders = getHeaders(path, queryParams, "GET", "", restAuthFunction);
-        HttpGet httpGet = new HttpGet(getRequestUrl(path, queryParams));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, queryParams));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
     }
@@ -93,7 +93,7 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
+        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
@@ -111,7 +111,7 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
+        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));

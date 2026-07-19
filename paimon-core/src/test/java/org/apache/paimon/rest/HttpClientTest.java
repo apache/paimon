@@ -316,6 +316,36 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testGetWithMalformedUrlDoesNotLeakCredentials() {
+        // Malformed URL throws in the constructor before exec(); the raw URL must not leak.
+        String secret = "QUERY_SECRET";
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                httpClient.get(
+                                        "/x?sig=" + secret + " bad",
+                                        MockRESTData.class,
+                                        restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testPostWithMalformedUrlDoesNotLeakCredentials() {
+        String secret = "QUERY_SECRET";
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                httpClient.post(
+                                        "/x?sig=" + secret + " bad",
+                                        mockResponseData,
+                                        MockRESTData.class,
+                                        restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
     public void testPostSetsJsonContentType() throws Exception {
         server.enqueueResponse(mockResponseDataStr, 200);
         httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);

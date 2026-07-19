@@ -22,8 +22,10 @@ import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
 import org.apache.paimon.utils.SensitiveConfigUtils;
 
+import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
@@ -41,6 +43,7 @@ import org.apache.hc.core5.util.Timeout;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.function.Function;
 
 /** Utils for {@link HttpClientBuilder}. */
 public class HttpClientUtils {
@@ -219,17 +222,26 @@ public class HttpClientUtils {
         }
     }
 
-    private static HttpGet newHttpGet(String uri) {
-        try {
-            return new HttpGet(uri);
-        } catch (RuntimeException e) {
-            throw SensitiveConfigUtils.invalidUri(uri);
-        }
+    public static HttpGet newHttpGet(String uri) {
+        return newRequest(uri, HttpGet::new);
     }
 
-    private static HttpHead newHttpHead(String uri) {
+    public static HttpHead newHttpHead(String uri) {
+        return newRequest(uri, HttpHead::new);
+    }
+
+    public static HttpPost newHttpPost(String uri) {
+        return newRequest(uri, HttpPost::new);
+    }
+
+    public static HttpDelete newHttpDelete(String uri) {
+        return newRequest(uri, HttpDelete::new);
+    }
+
+    /** A malformed URL leaks the raw URL from the constructor; sanitize it. */
+    private static <T> T newRequest(String uri, Function<String, T> constructor) {
         try {
-            return new HttpHead(uri);
+            return constructor.apply(uri);
         } catch (RuntimeException e) {
             throw SensitiveConfigUtils.invalidUri(uri);
         }
