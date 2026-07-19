@@ -46,7 +46,7 @@ class HadoopUtilsSecretLoggingTest {
         Options options = new Options();
         // hadoop.* keys are forwarded (prefix stripped) into the Hadoop configuration.
         options.set("hadoop.fs.oss.accessKeySecret", SECRET_MARKER);
-        options.set("hadoop.fs.oss.endpoint", "oss-cn-hangzhou.aliyuncs.com");
+        options.set("hadoop.fs.oss.endpoint", "mock-endpoint.example.com");
 
         // Warm up: first Hadoop Configuration build reconfigures log4j2 and drops our appender.
         HadoopUtils.getHadoopConfiguration(new Options());

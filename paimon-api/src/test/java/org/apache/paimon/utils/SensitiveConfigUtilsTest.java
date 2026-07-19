@@ -69,24 +69,24 @@ class SensitiveConfigUtilsTest {
     @Test
     void testRedactMapReplacesOnlySensitiveValues() {
         Map<String, String> options = new LinkedHashMap<>();
-        options.put("warehouse", "oss://bucket/warehouse");
-        options.put("fs.oss.accessKeyId", "LTAI-secret-id-01");
-        options.put("fs.oss.accessKeySecret", "real-secret-value");
-        options.put("fs.oss.endpoint", "oss-cn-hangzhou.aliyuncs.com");
+        options.put("warehouse", "mock://warehouse");
+        options.put("fs.oss.accessKeyId", "mock-access-id-0001");
+        options.put("fs.oss.accessKeySecret", "mock-secret-value");
+        options.put("fs.oss.endpoint", "mock-endpoint.example.com");
 
         Map<String, String> redacted = SensitiveConfigUtils.redactMap(options);
 
-        assertThat(redacted).containsEntry("warehouse", "oss://bucket/warehouse");
+        assertThat(redacted).containsEntry("warehouse", "mock://warehouse");
         // Long secrets keep their last 4 chars; endpoint is untouched.
-        assertThat(redacted).containsEntry("fs.oss.accessKeyId", "****d-01");
+        assertThat(redacted).containsEntry("fs.oss.accessKeyId", "****0001");
         assertThat(redacted).containsEntry("fs.oss.accessKeySecret", "****alue");
-        assertThat(redacted).containsEntry("fs.oss.endpoint", "oss-cn-hangzhou.aliyuncs.com");
+        assertThat(redacted).containsEntry("fs.oss.endpoint", "mock-endpoint.example.com");
         // Original map must not be mutated.
-        assertThat(options).containsEntry("fs.oss.accessKeySecret", "real-secret-value");
+        assertThat(options).containsEntry("fs.oss.accessKeySecret", "mock-secret-value");
         // The rendered string must not contain any raw secret.
         assertThat(redacted.toString())
-                .doesNotContain("real-secret-value")
-                .doesNotContain("LTAI-secret-id-01");
+                .doesNotContain("mock-secret-value")
+                .doesNotContain("mock-access-id-0001");
     }
 
     @Test
@@ -97,21 +97,21 @@ class SensitiveConfigUtilsTest {
     @Test
     void testRedactTextMasksSecretsInJsonAndForm() {
         String json =
-                "{\"accessKeyId\":\"LTAI-id\",\"accessKeySecret\":\"the-real-secret\","
-                        + "\"securityToken\":\"tok-123\",\"endpoint\":\"oss-cn-hangzhou\"}";
+                "{\"accessKeyId\":\"mock-id\",\"accessKeySecret\":\"mock-secret-abcd\","
+                        + "\"securityToken\":\"mock-tok\",\"endpoint\":\"mock-endpoint\"}";
         String redactedJson = SensitiveConfigUtils.redactText(json);
         assertThat(redactedJson)
-                .doesNotContain("the-real-secret")
-                .doesNotContain("tok-123")
+                .doesNotContain("mock-secret-abcd")
+                .doesNotContain("mock-tok")
                 .contains(REDACTED)
                 // Non-sensitive fields are kept.
-                .contains("oss-cn-hangzhou");
+                .contains("mock-endpoint");
 
-        String form = "password=hunter2&user=alice&fs.oss.access-key=AK-9";
+        String form = "password=mock-pass&user=alice&fs.oss.access-key=mock-ak";
         String redactedForm = SensitiveConfigUtils.redactText(form);
         assertThat(redactedForm)
-                .doesNotContain("hunter2")
-                .doesNotContain("AK-9")
+                .doesNotContain("mock-pass")
+                .doesNotContain("mock-ak")
                 .contains("user=alice");
     }
 
