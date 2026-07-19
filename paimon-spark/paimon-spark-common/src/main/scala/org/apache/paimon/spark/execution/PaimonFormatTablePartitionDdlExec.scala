@@ -20,6 +20,7 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.format.PaimonFormatTable
+import org.apache.paimon.spark.procedure.SyncFormatTableMetadataProcedure
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionsException, ResolvedPartitionSpec}
@@ -81,8 +82,8 @@ case class PaimonAddFormatTablePartitionsExec(
  * Tables always fail with a clear error). Complete specs are resolved against the catalog
  * registration first: missing specs fail with [[NoSuchPartitionsException]] unless IF EXISTS was
  * given, and only registered specs are unregistered and have their directories deleted, so data
- * that is merely awaiting registration is never removed. Partial specs resolve to the registered
- * leaf partitions they cover.
+ * that is merely awaiting registration (e.g. by MSCK REPAIR TABLE) is never removed. Partial specs
+ * resolve to the registered leaf partitions they cover.
  */
 case class PaimonDropFormatTablePartitionsExec(
     table: PaimonFormatTable,
@@ -137,6 +138,32 @@ case class PaimonDropFormatTablePartitionsExec(
       } finally {
         refreshCache()
       }
+    }
+    Seq.empty
+  }
+
+  override def output: Seq[Attribute] = Seq.empty
+}
+
+/**
+ * MSCK REPAIR TABLE for managed Format Tables, reusing the sync-procedure engine. Spark rejects
+ * RepairTable for v2 tables in DataSourceV2Strategy, so PaimonStrategy intercepts first; plain MSCK
+ * means ADD, and MSCK always applies (never a dry run). Unmanaged tables are not intercepted and
+ * keep Spark's own v2 rejection.
+ */
+case class PaimonRepairFormatTablePartitionsExec(
+    table: PaimonFormatTable,
+    addPartitions: Boolean,
+    dropPartitions: Boolean,
+    refreshCache: () => Unit)
+  extends LeafV2CommandExec {
+
+  override protected def run(): Seq[InternalRow] = {
+    try {
+      SyncFormatTableMetadataProcedure
+        .repairFormatTablePartitions(table, addPartitions, dropPartitions)
+    } finally {
+      refreshCache()
     }
     Seq.empty
   }

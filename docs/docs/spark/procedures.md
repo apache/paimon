@@ -586,5 +586,37 @@ This section introduce all available spark procedures about paimon.
          CALL sys.rescale(table => 'default.T', bucket_num => 16, partitions => 'dt=20250217,hh=08;dt=20250217,hh=09')<br/>
       </td>
    </tr>
+   <tr>
+      <td>list_format_table_partitions</td>
+      <td>
+         To list partitions of a managed Format Table (a Format Table with 'metastore.partitioned-table' = 'true') page by page. Each output row contains a partition path and the next_page_token to pass into the next call; the token is null on the last page. When a where predicate is given, each page returns the matching rows of one raw catalog page, so filtered pages can carry fewer than limit rows; keep calling with the returned token until it is null. Arguments:
+            <li>table: the target managed Format Table identifier. Cannot be empty.</li>
+            <li>where: partition predicate. Left empty for all partitions.</li>
+            <li>limit: the maximum number of partitions to return in one page, between 1 and 10000. Default is 1000.</li>
+            <li>page_token: the next_page_token returned by the previous call. Left empty for the first page.</li>
+      </td>
+      <td>
+         CALL sys.list_format_table_partitions(table => 'default.T')<br/><br/>
+         CALL sys.list_format_table_partitions(table => 'default.T', where => 'dt >= 20250101', limit => 500)<br/><br/>
+         CALL sys.list_format_table_partitions(table => 'default.T', page_token => 'token-from-previous-call')<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>sync_format_table_metadata</td>
+      <td>
+         To reconcile the partition metadata of a managed Format Table (a Format Table with 'metastore.partitioned-table' = 'true') with the partition directories on the filesystem. Only partition metadata is changed, data files are never touched. Defaults to a dry run which only reports the planned actions; pass dry_run => false to apply them. 'MSCK REPAIR TABLE' is the SQL equivalent which always applies the changes. Arguments:
+            <li>table: the target managed Format Table identifier. Cannot be empty.</li>
+            <li>mode: 'ADD' registers filesystem partitions missing from the catalog, 'DROP' unregisters catalog partitions whose directories no longer exist, 'SYNC' does both. Default is 'ADD'.</li>
+            <li>dry_run: only report the planned actions without applying them. Default is true.</li>
+      </td>
+      <td>
+         -- report partitions that would be registered<br/>
+         CALL sys.sync_format_table_metadata(table => 'default.T')<br/><br/>
+         -- register missing partitions<br/>
+         CALL sys.sync_format_table_metadata(table => 'default.T', dry_run => false)<br/><br/>
+         -- fully synchronize directories and metadata<br/>
+         CALL sys.sync_format_table_metadata(table => 'default.T', mode => 'SYNC', dry_run => false)<br/>
+      </td>
+   </tr>
    </tbody>
 </table>

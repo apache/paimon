@@ -39,6 +39,7 @@ import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
+import org.apache.paimon.spark.procedure.ListFormatTablePartitionsProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MergeBranchProcedure;
 import org.apache.paimon.spark.procedure.MigrateDatabaseProcedure;
@@ -58,6 +59,7 @@ import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
+import org.apache.paimon.spark.procedure.SyncFormatTableMetadataProcedure;
 import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -127,6 +129,10 @@ public class SparkProcedures {
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
+        procedureBuilders.put(
+                "list_format_table_partitions", ListFormatTablePartitionsProcedure::builder);
+        procedureBuilders.put(
+                "sync_format_table_metadata", SyncFormatTableMetadataProcedure::builder);
         return procedureBuilders.build();
     }
 }

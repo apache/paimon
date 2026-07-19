@@ -20,6 +20,9 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.spark.SparkTable;
 import org.apache.paimon.spark.SparkUtils;
+import org.apache.paimon.spark.format.PaimonFormatTable;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.PaimonSparkSession$;
@@ -34,6 +37,7 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 
+import java.util.Map;
 import java.util.function.Function;
 
 import scala.Option;
@@ -102,6 +106,38 @@ abstract class BaseProcedure implements Procedure {
                             "Couldn't load table '%s' in catalog '%s'", ident, tableCatalog.name());
             throw new RuntimeException(errMsg, e);
         }
+    }
+
+    protected PaimonFormatTable loadFormatTable(Identifier ident) {
+        try {
+            Table table = tableCatalog.loadTable(ident);
+            Preconditions.checkArgument(
+                    table instanceof PaimonFormatTable, "%s is not a Paimon Format Table", ident);
+            return (PaimonFormatTable) table;
+        } catch (NoSuchTableException e) {
+            throw new RuntimeException("Couldn't load Format Table " + ident, e);
+        }
+    }
+
+    /** Validate that the table is a managed Format Table and return its partition gateway. */
+    static org.apache.paimon.spark.format.FormatTablePartitionCatalog managedPartitionCatalog(
+            PaimonFormatTable sparkTable) {
+        String name = sparkTable.table().fullName();
+        Preconditions.checkArgument(
+                new org.apache.paimon.CoreOptions(sparkTable.table().options())
+                        .partitionedTableInMetastore(),
+                "%s is not a managed Format Table",
+                name);
+        org.apache.paimon.spark.format.FormatTablePartitionCatalog partitionCatalog =
+                sparkTable.partitionCatalog();
+        Preconditions.checkNotNull(
+                partitionCatalog, "Managed Format Table %s has no partition catalog gateway", name);
+        return partitionCatalog;
+    }
+
+    protected static String partitionPath(Map<String, String> spec, RowType partitionType) {
+        String path = PartitionPathUtils.generatePartitionPath(spec, partitionType, false);
+        return path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
     }
 
     protected DataSourceV2Relation createRelation(Identifier ident) {

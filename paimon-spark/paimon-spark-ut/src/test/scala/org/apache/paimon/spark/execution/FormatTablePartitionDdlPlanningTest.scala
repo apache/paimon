@@ -24,6 +24,7 @@ import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
+import org.apache.paimon.spark.commands.PaimonShowFormatTablePartitionsExec
 import org.apache.paimon.spark.format.{FormatTablePartitionCatalog, FormatTablePartitionPage, PaimonFormatTable}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.types.DataTypes
@@ -31,9 +32,10 @@ import org.apache.paimon.types.DataTypes
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionsException, ResolvedPartitionSpec, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
-import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, DropPartitions}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GenericInternalRow}
+import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, DropPartitions, RepairTable, ShowPartitions}
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier, TableCatalog}
+import org.apache.spark.sql.types.StringType
 
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
@@ -242,7 +244,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
 
       // Leading partial spec expands to every registered leaf partition below it.
       sql(s"ALTER TABLE $tableName DROP PARTITION (dt='20260715')")
-      assert(catalogPartitions(tableName) == Set("dt=20260716/hh=10"))
+      assert(shownPartitions(tableName) == Set("dt=20260716/hh=10"))
 
       // Complete specs honor IF EXISTS and fail loudly for unregistered partitions.
       sql(s"ALTER TABLE $tableName DROP IF EXISTS PARTITION (dt='20990101', hh='00')")
@@ -254,11 +256,11 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           .iterate(missingError: Throwable)(_.getCause)
           .takeWhile(_ != null)
           .exists(_.isInstanceOf[NoSuchPartitionsException]))
-      assert(catalogPartitions(tableName) == Set("dt=20260716/hh=10"))
+      assert(shownPartitions(tableName) == Set("dt=20260716/hh=10"))
 
       // Non-leading partial specs resolve by partition name through the gateway.
       sql(s"ALTER TABLE $tableName DROP PARTITION (hh='10')")
-      assert(catalogPartitions(tableName) == Set.empty)
+      assert(shownPartitions(tableName) == Set.empty)
     }
   }
 
@@ -360,7 +362,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
             () => refreshCalls += 1))
       }
 
-      // The unregistered directory (still awaiting registration) must survive untouched.
+      // The unregistered directory (e.g. awaiting MSCK registration) must survive untouched.
       assert(dropCalls == 0)
       assert(refreshCalls == 0)
       assert(fileIO.exists(pendingDir))
@@ -809,6 +811,67 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     assert(dropCalls == 0)
   }
 
+  test("MSCK strategy intercepts only managed Format Tables and maps the mode flags") {
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val identifier = SparkIdentifier.of(Array("test"), "format_table")
+    val (managed, _) = formatTable(managed = true)
+    val (unmanaged, _) = formatTable(managed = false)
+    val managedResolved = ResolvedTable.create(catalog, identifier, managed)
+
+    // (plain MSCK) -> ADD; DROP PARTITIONS -> DROP; SYNC PARTITIONS -> both.
+    Seq((true, false), (false, true), (true, true)).foreach {
+      case (add, drop) =>
+        val plans = PaimonStrategy(spark).apply(RepairTable(managedResolved, add, drop))
+        assert(plans.size == 1)
+        val repair = plans.head.asInstanceOf[PaimonRepairFormatTablePartitionsExec]
+        assert(repair.addPartitions == add)
+        assert(repair.dropPartitions == drop)
+    }
+
+    // Unmanaged tables keep Spark's own v2 rejection: no interception.
+    val unmanagedPlans = PaimonStrategy(spark)
+      .apply(RepairTable(ResolvedTable.create(catalog, identifier, unmanaged), true, false))
+    assert(unmanagedPlans.isEmpty)
+  }
+
+  test("MSCK repair reuses the sync engine: DROP unregisters catalog-only partitions") {
+    val gateway = new AtomicGateway(Set(Map("dt" -> "20260715", "hh" -> "10")))
+    val table = new PaimonFormatTable(rawFormatTable(managed = true), gateway)
+    var refreshCalls = 0
+
+    // The table location has no partition directories, so the registered partition is
+    // catalog-only; MSCK DROP PARTITIONS must unregister it (metadata-only).
+    runCommand(
+      PaimonRepairFormatTablePartitionsExec(
+        table,
+        addPartitions = false,
+        dropPartitions = true,
+        () => refreshCalls += 1))
+
+    assert(gateway.state.isEmpty)
+    assert(refreshCalls == 1)
+  }
+
+  test("strategy routes only managed Format Table SHOW PARTITIONS through the bounded executor") {
+    val output = Seq(AttributeReference("partition", StringType, nullable = false)())
+    val (managed, _) = formatTable(managed = true)
+    val (unmanaged, _) = formatTable(managed = false)
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val identifier = SparkIdentifier.of(Array("test"), "format_table")
+    val spec = Some(partition(20260715, 10))
+
+    val managedPlans = PaimonStrategy(spark).apply(
+      ShowPartitions(ResolvedTable.create(catalog, identifier, managed), spec, output))
+    val unmanagedPlans = PaimonStrategy(spark).apply(
+      ShowPartitions(ResolvedTable.create(catalog, identifier, unmanaged), spec, output))
+
+    assert(managedPlans.size == 1)
+    assert(
+      managedPlans.head.asInstanceOf[PaimonShowFormatTablePartitionsExec].maxResults ==
+        PaimonShowFormatTablePartitionsExec.DEFAULT_MAX_RESULTS)
+    assert(unmanagedPlans.isEmpty)
+  }
+
   private def partition(dt: Int, hh: Int): ResolvedPartitionSpec =
     ResolvedPartitionSpec(Seq("dt", "hh"), new GenericInternalRow(Array[Any](dt, hh)))
 
@@ -855,12 +918,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       specs.map(_.asJava).asJava,
       true)
 
-  private def catalogPartitions(tableName: String): Set[String] =
-    paimonCatalog
-      .listPartitions(Identifier.create(dbName0, tableName))
-      .asScala
-      .map(p => Seq("dt", "hh").map(key => s"$key=${p.spec().get(key)}").mkString("/"))
-      .toSet
+  private def shownPartitions(tableName: String): Set[String] =
+    sql(s"SHOW PARTITIONS $tableName").collect().map(_.getString(0)).toSet
 
   private def runCommand(command: AnyRef): Unit = {
     try {
