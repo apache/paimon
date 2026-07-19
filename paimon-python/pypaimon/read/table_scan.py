@@ -93,12 +93,16 @@ class TableScan:
         bucket / cross-partition PK tables (unconfirmed Rust parity), any
         partitioned table (Rust bucket_path vs the writer's str(value) can
         diverge), a stale schema (Rust reloads the latest), copy() overrides
-        Rust does not see (e.g. a removed scan.snapshot-id), query auth,
-        non-main branch, time-travel, scan.version, incremental, a missing/old
-        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
-        this capability gate in sync when adding scan features."""
+        Rust does not see (e.g. a removed scan.snapshot-id), a row limit
+        (native has no plan-time limit pushdown), query auth, non-main branch,
+        time-travel, scan.version, incremental, a missing/old pypaimon-rust, or
+        a catalog / identifier Rust cannot reconstruct. Keep this capability
+        gate in sync when adding scan features."""
         from pypaimon.read.native_plan import native_runtime_available
         if not native_runtime_available():
+            return False
+        # Native has no plan-time limit pushdown; Python trims splits before read.
+        if self.limit is not None:
             return False
         fs = self.file_scanner
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
@@ -172,20 +176,20 @@ class TableScan:
 
         try:
             splits = native_plan(self.table)
+            if not splits:
+                return None
+            snapshot_id = splits[0].snapshot_id
+            partition_predicate = self.file_scanner.partition_key_predicate
+            if partition_predicate is not None:
+                splits = [s for s in splits
+                          if getattr(s, 'partition', None) is None
+                          or partition_predicate.test(s.partition)]
+            return Plan(splits, snapshot_id=snapshot_id)
         except Exception as e:
-            # Any native construction/planning failure (e.g. unsupported scheme) -> fall back.
+            # Any native construction/planning/pruning failure -> fall back.
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
-        if not splits:
-            return None
-        snapshot_id = splits[0].snapshot_id
-        partition_predicate = self.file_scanner.partition_key_predicate
-        if partition_predicate is not None:
-            splits = [s for s in splits
-                      if getattr(s, 'partition', None) is None
-                      or partition_predicate.test(s.partition)]
-        return Plan(splits, snapshot_id=snapshot_id)
 
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:

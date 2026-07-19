@@ -62,6 +62,7 @@ def _scan(native_enabled, file_scanner):
     scan.file_scanner = file_scanner
     scan._query_auth_fn = None      # no query-auth restrictions
     scan._read_type = None
+    scan.limit = None               # no row limit
     return scan
 
 
@@ -112,6 +113,18 @@ class NativePlanTest(unittest.TestCase):
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
+    def test_plan_falls_back_when_partition_prune_raises(self):
+        pred = Mock()
+        pred.test.side_effect = RuntimeError('predicate boom')
+        fs = Mock(partition_key_predicate=pred)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        split = Mock(partition=Mock(values=[2026, 7]), snapshot_id=1)
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[split]):
+            self.assertIs(scan.plan(), sentinel)
+        fs.scan.assert_called_once_with()
+
     def test_plan_native_no_partition_predicate_keeps_all(self):
         splits = [Mock(partition=Mock(values=[1])), Mock(partition=Mock(values=[2]))]
         fs = Mock(partition_key_predicate=None)
@@ -152,6 +165,7 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
         check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
             'side_effect', RuntimeError('metadata read failed')))
+        check(lambda s, fs: setattr(s, 'limit', 5))
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
