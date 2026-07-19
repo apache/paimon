@@ -24,6 +24,7 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -236,7 +237,11 @@ public class HttpClient implements RESTClient {
                     (error != null && error.getResourceName() != null)
                             ? error.getResourceName()
                             : "";
-            String message = responseBodyStr != null ? responseBodyStr : "response body is null";
+            // Redact: unparsed body is echoed into the exception.
+            String message =
+                    responseBodyStr != null
+                            ? SensitiveConfigUtils.redactText(responseBodyStr)
+                            : "response body is null";
             int code = (error != null && error.getCode() != null) ? error.getCode() : errorCode;
             error = new ErrorResponse(resourceType, resourceName, message, code);
         }

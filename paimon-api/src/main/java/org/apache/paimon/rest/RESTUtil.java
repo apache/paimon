@@ -167,7 +167,12 @@ public class RESTUtil {
             try {
                 return RESTApi.toJson(body);
             } catch (JsonProcessingException e) {
-                throw new RESTException(e, "Failed to encode request body: %s", body);
+                // Body may hold credentials; keep type + Jackson reason, drop the value.
+                throw new RESTException(
+                        e,
+                        "Failed to encode request body of type %s: %s",
+                        body.getClass().getName(),
+                        e.getOriginalMessage());
             }
         }
         return null;
