@@ -15,6 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+import collections
 import os
 import shutil
 import tempfile
@@ -118,7 +119,8 @@ class RayRangeJoinTest(unittest.TestCase):
         ds = range_join(
             "default.rj_lr_left", "default.rj_lr_right", self.catalog_options,
             left_on="lid", right_on="rid", num_ranges=3)
-        got = {r["rid"]: r["val"] for r in ds.take_all()}
+        # Output keeps the left key name (pyarrow coalesces the right key into it).
+        got = {r["lid"]: r["val"] for r in ds.take_all()}
         self.assertEqual(got, {i: f"v{i}" for i in range(30)})
 
     def test_num_ranges_one_is_correct(self):
@@ -186,6 +188,38 @@ class RayRangeJoinTest(unittest.TestCase):
     def test_rejects_bad_on_spec(self):
         with self.assertRaisesRegex(ValueError, "exactly one of"):
             range_join("a", "b", self.catalog_options)  # neither on nor left_on/right_on
+
+    def test_rejects_float_range_key(self):
+        schema = pa.schema([("k", pa.float64()), ("v", pa.int64())])
+        self._table("default.rj_float_a", schema, [
+            pa.Table.from_pydict({"k": [1.0], "v": [1]}, schema=schema)])
+        self._table("default.rj_float_b", schema, [
+            pa.Table.from_pydict({"k": [1.0], "v": [2]}, schema=schema)])
+        with self.assertRaisesRegex(ValueError, "FLOAT/DOUBLE"):
+            range_join("default.rj_float_a", "default.rj_float_b", self.catalog_options,
+                       on="k", left_projection=["k"], right_projection=["k"])
+
+    def test_rejects_left_key_vs_right_column_collision(self):
+        left = pa.schema([("lid", pa.int64()), ("x", pa.int64())])
+        right = pa.schema([("rid", pa.int64()), ("lid", pa.int64())])
+        self._table("default.rj_xn_left", left, [
+            pa.Table.from_pydict({"lid": [1], "x": [1]}, schema=left)])
+        self._table("default.rj_xn_right", right, [
+            pa.Table.from_pydict({"rid": [1], "lid": [9]}, schema=right)])
+        # Left key 'lid' collides with the right non-key column 'lid' in the output.
+        with self.assertRaisesRegex(ValueError, "collide"):
+            range_join("default.rj_xn_left", "default.rj_xn_right", self.catalog_options,
+                       left_on="lid", right_on="rid")
+
+    def test_range_budget_caps_ranges_when_stats_missing(self):
+        Split = collections.namedtuple("Split", "files")
+        File = collections.namedtuple("File", "row_count")
+        known = [(Split([File(100)]), 0, 99)]      # 100 rows with stats
+        unknown = [(Split([File(100)]), None, None)]  # 100 rows without stats
+        # unknown == total/2 -> budget 2; all-known -> no cap; all-unknown -> 1.
+        self.assertEqual(rjmod._range_budget(known, unknown), 2)
+        self.assertEqual(rjmod._range_budget(known, known), rjmod._MAX_RANGES)
+        self.assertEqual(rjmod._range_budget(unknown, unknown), 1)
 
     def test_split_key_range_reads_stats(self):
         # The planner reads a file's min/max for the range column from manifest stats.

@@ -22,9 +22,8 @@ each range is read and joined in its own Ray task, with no global shuffle. Works
 when both sides are clustered by the first join key.
 
 Correctness never depends on stats: a split whose min/max is missing joins every range.
-That is also the cost model -- such a split is read once per range, so a mix of a few
-no-stats splits with N stats-derived ranges reads those few up to N times. (When *no*
-split has stats there are no cut points, so it collapses to a single range and one read.)
+Such a split is read once per range, so the range count is capped to keep those re-reads
+under one extra full scan (all-no-stats collapses to a single range).
 """
 
 from typing import Any, Dict, List, Optional
@@ -43,37 +42,61 @@ __all__ = ["range_join"]
 _MAX_RANGES = 512
 
 
-def _stats_field_names(table_field_names, file):
-    # Names the file's value_stats row is laid out in; None = unknown.
+def _file_key_range(file, col, table_field_names, table_schema_id):
+    """Min/max of ``col`` for one data file from its manifest stats; None when the
+    file has no usable stats for ``col``."""
+    # value_stats row layout: value_stats_cols, else write_cols, else the full schema.
     if file.value_stats_cols is not None:
-        return file.value_stats_cols
-    if file.write_cols is not None:
-        return file.write_cols
-    return table_field_names
+        names = file.value_stats_cols
+    elif file.write_cols is not None:
+        names = file.write_cols
+    elif file.schema_id == table_schema_id:
+        names = table_field_names
+    else:
+        return None  # stats laid out in an older schema's field order: unsafe
+    if col not in names:
+        return None
+    idx = names.index(col)
+    stats = file.value_stats
+    if len(stats.min_values) <= idx:
+        return None
+    fmin = stats.min_values.get_field(idx)
+    fmax = stats.max_values.get_field(idx)
+    if fmin is None or fmax is None:  # all-null or absent stats
+        return None
+    return fmin, fmax
 
 
-def _split_key_range(split, col, table_field_names, table_schema_id):
-    """Min/max of ``col`` over the split's files from manifest stats; (None, None)
-    when any file lacks usable stats (the split then joins every range)."""
+def _range_stats_by_file(table, col):
+    """{file_name: (min, max)} for ``col``, read straight from the manifest with stats.
+    scan.plan() drops value stats, so read the entries separately (driver-side)."""
+    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    if snapshot is None:
+        return {}
+    manifest_files = ManifestListManager(table).read_all(snapshot)
+    entries = ManifestFileManager(table).read_entries_parallel(manifest_files, drop_stats=False)
+    field_names = table.field_names
+    schema_id = table.table_schema.id
+    stats = {}
+    for entry in entries:
+        rng = _file_key_range(entry.file, col, field_names, schema_id)
+        if rng is not None:
+            stats[entry.file.file_name] = rng
+    return stats
+
+
+def _split_key_range(split, stats_by_file):
+    """Min/max of the range key over the split's files, or (None, None) when any file
+    lacks stats (the split then joins every range)."""
     lo, hi = None, None
     for f in split.files:
-        if f.value_stats_cols is None and f.write_cols is None \
-                and f.schema_id != table_schema_id:
-            # Stats laid out in an older schema's field order: name lookup unsafe.
+        rng = stats_by_file.get(f.file_name)
+        if rng is None:
             return None, None
-        names = _stats_field_names(table_field_names, f)
-        stats = f.value_stats
-        if col not in names:
-            return None, None
-        idx = names.index(col)
-        if len(stats.min_values) <= idx:
-            return None, None
-        fmin = stats.min_values.get_field(idx)
-        fmax = stats.max_values.get_field(idx)
-        if fmin is None or fmax is None:  # all-null or absent stats
-            return None, None
-        lo = fmin if lo is None else min(lo, fmin)
-        hi = fmax if hi is None else max(hi, fmax)
+        lo = rng[0] if lo is None else min(lo, rng[0])
+        hi = rng[1] if hi is None else max(hi, rng[1])
     if lo is None:
         return None, None
     return lo, hi
@@ -81,17 +104,18 @@ def _split_key_range(split, col, table_field_names, table_schema_id):
 
 def _plan_ranged_splits(table_id, catalog_options, projection, range_col):
     """Plan the manifest driver-side; returns ``(ranged_splits, schema_id)`` where
-    ranged_splits is a list of (split, lo, hi)."""
+    ranged_splits is a list of (split, lo, hi). Stats come from a separate manifest
+    read (scan.plan() strips them) and never reach the workers."""
     table = get_table(table_id, catalog_options, None, "range_join")
     schema_id = table.table_schema.id
     if pin_latest_snapshot(table) is None:
         return [], schema_id
+    stats_by_file = _range_stats_by_file(table, range_col)
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
-    field_names = table.field_names
     ranged = []
     for s in scan.plan().splits():
-        lo, hi = _split_key_range(s, range_col, field_names, schema_id)
+        lo, hi = _split_key_range(s, stats_by_file)
         ranged.append((s, lo, hi))
     return ranged, schema_id
 
@@ -120,6 +144,20 @@ def _cut_points(ranged_sides, num_ranges):
                 cuts.append(value)
                 k += 1
     return cuts
+
+
+def _range_budget(l_ranged, r_ranged):
+    # Cap ranges so unknown-stats splits (read in every range) re-read <= one full scan.
+    total = unknown = 0
+    for ranged in (l_ranged, r_ranged):
+        for split, lo, _ in ranged:
+            rows = sum(f.row_count for f in split.files)
+            total += rows
+            if lo is None:
+                unknown += rows
+    if unknown <= 0:
+        return _MAX_RANGES
+    return max(1, total // unknown)
 
 
 def _ranges_from_cuts(cuts):
@@ -223,6 +261,21 @@ def range_join(
             "range_join key columns must have the same type on both sides; "
             f"mismatched (left, right, left type, right type): {type_mismatch}.")
 
+    # The range key is the first pair; reject types that can't be range-partitioned safely.
+    range_key_type = key_type(ltable, lkeys[0]).upper()
+    if range_key_type.startswith("FLOAT") or range_key_type.startswith("DOUBLE"):
+        # NaN compares false to every bound, so it would fall out of every range while
+        # pyarrow's hash join still matches NaN == NaN -> silently dropped matches.
+        raise ValueError(
+            f"range_join range key {lkeys[0]!r} must not be FLOAT/DOUBLE (NaN can't be "
+            "range-partitioned); use an integer/string/date key.")
+    if "LOCAL TIME ZONE" in range_key_type:
+        # Manifest stats decode to naive datetimes; a tz-aware Arrow column can't be
+        # compared against them. Not supported yet.
+        raise ValueError(
+            f"range_join range key {lkeys[0]!r} of type TIMESTAMP WITH LOCAL TIME ZONE "
+            "is not supported yet.")
+
     # The join keys must survive projection, or the local join has no key.
     if left_projection is not None and not set(lkeys) <= set(left_projection):
         raise ValueError(
@@ -230,14 +283,15 @@ def range_join(
     if right_projection is not None and not set(rkeys) <= set(right_projection):
         raise ValueError(
             f"right_projection must include the join keys {rkeys}; got {right_projection}.")
-    # Non-key columns must not collide, or pyarrow's join collides on them.
+    # pyarrow drops the right keys (coalesced into the left), so the output keeps the LEFT
+    # key names. A right non-key column sharing a left column name collides -> reject it.
     lcols = left_projection if left_projection is not None else ltable.field_names
     rcols = right_projection if right_projection is not None else rtable.field_names
-    collisions = sorted((set(lcols) - set(lkeys)) & (set(rcols) - set(rkeys)))
+    collisions = sorted(set(lcols) & (set(rcols) - set(rkeys)))
     if collisions:
         raise ValueError(
-            f"range_join sides must not share columns other than the join keys; "
-            f"both have {collisions}. Project or rename them away.")
+            f"range_join output columns collide: {collisions}. The output keeps the left "
+            "key names and the right non-key columns; project or rename the overlap away.")
 
     l_range_col, r_range_col = lkeys[0], rkeys[0]
     l_ranged, l_schema_id = _plan_ranged_splits(
@@ -259,6 +313,9 @@ def range_join(
         num_ranges = max(1, min(_MAX_RANGES, max(len(l_ranged), len(r_ranged))))
     elif num_ranges < 1:
         raise ValueError(f"num_ranges must be >= 1; got {num_ranges}.")
+    # An unknown-stats split is read in every range. Cap ranges so those re-reads add at
+    # most one extra full scan, else the fallback can cost more than a shuffle.
+    num_ranges = min(num_ranges, _range_budget(l_ranged, r_ranged))
     ranges = _ranges_from_cuts(_cut_points((l_ranged, r_ranged), num_ranges))
 
     def _join_range(left_splits, right_splits, lo, hi):
