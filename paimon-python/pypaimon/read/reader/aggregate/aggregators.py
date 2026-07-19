@@ -39,7 +39,7 @@ from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
-from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType
+from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
 from pypaimon.table.row.internal_row import InternalRow
 
 # aggregator input type hints variables
@@ -60,6 +60,7 @@ NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
+NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -664,6 +665,124 @@ class FieldNestedUpdateAgg(FieldAggregator):
         )
 
 
+class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
+    """
+    Aggregator for merging MAP values with key and timestamp.
+
+    The input field type must be MAP with ROW values. Each ROW value must
+    contain a timestamp field, which is used to resolve conflicts when the
+    same key appears multiple times.
+
+    For the same key:
+    - A value with a newer timestamp replaces the existing value.
+    - A value with a null timestamp is ignored.
+    - A null value removes the corresponding key from the map.
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: DataType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        super().__init__(name, field_type)
+        if not isinstance(field_type, MapType):
+            raise ValueError(
+                "Data type for field '{}' must be 'MAP' but was '{}'".format(field_name, field_type)
+            )
+        if not isinstance(field_type.value, RowType):
+            raise ValueError(
+                "Value type of MAP for field '{}' must be 'ROW' but was '{}'".format(field_name, field_type.value)
+            )
+        if len(field_type.value.fields) < 2:
+            raise ValueError(
+                "ROW type for field '{}' must have at least 2 fields, but found {}".format(
+                    field_name, len(field_type.value.fields)
+                )
+            )
+
+        self.ts_field_name = options.field_merge_map_ts_field(field_name)
+        self.ts_field_index = self._resolve_ts_field_index(field_type.value, self.ts_field_name, field_name)
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        result_map = {}
+        self._put_to_map(result_map, accumulator)
+        self._merge_input_map(result_map, input_field)
+
+        return result_map
+
+    def _resolve_ts_field_index(self, row_type: RowType, ts_field_name: str, field_name: str) -> int:
+        if ts_field_name is None:
+            # default to the last field
+            ts_field_index = len(row_type.fields) - 1
+        else:
+            ts_field_index = row_type.get_field_index(ts_field_name)
+            if ts_field_index < 0:
+                raise ValueError(
+                    "Timestamp field '{}' not found in ROW type for field '{}'. Available fields: {}".format(
+                        ts_field_name, field_name, [field.name for field in row_type.fields]
+                    )
+                )
+
+        return ts_field_index
+
+    def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        if isinstance(input_field, dict):
+            maps.update(input_field)
+        elif isinstance(input_field, list):
+            tmp_map = {}
+            for item in input_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+                tmp_map[item['key']] = item['value']
+
+            maps.update(tmp_map)
+        else:
+            raise TypeError(
+                "input_field must be dict or list[dict], got {}".format(type(input_field))
+            )
+
+    def _merge_input_map(self, result_map: Dict[Any, Any], input_field: Any):
+        input_map = {}
+        self._put_to_map(input_map, input_field)
+
+        for key, new_row in input_map.items():
+            if new_row is None:
+                result_map.pop(key, None)
+                continue
+
+            new_ts = self._get_ts_field(new_row)
+            if new_ts is None:
+                continue
+
+            existing_row = result_map.get(key)
+            if existing_row is None:
+                result_map[key] = new_row
+                continue
+
+            existing_ts = self._get_ts_field(existing_row)
+            if existing_ts is None or new_ts > existing_ts:
+                result_map[key] = new_row
+
+    def _get_ts_field(self, input_row: Any) -> Any:
+        if isinstance(input_row, dict):
+            return input_row.get(self.ts_field_name)
+
+        if isinstance(input_row, InternalRow):
+            return input_row.get_field(self.ts_field_index)
+
+        raise TypeError(
+            "Unsupported row type '{}', expected InternalRow or dict.".format(
+                type(input_row).__name__
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -739,4 +858,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_NESTED_UPDATE, _build_field_options(FieldNestedUpdateAgg, NAME_NESTED_UPDATE)
+)
+register_aggregator(
+    NAME_MERGE_MAP_WITH_KEYTIME, _build_field_options(FieldMergeMapWithKeyTimeAgg, NAME_MERGE_MAP_WITH_KEYTIME)
 )

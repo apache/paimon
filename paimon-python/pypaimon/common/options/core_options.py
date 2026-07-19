@@ -153,6 +153,7 @@ class CoreOptions:
     NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
     COUNT_LIMIT = "count-limit"
+    MERGE_MAP_TS_FIELD = "ts-field"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -1566,6 +1567,15 @@ class CoreOptions:
             )
             .int_type()
             .default_value(2147483647)  # Integer.MAX_VALUE
+        )
+
+    def field_merge_map_ts_field(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_TS_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
         )
 
     @property
