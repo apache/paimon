@@ -42,7 +42,8 @@ public class SensitiveConfigUtils {
     /**
      * Substrings that mark a configuration key as sensitive. Keys are normalized (lower-cased with
      * separators removed) before matching, so {@code fs.oss.accessKeySecret}, {@code
-     * fs.s3a.access.key} and {@code fs.s3a.secret.key} are all detected.
+     * fs.s3a.access.key}, {@code fs.azure.account.key.*}, {@code fs.azure.sas.*} and {@code
+     * fs.s3a.encryption.key} are all detected.
      */
     private static final String[] SENSITIVE_KEY_PATTERNS = {
         "password",
@@ -50,28 +51,45 @@ public class SensitiveConfigUtils {
         "token",
         "credential",
         "accesskey",
+        "accountkey",
+        "encryptionkey",
         "authorization",
         "privatekey",
-        "apikey"
+        "apikey",
+        "sas"
     };
 
-    /** Matches {@code key:value} / {@code key=value} pairs whose key looks sensitive. */
+    /**
+     * Keys whose value is fully masked instead of keeping a trailing hint. Passwords and bearer
+     * tokens leak too much from even a few characters, so they are never partially revealed.
+     */
+    private static final String[] FULL_MASK_KEY_PATTERNS = {"password", "token", "authorization"};
+
+    /**
+     * Matches {@code key:value} / {@code key=value} pairs whose key looks sensitive. The value runs
+     * up to a quote, comma, brace, ampersand or line break, so multi-token values such as {@code
+     * Authorization: Bearer <token>} are masked whole rather than only their first word.
+     */
     private static final Pattern SENSITIVE_TEXT =
             Pattern.compile(
                     "(?i)([\"']?[\\w.-]*"
-                            + "(?:secret|token|password|credential|access[._-]?key|authorization"
-                            + "|api[._-]?key|private[._-]?key)"
-                            + "[\\w.-]*[\"']?\\s*[:=]\\s*)([\"']?)([^\"',&}\\s]+)");
+                            + "(?:secret|token|password|credential|access[._-]?key|account[._-]?key"
+                            + "|encryption[._-]?key|authorization|api[._-]?key|private[._-]?key|sas)"
+                            + "[\\w.-]*[\"']?\\s*[:=]\\s*)([\"']?)([^\"',&}\\r\\n]+)");
 
     private SensitiveConfigUtils() {}
 
     /** Returns whether the given configuration key is considered sensitive. */
     public static boolean isSensitive(String key) {
+        return matchesAny(key, SENSITIVE_KEY_PATTERNS);
+    }
+
+    private static boolean matchesAny(String key, String[] patterns) {
         if (key == null || key.isEmpty()) {
             return false;
         }
         String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        for (String pattern : SENSITIVE_KEY_PATTERNS) {
+        for (String pattern : patterns) {
             if (normalized.contains(pattern)) {
                 return true;
             }
@@ -81,7 +99,7 @@ public class SensitiveConfigUtils {
 
     /** Returns the value masked if its key is sensitive, otherwise the value unchanged. */
     public static String redactValue(String key, String value) {
-        return isSensitive(key) ? maskValue(value) : value;
+        return isSensitive(key) ? maskValue(value, matchesAny(key, FULL_MASK_KEY_PATTERNS)) : value;
     }
 
     /**
@@ -95,7 +113,7 @@ public class SensitiveConfigUtils {
         Map<String, String> redacted = new LinkedHashMap<>(options.size());
         for (Map.Entry<String, String> entry : options.entrySet()) {
             String key = entry.getKey();
-            redacted.put(key, isSensitive(key) ? maskValue(entry.getValue()) : entry.getValue());
+            redacted.put(key, redactValue(key, entry.getValue()));
         }
         return redacted;
     }
@@ -111,19 +129,24 @@ public class SensitiveConfigUtils {
         Matcher matcher = SENSITIVE_TEXT.matcher(text);
         StringBuffer sb = new StringBuffer();
         while (matcher.find()) {
-            String replacement = matcher.group(1) + matcher.group(2) + maskValue(matcher.group(3));
+            boolean fullMask = matchesAny(matcher.group(1), FULL_MASK_KEY_PATTERNS);
+            String replacement =
+                    matcher.group(1) + matcher.group(2) + maskValue(matcher.group(3), fullMask);
             matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(sb);
         return sb.toString();
     }
 
-    /** Masks a value, keeping the last {@link #TAIL_LEN} chars when it is long enough. */
-    private static String maskValue(String value) {
+    /**
+     * Masks a value. Password/token keys are fully masked; other secrets keep their last {@link
+     * #TAIL_LEN} chars when long enough, to aid troubleshooting.
+     */
+    private static String maskValue(String value, boolean fullMask) {
         if (value == null) {
             return null;
         }
-        if (value.length() >= MIN_LEN_FOR_TAIL) {
+        if (!fullMask && value.length() >= MIN_LEN_FOR_TAIL) {
             return "****" + value.substring(value.length() - TAIL_LEN);
         }
         return REDACTED;

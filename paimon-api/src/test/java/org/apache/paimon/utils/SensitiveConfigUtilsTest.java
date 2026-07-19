@@ -43,6 +43,12 @@ class SensitiveConfigUtilsTest {
         assertThat(SensitiveConfigUtils.isSensitive("Authorization")).isTrue();
         assertThat(SensitiveConfigUtils.isSensitive("client.private-key")).isTrue();
         assertThat(SensitiveConfigUtils.isSensitive("dlf.api-key")).isTrue();
+        // Azure / S3 cloud credentials.
+        assertThat(SensitiveConfigUtils.isSensitive("fs.azure.account.key.acct.blob.core"))
+                .isTrue();
+        assertThat(SensitiveConfigUtils.isSensitive("fs.azure.sas.container.acct.blob.core"))
+                .isTrue();
+        assertThat(SensitiveConfigUtils.isSensitive("fs.s3a.encryption.key")).isTrue();
     }
 
     @Test
@@ -57,7 +63,7 @@ class SensitiveConfigUtilsTest {
 
     @Test
     void testRedactValue() {
-        // Long value keeps only its last 4 chars.
+        // Secret/access-key values keep only their last 4 chars.
         assertThat(SensitiveConfigUtils.redactValue("fs.oss.accessKeySecret", "0123456789abcdef"))
                 .isEqualTo("****cdef");
         // Short value is fully masked.
@@ -67,11 +73,26 @@ class SensitiveConfigUtilsTest {
     }
 
     @Test
+    void testPasswordAndTokenAreFullyMasked() {
+        // Passwords and tokens leak too much from a trailing hint -> always fully masked.
+        assertThat(SensitiveConfigUtils.redactValue("my.password", "0123456789abcdef"))
+                .isEqualTo(REDACTED);
+        assertThat(SensitiveConfigUtils.redactValue("security.token", "0123456789abcdef"))
+                .isEqualTo(REDACTED);
+        assertThat(SensitiveConfigUtils.redactValue("Authorization", "Bearer 0123456789abcdef"))
+                .isEqualTo(REDACTED);
+        // Contrast: an access-key secret keeps its tail.
+        assertThat(SensitiveConfigUtils.redactValue("fs.s3a.secret.key", "0123456789abcdef"))
+                .isEqualTo("****cdef");
+    }
+
+    @Test
     void testRedactMapReplacesOnlySensitiveValues() {
         Map<String, String> options = new LinkedHashMap<>();
         options.put("warehouse", "mock://warehouse");
         options.put("fs.oss.accessKeyId", "mock-access-id-0001");
         options.put("fs.oss.accessKeySecret", "mock-secret-value");
+        options.put("fs.azure.account.key.acct", "mock-azure-key-value");
         options.put("fs.oss.endpoint", "mock-endpoint.example.com");
 
         Map<String, String> redacted = SensitiveConfigUtils.redactMap(options);
@@ -80,6 +101,7 @@ class SensitiveConfigUtilsTest {
         // Long secrets keep their last 4 chars; endpoint is untouched.
         assertThat(redacted).containsEntry("fs.oss.accessKeyId", "****0001");
         assertThat(redacted).containsEntry("fs.oss.accessKeySecret", "****alue");
+        assertThat(redacted).containsEntry("fs.azure.account.key.acct", "****alue");
         assertThat(redacted).containsEntry("fs.oss.endpoint", "mock-endpoint.example.com");
         // Original map must not be mutated.
         assertThat(options).containsEntry("fs.oss.accessKeySecret", "mock-secret-value");
@@ -113,6 +135,21 @@ class SensitiveConfigUtilsTest {
                 .doesNotContain("mock-pass")
                 .doesNotContain("mock-ak")
                 .contains("user=alice");
+    }
+
+    @Test
+    void testRedactTextMasksWholeValueWithSpaces() {
+        // The token after the "Bearer " scheme (with a space) must be masked, not just "Bearer".
+        String header = "Authorization: Bearer mock-jwt-token-abcdef";
+        assertThat(SensitiveConfigUtils.redactText(header))
+                .doesNotContain("mock-jwt-token-abcdef")
+                .startsWith("Authorization: ");
+
+        // A quoted multi-word secret value is masked up to the closing quote only.
+        String json = "{\"token\":\"Bearer mock-jwt-abcd\",\"user\":\"alice\"}";
+        assertThat(SensitiveConfigUtils.redactText(json))
+                .doesNotContain("mock-jwt-abcd")
+                .contains("\"user\":\"alice\"");
     }
 
     @Test

@@ -139,12 +139,21 @@ public class HttpClient implements RESTClient {
                             } catch (JsonProcessingException e) {
                                 // ignore exception
                             }
-                            error = buildErrorResponse(error, responseBodyStr, response.getCode());
+                            error = buildErrorResponse(error, response.getCode());
 
                             errorHandler.accept(error, extractRequestId(response));
                         }
                         if (responseType != null && responseBodyStr != null) {
-                            return RESTApi.fromJson(responseBodyStr, responseType);
+                            try {
+                                return RESTApi.fromJson(responseBodyStr, responseType);
+                            } catch (JsonProcessingException e) {
+                                // Do not surface the body or Jackson's source snippet: a
+                                // successful response (e.g. a token response) may contain
+                                // credentials. Report only the target type.
+                                throw new RESTException(
+                                        "Failed to parse REST response into %s",
+                                        responseType.getName());
+                            }
                         } else if (responseType == null) {
                             return null;
                         } else {
@@ -226,25 +235,20 @@ public class HttpClient implements RESTClient {
                 .toArray(Header[]::new);
     }
 
-    private static ErrorResponse buildErrorResponse(
-            ErrorResponse error, String responseBodyStr, int errorCode) {
-        if (error == null || error.getMessage() == null || error.getMessage().isEmpty()) {
-            String resourceType =
-                    (error != null && error.getResourceType() != null)
-                            ? error.getResourceType()
-                            : "";
-            String resourceName =
-                    (error != null && error.getResourceName() != null)
-                            ? error.getResourceName()
-                            : "";
-            // Redact: unparsed body is echoed into the exception.
-            String message =
-                    responseBodyStr != null
-                            ? SensitiveConfigUtils.redactText(responseBodyStr)
-                            : "response body is null";
-            int code = (error != null && error.getCode() != null) ? error.getCode() : errorCode;
-            error = new ErrorResponse(resourceType, resourceName, message, code);
+    private static ErrorResponse buildErrorResponse(ErrorResponse error, int errorCode) {
+        String resourceType =
+                (error != null && error.getResourceType() != null) ? error.getResourceType() : "";
+        String resourceName =
+                (error != null && error.getResourceName() != null) ? error.getResourceName() : "";
+        int code = (error != null && error.getCode() != null) ? error.getCode() : errorCode;
+        String message;
+        if (error != null && error.getMessage() != null && !error.getMessage().isEmpty()) {
+            // A parsed message may still embed secrets (e.g. "password=..."); redact it.
+            message = SensitiveConfigUtils.redactText(error.getMessage());
+        } else {
+            // The raw body is arbitrary and cannot be reliably sanitized; do not echo it.
+            message = "Unparseable error response body (HTTP " + errorCode + ").";
         }
-        return error;
+        return new ErrorResponse(resourceType, resourceName, message, code);
     }
 }
