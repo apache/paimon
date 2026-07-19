@@ -48,6 +48,9 @@ def _scan(native_enabled, file_scanner):
     file_scanner.start_pos_of_this_subtask = None  # no slice
     file_scanner.chunk_shuffle = None              # no chunk-shuffle
     file_scanner._global_index_result = None       # no global-index result
+    file_scanner.deletion_vectors_enabled = False  # no deletion vectors
+    file_scanner.data_evolution = False            # no data evolution
+    file_scanner.only_read_real_buckets = False    # not postpone bucket
     scan.file_scanner = file_scanner
     scan._query_auth_fn = None      # no query-auth restrictions
     scan._read_type = None
@@ -55,6 +58,21 @@ def _scan(native_enabled, file_scanner):
 
 
 class NativePlanTest(unittest.TestCase):
+
+    def setUp(self):
+        # Make the real capability probe see a split-API-capable pypaimon-rust so
+        # gate tests route natively. Tests that call native_plan() directly override
+        # sys.modules within their own block.
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.PaimonCatalog = type(
+            'PaimonCatalog', (), {'get_table': lambda self, name: None})
+        fake_mod = ModuleType('pypaimon_rust')
+        fake_mod.datafusion = fake_df
+        patcher = patch.dict(
+            sys.modules,
+            {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_switch_defaults_off(self):
         self.assertFalse(CoreOptions(Options({})).native_plan_enabled())
@@ -110,6 +128,9 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'start_pos_of_this_subtask', 0))
         check(lambda s, fs: setattr(fs, 'chunk_shuffle', (1, 100)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
+        check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
+        check(lambda s, fs: setattr(fs, 'data_evolution', True))
+        check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
@@ -136,6 +157,20 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(native_enabled=True, file_scanner=fs)
         with patch('pypaimon.read.native_plan.native_plan', return_value=[]):
             self.assertIs(scan.plan(), sentinel)
+        fs.scan.assert_called_once_with()
+
+    def test_plan_falls_back_when_rust_unavailable(self):
+        # scan.native-plan.enabled but pypaimon-rust missing/old -> fall back,
+        # not crash.
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        with patch('pypaimon.read.native_plan.native_runtime_available',
+                   return_value=False), \
+                patch('pypaimon.read.native_plan.native_plan') as np:
+            self.assertIs(scan.plan(), sentinel)
+        np.assert_not_called()
         fs.scan.assert_called_once_with()
 
     def test_plan_falls_back_for_jdbc_catalog_loader(self):

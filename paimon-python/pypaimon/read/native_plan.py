@@ -31,6 +31,15 @@ from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import deserialize_split_v1
 
 
+def native_runtime_available() -> bool:
+    """Whether an installed pypaimon-rust exposes the split-planning API."""
+    try:
+        from pypaimon_rust.datafusion import PaimonCatalog
+    except ImportError:
+        return False
+    return hasattr(PaimonCatalog, 'get_table')
+
+
 def _partition_fields(table):
     """Ordered partition DataFields, used to decode the split partition bytes."""
     schema = table.table_schema
@@ -86,10 +95,10 @@ def native_plan(table) -> List[Split]:
     Predicate/limit are not pushed to the native planner (pushdown is a
     follow-up); pypaimon applies them at read time.
     """
-    from pypaimon_rust.datafusion import PaimonCatalog
-    if not hasattr(PaimonCatalog, 'get_table'):
+    if not native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
+    from pypaimon_rust.datafusion import PaimonCatalog
 
     rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
     rust_splits = rt.new_read_builder(_read_options(table)).new_scan().plan().splits()

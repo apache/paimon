@@ -68,14 +68,22 @@ class TableScan:
     def _native_plan_supported(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
-        drops L0), query auth, non-main branch, time-travel, incremental, or a
-        catalog / identifier Rust cannot reconstruct. Keep this capability gate
-        in sync when adding scan features."""
+        drops L0), deletion vectors (Python drops L0), data evolution
+        (dedicated split generator), postpone bucket (drops synthetic buckets),
+        query auth, non-main branch, time-travel, incremental, a missing/old
+        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
+        this capability gate in sync when adding scan features."""
+        from pypaimon.read.native_plan import native_runtime_available
+        if not native_runtime_available():
+            return False
         fs = self.file_scanner
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
                 or getattr(fs, 'start_pos_of_this_subtask', None) is not None
                 or getattr(fs, 'chunk_shuffle', None) is not None
-                or getattr(fs, '_global_index_result', None) is not None):
+                or getattr(fs, '_global_index_result', None) is not None
+                or getattr(fs, 'deletion_vectors_enabled', False)
+                or getattr(fs, 'data_evolution', False)
+                or getattr(fs, 'only_read_real_buckets', False)):
             return False
         loader = getattr(
             getattr(self.table, 'catalog_environment', None),
