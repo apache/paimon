@@ -202,7 +202,8 @@ public class RESTUtil {
                 url = builder.build().toString();
             }
         } catch (URISyntaxException e) {
-            throw new RESTException(e, "build request URL failed.");
+            // cause / getMessage() echo the raw URL (may carry credentials); keep only the reason.
+            throw new RESTException("build request URL failed: %s", e.getReason());
         }
 
         return url;

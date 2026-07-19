@@ -129,8 +129,6 @@ class SensitiveConfigUtilsTest {
 
     @Test
     void testRedactTextRedactsWholeMarkedText() {
-        // Free-form text cannot be masked per-secret reliably, so any marker redacts it whole.
-        // This covers the cases a boundary regex leaked: commas, spaces, quotes, Azure sig.
         for (String text :
                 new String[] {
                     "{\"accessKeySecret\":\"mock-secret-abcd\",\"endpoint\":\"mock\"}",
@@ -139,7 +137,11 @@ class SensitiveConfigUtilsTest {
                     "{\"password\":\"alpha,beta\"}",
                     "{\"sas\":\"sv=2024-11-04&sig=REST-LEAK\"}",
                     "invalid token SECRET-9999 in request",
-                    "https://x.blob.core.windows.net/c/f?sig=SECRETSIG"
+                    "https://x.blob.core.windows.net/c/f?sig=SECRETSIG",
+                    "api_key=mock",
+                    "private.key: mock",
+                    "fs.s3a.access.key=mock",
+                    "{\"apiKey\":\"mock\"}"
                 }) {
             assertThat(SensitiveConfigUtils.redactText(text)).as(text).isEqualTo(REDACTED);
         }
@@ -151,5 +153,16 @@ class SensitiveConfigUtilsTest {
         assertThat(SensitiveConfigUtils.redactText("")).isEmpty();
         assertThat(SensitiveConfigUtils.redactText("Table not found: default.t"))
                 .isEqualTo("Table not found: default.t");
+    }
+
+    @Test
+    void testSanitizeUriDropsQueryAndUserInfo() {
+        assertThat(SensitiveConfigUtils.sanitizeUri("https://host:443/p?sig=x&X-Amz-Signature=y"))
+                .isEqualTo("https://host:443/p");
+        assertThat(SensitiveConfigUtils.sanitizeUri("https://alice:secret@host/p?sig=x"))
+                .isEqualTo("https://host/p");
+        assertThat(SensitiveConfigUtils.sanitizeUri("https://alice:secret@host/bad path?sig=x"))
+                .doesNotContain("secret")
+                .doesNotContain("sig=");
     }
 }

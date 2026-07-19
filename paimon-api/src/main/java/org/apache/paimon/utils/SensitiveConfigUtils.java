@@ -80,29 +80,29 @@ public class SensitiveConfigUtils {
     };
 
     /**
-     * Markers that flag free-form text (e.g. a server error message or a signed URL) as possibly
-     * carrying a secret. Matched by a plain lower-cased substring scan, so no regex backtracking.
+     * Markers that flag free-form text (a server error message or a signed URL) as possibly
+     * carrying a secret. Matched after the text is normalized (lower-cased, separators removed), so
+     * {@code api_key}, {@code private.key}, {@code accessKey} and {@code X-Amz-Signature} all hit.
      */
     private static final String[] SENSITIVE_TEXT_MARKERS = {
         "password",
         "secret",
         "token",
         "credential",
-        "access-key",
         "accesskey",
-        "account-key",
         "accountkey",
-        "authorization",
-        "private-key",
-        "privatekey",
-        "api-key",
-        "apikey",
-        "encryption-key",
         "encryptionkey",
+        "authorization",
+        "privatekey",
+        "apikey",
         "signature",
-        "sig=",
-        "x-amz-"
+        "sas"
     };
+
+    /**
+     * Literal markers (Azure SAS {@code sig}) that would be ambiguous once separators are removed.
+     */
+    private static final String[] SENSITIVE_TEXT_LITERAL_MARKERS = {"sig=", "\"sig\"", "'sig'"};
 
     private SensitiveConfigUtils() {}
 
@@ -156,8 +156,14 @@ public class SensitiveConfigUtils {
             return text;
         }
         String lower = text.toLowerCase(Locale.ROOT);
-        for (String marker : SENSITIVE_TEXT_MARKERS) {
+        for (String marker : SENSITIVE_TEXT_LITERAL_MARKERS) {
             if (lower.contains(marker)) {
+                return REDACTED;
+            }
+        }
+        String normalized = lower.replaceAll("[^a-z0-9]", "");
+        for (String marker : SENSITIVE_TEXT_MARKERS) {
+            if (normalized.contains(marker)) {
                 return REDACTED;
             }
         }
@@ -197,7 +203,9 @@ public class SensitiveConfigUtils {
 
     private static String stripQuery(String uri) {
         int queryStart = uri.indexOf('?');
-        return queryStart >= 0 ? uri.substring(0, queryStart) : uri;
+        String base = queryStart >= 0 ? uri.substring(0, queryStart) : uri;
+        // A malformed URI may keep an embedded user:password@; drop it too.
+        return base.replaceAll("://[^/@]*@", "://");
     }
 
     /**

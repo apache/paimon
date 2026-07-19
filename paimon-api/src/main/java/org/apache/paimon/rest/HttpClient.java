@@ -245,9 +245,12 @@ public class HttpClient implements RESTClient {
         if (error != null && error.getMessage() != null && !error.getMessage().isEmpty()) {
             // A parsed message may still embed secrets (e.g. "password=..."); redact it.
             message = SensitiveConfigUtils.redactText(error.getMessage());
+        } else if (error == null) {
+            // The body could not be parsed; it is arbitrary and is not echoed (may hold secrets).
+            message = "Unparseable error response body (HTTP " + code + ").";
         } else {
-            // The raw body is arbitrary and cannot be reliably sanitized; do not echo it.
-            message = "Unparseable error response body (HTTP " + errorCode + ").";
+            // Parsed as an ErrorResponse but with no message.
+            message = "Empty error message (HTTP " + code + ").";
         }
         return new ErrorResponse(resourceType, resourceName, message, code);
     }

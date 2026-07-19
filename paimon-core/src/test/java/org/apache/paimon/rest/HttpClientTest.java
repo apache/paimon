@@ -275,8 +275,8 @@ public class HttpClientTest {
 
     @Test
     public void testGetWithUnparsableJsonErrorResponse() {
-        // A JSON body that cannot be mapped to ErrorResponse must NOT be echoed (it may carry
-        // secrets); the exception carries only a generic message with the HTTP status.
+        // A JSON body that parses to an ErrorResponse with no message must NOT be echoed (it may
+        // carry secrets); it is reported as an empty message, not "unparseable".
         String jsonWithUppercaseFields =
                 "{\"Message\":\"Your request is denied as lack of ssl protect.\","
                         + "\"Code\":\"InvalidProtocol.NeedSsl\"}";
@@ -291,7 +291,8 @@ public class HttpClientTest {
                             || e.getMessage().contains(jsonWithUppercaseFields),
                     "Raw response body must not be echoed");
             Assertions.assertTrue(
-                    e.getMessage().contains("403"), "Message should carry the HTTP status");
+                    e.getMessage().contains("Empty error message"),
+                    "Parsed-but-empty message must not be labelled unparseable");
         }
     }
 

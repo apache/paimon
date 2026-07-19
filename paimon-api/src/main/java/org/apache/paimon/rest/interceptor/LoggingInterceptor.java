@@ -60,7 +60,8 @@ public class LoggingInterceptor implements HttpResponseInterceptor {
                     SensitiveConfigUtils.sanitizeUri(request.getUri().toString()),
                     durationMs);
         } catch (URISyntaxException e) {
-            LOG.warn("Failed to log rest request: {}", e.getMessage());
+            // e.getMessage() echoes the raw URI (may carry credentials); log only the reason.
+            LOG.warn("Failed to log rest request: {}", e.getReason());
         }
     }
 }
