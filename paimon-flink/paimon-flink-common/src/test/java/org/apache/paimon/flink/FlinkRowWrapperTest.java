@@ -167,7 +167,8 @@ public class FlinkRowWrapperTest {
 
         assertThatThrownBy(() -> wrapper.isNullAt(0))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Illegal character");
+                .hasMessageContaining("Invalid URI")
+                .hasMessageNotContaining("1304008055350781673");
     }
 
     @Test
