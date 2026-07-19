@@ -16,6 +16,7 @@
 # under the License.
 
 import json as _json
+import logging
 from typing import Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
@@ -28,6 +29,8 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
+
+logger = logging.getLogger(__name__)
 
 
 class TableScan:
@@ -70,9 +73,11 @@ class TableScan:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
         drops L0), deletion vectors (Python drops L0), data evolution
         (dedicated split generator), postpone bucket (drops synthetic buckets),
-        query auth, non-main branch, time-travel, incremental, a missing/old
-        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
-        this capability gate in sync when adding scan features."""
+        a primary-key table whose trimmed PK is empty (PK equals the partition
+        key; native may mark splits raw-convertible and skip merge), query auth,
+        non-main branch, time-travel, incremental, a missing/old pypaimon-rust,
+        or a catalog / identifier Rust cannot reconstruct. Keep this capability
+        gate in sync when adding scan features."""
         from pypaimon.read.native_plan import native_runtime_available
         if not native_runtime_available():
             return False
@@ -110,6 +115,11 @@ class TableScan:
                 or self.table.options.merge_engine() == 'first-row' \
                 or self.table.current_branch() != 'main':
             return False
+        # PK equal to the partition key -> empty trimmed PK. Native marks such splits
+        # raw-convertible and the reader then skips merge, returning stale/duplicate rows.
+        if getattr(self.table, 'is_primary_key_table', False) \
+                and not self.table.trimmed_primary_keys:
+            return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         options = self.table.options.options
         if any(options.contains_key(k) for k in SCAN_KEYS):
@@ -126,7 +136,15 @@ class TableScan:
         """
         from pypaimon.read.native_plan import native_plan
 
-        splits = native_plan(self.table)
+        try:
+            splits = native_plan(self.table)
+        except Exception as e:
+            # Native planning is best-effort. Any construction/planning failure -- e.g. a
+            # storage scheme the pinned Rust build does not support (viewfs://, ...) -- must
+            # fall back to the Python scanner rather than fail an otherwise valid scan.
+            logger.warning(
+                "Native plan failed, falling back to the Python scanner: %s", e)
+            return None
         if not splits:
             return None
         snapshot_id = splits[0].snapshot_id

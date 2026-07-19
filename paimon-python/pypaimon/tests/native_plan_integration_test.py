@@ -25,10 +25,10 @@ from pypaimon import CatalogFactory, Schema
 
 def _has_native_planner():
     try:
-        from pypaimon_rust.datafusion import PaimonCatalog
+        from pypaimon_rust.datafusion import PaimonCatalog, Split
     except Exception:
         return False
-    return hasattr(PaimonCatalog, 'get_table')
+    return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
 
 
 @unittest.skipUnless(_has_native_planner(),
@@ -62,12 +62,18 @@ class NativePlanIntegrationTest(unittest.TestCase):
         rows = rb.new_read().to_arrow(plan.splits()).to_pylist()
         return plan.snapshot_id, sorted(rows, key=lambda r: r['k'])
 
-    def _assert_matches(self, name):
+    def _assert_matches(self, name, expect_native=True):
         sid_n, rows_n = self._plan_and_read(name, native=False)
         sid_r, rows_r = self._plan_and_read(name, native=True)
         self.assertEqual(rows_r, rows_n)
         self.assertEqual(sid_r, sid_n)   # snapshot id preserved through native plan
         self.assertIsNotNone(sid_r)
+        # Guard against a false green where native silently fell back to Python: assert the
+        # native planner was (or was not) actually used, as expected for this table.
+        native_table = self.cat.get_table('default.%s' % name).copy(
+            {'scan.native-plan.enabled': 'true'})
+        self.assertEqual(
+            native_table.new_read_builder().explain().native_planned, expect_native)
 
     def test_primary_key_matches_normal_plan(self):
         self.cat.create_table('default.pk_t', Schema.from_pyarrow_schema(
@@ -76,13 +82,30 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('pk_t', [{'k': 2, 'v': 'b2'}, {'k': 3, 'v': 'c1'}])  # k=2 updated
         self._assert_matches('pk_t')
 
+    def test_pk_equal_to_partition_key_falls_back(self):
+        # Trimmed PK is empty. Native would mark splits raw-convertible and skip merge,
+        # returning both versions of k=2; the Python reader instead rejects this config. The
+        # gate must fall back to Python so native does not silently return duplicate rows.
+        self.cat.create_table('default.pkpart_t', Schema.from_pyarrow_schema(
+            self.schema, partition_keys=['k'], primary_keys=['k'], options={'bucket': '1'}), False)
+        self._write('pkpart_t', [{'k': 1, 'v': 'a1'}, {'k': 2, 'v': 'b1'}])
+        self._write('pkpart_t', [{'k': 2, 'v': 'b2'}])  # k=2 updated
+        native_table = self.cat.get_table('default.pkpart_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        # Gate falls back to the Python planner -> native not used.
+        self.assertFalse(native_table.new_read_builder().explain().native_planned)
+        # And the Python read path rejects the invalid PK/partition combination.
+        with self.assertRaises(ValueError):
+            rb = native_table.new_read_builder()
+            rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
     def test_first_row_merge_engine_falls_back(self):
         self.cat.create_table('default.fr_t', Schema.from_pyarrow_schema(
             self.schema, primary_keys=['k'],
             options={'bucket': '1', 'merge-engine': 'first-row'}), False)
         self._write('fr_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
         self._write('fr_t', [{'k': 1, 'v': 'X'}, {'k': 3, 'v': 'c'}])  # k=1 stays 'a'
-        self._assert_matches('fr_t')
+        self._assert_matches('fr_t', expect_native=False)
 
     def test_append_matches_normal_plan(self):
         self.cat.create_table(

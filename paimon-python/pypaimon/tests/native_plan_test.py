@@ -41,6 +41,8 @@ def _scan(native_enabled, file_scanner):
     scan.table.options.merge_engine.return_value = None            # not first-row
     scan.table.options.query_auth_enabled = False
     scan.table.current_branch.return_value = 'main'
+    scan.table.is_primary_key_table = False        # not a pk table
+    scan.table.trimmed_primary_keys = ['k']        # non-empty trimmed pk
     scan.table.identifier.get_database_name.return_value = 'default'
     scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
         CatalogContext.create_from_options(Options({})))           # filesystem catalog
@@ -132,6 +134,9 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
         check(lambda s, fs: setattr(fs, 'data_evolution', True))
         check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
+        # PK equal to the partition key -> empty trimmed PK.
+        check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
+                             setattr(s.table, 'trimmed_primary_keys', [])))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
@@ -172,6 +177,18 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan.native_plan') as np:
             self.assertIs(scan.plan(), sentinel)
         np.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_plan_falls_back_when_native_plan_raises(self):
+        # A native construction/planning failure (e.g. a storage scheme the pinned Rust build
+        # does not support) must fall back to the Python scanner, not fail the scan.
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        with patch('pypaimon.read.native_plan.native_plan',
+                   side_effect=RuntimeError('unsupported scheme viewfs://')):
+            self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
 
     def test_plan_falls_back_for_jdbc_catalog_loader(self):
