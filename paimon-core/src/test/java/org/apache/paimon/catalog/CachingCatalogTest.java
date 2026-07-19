@@ -369,6 +369,32 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreatePartitionsFailureInvalidatesPartitionCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        List<Partition> stored = new ArrayList<>();
+        when(wrapped.listPartitions(identifier)).thenAnswer(ignored -> new ArrayList<>(stored));
+        RuntimeException responseLost = new RuntimeException("response lost");
+        Mockito.doAnswer(
+                        ignored -> {
+                            stored.add(created);
+                            throw responseLost;
+                        })
+                .when(wrapped)
+                .createPartitions(identifier, singletonList(spec));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        assertThatThrownBy(() -> catalog.createPartitions(identifier, singletonList(spec)))
+                .isSameAs(responseLost);
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
     public void testDeadlock() throws Exception {
         Catalog underlyCatalog = this.catalog;
         TestableCachingCatalog catalog =

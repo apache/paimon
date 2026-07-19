@@ -212,6 +212,9 @@ public class RESTCatalogServer {
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
 
     private volatile boolean partitionListingSupported = true;
+    private volatile boolean failNextCreatePartitionsResponse;
+    private volatile boolean failNextDropPartitionsResponse;
+    private volatile int tableGetCount;
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -277,6 +280,22 @@ public class RESTCatalogServer {
 
     public void setPartitionListingSupported(boolean partitionListingSupported) {
         this.partitionListingSupported = partitionListingSupported;
+    }
+
+    public void failNextCreatePartitionsResponse() {
+        this.failNextCreatePartitionsResponse = true;
+    }
+
+    public void failNextDropPartitionsResponse() {
+        this.failNextDropPartitionsResponse = true;
+    }
+
+    public int tableGetCount() {
+        return tableGetCount;
+    }
+
+    public void resetTableGetCount() {
+        tableGetCount = 0;
     }
 
     public void addNoPermissionDatabase(String database) {
@@ -1733,6 +1752,7 @@ public class RESTCatalogServer {
         }
         switch (method) {
             case "GET":
+                tableGetCount++;
                 TableMetadata tableMetadata;
                 if (identifier.isSystemTable()) {
                     TableSchema schema = catalog.loadTableSchema(identifier);
@@ -1897,6 +1917,16 @@ public class RESTCatalogServer {
                         existed.add(spec);
                     }
                 }
+                if (failNextCreatePartitionsResponse) {
+                    failNextCreatePartitionsResponse = false;
+                    return mockResponse(
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_PARTITION,
+                                    tableIdentifier.getFullName(),
+                                    "Injected response failure after creating partitions.",
+                                    400),
+                            400);
+                }
                 return mockResponse(new CreatePartitionsResponse(created, existed), 200);
             default:
                 return new MockResponse().setResponseCode(404);
@@ -1940,6 +1970,16 @@ public class RESTCatalogServer {
                     }
                     return false;
                 });
+        if (failNextDropPartitionsResponse) {
+            failNextDropPartitionsResponse = false;
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_PARTITION,
+                            tableIdentifier.getFullName(),
+                            "Injected response failure after dropping partitions.",
+                            400),
+                    400);
+        }
         return mockResponse(new DropPartitionsResponse(dropped, missing), 200);
     }
 

@@ -48,7 +48,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.StringJoiner;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
 
@@ -63,6 +62,10 @@ public class FormatTableCommit implements BatchTableCommit {
     protected boolean overwrite = false;
     private Catalog hiveCatalog;
     private Identifier tableIdentifier;
+    @Nullable private final FormatTableCatalogProvider catalogProvider;
+    // Volatile: commit() and abort() may run on different threads when callers drive the API
+    // directly; abort must observe that registration already began to keep its no-op guarantee.
+    private volatile boolean partitionRegistrationStarted;
 
     public FormatTableCommit(
             String location,
@@ -74,6 +77,30 @@ public class FormatTableCommit implements BatchTableCommit {
             @Nullable Map<String, String> staticPartitions,
             @Nullable String syncHiveUri,
             CatalogContext catalogContext) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                null);
+    }
+
+    public FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTableCatalogProvider catalogProvider) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -82,6 +109,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
         this.tableIdentifier = tableIdentifier;
+        this.catalogProvider = catalogProvider;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -143,7 +171,9 @@ public class FormatTableCommit implements BatchTableCommit {
 
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
-                if (partitionKeys != null && !partitionKeys.isEmpty() && hiveCatalog != null) {
+                if (partitionKeys != null
+                        && !partitionKeys.isEmpty()
+                        && (hiveCatalog != null || catalogProvider != null)) {
                     partitionSpecs.add(
                             extractPartitionSpecFromPath(
                                     committer.targetPath().getParent(), partitionKeys));
@@ -151,6 +181,14 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.clean(this.fileIO);
+            }
+            if (catalogProvider != null && !partitionSpecs.isEmpty()) {
+                partitionRegistrationStarted = true;
+                try {
+                    catalogProvider.createPartitions(new ArrayList<>(partitionSpecs));
+                } catch (RuntimeException e) {
+                    throw partitionRegistrationFailure(e);
+                }
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
                 if (hiveCatalog != null) {
@@ -172,9 +210,26 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
         } catch (Exception e) {
-            this.abort(commitMessages);
-            throw new RuntimeException(e);
+            if (!partitionRegistrationStarted) {
+                this.abort(commitMessages);
+                throw new RuntimeException(e);
+            }
+            throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
         }
+    }
+
+    private RuntimeException partitionRegistrationFailure(RuntimeException cause) {
+        String tableName = tableIdentifier.getFullName();
+        return new RuntimeException(
+                String.format(
+                        "Managed partition registration failed for %s after data files were "
+                                + "committed. Committed data files were preserved because the "
+                                + "catalog state may be ambiguous. Verify the catalog partition "
+                                + "metadata and, if partitions are missing, re-run a partition "
+                                + "metadata sync for %s (e.g. the Spark procedure "
+                                + "sys.sync_format_table_metadata or MSCK REPAIR TABLE).",
+                        tableName, tableName),
+                cause);
     }
 
     private Method getHiveCreatePartitionsInHmsMethod() throws NoSuchMethodException {
@@ -192,12 +247,68 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private LinkedHashMap<String, String> extractPartitionSpecFromPath(
             Path partitionPath, List<String> partitionKeys) {
-        if (formatTablePartitionOnlyValueInPath) {
-            return PartitionPathUtils.extractPartitionSpecFromPathOnlyValue(
-                    partitionPath, partitionKeys);
-        } else {
-            return PartitionPathUtils.extractPartitionSpecFromPath(partitionPath);
+        // The writer always lays partitions out as <location>/<c1>/.../<cn>, so the partition
+        // spec is exactly the trailing partitionKeys.size() components of the partition
+        // directory. Never walk beyond them: the table location itself may contain foreign
+        // 'k=v' segments that must not leak into the registered spec. Registered values are
+        // RAW (unescaped); readers re-escape them when probing partition directories.
+        String[] components = new String[partitionKeys.size()];
+        Path current = partitionPath;
+        for (int i = partitionKeys.size() - 1; i >= 0; i--) {
+            if (current == null || current.getName().isEmpty()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition path '%s' has fewer than %s directory levels required "
+                                        + "by partition keys %s of table %s.",
+                                partitionPath,
+                                partitionKeys.size(),
+                                partitionKeys,
+                                tableIdentifier.getFullName()));
+            }
+            components[i] = current.getName();
+            current = current.getParent();
         }
+
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            String expectedKey = partitionKeys.get(i);
+            String component = components[i];
+            if (formatTablePartitionOnlyValueInPath) {
+                partitionSpec.put(expectedKey, PartitionPathUtils.unescapePathName(component));
+            } else {
+                int splitIndex = component.indexOf('=');
+                if (splitIndex < 0) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Partition directory '%s' of partition path '%s' is not in "
+                                            + "'key=value' form expected for partition key '%s' "
+                                            + "of table %s.",
+                                    component,
+                                    partitionPath,
+                                    expectedKey,
+                                    tableIdentifier.getFullName()));
+                }
+                String parsedKey =
+                        PartitionPathUtils.unescapePathName(component.substring(0, splitIndex));
+                String parsedValue =
+                        PartitionPathUtils.unescapePathName(component.substring(splitIndex + 1));
+                if (!expectedKey.equals(parsedKey)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Partition directory '%s' of partition path '%s' declares "
+                                            + "partition key '%s' but partition key '%s' was "
+                                            + "expected at position %s for table %s.",
+                                    component,
+                                    partitionPath,
+                                    parsedKey,
+                                    expectedKey,
+                                    i,
+                                    tableIdentifier.getFullName()));
+                }
+                partitionSpec.put(expectedKey, parsedValue);
+            }
+        }
+        return partitionSpec;
     }
 
     private static Path buildPartitionPath(
@@ -208,24 +319,29 @@ public class FormatTableCommit implements BatchTableCommit {
         if (partitionSpec.isEmpty() || partitionKeys.isEmpty()) {
             throw new IllegalArgumentException("partitionSpec or partitionKeys is empty.");
         }
-        StringJoiner joiner = new StringJoiner("/");
+        LinkedHashMap<String, String> orderedSpec = new LinkedHashMap<>();
         for (int i = 0; i < partitionSpec.size(); i++) {
             String key = partitionKeys.get(i);
             if (partitionSpec.containsKey(key)) {
-                if (formatTablePartitionOnlyValueInPath) {
-                    joiner.add(partitionSpec.get(key));
-                } else {
-                    joiner.add(key + "=" + partitionSpec.get(key));
-                }
+                orderedSpec.put(key, partitionSpec.get(key));
             } else {
                 throw new RuntimeException("partitionSpec does not contain key: " + key);
             }
         }
-        return new Path(location, joiner.toString());
+        return new Path(
+                location,
+                PartitionPathUtils.generatePartitionPathUtil(
+                        orderedSpec, formatTablePartitionOnlyValueInPath));
     }
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
+        // Once partition registration has started the data files are already committed and must be
+        // preserved: the catalog outcome is ambiguous (see partitionRegistrationFailure), so
+        // discarding the files here could delete data the catalog already references.
+        if (partitionRegistrationStarted) {
+            return;
+        }
         try {
             for (CommitMessage commitMessage : commitMessages) {
                 if (commitMessage instanceof TwoPhaseCommitMessage) {

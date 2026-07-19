@@ -59,6 +59,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -81,9 +82,9 @@ public class FormatTableScan implements InnerTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
 
-    private final FormatTable table;
-    private final CoreOptions coreOptions;
-    @Nullable private PartitionPredicate partitionFilter;
+    protected final FormatTable table;
+    protected final CoreOptions coreOptions;
+    @Nullable protected PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
     private final long targetSplitSize;
     private final long openFileCost;
@@ -142,7 +143,7 @@ public class FormatTableScan implements InnerTableScan {
         return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
     }
 
-    private BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
+    protected BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
         RowType partitionType = table.partitionType();
         GenericRow row =
                 convertSpecToInternalRow(partitionSpec, partitionType, table.defaultPartName());
@@ -160,7 +161,11 @@ public class FormatTableScan implements InnerTableScan {
                         LinkedHashMap<String, String> partitionSpec = pair.getKey();
                         BinaryRow partitionRow = toPartitionRow(partitionSpec);
                         if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
+                            try {
+                                splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
+                            } catch (FileNotFoundException e) {
+                                onPartitionFileNotFound(partitionSpec, pair.getValue(), e);
+                            }
                         }
                     }
                 } else {
@@ -177,7 +182,7 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+    protected List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
         LOG.debug(
                 "Find partitions for format table {}, partition filter: {}",
                 table.name(),
@@ -220,6 +225,14 @@ public class FormatTableScan implements InnerTableScan {
                     table.partitionType(),
                     table.defaultPartName());
         }
+    }
+
+    protected void onPartitionFileNotFound(
+            LinkedHashMap<String, String> partitionSpec,
+            Path partitionPath,
+            FileNotFoundException exception)
+            throws IOException {
+        throw exception;
     }
 
     protected static List<Pair<LinkedHashMap<String, String>, Path>> generatePartitions(

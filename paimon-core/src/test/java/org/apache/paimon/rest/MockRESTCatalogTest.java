@@ -26,6 +26,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
@@ -46,6 +48,8 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTableCatalogProvider;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -245,6 +249,96 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
         assertThatThrownBy(() -> restCatalog.listPartitions(identifier))
                 .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCreatePartitionFailureInvalidatesManagedListingCache() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        FormatTableCatalogProvider provider = table.catalogProvider();
+        assertThat(provider).isNotNull();
+        assertThat(provider.listPartitions(null)).isEmpty();
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+        restCatalogServer.failNextCreatePartitionsResponse();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.createPartitions(
+                                        identifier, Collections.singletonList(partition)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Injected response failure");
+
+        assertThat(provider.listPartitions(null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+    }
+
+    @Test
+    void testDropPartitionFailureInvalidatesManagedListingCache() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        FormatTableCatalogProvider provider = table.catalogProvider();
+        assertThat(provider).isNotNull();
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+        restCatalog.createPartitions(identifier, Collections.singletonList(partition));
+        assertThat(provider.listPartitions(null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+        restCatalogServer.failNextDropPartitionsResponse();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.dropPartitions(
+                                        identifier, Collections.singletonList(partition)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Injected response failure");
+
+        assertThat(provider.listPartitions(null)).isEmpty();
+    }
+
+    @Test
+    void testRejectExternalManagedFormatTableBeforeCreate() throws Exception {
+        Identifier identifier = Identifier.create("db1", "external_managed_format_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        String externalPath = dataPath + "/external-managed-format-table";
+        Schema schema =
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.PATH.key(), externalPath)
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
+
+        assertThatThrownBy(() -> restCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("internal table");
+        assertThat(restCatalog.listTables(identifier.getDatabaseName()))
+                .doesNotContain(identifier.getTableName());
+        assertThat(LocalFileIO.create().exists(new Path(externalPath))).isFalse();
+    }
+
+    @Test
+    void testRoundTrippedManagedFormatTableReplacePassesClientValidation() throws Exception {
+        Identifier identifier = createManagedFormatTable();
+        FormatTable existing = (FormatTable) restCatalog.getTable(identifier);
+        Schema replacement =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .options(existing.options())
+                        .build();
+        assertThat(replacement.options())
+                .containsEntry(CoreOptions.PATH.key(), existing.location());
+
+        // The mock service does not implement Format Table replacement. Reaching that response
+        // proves the REST client accepted the unchanged synthetic path from the loaded table.
+        assertThatThrownBy(() -> restCatalog.replaceTable(identifier, replacement, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("replaceTable does not support format tables");
     }
 
     private Identifier createManagedFormatTable() throws Exception {

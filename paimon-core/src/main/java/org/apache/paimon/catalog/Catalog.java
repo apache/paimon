@@ -670,6 +670,17 @@ public interface Catalog extends AutoCloseable {
         return false;
     }
 
+    /**
+     * Whether this catalog can be the source of truth for partitions of managed Format Tables
+     * ({@code type=format-table} with {@code metastore.partitioned-table=true}), i.e. whether it
+     * implements the partition APIs that managed Format Table scans and commits rely on. Catalogs
+     * without this capability load such tables with the option ignored, falling back to filesystem
+     * partition discovery.
+     */
+    default boolean supportsManagedFormatTablePartitions() {
+        return false;
+    }
+
     // ==================== Version management methods ==========================
 
     /**

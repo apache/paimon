@@ -49,6 +49,8 @@ abstract class FormatTableBatchWriteBase(
   extends Logging
   with Serializable {
 
+  @volatile protected var commitStarted: Boolean = false
+
   protected val batchWriteBuilder: BatchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
     // todo: add test for static overwrite the whole table
@@ -65,6 +67,7 @@ abstract class FormatTableBatchWriteBase(
   }
 
   protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
+    commitStarted = true
     logInfo(s"Committing to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava
@@ -80,6 +83,12 @@ abstract class FormatTableBatchWriteBase(
   }
 
   protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
+    if (commitStarted) {
+      logWarning(
+        s"Skip abort cleanup for FormatTable ${table.name()} because commit has already started")
+      return
+    }
+
     logInfo(s"Aborting write to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava

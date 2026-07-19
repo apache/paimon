@@ -34,6 +34,22 @@ Paimon catalogs currently support three types of metastores:
 
 See [CatalogOptions](../maintenance/configurations#catalogoptions) for detailed options when creating a catalog.
 
+:::info
+
+For Format Tables, `metastore.partitioned-table = true` enables catalog-managed partitions, which
+requires an internal table in a catalog that supports it (currently the REST catalog) and cannot
+be combined with `format-table.implementation = engine`. The REST catalog validates this
+combination on `CREATE TABLE` (catalog-level `table-default.*` options participate in the
+effective options); other catalogs keep their previous behavior and treat the option as inert.
+
+A Format Table that carries `metastore.partitioned-table = true` where it cannot be honored
+(e.g. in a Hive catalog, or on an external table) still loads — the option is ignored, the table
+behaves as an unmanaged Format Table, and a warning is logged. To remove the option permanently,
+use `ALTER TABLE my_table RESET ('metastore.partitioned-table')` where the catalog supports
+altering the table.
+
+:::
+
 ### Create Filesystem Catalog
 
 The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.

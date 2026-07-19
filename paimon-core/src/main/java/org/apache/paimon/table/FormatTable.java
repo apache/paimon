@@ -18,9 +18,11 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -29,6 +31,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
+import org.apache.paimon.table.format.FormatTableCatalogProvider;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.BatchVectorSearchBuilder;
@@ -56,8 +59,9 @@ import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
  * operations on this table allow for reading or writing to these files, facilitating the retrieval
  * of existing data and the addition of new files.
  *
- * <p>Partitioned file format table just like the standard hive format. Partitions are discovered
- * and inferred based on directory structure.
+ * <p>A partitioned file format table uses the standard Hive directory layout. By default,
+ * partitions are discovered from that layout. Catalog-managed format tables use catalog metadata
+ * for partition visibility while retaining the same physical layout.
  *
  * @since 0.9.0
  */
@@ -74,6 +78,12 @@ public interface FormatTable extends Table {
     FormatTable copy(Map<String, String> dynamicOptions);
 
     CatalogContext catalogContext();
+
+    /** Catalog access used by managed partition discovery and registration. */
+    @Nullable
+    default FormatTableCatalogProvider catalogProvider() {
+        return null;
+    }
 
     /** Currently supported formats. */
     enum Format {
@@ -115,6 +125,7 @@ public interface FormatTable extends Table {
         private Map<String, String> options;
         @Nullable private String comment;
         private CatalogContext catalogContext;
+        @Nullable private FormatTableCatalogProvider catalogProvider;
 
         public Builder fileIO(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -161,6 +172,11 @@ public interface FormatTable extends Table {
             return this;
         }
 
+        public Builder catalogProvider(@Nullable FormatTableCatalogProvider catalogProvider) {
+            this.catalogProvider = catalogProvider;
+            return this;
+        }
+
         public FormatTable build() {
             return new FormatTableImpl(
                     fileIO,
@@ -171,7 +187,8 @@ public interface FormatTable extends Table {
                     format,
                     options,
                     comment,
-                    catalogContext);
+                    catalogContext,
+                    catalogProvider);
         }
     }
 
@@ -189,6 +206,7 @@ public interface FormatTable extends Table {
         private final Map<String, String> options;
         @Nullable private final String comment;
         private CatalogContext catalogContext;
+        @Nullable private final FormatTableCatalogProvider catalogProvider;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -200,6 +218,30 @@ public interface FormatTable extends Table {
                 Map<String, String> options,
                 @Nullable String comment,
                 CatalogContext catalogContext) {
+            this(
+                    fileIO,
+                    identifier,
+                    rowType,
+                    partitionKeys,
+                    location,
+                    format,
+                    options,
+                    comment,
+                    catalogContext,
+                    null);
+        }
+
+        public FormatTableImpl(
+                FileIO fileIO,
+                Identifier identifier,
+                RowType rowType,
+                List<String> partitionKeys,
+                String location,
+                Format format,
+                Map<String, String> options,
+                @Nullable String comment,
+                CatalogContext catalogContext,
+                @Nullable FormatTableCatalogProvider catalogProvider) {
             this.fileIO = fileIO;
             this.identifier = identifier;
             this.rowType = rowType;
@@ -209,6 +251,7 @@ public interface FormatTable extends Table {
             this.options = options;
             this.comment = comment;
             this.catalogContext = catalogContext;
+            this.catalogProvider = catalogProvider;
         }
 
         @Override
@@ -265,6 +308,27 @@ public interface FormatTable extends Table {
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
+
+            CoreOptions coreOptions = CoreOptions.fromMap(options);
+            CoreOptions copiedCoreOptions = CoreOptions.fromMap(newOptions);
+            boolean managed = coreOptions.partitionedTableInMetastore();
+            boolean copiedManaged = copiedCoreOptions.partitionedTableInMetastore();
+            if (managed != copiedManaged) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change whether Format Table partitions are catalog-managed.",
+                                CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
+            }
+            if (managed
+                    && coreOptions.formatTablePartitionOnlyValueInPath()
+                            != copiedCoreOptions.formatTablePartitionOnlyValueInPath()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change the physical partition layout of a catalog-managed Format Table.",
+                                CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key()));
+            }
+            CatalogUtils.validateManagedFormatTableOptions(newOptions);
+
             return new FormatTableImpl(
                     fileIO,
                     identifier,
@@ -274,7 +338,8 @@ public interface FormatTable extends Table {
                     format,
                     newOptions,
                     comment,
-                    catalogContext);
+                    catalogContext,
+                    catalogProvider);
         }
 
         @Override
@@ -301,6 +366,12 @@ public interface FormatTable extends Table {
         @Override
         public CatalogContext catalogContext() {
             return this.catalogContext;
+        }
+
+        @Override
+        @Nullable
+        public FormatTableCatalogProvider catalogProvider() {
+            return catalogProvider;
         }
     }
 

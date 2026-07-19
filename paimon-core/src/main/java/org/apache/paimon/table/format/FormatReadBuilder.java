@@ -173,6 +173,16 @@ public class FormatReadBuilder implements ReadBuilder {
                 partitionFilter = partitionPredicateOpt.get();
             }
         }
+        if (options.partitionedTableInMetastore()) {
+            if (table.catalogProvider() == null) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Managed format table %s has no catalog partition provider. "
+                                        + "The catalog client does not support managed format tables.",
+                                table.fullName()));
+            }
+            return new ManagedFormatTableScan(table, partitionFilter, limit);
+        }
         return new FormatTableScan(table, partitionFilter, limit);
     }
 

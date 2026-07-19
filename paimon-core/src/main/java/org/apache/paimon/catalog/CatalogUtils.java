@@ -39,6 +39,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTableCatalogProvider;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -53,6 +54,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -84,6 +88,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CatalogUtils.class);
 
     public static Path path(String warehouse, String database, String table) {
         return new Path(String.format("%s/%s.db/%s", warehouse, database, table));
@@ -173,6 +179,7 @@ public class CatalogUtils {
                 options.get(PRIMARY_KEY) == null,
                 "Cannot define %s for format table.",
                 PRIMARY_KEY.key());
+        validateManagedFormatTableOptions(options);
         if (dataTokenEnabled && options.get(PATH) == null) {
             checkArgument(
                     options.get(FORMAT_TABLE_IMPLEMENTATION)
@@ -211,6 +218,44 @@ public class CatalogUtils {
                     "%s must not be empty.",
                     TextOptions.LINE_DELIMITER.key());
         }
+    }
+
+    /** Validate options which are specific to catalog-managed format tables. */
+    public static void validateManagedFormatTableOptions(Map<String, String> tableOptions) {
+        validateManagedFormatTableOptions(Options.fromMap(tableOptions));
+    }
+
+    private static void validateManagedFormatTableOptions(Options options) {
+        if (options.get(CoreOptions.METASTORE_PARTITIONED_TABLE)) {
+            checkArgument(
+                    options.get(FORMAT_TABLE_IMPLEMENTATION)
+                            != CoreOptions.FormatTableImplementation.ENGINE,
+                    "Cannot define %s=true together with %s=engine for a managed format table.",
+                    CoreOptions.METASTORE_PARTITIONED_TABLE.key(),
+                    FORMAT_TABLE_IMPLEMENTATION.key());
+        }
+    }
+
+    /** Validate that a catalog can persist the requested managed Format Table. */
+    public static void validateManagedFormatTableCatalog(
+            Identifier identifier,
+            Map<String, String> tableOptions,
+            Catalog catalog,
+            boolean isExternal) {
+        CoreOptions options = CoreOptions.fromMap(tableOptions);
+        if (options.type() != TableType.FORMAT_TABLE || !options.partitionedTableInMetastore()) {
+            return;
+        }
+        checkArgument(
+                !isExternal,
+                "Managed format table %s must be an internal table.",
+                identifier.getFullName());
+        checkArgument(
+                catalog.supportsManagedFormatTablePartitions(),
+                "Managed format table %s requires a catalog with catalog-managed partition support"
+                        + " (e.g. a REST catalog), but %s does not support it.",
+                identifier.getFullName(),
+                catalog.getClass().getSimpleName());
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
@@ -272,6 +317,34 @@ public class CatalogUtils {
     }
 
     /**
+     * Why the managed Format Table semantics cannot be honored when loading the table from this
+     * catalog, or {@code null} if they can.
+     */
+    @Nullable
+    private static String managedFormatTableLoadProblem(
+            Catalog catalog, TableMetadata metadata, Map<String, String> tableOptions) {
+        if (!catalog.supportsManagedFormatTablePartitions()) {
+            return String.format(
+                    "catalog %s does not support catalog-managed Format Table partitions",
+                    catalog.getClass().getSimpleName());
+        }
+        if (metadata.isExternal()) {
+            return "managed format tables must be internal tables";
+        }
+        if (Options.fromMap(tableOptions).get(FORMAT_TABLE_IMPLEMENTATION)
+                == CoreOptions.FormatTableImplementation.ENGINE) {
+            return String.format(
+                    "the option conflicts with %s=engine", FORMAT_TABLE_IMPLEMENTATION.key());
+        }
+        if (catalog.catalogLoader() == null) {
+            return String.format(
+                    "catalog %s does not provide a catalog loader",
+                    catalog.getClass().getSimpleName());
+        }
+        return null;
+    }
+
+    /**
      * Load table from {@link Catalog}, this table can be:
      *
      * <ul>
@@ -304,7 +377,30 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
+            FormatTableCatalogProvider catalogProvider = null;
+            if (options.partitionedTableInMetastore()) {
+                String problem = managedFormatTableLoadProblem(catalog, metadata, schema.options());
+                if (problem == null) {
+                    catalogProvider =
+                            new FormatTableCatalogProvider(identifier, catalog.catalogLoader());
+                } else {
+                    // Existing tables may carry the option from a version (or catalog) where it
+                    // was inert; refusing to load them would leave no SQL way to repair the
+                    // table. Keep them readable with filesystem partition discovery instead.
+                    LOG.warn(
+                            "Ignoring '{}=true' on format table {}: {}. Falling back to "
+                                    + "filesystem partition discovery, the table behaves as an "
+                                    + "unmanaged format table. Use ALTER TABLE ... RESET/UNSET "
+                                    + "to remove the option.",
+                            CoreOptions.METASTORE_PARTITIONED_TABLE.key(),
+                            identifier,
+                            problem);
+                    Map<String, String> effectiveOptions = new HashMap<>(schema.options());
+                    effectiveOptions.remove(CoreOptions.METASTORE_PARTITIONED_TABLE.key());
+                    schema = schema.copy(effectiveOptions);
+                }
+            }
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext, catalogProvider);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -453,7 +549,8 @@ public class CatalogUtils {
             Identifier identifier,
             TableSchema schema,
             Function<Path, FileIO> fileIO,
-            CatalogContext catalogContext) {
+            CatalogContext catalogContext,
+            @Nullable FormatTableCatalogProvider catalogProvider) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -471,6 +568,7 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .catalogContext(catalogContext)
+                .catalogProvider(catalogProvider)
                 .build();
     }
 

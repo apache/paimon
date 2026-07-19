@@ -63,6 +63,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTableCatalogProvider;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
@@ -95,6 +96,8 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
+import static org.apache.paimon.catalog.CatalogUtils.validateManagedFormatTableCatalog;
+import static org.apache.paimon.catalog.CatalogUtils.validateManagedFormatTableOptions;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for REST. */
@@ -454,6 +457,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsManagedFormatTablePartitions() {
+        return true;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return true;
     }
@@ -567,8 +575,13 @@ public class RESTCatalog implements Catalog {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
-            createExternalTablePathIfNotExist(schema);
             tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            // Defaults participate in the managed Format Table combination, so validate the
+            // effective options rather than only the explicit ones.
+            validateManagedFormatTableOptions(schema.options());
+            validateManagedFormatTableCatalog(
+                    identifier, schema.options(), this, schema.options().containsKey(PATH.key()));
+            createExternalTablePathIfNotExist(schema);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
@@ -645,8 +658,14 @@ public class RESTCatalog implements Catalog {
         checkNotBranch(identifier, "replaceTable");
         checkNotSystemTable(identifier, "replaceTable");
         validateCreateTable(newSchema, dataTokenEnabled);
+        tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+        // Defaults participate in the managed Format Table combination, so validate the
+        // effective options rather than only the explicit ones. Externality is not decided
+        // client-side here: a round-tripped schema of an internal table may carry the synthetic
+        // path option, and the server remains the authority for replace semantics.
+        validateManagedFormatTableOptions(newSchema.options());
+        validateManagedFormatTableCatalog(identifier, newSchema.options(), this, false);
         try {
-            tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
             api.replaceTable(identifier, newSchema);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -751,6 +770,9 @@ public class RESTCatalog implements Catalog {
                             identifier, e.getMessage()));
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } finally {
+            // The server may have committed even when the response was lost or malformed.
+            FormatTableCatalogProvider.advanceGeneration(identifier);
         }
     }
 
@@ -769,6 +791,9 @@ public class RESTCatalog implements Catalog {
                 throw new TableNoPermissionException(identifier, e);
             } catch (BadRequestException e) {
                 throw new IllegalArgumentException(e.getMessage());
+            } finally {
+                // The server may have committed even when the response was lost or malformed.
+                FormatTableCatalogProvider.advanceGeneration(identifier);
             }
             return;
         }

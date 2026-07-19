@@ -18,9 +18,15 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -28,6 +34,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
@@ -76,5 +83,50 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                                         Lists.newArrayList(PropertyChange.removeProperty("a")),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testResetManagedPartitionsOnStrandedFormatTable() throws Exception {
+        String database = "stranded_managed_format_table_db";
+        Identifier identifier = Identifier.create(database, "stranded_format_table");
+        catalog.createDatabase(database, false);
+        // Write the schema file directly to simulate a format table stranded with the
+        // REST-only option in a filesystem catalog.
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .build();
+        Path tablePath =
+                ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
+                        .getTableLocation(identifier);
+        new SchemaManager(fileIO, tablePath).createTable(schema);
+        // A catalog that cannot manage partitions must still load such a stranded table: the
+        // option is ignored and the table degrades to an unmanaged format table (readable), rather
+        // than becoming permanently unreadable.
+        Table stranded = catalog.getTable(identifier);
+        assertThat(stranded).isInstanceOf(FormatTable.class);
+        assertThat(new CoreOptions(stranded.options()).partitionedTableInMetastore()).isFalse();
+
+        // Alters that do not touch managed-sensitive options skip the managed validation.
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.setOption("custom.unrelated-option", "value")),
+                false);
+
+        // The documented remediation must succeed on a non-REST catalog.
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(
+                        SchemaChange.removeOption(CoreOptions.METASTORE_PARTITIONED_TABLE.key())),
+                false);
+
+        assertThat(catalog.getTable(identifier).options())
+                .doesNotContainKey(CoreOptions.METASTORE_PARTITIONED_TABLE.key())
+                .containsEntry("custom.unrelated-option", "value");
     }
 }

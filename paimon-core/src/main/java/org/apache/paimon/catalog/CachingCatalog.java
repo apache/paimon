@@ -338,9 +338,10 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        wrapped.createPartitions(identifier, partitions);
-        if (partitionCache != null) {
-            partitionCache.invalidate(identifier);
+        try {
+            wrapped.createPartitions(identifier, partitions);
+        } finally {
+            invalidatePartitionCache(identifier);
         }
     }
 
@@ -348,25 +349,34 @@ public class CachingCatalog extends DelegateCatalog {
     public void createPartitions(
             Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
             throws TableNotExistException {
-        wrapped.createPartitions(identifier, partitions, ignoreIfExists);
-        if (partitionCache != null) {
-            partitionCache.invalidate(identifier);
+        try {
+            wrapped.createPartitions(identifier, partitions, ignoreIfExists);
+        } finally {
+            invalidatePartitionCache(identifier);
         }
     }
 
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        wrapped.dropPartitions(identifier, partitions);
-        if (partitionCache != null) {
-            partitionCache.invalidate(identifier);
+        try {
+            wrapped.dropPartitions(identifier, partitions);
+        } finally {
+            invalidatePartitionCache(identifier);
         }
     }
 
     @Override
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
-        wrapped.alterPartitions(identifier, partitions);
+        try {
+            wrapped.alterPartitions(identifier, partitions);
+        } finally {
+            invalidatePartitionCache(identifier);
+        }
+    }
+
+    private void invalidatePartitionCache(Identifier identifier) {
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }
