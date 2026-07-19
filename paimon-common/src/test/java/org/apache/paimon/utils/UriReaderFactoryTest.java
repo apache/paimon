@@ -36,6 +36,7 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UriReaderFactory}. */
 public class UriReaderFactoryTest {
@@ -66,6 +67,19 @@ public class UriReaderFactoryTest {
     public void testCreateHttpUriReader() {
         UriReader reader = factory.create("http://example.com/file.txt");
         assertThat(reader).isInstanceOf(HttpUriReader.class);
+    }
+
+    @Test
+    public void testInvalidUriDoesNotLeakCredentials() {
+        assertThatThrownBy(
+                        () -> factory.create("https://alice:secret@host/bad path?sig=QUERY_SECRET"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasNoCause()
+                .satisfies(
+                        e -> {
+                            assertThat(String.valueOf(e)).doesNotContain("secret");
+                            assertThat(String.valueOf(e)).doesNotContain("QUERY_SECRET");
+                        });
     }
 
     @Test

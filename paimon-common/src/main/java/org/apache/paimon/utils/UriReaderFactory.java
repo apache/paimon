@@ -44,9 +44,19 @@ public class UriReaderFactory implements Serializable {
     }
 
     public UriReader create(String input) {
-        URI uri = URI.create(input);
+        URI uri = parseUri(input);
         UriKey key = new UriKey(uri.getScheme(), uri.getAuthority());
         return readers.computeIfAbsent(key, k -> newReader(k, uri));
+    }
+
+    private static URI parseUri(String input) {
+        try {
+            return URI.create(input);
+        } catch (IllegalArgumentException e) {
+            // Original exception/cause echoes the raw URI (may carry credentials); drop them.
+            throw new IllegalArgumentException(
+                    "Invalid URI: " + SensitiveConfigUtils.sanitizeUri(input));
+        }
     }
 
     public boolean exists(String input) throws IOException {
