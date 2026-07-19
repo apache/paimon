@@ -52,9 +52,10 @@ def pread(stream, length: int, offset: int) -> bytes:
 # merged read at SPAN so threads stay busy and memory stays bounded.
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
+_COALESCE_VIEW_MAX_READ_AMPLIFICATION = 2.0
 
 
-def _coalesce_ranges(items, max_gap, max_span):
+def _coalesce_ranges(items, max_gap, max_span, max_read_amplification=0):
     """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
     ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
     from collections import defaultdict
@@ -64,16 +65,26 @@ def _coalesce_ranges(items, max_gap, max_span):
     spans = []
     for path, group in by_path.items():
         group.sort(key=lambda x: x[2])
-        cur, start, end = [], None, None
+        cur, start, end, useful = [], None, None, 0
         for idx, _, off, length in group:
             stop = off + length
-            if cur and off - end <= max_gap and stop - start <= max_span:
+            next_useful = useful + length
+            next_start = start if cur else off
+            next_end = max(end, stop) if cur else stop
+            next_span = next_end - next_start
+            within_read_amplification = (
+                max_read_amplification <= 0
+                or next_span <= next_useful * max_read_amplification
+            )
+            if (cur and off - end <= max_gap and stop - start <= max_span
+                    and within_read_amplification):
                 cur.append((idx, off, length))
-                end = max(end, stop)
+                end = next_end
+                useful = next_useful
             else:
                 if cur:
                     spans.append((path, start, end - start, cur))
-                cur, start, end = [(idx, off, length)], off, stop
+                cur, start, end, useful = [(idx, off, length)], off, stop, length
         if cur:
             spans.append((path, start, end - start, cur))
     return spans
@@ -185,33 +196,61 @@ class FileIO(ABC):
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
         """
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span,
+            max_read_amplification=0, return_views=False)
+
+    def read_ranges_coalesced_views(self, ranges, parallelism,
+                                    max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN,
+                                    max_read_amplification=(
+                                        _COALESCE_VIEW_MAX_READ_AMPLIFICATION)):
+        """Read coalesced ranges as zero-copy ``memoryview`` slices.
+
+        Member ranges from the same merged span share the span's backing buffer
+        instead of allocating one ``bytes`` object per member. Callers must
+        accept the Python buffer protocol. Use :meth:`read_ranges_coalesced`
+        when concrete ``bytes`` results are required. Sparse spans are split by
+        ``max_read_amplification`` so views do not retain excessive gap bytes;
+        set it to a non-positive value to disable this bound.
+        """
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span, max_read_amplification,
+            return_views=True)
+
+    def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
+                               max_read_amplification, return_views):
         from concurrent.futures import ThreadPoolExecutor
         # Threads write disjoint results[idx]; safe under the GIL (no list resize).
-        results: List[Optional[bytes]] = [None] * len(ranges)
+        results = [None] * len(ranges)
         coalescible, singletons = [], []
-        for i, r in enumerate(ranges):
+        for index, value in enumerate(ranges):
             # None path/offset/length => null blob, leave result None.
-            if r is None or r[0] is None or r[1] is None or r[2] is None:
+            if (value is None or value[0] is None
+                    or value[1] is None or value[2] is None):
                 continue
-            path, offset, length = r
+            path, offset, length = value
             if length < 0:  # unknown length => read to EOF, never coalesced
-                singletons.append((i, path, offset, length))
+                singletons.append((index, path, offset, length))
             else:
-                coalescible.append((i, path, offset, length))
+                coalescible.append((index, path, offset, length))
 
-        spans = _coalesce_ranges(coalescible, max_gap, max_span)
+        spans = _coalesce_ranges(
+            coalescible, max_gap, max_span, max_read_amplification)
 
         def _run(task):
             kind, payload = task
             if kind == "span":
                 path, span_off, span_len, members = payload
                 buf = self.read_file_range(path, span_off, span_len)
+                if return_views:
+                    buf = memoryview(buf)
                 for idx, off, length in members:
                     s = off - span_off
                     results[idx] = buf[s:s + length]
             else:
                 idx, path, off, length = payload
-                results[idx] = self.read_file_range(path, off, length)
+                result = self.read_file_range(path, off, length)
+                results[idx] = memoryview(result) if return_views else result
 
         tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
         if not tasks:

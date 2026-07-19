@@ -2580,6 +2580,17 @@ class CoalesceRangesTest(unittest.TestCase):
         # max_span forces a split even when contiguous
         self.assertEqual(len(_coalesce_ranges(
             [(0, "a", 0, 10), (1, "a", 10, 10)], max_gap=100, max_span=15)), 2)
+        # A read-amplification bound prevents sparse ranges from sharing a span.
+        self.assertEqual(len(_coalesce_ranges(
+            [(0, "a", 0, 10), (1, "a", 100, 10)],
+            max_gap=100,
+            max_span=1 << 30,
+            max_read_amplification=2.0)), 2)
+        self.assertEqual(len(_coalesce_ranges(
+            [(0, "a", 0, 10), (1, "a", 100, 10)],
+            max_gap=100,
+            max_span=1 << 30,
+            max_read_amplification=0)), 1)
 
     def test_read_ranges_coalesced(self):
         from pypaimon.common.file_io import FileIO
@@ -2592,12 +2603,36 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
                       (path, 100, -1), (path, None, None)]
             got = fio.read_ranges_coalesced(ranges, parallelism=4)
+            self.assertIsInstance(got[0], bytes)
+            self.assertIsInstance(got[1], bytes)
             self.assertEqual(got[0], data[0:10])
             self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
             self.assertIsNone(got[2])
             self.assertEqual(got[3], data[500:520])
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
+
+    def test_read_ranges_coalesced_views(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            ranges = [(path, 0, 10), (path, 10, 10), None,
+                      (path, 500, 20), (path, 100, -1)]
+            got = file_io.read_ranges_coalesced_views(ranges, parallelism=4)
+
+            self.assertIsInstance(got[0], memoryview)
+            self.assertIsInstance(got[1], memoryview)
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[10:20])
+            self.assertIs(got[0].obj, got[1].obj)
+            self.assertIsNone(got[2])
+            self.assertEqual(bytes(got[3]), data[500:520])
+            self.assertIsNot(got[0].obj, got[3].obj)
+            self.assertEqual(bytes(got[4]), data[100:])
 
 
 class ReadFileRangeTest(unittest.TestCase):
