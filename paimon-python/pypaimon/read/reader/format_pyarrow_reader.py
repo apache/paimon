@@ -133,6 +133,7 @@ def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
     if not cache_enabled or cache_size <= 0:
         return load()
 
+    # FileIO keeps this instance stable, and the cached Dataset retains it.
     key = (id(filesystem), file_path_for_pyarrow)
     return _global_parquet_dataset_cache(cache_size).get_or_load(key, load)
 

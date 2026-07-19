@@ -22,7 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pyarrow as pa
+import pyarrow.fs as pafs
 import pyarrow.parquet as pq
+from fsspec.implementations.local import LocalFileSystem as FsspecLocalFileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.core_options import CoreOptions
@@ -30,6 +32,45 @@ from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.read.reader import format_pyarrow_reader as reader_module
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import AtomicType, DataField
+
+
+class _CountingInputFile:
+    def __init__(self, wrapped, file_system):
+        self._wrapped = wrapped
+        self._file_system = file_system
+
+    def read(self, size=-1):
+        offset = self._wrapped.tell()
+        data = self._wrapped.read(size)
+        self._file_system.reads.append((offset, len(data)))
+        return data
+
+    def readinto(self, buffer):
+        offset = self._wrapped.tell()
+        size = self._wrapped.readinto(buffer)
+        self._file_system.reads.append((offset, size))
+        return size
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
+class _CountingLocalFileSystem(FsspecLocalFileSystem):
+    def __init__(self):
+        super().__init__()
+        self.opens = 0
+        self.reads = []
+
+    def _open(self, path, mode="rb", **kwargs):
+        wrapped = super()._open(path, mode=mode, **kwargs)
+        if "r" not in mode:
+            return wrapped
+        self.opens += 1
+        return _CountingInputFile(wrapped, self)
+
+    def reset_counts(self):
+        self.opens = 0
+        self.reads = []
 
 
 class ParquetMetadataCacheTest(unittest.TestCase):
@@ -58,9 +99,9 @@ class ParquetMetadataCacheTest(unittest.TestCase):
             "parquet.metadata-cache-size": size,
         }))
 
-    def _read(self, path, options):
+    def _read(self, path, options, file_io=None):
         reader = FormatPyArrowReader(
-            self.file_io,
+            file_io or self.file_io,
             "parquet",
             path,
             [DataField(0, "value", AtomicType("BIGINT"))],
@@ -98,6 +139,35 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         self.assertEqual(list(range(10)), first)
         self.assertEqual(first, second)
         self.assertEqual(1, dataset.call_count)
+
+    def test_repeated_scan_skips_footer_io(self):
+        path = os.path.join(self.temp_dir.name, "footer-io.parquet")
+        pq.write_table(
+            pa.table({
+                "value": list(range(10000)),
+                "payload": ["x" * 100] * 10000,
+            }),
+            path,
+            row_group_size=100,
+            compression="none",
+        )
+        counting = _CountingLocalFileSystem()
+        file_io = LocalFileIO(self.temp_dir.name, Options({}))
+        file_io.filesystem = pafs.PyFileSystem(pafs.FSSpecHandler(counting))
+
+        uncached = self._read(path, self._options(False), file_io)
+        uncached_opens = counting.opens
+        uncached_reads = len(counting.reads)
+
+        counting.reset_counts()
+        reader_module._reset_parquet_dataset_cache()
+        self._read(path, self._options(True), file_io)
+        counting.reset_counts()
+        cached = self._read(path, self._options(True), file_io)
+
+        self.assertEqual(uncached, cached)
+        self.assertLess(counting.opens, uncached_opens)
+        self.assertLess(len(counting.reads), uncached_reads)
 
     def test_evicts_least_recently_used_entry(self):
         options = self._options(True, size=2)
