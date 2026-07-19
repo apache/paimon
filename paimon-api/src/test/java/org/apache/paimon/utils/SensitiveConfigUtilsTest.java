@@ -63,8 +63,8 @@ class SensitiveConfigUtilsTest {
 
     @Test
     void testRedactValue() {
-        // Secret/access-key values keep only their last 4 chars.
-        assertThat(SensitiveConfigUtils.redactValue("fs.oss.accessKeySecret", "0123456789abcdef"))
+        // Identifier-like access-key id keeps only its last 4 chars.
+        assertThat(SensitiveConfigUtils.redactValue("fs.oss.accessKeyId", "0123456789abcdef"))
                 .isEqualTo("****cdef");
         // Short value is fully masked.
         assertThat(SensitiveConfigUtils.redactValue("password", "short")).isEqualTo(REDACTED);
@@ -73,16 +73,27 @@ class SensitiveConfigUtilsTest {
     }
 
     @Test
-    void testPasswordAndTokenAreFullyMasked() {
-        // Passwords and tokens leak too much from a trailing hint -> always fully masked.
-        assertThat(SensitiveConfigUtils.redactValue("my.password", "0123456789abcdef"))
-                .isEqualTo(REDACTED);
-        assertThat(SensitiveConfigUtils.redactValue("security.token", "0123456789abcdef"))
-                .isEqualTo(REDACTED);
-        assertThat(SensitiveConfigUtils.redactValue("Authorization", "Bearer 0123456789abcdef"))
-                .isEqualTo(REDACTED);
-        // Contrast: an access-key secret keeps its tail.
-        assertThat(SensitiveConfigUtils.redactValue("fs.s3a.secret.key", "0123456789abcdef"))
+    void testTrueSecretsAreFullyMasked() {
+        // True secrets are never partially revealed (AWS/Azure: the secret is never shown).
+        for (String key :
+                new String[] {
+                    "my.password",
+                    "security.token",
+                    "Authorization",
+                    "fs.s3a.secret.key",
+                    "fs.oss.accessKeySecret",
+                    "client.private-key",
+                    "fs.s3a.encryption.key",
+                    "fs.azure.account.key.acct",
+                    "fs.azure.sas.acct",
+                    "some.credential"
+                }) {
+            assertThat(SensitiveConfigUtils.redactValue(key, "0123456789abcdef"))
+                    .as(key)
+                    .isEqualTo(REDACTED);
+        }
+        // Contrast: an access-key id (an identifier) keeps its tail.
+        assertThat(SensitiveConfigUtils.redactValue("fs.oss.accessKeyId", "0123456789abcdef"))
                 .isEqualTo("****cdef");
     }
 
@@ -98,10 +109,10 @@ class SensitiveConfigUtilsTest {
         Map<String, String> redacted = SensitiveConfigUtils.redactMap(options);
 
         assertThat(redacted).containsEntry("warehouse", "mock://warehouse");
-        // Long secrets keep their last 4 chars; endpoint is untouched.
+        // Access-key id keeps a tail; true secrets are fully masked; endpoint is untouched.
         assertThat(redacted).containsEntry("fs.oss.accessKeyId", "****0001");
-        assertThat(redacted).containsEntry("fs.oss.accessKeySecret", "****alue");
-        assertThat(redacted).containsEntry("fs.azure.account.key.acct", "****alue");
+        assertThat(redacted).containsEntry("fs.oss.accessKeySecret", REDACTED);
+        assertThat(redacted).containsEntry("fs.azure.account.key.acct", REDACTED);
         assertThat(redacted).containsEntry("fs.oss.endpoint", "mock-endpoint.example.com");
         // Original map must not be mutated.
         assertThat(options).containsEntry("fs.oss.accessKeySecret", "mock-secret-value");
@@ -117,45 +128,28 @@ class SensitiveConfigUtilsTest {
     }
 
     @Test
-    void testRedactTextMasksSecretsInJsonAndForm() {
-        String json =
-                "{\"accessKeyId\":\"mock-id\",\"accessKeySecret\":\"mock-secret-abcd\","
-                        + "\"securityToken\":\"mock-tok\",\"endpoint\":\"mock-endpoint\"}";
-        String redactedJson = SensitiveConfigUtils.redactText(json);
-        assertThat(redactedJson)
-                .doesNotContain("mock-secret-abcd")
-                .doesNotContain("mock-tok")
-                .contains(REDACTED)
-                // Non-sensitive fields are kept.
-                .contains("mock-endpoint");
-
-        String form = "password=mock-pass&user=alice&fs.oss.access-key=mock-ak";
-        String redactedForm = SensitiveConfigUtils.redactText(form);
-        assertThat(redactedForm)
-                .doesNotContain("mock-pass")
-                .doesNotContain("mock-ak")
-                .contains("user=alice");
+    void testRedactTextRedactsWholeMarkedText() {
+        // Free-form text cannot be masked per-secret reliably, so any marker redacts it whole.
+        // This covers the cases a boundary regex leaked: commas, spaces, quotes, Azure sig.
+        for (String text :
+                new String[] {
+                    "{\"accessKeySecret\":\"mock-secret-abcd\",\"endpoint\":\"mock\"}",
+                    "password=mock-pass&user=alice",
+                    "Authorization: Bearer mock-jwt-token-abcdef",
+                    "{\"password\":\"alpha,beta\"}",
+                    "{\"sas\":\"sv=2024-11-04&sig=REST-LEAK\"}",
+                    "invalid token SECRET-9999 in request",
+                    "https://x.blob.core.windows.net/c/f?sig=SECRETSIG"
+                }) {
+            assertThat(SensitiveConfigUtils.redactText(text)).as(text).isEqualTo(REDACTED);
+        }
     }
 
     @Test
-    void testRedactTextMasksWholeValueWithSpaces() {
-        // The token after the "Bearer " scheme (with a space) must be masked, not just "Bearer".
-        String header = "Authorization: Bearer mock-jwt-token-abcdef";
-        assertThat(SensitiveConfigUtils.redactText(header))
-                .doesNotContain("mock-jwt-token-abcdef")
-                .startsWith("Authorization: ");
-
-        // A quoted multi-word secret value is masked up to the closing quote only.
-        String json = "{\"token\":\"Bearer mock-jwt-abcd\",\"user\":\"alice\"}";
-        assertThat(SensitiveConfigUtils.redactText(json))
-                .doesNotContain("mock-jwt-abcd")
-                .contains("\"user\":\"alice\"");
-    }
-
-    @Test
-    void testRedactTextNullAndEmptySafe() {
+    void testRedactTextKeepsTextWithoutMarkers() {
         assertThat(SensitiveConfigUtils.redactText(null)).isNull();
         assertThat(SensitiveConfigUtils.redactText("")).isEmpty();
-        assertThat(SensitiveConfigUtils.redactText("no secrets here")).isEqualTo("no secrets here");
+        assertThat(SensitiveConfigUtils.redactText("Table not found: default.t"))
+                .isEqualTo("Table not found: default.t");
     }
 }

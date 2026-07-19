@@ -18,11 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Redacts sensitive configuration values (passwords, secrets, tokens, access keys) before they are
@@ -60,22 +60,49 @@ public class SensitiveConfigUtils {
     };
 
     /**
-     * Keys whose value is fully masked instead of keeping a trailing hint. Passwords and bearer
-     * tokens leak too much from even a few characters, so they are never partially revealed.
+     * Keys whose value is fully masked instead of keeping a trailing hint. Every true secret is
+     * here; only identifier-like keys ({@code accessKeyId}) keep a tail. This mirrors AWS/Azure,
+     * where the access-key id is loggable but the secret / token / SAS is never shown. Note {@code
+     * accessKeySecret} normalizes to contain {@code secret}, so it is fully masked while {@code
+     * accessKeyId} (only {@code accesskey}) keeps its tail.
      */
-    private static final String[] FULL_MASK_KEY_PATTERNS = {"password", "token", "authorization"};
+    private static final String[] FULL_MASK_KEY_PATTERNS = {
+        "password",
+        "token",
+        "authorization",
+        "secret",
+        "credential",
+        "privatekey",
+        "encryptionkey",
+        "apikey",
+        "accountkey",
+        "sas"
+    };
 
     /**
-     * Matches {@code key:value} / {@code key=value} pairs whose key looks sensitive. The value runs
-     * up to a quote, comma, brace, ampersand or line break, so multi-token values such as {@code
-     * Authorization: Bearer <token>} are masked whole rather than only their first word.
+     * Markers that flag free-form text (e.g. a server error message or a signed URL) as possibly
+     * carrying a secret. Matched by a plain lower-cased substring scan, so no regex backtracking.
      */
-    private static final Pattern SENSITIVE_TEXT =
-            Pattern.compile(
-                    "(?i)([\"']?[\\w.-]*"
-                            + "(?:secret|token|password|credential|access[._-]?key|account[._-]?key"
-                            + "|encryption[._-]?key|authorization|api[._-]?key|private[._-]?key|sas)"
-                            + "[\\w.-]*[\"']?\\s*[:=]\\s*)([\"']?)([^\"',&}\\r\\n]+)");
+    private static final String[] SENSITIVE_TEXT_MARKERS = {
+        "password",
+        "secret",
+        "token",
+        "credential",
+        "access-key",
+        "accesskey",
+        "account-key",
+        "accountkey",
+        "authorization",
+        "private-key",
+        "privatekey",
+        "api-key",
+        "apikey",
+        "encryption-key",
+        "encryptionkey",
+        "signature",
+        "sig=",
+        "x-amz-"
+    };
 
     private SensitiveConfigUtils() {}
 
@@ -119,23 +146,58 @@ public class SensitiveConfigUtils {
     }
 
     /**
-     * Best-effort masking of secret values in free-form text (JSON/form HTTP bodies): masks the
-     * value after any sensitive-looking key. Prefer {@link #redactMap} when keys are known.
+     * Redacts free-form text (e.g. a server {@code ErrorResponse.message}). Arbitrary text cannot
+     * be masked per-secret reliably, so if any sensitive marker is present the whole text is
+     * replaced. Runs a plain linear substring scan (no regex backtracking / ReDoS) and is safe to
+     * call on attacker-controlled input. Prefer {@link #redactMap} when the keys are known.
      */
     public static String redactText(String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        Matcher matcher = SENSITIVE_TEXT.matcher(text);
-        StringBuffer sb = new StringBuffer();
-        while (matcher.find()) {
-            boolean fullMask = matchesAny(matcher.group(1), FULL_MASK_KEY_PATTERNS);
-            String replacement =
-                    matcher.group(1) + matcher.group(2) + maskValue(matcher.group(3), fullMask);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        String lower = text.toLowerCase(Locale.ROOT);
+        for (String marker : SENSITIVE_TEXT_MARKERS) {
+            if (lower.contains(marker)) {
+                return REDACTED;
+            }
         }
-        matcher.appendTail(sb);
-        return sb.toString();
+        return text;
+    }
+
+    /**
+     * Strips the query string and user-info from a URI so signed-URL credentials (AWS/GCS
+     * signature, Azure SAS {@code sig}, an embedded {@code user:password}) never reach logs or
+     * exceptions. Returns {@code scheme://host[:port]/path}; falls back to the substring before
+     * {@code '?'} when the URI cannot be parsed.
+     */
+    public static String sanitizeUri(String uri) {
+        if (uri == null || uri.isEmpty()) {
+            return uri;
+        }
+        try {
+            URI parsed = new URI(uri);
+            StringBuilder sb = new StringBuilder();
+            if (parsed.getScheme() != null) {
+                sb.append(parsed.getScheme()).append("://");
+            }
+            if (parsed.getHost() != null) {
+                sb.append(parsed.getHost());
+                if (parsed.getPort() != -1) {
+                    sb.append(':').append(parsed.getPort());
+                }
+            }
+            if (parsed.getRawPath() != null) {
+                sb.append(parsed.getRawPath());
+            }
+            return sb.length() == 0 ? stripQuery(uri) : sb.toString();
+        } catch (URISyntaxException e) {
+            return stripQuery(uri);
+        }
+    }
+
+    private static String stripQuery(String uri) {
+        int queryStart = uri.indexOf('?');
+        return queryStart >= 0 ? uri.substring(0, queryStart) : uri;
     }
 
     /**

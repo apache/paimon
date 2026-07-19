@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
@@ -120,7 +121,10 @@ public class HttpClientUtils {
             return false;
         }
         throw new IOException(
-                "Unexpected HTTP status code: " + rangeStatusCode + " for uri: " + uri);
+                "Unexpected HTTP status code: "
+                        + rangeStatusCode
+                        + " for uri: "
+                        + SensitiveConfigUtils.sanitizeUri(uri));
     }
 
     public static boolean isNotFoundError(Throwable throwable) {
