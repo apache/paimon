@@ -33,13 +33,13 @@ the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """
 
-from typing import Any, List, Dict, Optional, Tuple, Union
+from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
-from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType
+from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
 from pypaimon.table.row.internal_row import InternalRow
 
 # aggregator input type hints variables
@@ -60,6 +60,7 @@ NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
+NAME_MERGE_MAP = "merge_map"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -664,6 +665,96 @@ class FieldNestedUpdateAgg(FieldAggregator):
         )
 
 
+class FieldMergeMapAgg(FieldAggregator):
+    """
+    Merge map values by combining all key-value pairs.
+
+    When the same key exists in both maps, the value from the input map
+    overwrites the value from the accumulator map.
+    """
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if not isinstance(field_type, MapType):
+            raise ValueError(
+                "Data type for merge map column must be 'MAP' but was '{}'".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        result = {}
+
+        self._put_to_map(result, accumulator)
+        self._put_to_map(result, input_field)
+
+        return result
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        # it's hard to mark the input is retracted without accumulator
+        if accumulator is None:
+            return None
+
+        # nothing to be retracted
+        if retract_field is None:
+            return accumulator
+
+        if len(retract_field) == 0:
+            return accumulator
+
+        retract_keys = self._get_keys(retract_field)
+        acc = {}
+        self._put_to_map(acc, accumulator)
+
+        result = {
+            key: value
+            for key, value in acc.items()
+            if key not in retract_keys
+        }
+
+        return result
+
+    def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        if isinstance(input_field, dict):
+            maps.update(input_field)
+        elif isinstance(input_field, list):
+            tmp_map = {}
+            for item in input_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+                tmp_map[item['key']] = item['value']
+
+            maps.update(tmp_map)
+        else:
+            raise TypeError(
+                "input_field must be dict or list[dict], got {}".format(type(input_field))
+            )
+
+    def _get_keys(self, retract_field: Any) -> Set[Any]:
+        keys = set()
+
+        if isinstance(retract_field, dict):
+            keys.update(retract_field.keys())
+
+        elif isinstance(retract_field, list):
+            for item in retract_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+
+                keys.add(item["key"])
+        else:
+            raise TypeError(
+                "retract_field must be dict or list[dict], got {}".format(type(retract_field))
+            )
+
+        return keys
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -739,4 +830,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_NESTED_UPDATE, _build_field_options(FieldNestedUpdateAgg, NAME_NESTED_UPDATE)
+)
+register_aggregator(
+    NAME_MERGE_MAP, _build_no_type_check(FieldMergeMapAgg, NAME_MERGE_MAP)
 )
