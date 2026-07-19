@@ -173,6 +173,18 @@ public class SensitiveConfigUtils {
     /** Placeholder for a URI that cannot be parsed and thus cannot be safely sanitized. */
     public static final String INVALID_URI = "<invalid-uri>";
 
+    /** Message prefix of the safe exception thrown for an unparseable URI. */
+    public static final String INVALID_URI_MESSAGE_PREFIX = "Invalid URI: ";
+
+    /**
+     * Builds a safe exception for an unparseable URI. The original exception echoes the raw URI
+     * (which may carry credentials), so it is neither kept as a cause nor reused as the message.
+     * Callers across modules share this prefix so the exception can be classified uniformly.
+     */
+    public static IllegalArgumentException invalidUri(String uri) {
+        return new IllegalArgumentException(INVALID_URI_MESSAGE_PREFIX + sanitizeUri(uri));
+    }
+
     /**
      * Strips the query string and user-info from a URI so signed-URL credentials (AWS/GCS
      * signature, Azure SAS {@code sig}, an embedded {@code user:password}) never reach logs or

@@ -53,9 +53,7 @@ public class UriReaderFactory implements Serializable {
         try {
             return URI.create(input);
         } catch (IllegalArgumentException e) {
-            // Original exception/cause echoes the raw URI (may carry credentials); drop them.
-            throw new IllegalArgumentException(
-                    "Invalid URI: " + SensitiveConfigUtils.sanitizeUri(input));
+            throw SensitiveConfigUtils.invalidUri(input);
         }
     }
 

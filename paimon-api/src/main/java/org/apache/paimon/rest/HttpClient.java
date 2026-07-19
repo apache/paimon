@@ -161,8 +161,9 @@ public class HttpClient implements RESTClient {
                         }
                     });
         } catch (IOException e) {
+            // No cause: a redirect/protocol error message can echo the target URL (a signed URL).
             throw new RESTException(
-                    e, "Error occurred while processing %s request", request.getMethod());
+                    "Error occurred while processing %s request", request.getMethod());
         }
     }
 

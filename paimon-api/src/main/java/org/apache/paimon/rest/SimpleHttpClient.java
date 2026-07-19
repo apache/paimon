@@ -101,8 +101,8 @@ public class SimpleHttpClient implements Closeable {
                         return responseBodyStr;
                     });
         } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to convert HTTP response body to string, error : " + e.getMessage());
+            // No message from e: a redirect/protocol error can echo the target URL (a signed URL).
+            throw new RuntimeException("Failed to convert HTTP response body to string.");
         }
     }
 

@@ -33,6 +33,7 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuil
 import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.apache.hc.client5.http.ssl.HttpsSupport;
+import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
 import org.apache.hc.core5.ssl.SSLContexts;
@@ -86,12 +87,9 @@ public class HttpClientUtils {
         return connectionManagerBuilder.build();
     }
 
-    /** Message prefix of the safe exception thrown for an unparseable URI. */
-    public static final String INVALID_URI_MESSAGE_PREFIX = "Invalid HTTP URI: ";
-
     public static InputStream getAsInputStream(String uri) throws IOException {
         HttpGet httpGet = newHttpGet(uri);
-        CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet);
+        CloseableHttpResponse response = execute(httpGet, uri);
         int statusCode = response.getCode();
         if (statusCode != HttpStatus.SC_OK) {
             try {
@@ -144,7 +142,8 @@ public class HttpClientUtils {
             if (current instanceof IllegalArgumentException
                     && current.getMessage() != null
                     && (current.getMessage().contains("Illegal character")
-                            || current.getMessage().startsWith(INVALID_URI_MESSAGE_PREFIX))) {
+                            || current.getMessage()
+                                    .startsWith(SensitiveConfigUtils.INVALID_URI_MESSAGE_PREFIX))) {
                 return true;
             }
             current = current.getCause();
@@ -191,7 +190,7 @@ public class HttpClientUtils {
 
     private static int headStatusCode(String uri) throws IOException {
         HttpHead httpHead = newHttpHead(uri);
-        try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpHead)) {
+        try (CloseableHttpResponse response = execute(httpHead, uri)) {
             return response.getCode();
         }
     }
@@ -199,8 +198,24 @@ public class HttpClientUtils {
     private static int getRangeStatusCode(String uri) throws IOException {
         HttpGet httpGet = newHttpGet(uri);
         httpGet.addHeader("Range", "bytes=0-0");
-        try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet)) {
+        try (CloseableHttpResponse response = execute(httpGet, uri)) {
             return response.getCode();
+        }
+    }
+
+    /**
+     * Executes a request, converting any execute-stage failure into an exception that carries
+     * neither the original message nor cause. Redirect and protocol errors (e.g. "Circular redirect
+     * to &lt;Location&gt;") echo the target URL, which for a signed URL is a credential; only the
+     * sanitized request URI is reported.
+     */
+    private static CloseableHttpResponse execute(ClassicHttpRequest request, String uri)
+            throws IOException {
+        try {
+            return DEFAULT_HTTP_CLIENT.execute(request);
+        } catch (IOException | RuntimeException e) {
+            throw new IOException(
+                    "HTTP request failed for uri: " + SensitiveConfigUtils.sanitizeUri(uri));
         }
     }
 
@@ -208,7 +223,7 @@ public class HttpClientUtils {
         try {
             return new HttpGet(uri);
         } catch (RuntimeException e) {
-            throw invalidUri(uri);
+            throw SensitiveConfigUtils.invalidUri(uri);
         }
     }
 
@@ -216,14 +231,8 @@ public class HttpClientUtils {
         try {
             return new HttpHead(uri);
         } catch (RuntimeException e) {
-            throw invalidUri(uri);
+            throw SensitiveConfigUtils.invalidUri(uri);
         }
-    }
-
-    // No cause: the original exception echoes the raw URI, which may hold credentials.
-    private static IllegalArgumentException invalidUri(String uri) {
-        return new IllegalArgumentException(
-                INVALID_URI_MESSAGE_PREFIX + SensitiveConfigUtils.sanitizeUri(uri));
     }
 
     private static RuntimeException httpError(int statusCode) {
