@@ -41,10 +41,14 @@ class BlobFormatWriter:
 
     def __init__(self, output_stream: BinaryIO,
                  blob_consumer: Optional[BlobConsumer] = None,
-                 file_path: Optional[str] = None):
+                 file_path: Optional[str] = None,
+                 copy_buffer_size: int = BUFFER_SIZE):
+        if copy_buffer_size <= 0:
+            raise ValueError("BLOB copy buffer size must be positive")
         self.output_stream = output_stream
         self._blob_consumer = blob_consumer
         self._file_path = file_path
+        self.copy_buffer_size = copy_buffer_size
         self.lengths: List[int] = []
         self.position = 0
 
@@ -176,10 +180,10 @@ class BlobFormatWriter:
         else:
             stream = blob_value.new_input_stream()
             try:
-                chunk = stream.read(self.BUFFER_SIZE)
+                chunk = stream.read(self.copy_buffer_size)
                 while chunk:
                     crc32 = self._write_with_crc(chunk, crc32)
-                    chunk = stream.read(self.BUFFER_SIZE)
+                    chunk = stream.read(self.copy_buffer_size)
             finally:
                 stream.close()
 

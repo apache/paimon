@@ -36,7 +36,8 @@ class BlobFileWriter:
     Writes rows one by one and tracks file size.
     """
 
-    def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None):
+    def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None,
+                 copy_buffer_size: int = BlobFormatWriter.BUFFER_SIZE):
         self.file_io = file_io
         self.file_path = file_path
         self._blob_consumer = blob_consumer
@@ -45,6 +46,7 @@ class BlobFileWriter:
             self.output_stream,
             blob_consumer=blob_consumer,
             file_path=str(file_path),
+            copy_buffer_size=copy_buffer_size,
         )
         self.row_count = 0
         self.closed = False

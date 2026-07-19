@@ -44,6 +44,7 @@ class BlobWriter(AppendOnlyDataWriter):
 
         options = self.table.options
         self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
+        self.blob_copy_buffer_size = CoreOptions.blob_copy_buffer_size(options)
 
         self._blob_consumer = blob_consumer
         self.current_writer: Optional[BlobFileWriter] = None
@@ -100,7 +101,12 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        self.current_writer = BlobFileWriter(self.file_io, file_path, blob_consumer=self._blob_consumer)
+        self.current_writer = BlobFileWriter(
+            self.file_io,
+            file_path,
+            blob_consumer=self._blob_consumer,
+            copy_buffer_size=self.blob_copy_buffer_size,
+        )
 
     def rolling_file(self) -> bool:
         if self.current_writer is None:
