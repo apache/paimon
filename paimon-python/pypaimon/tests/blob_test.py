@@ -131,23 +131,28 @@ class BlobTest(unittest.TestCase):
             pass  # Ignore cleanup errors
 
     def test_blob_copy_buffer_size_validation(self):
-        """blob.copy-buffer-size must be within 1 .. Integer.MAX_VALUE, matching Java."""
+        """blob.copy-buffer-size must be within 1 .. 256 MiB, matching Java."""
         from pypaimon.write.blob_format_writer import BlobFormatWriter
         from pypaimon.common.options.core_options import CoreOptions
 
-        # BlobFormatWriter rejects non-positive and oversized (> 2**31 - 1) buffers.
-        for bad in [0, -1, 2 ** 31]:
+        max_size = 256 * 1024 * 1024
+        # BlobFormatWriter rejects non-positive and oversized (> 256 MiB) buffers.
+        for bad in [0, -1, max_size + 1]:
             with self.assertRaises(ValueError):
                 BlobFormatWriter(io.BytesIO(), copy_buffer_size=bad)
-        # a valid custom buffer is accepted.
+        # valid custom buffers (including the max) are accepted.
         BlobFormatWriter(io.BytesIO(), copy_buffer_size=8).close()
+        BlobFormatWriter(io.BytesIO(), copy_buffer_size=max_size).close()
 
         # CoreOptions accessor defaults to 4 KiB and validates the same bounds.
         self.assertEqual(CoreOptions(Options({})).blob_copy_buffer_size(), 4096)
         self.assertEqual(
             CoreOptions(Options({'blob.copy-buffer-size': '256 kb'})).blob_copy_buffer_size(),
             256 * 1024)
-        for bad in ['0 bytes', '3 gb']:
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '256 mb'})).blob_copy_buffer_size(),
+            max_size)
+        for bad in ['0 bytes', '512 mb', '3 gb']:
             with self.assertRaises(ValueError):
                 CoreOptions(Options({'blob.copy-buffer-size': bad})).blob_copy_buffer_size()
 

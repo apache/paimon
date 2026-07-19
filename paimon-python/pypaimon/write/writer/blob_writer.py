@@ -44,7 +44,8 @@ class BlobWriter(AppendOnlyDataWriter):
 
         options = self.table.options
         self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
-        self.blob_copy_buffer_size = CoreOptions.blob_copy_buffer_size(options)
+        # Use the effective options (constructor-provided), consistent with the other accessors.
+        self.blob_copy_buffer_size = self.options.blob_copy_buffer_size()
 
         self._blob_consumer = blob_consumer
         self.current_writer: Optional[BlobFileWriter] = None
