@@ -39,7 +39,10 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
 
     @Override
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
-        GlobalIndexIOMeta written = writeData(data);
+        // Attach rowCount so allNonNullRows() takes the complement path (a single file has dense
+        // 0-based local row ids). The multi-file reader keeps rowCount unknown and stays on the
+        // range-scan fallback.
+        GlobalIndexIOMeta written = writeData(data, true);
         return globalIndexer.createReader(
                 fileReader, Collections.singletonList(written), newDirectExecutorService());
     }

@@ -307,9 +307,68 @@ public abstract class AbstractIndexReaderTest {
         }
     }
 
+    @TestTemplate
+    public void testIsNotNullAcrossNullDensities() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        List<Object> originalKeys = data.stream().map(Pair::getKey).collect(Collectors.toList());
+
+        // No nulls, few nulls, half, many nulls and all nulls. allNonNullRows() must return the
+        // exact non-null row ids on both the complement path (single file, rowCount attached) and
+        // the range-scan fallback (multi file, rowCount unknown).
+        for (double nullFraction : new double[] {0.0, 0.01, 0.5, 0.99, 1.0}) {
+            applyTailNulls(originalKeys, nullFraction);
+            try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+                GlobalIndexResult result = reader.visitIsNotNull(ref).join().get();
+                assertResult(result, filter(Objects::nonNull));
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testNotEqualAndNotInWithNulls() throws Exception {
+        // Null the tail so the surviving non-null keys stay a sorted prefix; both visitors build
+        // on allNonNullRows() and must exclude the null rows (NULL <> x and NULL NOT IN (..) are
+        // never true).
+        int nullCount = (int) (dataNum * 0.3);
+        for (int i = dataNum - nullCount; i < dataNum; i++) {
+            data.get(i).setLeft(null);
+        }
+
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            Object literal = data.get(0).getKey(); // the lowest key, guaranteed non-null
+
+            GlobalIndexResult notEqual = reader.visitNotEqual(ref, literal).join().get();
+            assertResult(
+                    notEqual, filter(obj -> obj != null && comparator.compare(obj, literal) != 0));
+
+            List<Object> literals = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                literals.add(data.get(i).getKey());
+            }
+            TreeSet<Object> set = new TreeSet<>(comparator);
+            set.addAll(literals);
+            GlobalIndexResult notIn = reader.visitNotIn(ref, literals).join().get();
+            assertResult(notIn, filter(obj -> obj != null && !set.contains(obj)));
+        }
+    }
+
+    /** Restores the original keys, then sets the highest-key tail to null by the given fraction. */
+    private void applyTailNulls(List<Object> originalKeys, double nullFraction) {
+        int firstNull = dataNum - (int) (dataNum * nullFraction);
+        for (int i = 0; i < dataNum; i++) {
+            data.get(i).setLeft(i < firstNull ? originalKeys.get(i) : null);
+        }
+    }
+
     protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
+        return writeData(data, false);
+    }
+
+    protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data, boolean attachRowCount)
+            throws IOException {
         GlobalIndexSingleColumnWriter indexWriter = globalIndexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
@@ -318,11 +377,15 @@ public abstract class AbstractIndexReaderTest {
         Assertions.assertEquals(1, results.size());
 
         ResultEntry resultEntry = results.get(0);
-        String fileName = resultEntry.fileName();
-        return new GlobalIndexIOMeta(
-                new Path(new Path(tempPath.toUri()), fileName),
-                fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.meta());
+        Path filePath = new Path(new Path(tempPath.toUri()), resultEntry.fileName());
+        long fileSize = fileIO.getFileSize(filePath);
+        // Attaching rowCount lets BTreeIndexReader derive the non-null rows from the null bitmap
+        // instead of scanning. It is only valid when the file's local row ids are dense and
+        // 0-based, which holds here because the whole data set is written to a single file.
+        return attachRowCount
+                ? new GlobalIndexIOMeta(
+                        filePath, fileSize, resultEntry.meta(), resultEntry.rowCount())
+                : new GlobalIndexIOMeta(filePath, fileSize, resultEntry.meta());
     }
 
     protected List<Long> filter(Predicate<Object> filter) {

@@ -30,10 +30,24 @@ public class GlobalIndexIOMeta {
     private final long fileSize;
     private final byte[] metadata;
 
+    /**
+     * Total number of logical rows covered by this index file, i.e. the size of the dense local row
+     * id universe {@code [0, rowCount)}, or {@code -1} when unknown. For btree indexes the writer
+     * assigns exactly one dense row id per logical row (null rows included), so a reader can derive
+     * the non-null rows as the complement of the null bitmap within {@code [0, rowCount)} instead
+     * of scanning the whole file.
+     */
+    private final long rowCount;
+
     public GlobalIndexIOMeta(Path filePath, long fileSize, byte[] metadata) {
+        this(filePath, fileSize, metadata, -1);
+    }
+
+    public GlobalIndexIOMeta(Path filePath, long fileSize, byte[] metadata, long rowCount) {
         this.filePath = filePath;
         this.fileSize = fileSize;
         this.metadata = metadata;
+        this.rowCount = rowCount;
     }
 
     public Path filePath() {
@@ -46,6 +60,11 @@ public class GlobalIndexIOMeta {
 
     public byte[] metadata() {
         return metadata;
+    }
+
+    /** Row count of this index file, or {@code -1} when unknown. */
+    public long rowCount() {
+        return rowCount;
     }
 
     @Override
