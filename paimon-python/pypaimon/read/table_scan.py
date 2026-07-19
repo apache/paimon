@@ -32,6 +32,13 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 
 logger = logging.getLogger(__name__)
 
+# Options native forwards to Rust; any other copy() override is invisible to Rust.
+_NATIVE_FORWARDED_OPTIONS = frozenset({
+    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
+    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
+    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+})
+
 
 class TableScan:
     """Implementation of TableScan for native Python reading."""
@@ -60,9 +67,9 @@ class TableScan:
         # auth-aware file scanner; fall back to the normal path otherwise.
         if (auth_result is None and self.table.options.native_plan_enabled()
                 and self._native_plan_supported()):
-            native_plan = self._try_native_plan()
-            if native_plan is not None:
-                return native_plan
+            native = self._try_native_plan()
+            if native is not None:
+                return native
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
@@ -74,10 +81,12 @@ class TableScan:
         drops L0), deletion vectors (Python drops L0), data evolution
         (dedicated split generator), postpone bucket (drops synthetic buckets),
         a primary-key table whose trimmed PK is empty (PK equals the partition
-        key; native may mark splits raw-convertible and skip merge), query auth,
-        non-main branch, time-travel, incremental, a missing/old pypaimon-rust,
-        or a catalog / identifier Rust cannot reconstruct. Keep this capability
-        gate in sync when adding scan features."""
+        key; native may mark splits raw-convertible and skip merge), dynamic
+        bucket / cross-partition PK tables (unconfirmed Rust parity), copy()
+        overrides Rust does not see (e.g. a removed scan.snapshot-id), query
+        auth, non-main branch, time-travel, incremental, a missing/old
+        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
+        this capability gate in sync when adding scan features."""
         from pypaimon.read.native_plan import native_runtime_available
         if not native_runtime_available():
             return False
@@ -115,10 +124,17 @@ class TableScan:
                 or self.table.options.merge_engine() == 'first-row' \
                 or self.table.current_branch() != 'main':
             return False
-        # PK equal to the partition key -> empty trimmed PK. Native marks such splits
-        # raw-convertible and the reader then skips merge, returning stale/duplicate rows.
+        # Empty trimmed PK (PK == partition key): native skips merge -> duplicate/stale rows.
         if getattr(self.table, 'is_primary_key_table', False) \
                 and not self.table.trimmed_primary_keys:
+            return False
+        # Dynamic-bucket / cross-partition PK: Rust parity unconfirmed -> fall back.
+        from pypaimon.table.bucket_mode import BucketMode
+        if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
+            return False
+        # copy() overrides Rust can't see (e.g. removed scan.snapshot-id) -> fall back.
+        overrides = set(getattr(self.table, '_applied_dynamic_options', {}) or {})
+        if overrides - _NATIVE_FORWARDED_OPTIONS:
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         options = self.table.options.options
@@ -139,9 +155,7 @@ class TableScan:
         try:
             splits = native_plan(self.table)
         except Exception as e:
-            # Native planning is best-effort. Any construction/planning failure -- e.g. a
-            # storage scheme the pinned Rust build does not support (viewfs://, ...) -- must
-            # fall back to the Python scanner rather than fail an otherwise valid scan.
+            # Any native construction/planning failure (e.g. unsupported scheme) -> fall back.
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
@@ -174,9 +188,9 @@ class TableScan:
         auth_result = self.__auth_query()
         if (auth_result is None and self.table.options.native_plan_enabled()
                 and self._native_plan_supported()):
-            native_plan = self._try_native_plan()
-            if native_plan is not None:
-                return native_plan, None
+            native = self._try_native_plan()
+            if native is not None:
+                return native, None
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()

@@ -66,6 +66,17 @@ def _catalog_metastore(loader) -> Optional[str]:
     return None
 
 
+def _option_value_to_string(value) -> str:
+    """Stringify an option value for the Rust catalog.
+
+    Python bools stringify to ``'True'``/``'False'``; Rust parses booleans
+    case-sensitively, so emit lowercase ``'true'``/``'false'`` instead.
+    """
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return OptionsUtils.convert_to_string(value)
+
+
 def _catalog_options(table) -> dict:
     """Catalog options that built this table, to reconstruct the Rust catalog."""
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
@@ -73,7 +84,7 @@ def _catalog_options(table) -> dict:
         raise ValueError("native_plan requires a catalog-backed table (no catalog loader)")
     options = loader.context().options.to_map()
     normalized = {
-        str(key): OptionsUtils.convert_to_string(value)
+        str(key): _option_value_to_string(value)
         for key, value in options.items()
         if value is not None
     }

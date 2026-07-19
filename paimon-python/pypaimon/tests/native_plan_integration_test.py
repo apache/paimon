@@ -83,21 +83,27 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._assert_matches('pk_t')
 
     def test_pk_equal_to_partition_key_falls_back(self):
-        # Trimmed PK is empty. Native would mark splits raw-convertible and skip merge,
-        # returning both versions of k=2; the Python reader instead rejects this config. The
-        # gate must fall back to Python so native does not silently return duplicate rows.
+        # Empty trimmed PK: native would skip merge and return duplicates -> must fall back.
         self.cat.create_table('default.pkpart_t', Schema.from_pyarrow_schema(
             self.schema, partition_keys=['k'], primary_keys=['k'], options={'bucket': '1'}), False)
         self._write('pkpart_t', [{'k': 1, 'v': 'a1'}, {'k': 2, 'v': 'b1'}])
-        self._write('pkpart_t', [{'k': 2, 'v': 'b2'}])  # k=2 updated
+        self._write('pkpart_t', [{'k': 2, 'v': 'b2'}])
         native_table = self.cat.get_table('default.pkpart_t').copy(
             {'scan.native-plan.enabled': 'true'})
-        # Gate falls back to the Python planner -> native not used.
         self.assertFalse(native_table.new_read_builder().explain().native_planned)
-        # And the Python read path rejects the invalid PK/partition combination.
         with self.assertRaises(ValueError):
             rb = native_table.new_read_builder()
             rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+    def test_copy_removed_persisted_scan_option_falls_back(self):
+        # copy() removes a persisted scan.snapshot-id that Rust would still reload -> fall back.
+        self.cat.create_table('default.snapopt_t', Schema.from_pyarrow_schema(
+            self.schema, options={'scan.snapshot-id': '1'}), False)
+        self._write('snapopt_t', [{'k': 1, 'v': 'a'}])   # snapshot 1
+        self._write('snapopt_t', [{'k': 2, 'v': 'b'}])   # snapshot 2
+        native = self.cat.get_table('default.snapopt_t').copy(
+            {'scan.snapshot-id': None, 'scan.native-plan.enabled': 'true'})
+        self.assertFalse(native.new_read_builder().explain().native_planned)
 
     def test_first_row_merge_engine_falls_back(self):
         self.cat.create_table('default.fr_t', Schema.from_pyarrow_schema(

@@ -29,6 +29,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.read.native_plan import _catalog_options, native_plan
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
+from pypaimon.table.bucket_mode import BucketMode
 
 
 def _scan(native_enabled, file_scanner):
@@ -43,6 +44,8 @@ def _scan(native_enabled, file_scanner):
     scan.table.current_branch.return_value = 'main'
     scan.table.is_primary_key_table = False        # not a pk table
     scan.table.trimmed_primary_keys = ['k']        # non-empty trimmed pk
+    scan.table.bucket_mode.return_value = BucketMode.HASH_FIXED
+    scan.table._applied_dynamic_options = {}       # no copy() overrides
     scan.table.identifier.get_database_name.return_value = 'default'
     scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
         CatalogContext.create_from_options(Options({})))           # filesystem catalog
@@ -134,9 +137,14 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
         check(lambda s, fs: setattr(fs, 'data_evolution', True))
         check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
-        # PK equal to the partition key -> empty trimmed PK.
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
+        check(lambda s, fs: s.table.bucket_mode.__setattr__(
+            'return_value', BucketMode.HASH_DYNAMIC))
+        check(lambda s, fs: s.table.bucket_mode.__setattr__(
+            'return_value', BucketMode.CROSS_PARTITION))
+        check(lambda s, fs: setattr(
+            s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
@@ -180,8 +188,7 @@ class NativePlanTest(unittest.TestCase):
         fs.scan.assert_called_once_with()
 
     def test_plan_falls_back_when_native_plan_raises(self):
-        # A native construction/planning failure (e.g. a storage scheme the pinned Rust build
-        # does not support) must fall back to the Python scanner, not fail the scan.
+        # A native planning failure (e.g. unsupported scheme) must fall back, not crash.
         fs = Mock(partition_key_predicate=None)
         sentinel = object()
         fs.scan.return_value = sentinel
@@ -257,7 +264,8 @@ class NativePlanTest(unittest.TestCase):
 
         self.assertEqual(_catalog_options(table), {
             'warehouse': '/tmp/warehouse',
-            'data-token.enabled': 'True',
+            # Lowercase so Rust's case-sensitive bool parser accepts it.
+            'data-token.enabled': 'true',
             'retry-count': '3',
             'metastore': 'filesystem',
         })
