@@ -14,10 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import os
 import tempfile
 import time
 import unittest
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -178,14 +180,26 @@ class ParquetMetadataCacheTest(unittest.TestCase):
             self._read(self.paths[0], options)
         self.assertEqual(4, dataset.call_count)
 
-    def test_resizes_existing_cache(self):
+    def test_cache_capacity_does_not_shrink(self):
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
             for path in self.paths:
                 self._read(path, self._options(True, size=3))
             self._read(self.paths[2], self._options(True, size=1))
             self._read(self.paths[0], self._options(True, size=1))
-        self.assertEqual(4, dataset.call_count)
+        self.assertEqual(3, dataset.call_count)
+        self.assertEqual(
+            3, reader_module._parquet_dataset_cache(self.file_io, 1).max_entries)
+
+    def test_cache_capacity_is_isolated_by_file_io(self):
+        other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
+
+        first_cache = reader_module._parquet_dataset_cache(self.file_io, 3)
+        second_cache = reader_module._parquet_dataset_cache(other_file_io, 1)
+
+        self.assertIsNot(first_cache, second_cache)
+        self.assertEqual(3, first_cache.max_entries)
+        self.assertEqual(1, second_cache.max_entries)
 
     def test_does_not_share_across_filesystems(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
@@ -197,10 +211,55 @@ class ParquetMetadataCacheTest(unittest.TestCase):
                 other_file_io, self.paths[0], True, 256)
         self.assertEqual(2, dataset.call_count)
 
+    def test_cache_key_retains_filesystem_wrapper(self):
+        root = pafs.LocalFileSystem()
+        filesystem = pafs.SubTreeFileSystem(self.temp_dir.name, root)
+        filesystem_ref = weakref.ref(filesystem)
+        file_io = LocalFileIO(self.temp_dir.name, Options({}))
+        file_io.filesystem = filesystem
+
+        reader_module._parquet_dataset(
+            file_io, os.path.basename(self.paths[0]), True, 256)
+        file_io.filesystem = root
+        del filesystem
+        gc.collect()
+
+        self.assertIsNotNone(filesystem_ref())
+
+    def test_filesystem_hash_collision_does_not_share_dataset(self):
+        first_dir = tempfile.TemporaryDirectory()
+        second_dir = tempfile.TemporaryDirectory()
+        try:
+            file_name = "same.parquet"
+            pq.write_table(
+                pa.table({"value": [1]}), os.path.join(first_dir.name, file_name))
+            pq.write_table(
+                pa.table({"value": [2]}), os.path.join(second_dir.name, file_name))
+            file_io = LocalFileIO(first_dir.name, Options({}))
+            first_filesystem = pafs.SubTreeFileSystem(
+                first_dir.name, pafs.LocalFileSystem())
+            second_filesystem = pafs.SubTreeFileSystem(
+                second_dir.name, pafs.LocalFileSystem())
+
+            with patch.object(
+                    reader_module._FilesystemIdentity, "__hash__", return_value=1):
+                file_io.filesystem = first_filesystem
+                first = reader_module._parquet_dataset(
+                    file_io, file_name, True, 256).to_table()
+                file_io.filesystem = second_filesystem
+                second = reader_module._parquet_dataset(
+                    file_io, file_name, True, 256).to_table()
+
+            self.assertEqual([1], first.column("value").to_pylist())
+            self.assertEqual([2], second.column("value").to_pylist())
+        finally:
+            first_dir.cleanup()
+            second_dir.cleanup()
+
     def test_resets_after_process_change(self):
-        parent_cache = reader_module._global_parquet_dataset_cache(256)
+        parent_cache = reader_module._parquet_dataset_cache(self.file_io, 256)
         with patch.object(reader_module.os, "getpid", return_value=os.getpid() + 1):
-            child_cache = reader_module._global_parquet_dataset_cache(256)
+            child_cache = reader_module._parquet_dataset_cache(self.file_io, 256)
         self.assertIsNot(parent_cache, child_cache)
 
     def test_coalesces_concurrent_loads(self):

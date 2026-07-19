@@ -17,6 +17,7 @@
 
 import os
 import threading
+import weakref
 from collections import OrderedDict
 from concurrent.futures import Future
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -38,6 +39,20 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 
 
+class _FilesystemIdentity:
+    def __init__(self, filesystem):
+        self.filesystem = filesystem
+
+    def __hash__(self):
+        return id(self.filesystem)
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _FilesystemIdentity)
+            and self.filesystem is other.filesystem
+        )
+
+
 class _ParquetDatasetCache:
     def __init__(self, max_entries: int):
         self.max_entries = max_entries
@@ -45,7 +60,7 @@ class _ParquetDatasetCache:
         self._loads = {}
         self._lock = threading.Lock()
 
-    def get_or_load(self, key: Tuple[int, str], loader: Callable[[], Any]):
+    def get_or_load(self, key: Tuple[Any, str], loader: Callable[[], Any]):
         with self._lock:
             dataset = self._entries.get(key)
             if dataset is not None:
@@ -80,45 +95,44 @@ class _ParquetDatasetCache:
         future.set_result(dataset)
         return dataset
 
-    def resize(self, max_entries: int):
+    def ensure_capacity(self, max_entries: int):
         with self._lock:
-            self.max_entries = max_entries
-            while len(self._entries) > self.max_entries:
-                self._entries.popitem(last=False)
+            self.max_entries = max(self.max_entries, max_entries)
 
 
-_PARQUET_DATASET_CACHE = None
+_PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
 _PARQUET_DATASET_CACHE_LOCK = threading.Lock()
 _PARQUET_DATASET_CACHE_PID = os.getpid()
 
 
 def _ensure_parquet_dataset_cache_process():
-    global _PARQUET_DATASET_CACHE
+    global _PARQUET_DATASET_CACHES
     global _PARQUET_DATASET_CACHE_LOCK
     global _PARQUET_DATASET_CACHE_PID
     current_pid = os.getpid()
     if current_pid != _PARQUET_DATASET_CACHE_PID:
-        _PARQUET_DATASET_CACHE = None
+        _PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
         _PARQUET_DATASET_CACHE_LOCK = threading.Lock()
         _PARQUET_DATASET_CACHE_PID = current_pid
 
 
-def _global_parquet_dataset_cache(max_entries: int) -> _ParquetDatasetCache:
-    global _PARQUET_DATASET_CACHE
+def _parquet_dataset_cache(file_io: FileIO, max_entries: int) -> _ParquetDatasetCache:
     _ensure_parquet_dataset_cache_process()
     with _PARQUET_DATASET_CACHE_LOCK:
-        if _PARQUET_DATASET_CACHE is None:
-            _PARQUET_DATASET_CACHE = _ParquetDatasetCache(max_entries)
-        elif _PARQUET_DATASET_CACHE.max_entries != max_entries:
-            _PARQUET_DATASET_CACHE.resize(max_entries)
-        return _PARQUET_DATASET_CACHE
+        cache = _PARQUET_DATASET_CACHES.get(file_io)
+        if cache is None:
+            cache = _ParquetDatasetCache(max_entries)
+            _PARQUET_DATASET_CACHES[file_io] = cache
+        else:
+            cache.ensure_capacity(max_entries)
+        return cache
 
 
 def _reset_parquet_dataset_cache():
-    global _PARQUET_DATASET_CACHE
+    global _PARQUET_DATASET_CACHES
     _ensure_parquet_dataset_cache_process()
     with _PARQUET_DATASET_CACHE_LOCK:
-        _PARQUET_DATASET_CACHE = None
+        _PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
 
 
 def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
@@ -133,9 +147,8 @@ def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
     if not cache_enabled or cache_size <= 0:
         return load()
 
-    # FileIO keeps this instance stable, and the cached Dataset retains it.
-    key = (id(filesystem), file_path_for_pyarrow)
-    return _global_parquet_dataset_cache(cache_size).get_or_load(key, load)
+    key = (_FilesystemIdentity(filesystem), file_path_for_pyarrow)
+    return _parquet_dataset_cache(file_io, cache_size).get_or_load(key, load)
 
 
 class FormatPyArrowReader(RecordBatchReader):

@@ -278,7 +278,8 @@ class CoreOptions:
         .int_type()
         .default_value(256)
         .with_description(
-            "Maximum number of Parquet metadata entries cached in the current process."
+            "Maximum number of Parquet metadata entries cached per FileIO in the current "
+            "process. When readers share a FileIO, the largest requested value is used."
         )
     )
 
