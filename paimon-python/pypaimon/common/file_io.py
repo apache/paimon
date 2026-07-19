@@ -52,10 +52,10 @@ def pread(stream, length: int, offset: int) -> bytes:
 # merged read at SPAN so threads stay busy and memory stays bounded.
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
-_COALESCE_VIEW_MAX_READ_AMPLIFICATION = 2.0
+_COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
 
 
-def _coalesce_ranges(items, max_gap, max_span, max_read_amplification=0):
+def _coalesce_ranges(items, max_gap, max_span):
     """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
     ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
     from collections import defaultdict
@@ -65,26 +65,16 @@ def _coalesce_ranges(items, max_gap, max_span, max_read_amplification=0):
     spans = []
     for path, group in by_path.items():
         group.sort(key=lambda x: x[2])
-        cur, start, end, useful = [], None, None, 0
+        cur, start, end = [], None, None
         for idx, _, off, length in group:
             stop = off + length
-            next_useful = useful + length
-            next_start = start if cur else off
-            next_end = max(end, stop) if cur else stop
-            next_span = next_end - next_start
-            within_read_amplification = (
-                max_read_amplification <= 0
-                or next_span <= next_useful * max_read_amplification
-            )
-            if (cur and off - end <= max_gap and stop - start <= max_span
-                    and within_read_amplification):
+            if cur and off - end <= max_gap and stop - start <= max_span:
                 cur.append((idx, off, length))
-                end = next_end
-                useful = next_useful
+                end = max(end, stop)
             else:
                 if cur:
                     spans.append((path, start, end - start, cur))
-                cur, start, end, useful = [(idx, off, length)], off, stop, length
+                cur, start, end = [(idx, off, length)], off, stop
         if cur:
             spans.append((path, start, end - start, cur))
     return spans
@@ -198,27 +188,28 @@ class FileIO(ABC):
         """
         return self._read_ranges_coalesced(
             ranges, parallelism, max_gap, max_span,
-            max_read_amplification=0, return_views=False)
+            max_retained_amplification=0, return_views=False)
 
     def read_ranges_coalesced_views(self, ranges, parallelism,
                                     max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN,
-                                    max_read_amplification=(
-                                        _COALESCE_VIEW_MAX_READ_AMPLIFICATION)):
+                                    max_retained_amplification=(
+                                        _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION)):
         """Read coalesced ranges as zero-copy ``memoryview`` slices.
 
         Member ranges from the same merged span share the span's backing buffer
         instead of allocating one ``bytes`` object per member. Callers must
         accept the Python buffer protocol. Use :meth:`read_ranges_coalesced`
-        when concrete ``bytes`` results are required. Sparse spans are split by
-        ``max_read_amplification`` so views do not retain excessive gap bytes;
-        set it to a non-positive value to disable this bound.
+        when concrete ``bytes`` results are required. Each view keeps its backing
+        buffer alive. Sparse spans use independent views so they do not retain
+        excessive gap bytes; set ``max_retained_amplification`` to a non-positive
+        value to always share the merged buffer.
         """
         return self._read_ranges_coalesced(
-            ranges, parallelism, max_gap, max_span, max_read_amplification,
+            ranges, parallelism, max_gap, max_span, max_retained_amplification,
             return_views=True)
 
     def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
-                               max_read_amplification, return_views):
+                               max_retained_amplification, return_views):
         from concurrent.futures import ThreadPoolExecutor
         # Threads write disjoint results[idx]; safe under the GIL (no list resize).
         results = [None] * len(ranges)
@@ -234,8 +225,7 @@ class FileIO(ABC):
             else:
                 coalescible.append((index, path, offset, length))
 
-        spans = _coalesce_ranges(
-            coalescible, max_gap, max_span, max_read_amplification)
+        spans = _coalesce_ranges(coalescible, max_gap, max_span)
 
         def _run(task):
             kind, payload = task
@@ -244,9 +234,17 @@ class FileIO(ABC):
                 buf = self.read_file_range(path, span_off, span_len)
                 if return_views:
                     buf = memoryview(buf)
+                    useful = sum(length for _, _, length in members)
+                    share_buffer = (
+                        max_retained_amplification <= 0
+                        or span_len <= useful * max_retained_amplification
+                    )
                 for idx, off, length in members:
                     s = off - span_off
-                    results[idx] = buf[s:s + length]
+                    value = buf[s:s + length]
+                    if return_views and not share_buffer:
+                        value = memoryview(bytes(value))
+                    results[idx] = value
             else:
                 idx, path, off, length = payload
                 result = self.read_file_range(path, off, length)

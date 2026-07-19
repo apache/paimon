@@ -2580,17 +2580,6 @@ class CoalesceRangesTest(unittest.TestCase):
         # max_span forces a split even when contiguous
         self.assertEqual(len(_coalesce_ranges(
             [(0, "a", 0, 10), (1, "a", 10, 10)], max_gap=100, max_span=15)), 2)
-        # A read-amplification bound prevents sparse ranges from sharing a span.
-        self.assertEqual(len(_coalesce_ranges(
-            [(0, "a", 0, 10), (1, "a", 100, 10)],
-            max_gap=100,
-            max_span=1 << 30,
-            max_read_amplification=2.0)), 2)
-        self.assertEqual(len(_coalesce_ranges(
-            [(0, "a", 0, 10), (1, "a", 100, 10)],
-            max_gap=100,
-            max_span=1 << 30,
-            max_read_amplification=0)), 1)
 
     def test_read_ranges_coalesced(self):
         from pypaimon.common.file_io import FileIO
@@ -2622,7 +2611,8 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io = FileIO.get(f"file://{tmp_dir}", {})
             ranges = [(path, 0, 10), (path, 10, 10), None,
                       (path, 500, 20), (path, 100, -1)]
-            got = file_io.read_ranges_coalesced_views(ranges, parallelism=4)
+            got = file_io.read_ranges_coalesced_views(
+                ranges, parallelism=4, max_gap=100)
 
             self.assertIsInstance(got[0], memoryview)
             self.assertIsInstance(got[1], memoryview)
@@ -2633,6 +2623,50 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(bytes(got[3]), data[500:520])
             self.assertIsNot(got[0].obj, got[3].obj)
             self.assertEqual(bytes(got[4]), data[100:])
+
+            array = pa.array(got, type=pa.binary())
+            self.assertEqual(array.to_pylist(), [
+                data[0:10], data[10:20], None, data[500:520], data[100:],
+            ])
+
+    def test_sparse_views_preserve_coalesced_read(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            reads = []
+            original_read = file_io.read_file_range
+
+            def read_file_range(file_path, offset, length):
+                reads.append((file_path, offset, length))
+                return original_read(file_path, offset, length)
+
+            file_io.read_file_range = read_file_range
+            got = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+            )
+
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[1000:1010])
+            self.assertIsNot(got[0].obj, got[1].obj)
+
+            reads.clear()
+            shared = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+                max_retained_amplification=0,
+            )
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertIs(shared[0].obj, shared[1].obj)
 
 
 class ReadFileRangeTest(unittest.TestCase):
