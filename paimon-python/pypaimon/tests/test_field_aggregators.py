@@ -45,7 +45,9 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldPrimaryKeyAgg,
     FieldSumAgg,
     FieldListaggAgg,
-    FieldNestedUpdateAgg, FieldRoaringBitmap64Agg, FieldRoaringBitmap32Agg,
+    FieldNestedUpdateAgg,
+    FieldRoaringBitmap32Agg,
+    FieldRoaringBitmap64Agg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType
 from pypaimon.table.row.generic_row import GenericRow
