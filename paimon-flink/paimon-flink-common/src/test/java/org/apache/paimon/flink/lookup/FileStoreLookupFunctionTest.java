@@ -19,6 +19,9 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -29,10 +32,13 @@ import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
 import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -42,6 +48,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.table.data.RowData;
@@ -137,6 +144,23 @@ public class FileStoreLookupFunctionTest {
             boolean refreshAsync,
             Integer fullLoadThreshold)
             throws Exception {
+        return createFileStoreTable(
+                isPartition,
+                dynamicPartition,
+                refreshAsync,
+                fullLoadThreshold,
+                false,
+                CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable createFileStoreTable(
+            boolean isPartition,
+            boolean dynamicPartition,
+            boolean refreshAsync,
+            Integer fullLoadThreshold,
+            boolean queryAuthEnabled,
+            CatalogEnvironment catalogEnvironment)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
@@ -151,11 +175,11 @@ public class FileStoreLookupFunctionTest {
         if (fullLoadThreshold != null) {
             conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD, fullLoadThreshold);
         }
+        if (queryAuthEnabled) {
+            conf.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+        }
 
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
-                        new String[] {"pt", "k", "v"});
+        RowType rowType = tableRowType();
         Schema schema =
                 new Schema(
                         rowType.getFields(),
@@ -164,8 +188,7 @@ public class FileStoreLookupFunctionTest {
                         conf.toMap(),
                         "");
         TableSchema tableSchema = schemaManager.createTable(schema);
-        return FileStoreTableFactory.create(
-                fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema, catalogEnvironment);
     }
 
     @AfterEach
@@ -217,6 +240,77 @@ public class FileStoreLookupFunctionTest {
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
+    }
+
+    @Test
+    public void testQueryAuthUsesFullCacheAndAppliesRowFilter() throws Exception {
+        Predicate authFilter = new PredicateBuilder(tableRowType()).equal(2, 20L);
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(
+                        Collections.singletonList(JsonSerdeUtil.toFlatJson(authFilter)), null);
+        Identifier identifier = Identifier.create("default", "table");
+        CatalogEnvironment catalogEnvironment =
+                new CatalogEnvironment(
+                        identifier,
+                        null,
+                        () ->
+                                new FileSystemCatalog(fileIO, tablePath) {
+                                    @Override
+                                    public TableQueryAuthResult authTableQuery(
+                                            Identifier ignored, List<String> select) {
+                                        return authResult;
+                                    }
+                                },
+                        null,
+                        null,
+                        null,
+                        false,
+                        false);
+        table = createFileStoreTable(false, false, false, null, true, catalogEnvironment);
+
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        writer.write(GenericRow.of(1, 1, 10L));
+        writer.write(GenericRow.of(2, 2, 20L));
+        commit(writer.prepareCommit(true, 1));
+        writer.close();
+
+        ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
+        serviceManager.resetService(
+                PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
+        lookupFunction = createLookupFunction(table, true);
+        lookupFunction.open(tempDir.toString());
+
+        assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
+        assertThat(lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1)))).isEmpty();
+        assertThat(lookupFunction.lookup(new FlinkRowData(GenericRow.of(2, 2)))).hasSize(1);
+    }
+
+    @Test
+    public void testPartialLookupRejectsQueryAuth() throws Exception {
+        table = createFileStoreTable(false, false, false, null, true, CatalogEnvironment.empty());
+
+        assertThatThrownBy(
+                        () ->
+                                PrimaryKeyPartialLookupTable.createLocalTable(
+                                        table,
+                                        new int[] {0, 1},
+                                        tempDir.resolve("local").toFile(),
+                                        Arrays.asList("pt", "k"),
+                                        Collections.emptySet()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support query authorization");
+        assertThatThrownBy(
+                        () ->
+                                PrimaryKeyPartialLookupTable.createRemoteTable(
+                                        table, new int[] {0, 1}, Arrays.asList("pt", "k")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support query authorization");
+    }
+
+    private RowType tableRowType() {
+        return RowType.of(
+                new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                new String[] {"pt", "k", "v"});
     }
 
     @Test

@@ -83,6 +83,10 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+        if (coreOptions.queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Primary key partial lookup does not support query authorization.");
+        }
 
         if (!coreOptions.needLookup()
                 && coreOptions.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE) {

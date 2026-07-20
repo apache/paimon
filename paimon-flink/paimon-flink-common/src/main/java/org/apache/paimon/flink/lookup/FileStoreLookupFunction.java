@@ -213,7 +213,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 table instanceof FallbackReadFileStoreTable
                         && ((FallbackReadFileStoreTable) table).other()
                                 instanceof ChainGroupReadTable;
-        if (!isChainTable
+        if (!table.coreOptions().queryAuthEnabled()
+                && !isChainTable
                 && options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(table)) {
