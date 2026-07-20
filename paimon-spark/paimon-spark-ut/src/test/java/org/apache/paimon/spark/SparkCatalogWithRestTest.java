@@ -842,7 +842,7 @@ public class SparkCatalogWithRestTest {
                                         + "LATERAL (SELECT id FROM vector_search("
                                         + "'t_auth_vector', 'embedding', q.query_embedding, 1)) AS r")
                         .collectAsList();
-        assertThat(rows).isEmpty();
+        assertThat(rows.toString()).isEqualTo("[[1,1]]");
     }
 
     @Test
@@ -884,7 +884,7 @@ public class SparkCatalogWithRestTest {
                                         + "'t_auth_vector_metadata', 'embedding', "
                                         + "q.query_embedding, 1)) AS r")
                         .collectAsList();
-        assertThat(rows).isEmpty();
+        assertThat(rows.toString()).isEqualTo("[[1,0]]");
     }
 
     @Test

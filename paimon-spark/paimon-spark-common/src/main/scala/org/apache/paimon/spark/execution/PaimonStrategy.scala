@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlobalIndexResult}
 import org.apache.paimon.partition.PartitionPredicate
@@ -31,7 +32,7 @@ import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, 
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.read.VectorSearchResultUtils
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
+import org.apache.paimon.table.{FileStoreTable, InnerTable, SpecialFields, Table}
 import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, QueryAuthSplit, ReadBuilder, VectorScan}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RoaringNavigableMap64
@@ -354,6 +355,7 @@ case class LateralVectorSearchExec(
       .withLimit(limit)
       .withOptions(options.asJava)
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
+    pushQueryAuthFilter(coreOptions, vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
     val batchSize =
@@ -404,6 +406,23 @@ case class LateralVectorSearchExec(
         vectorSearchBuilder.withFilter(dataFilter)
       }
     }
+  }
+
+  private def pushQueryAuthFilter(
+      coreOptions: CoreOptions,
+      vectorSearchBuilder: BatchVectorSearchBuilder): Unit = {
+    if (!coreOptions.queryAuthEnabled()) {
+      return
+    }
+
+    // Vector search applies its limit before physical readers enforce QueryAuthSplit. Push the row
+    // filter into candidate selection so unauthorized rows cannot consume the limit.
+    val table = innerTable.asInstanceOf[FileStoreTable]
+    val authResult = table.catalogEnvironment().tableQueryAuth(coreOptions).auth(null)
+    Option(authResult)
+      .flatMap(result => Option(result.extractPredicate()))
+      .flatMap(predicate => Option(TableQueryAuthResult.remapPredicate(predicate, table.rowType())))
+      .foreach(vectorSearchBuilder.withFilter)
   }
 
   private def convertSearchFilters(): Seq[Predicate] = {
