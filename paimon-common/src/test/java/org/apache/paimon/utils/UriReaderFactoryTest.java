@@ -84,7 +84,7 @@ public class UriReaderFactoryTest {
     }
 
     @Test
-    public void testCreateReaderFromProvidedFileIO() throws Exception {
+    public void testProvidedFileIOSurvivesSerialization() throws Exception {
         java.nio.file.Path file = tempPath.resolve("file.txt");
         Files.write(file, new byte[] {1, 2});
 
@@ -93,12 +93,14 @@ public class UriReaderFactoryTest {
         IsolatedDirectoryFileIO fileIO = new IsolatedDirectoryFileIO();
         fileIO.configure(CatalogContext.create(options));
 
-        UriReaderFactory fileIOFactory =
-                InstantiationUtil.clone(UriReaderFactory.fromFileIO(fileIO));
-        try (SeekableInputStream inputStream =
-                fileIOFactory
-                        .create(file.toUri().toString())
-                        .newInputStream(file.toUri().toString())) {
+        String fileUri = file.toUri().toString();
+        UriReaderFactory originalFactory = UriReaderFactory.fromFileIO(fileIO);
+        UriReader originalReader = originalFactory.create(fileUri);
+        UriReaderFactory fileIOFactory = InstantiationUtil.clone(originalFactory);
+        UriReader deserializedReader = fileIOFactory.create(fileUri);
+
+        assertThat(deserializedReader).isNotSameAs(originalReader);
+        try (SeekableInputStream inputStream = deserializedReader.newInputStream(fileUri)) {
             assertThat(inputStream.read()).isEqualTo(1);
             assertThat(inputStream.read()).isEqualTo(2);
         }

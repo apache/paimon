@@ -28,6 +28,9 @@ import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTApi;
+import org.apache.paimon.rest.RESTTokenFileIO;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -119,6 +122,52 @@ public class BlobDescriptorReaderFactoryTest {
         verify(catalogLoader).load();
         verify(catalog).getTable(sourceIdentifier);
         verify(sourceFileIO).isObjectStore();
+    }
+
+    @Test
+    public void testRESTTokenFileIOSurvivesSerialization() throws Exception {
+        java.nio.file.Path sourceDirectory = Files.createDirectory(tempPath.resolve("rest-source"));
+        java.nio.file.Path blobFile = sourceDirectory.resolve("blob");
+        Files.write(blobFile, new byte[] {1, 2});
+
+        Identifier sourceIdentifier = Identifier.fromString("db.source");
+        RESTApi restApi = mock(RESTApi.class);
+        when(restApi.loadTableToken(sourceIdentifier))
+                .thenReturn(new GetTableTokenResponse(Collections.emptyMap(), Long.MAX_VALUE));
+        RESTTokenFileIO sourceFileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options()),
+                        restApi,
+                        sourceIdentifier,
+                        new Path(sourceDirectory.toUri()));
+
+        FileStoreTable sourceTable = mock(FileStoreTable.class);
+        when(sourceTable.fileIO()).thenReturn(sourceFileIO);
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.getTable(sourceIdentifier)).thenReturn(sourceTable);
+        CatalogLoader catalogLoader = mock(CatalogLoader.class);
+        when(catalogLoader.load()).thenReturn(catalog);
+        CatalogEnvironment catalogEnvironment = mock(CatalogEnvironment.class);
+        when(catalogEnvironment.catalogLoader()).thenReturn(catalogLoader);
+
+        FileStoreTable targetTable = mock(FileStoreTable.class);
+        when(targetTable.catalogEnvironment()).thenReturn(catalogEnvironment);
+        when(targetTable.coreOptions())
+                .thenReturn(
+                        CoreOptions.fromMap(
+                                Collections.singletonMap(
+                                        "blob-descriptor.source-table", "db.source")));
+
+        UriReaderFactory readerFactory =
+                InstantiationUtil.clone(BlobDescriptorReaderFactory.create(targetTable));
+        String blobUri = blobFile.toUri().toString();
+        try (SeekableInputStream inputStream =
+                readerFactory.create(blobUri).newInputStream(blobUri)) {
+            assertThat(inputStream.read()).isEqualTo(1);
+            assertThat(inputStream.read()).isEqualTo(2);
+        }
+
+        verify(restApi).loadTableToken(sourceIdentifier);
     }
 
     @Test

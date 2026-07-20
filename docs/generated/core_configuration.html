@@ -78,7 +78,7 @@ under the License.
             <td><h5>blob-descriptor.source-table</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>The source table whose FileIO is used to read managed BLOB descriptor content. The table must belong to the current catalog and can include a branch suffix, for example db.table$branch_rt. This option is not supported for target tables without a catalog loader, including external tables in REST catalogs. When set, other blob-descriptor.* FileIO options are ignored.</td>
+            <td>The source table whose FileIO is used to read descriptor-backed BLOB content and copy it into the target table's managed BLOB storage. The table must belong to the current catalog and can include a branch suffix, for example db.table$branch_rt. This option is not supported for target tables without a catalog loader, including external tables in REST catalogs. When set, other blob-descriptor.* FileIO options are ignored.</td>
         </tr>
         <tr>
             <td><h5>blob-field</h5></td>

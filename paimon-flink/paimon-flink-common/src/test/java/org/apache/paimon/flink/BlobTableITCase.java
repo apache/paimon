@@ -398,14 +398,17 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
         String sourceTable = tEnv.getCurrentDatabase() + ".blob_descriptor_source";
         tEnv.executeSql(
-                "CREATE TABLE blob_descriptor_target (id INT, picture BYTES)"
-                        + " WITH ('row-tracking.enabled'='true',"
-                        + " 'data-evolution.enabled'='true',"
+                "CREATE TABLE blob_descriptor_target ("
+                        + "id INT, picture BYTES, PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='2',"
                         + " 'blob-field'='picture',"
                         + " 'blob-descriptor.source-table'='"
                         + sourceTable
                         + "')");
-        batchSql("INSERT INTO blob_descriptor_target SELECT * FROM blob_descriptor_source");
+        batchSql(
+                "INSERT INTO blob_descriptor_target "
+                        + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                        + "SELECT * FROM blob_descriptor_source");
 
         assertThat(batchSql("SELECT * FROM blob_descriptor_target ORDER BY id"))
                 .containsExactly(

@@ -38,30 +38,22 @@ public class UriReaderFactory implements Serializable {
     private static final long serialVersionUID = -8477284718943635074L;
 
     @Nullable private final CatalogContext context;
-    @Nullable private final FileIO fileIO;
     private transient Map<UriKey, UriReader> readers;
 
     public UriReaderFactory(@Nullable CatalogContext context) {
         this.context = context;
-        this.fileIO = null;
-        this.readers = new ConcurrentHashMap<>();
-    }
-
-    private UriReaderFactory(FileIO fileIO) {
-        this.context = null;
-        this.fileIO = Objects.requireNonNull(fileIO);
         this.readers = new ConcurrentHashMap<>();
     }
 
     /** Creates a factory which uses the provided {@link FileIO} for non-HTTP URIs. */
     public static UriReaderFactory fromFileIO(FileIO fileIO) {
-        return new UriReaderFactory(fileIO);
+        return new ProvidedFileIOUriReaderFactory(fileIO);
     }
 
     public UriReader create(String input) {
         URI uri = URI.create(input);
         UriKey key = new UriKey(uri.getScheme(), uri.getAuthority());
-        return readers.computeIfAbsent(key, k -> newReader(k, uri));
+        return readers.computeIfAbsent(key, k -> newReader(uri));
     }
 
     public boolean exists(String input) throws IOException {
@@ -80,13 +72,9 @@ public class UriReaderFactory implements Serializable {
         this.readers = new ConcurrentHashMap<>();
     }
 
-    private UriReader newReader(UriKey key, URI uri) {
-        if ("http".equals(key.scheme) || "https".equals(key.scheme)) {
+    protected UriReader newReader(URI uri) {
+        if (isHttp(uri)) {
             return UriReader.fromHttp();
-        }
-
-        if (fileIO != null) {
-            return UriReader.fromFile(fileIO);
         }
 
         try {
@@ -94,6 +82,30 @@ public class UriReaderFactory implements Serializable {
             return UriReader.fromFile(createdFileIO);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private static boolean isHttp(URI uri) {
+        return "http".equals(uri.getScheme()) || "https".equals(uri.getScheme());
+    }
+
+    private static final class ProvidedFileIOUriReaderFactory extends UriReaderFactory {
+
+        private static final long serialVersionUID = 1L;
+
+        // Intentionally not transient. FileIO is serializable by contract, while implementations
+        // keep process-local clients transient. Distributed workers need this serialized FileIO to
+        // rebuild the transient reader cache with table-scoped credentials.
+        private final FileIO fileIO;
+
+        private ProvidedFileIOUriReaderFactory(FileIO fileIO) {
+            super(null);
+            this.fileIO = Objects.requireNonNull(fileIO);
+        }
+
+        @Override
+        protected UriReader newReader(URI uri) {
+            return isHttp(uri) ? super.newReader(uri) : UriReader.fromFile(fileIO);
         }
     }
 
