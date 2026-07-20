@@ -19,6 +19,7 @@
 import re
 from decimal import Decimal as BigDecimal
 from decimal import ROUND_HALF_UP
+from decimal import localcontext
 from typing import Optional, Tuple
 
 _DECIMAL_PATTERN = re.compile(
@@ -84,9 +85,7 @@ class Decimal:
         Converts this Decimal into a decimal.Decimal instance.
         """
         if self.decimal_val is None:
-            self.decimal_val = (
-                BigDecimal(self.long_val) / BigDecimal(self.POW10[self.scale])
-            )
+            self.decimal_val = BigDecimal(self.long_val).scaleb(-self.scale)
         return self.decimal_val
 
     def to_unscaled_long(self) -> int:
@@ -100,20 +99,29 @@ class Decimal:
         if self.is_compact():
             return self.long_val
 
-        value = self.to_big_decimal() * self.POW10[self.scale]
+        value = self.to_big_decimal().scaleb(self.scale)
 
         if value != value.to_integral_exact():
             raise ArithmeticError("Decimal does not exactly fit in long.")
 
-        return int(value)
+        int_val = int(value)
+        if not (-(1 << 63) <= int_val <= (1 << 63) - 1):
+            raise ArithmeticError("BigInteger out of long range")
+
+        return int_val
 
     def to_unscaled_bytes(self) -> bytes:
         """
         Returns the unscaled value encoded as a signed byte array.
         """
-        value = self.to_unscaled_long()
-        length = max(1, (value.bit_length() + 8) // 8)
-        return value.to_bytes(length, byteorder="big", signed=True)
+        value = self.to_big_decimal().scaleb(self.scale)
+
+        if value != value.to_integral_exact():
+            raise ArithmeticError("Decimal does not exactly fit in long.")
+
+        unscaled = int(value)
+        length = max(1, (unscaled.bit_length() + 8) // 8)
+        return unscaled.to_bytes(length, byteorder="big", signed=True)
 
     def is_compact(self) -> bool:
         """
@@ -217,14 +225,25 @@ class Decimal:
 
         The value is rounded to the requested scale using ROUND_HALF_UP.
         If the resulting precision exceeds the specified precision, None is returned.
+
+        Note:
+            Java ``BigDecimal`` provides arbitrary precision. Paimon supports
+            DECIMAL precision up to 38 digits, so a temporary context with
+            precision >= 38 is used here to match Java semantics without
+            modifying the global decimal context.
         """
 
         quant = BigDecimal(1).scaleb(-scale)
 
-        value = value.quantize(
-            quant,
-            rounding=ROUND_HALF_UP,
-        )
+        with localcontext() as ctx:
+            # Java BigDecimal is arbitrary precision.
+            # Paimon DECIMAL supports precision up to 38.
+            ctx.prec = max(precision, 38)
+
+            value = value.quantize(
+                quant,
+                rounding=ROUND_HALF_UP,
+            )
 
         digits = len(value.as_tuple().digits)
 
@@ -234,7 +253,7 @@ class Decimal:
         long_val = -1
 
         if precision <= cls.MAX_COMPACT_PRECISION:
-            unscaled = value * cls.POW10[scale]
+            unscaled = value.scaleb(scale)
 
             if unscaled != unscaled.to_integral_exact():
                 raise ArithmeticError(
@@ -290,7 +309,7 @@ class Decimal:
             signed=True,
         )
 
-        bd = BigDecimal(value) / BigDecimal(cls.POW10[scale])
+        bd = BigDecimal(value).scaleb(-scale)
 
         return cls.from_big_decimal(
             bd,
