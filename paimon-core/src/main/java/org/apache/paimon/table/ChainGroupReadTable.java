@@ -222,7 +222,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             this(tableSchema, chainGroupReadTable, FileStoreTable::newScan);
         }
 
-        private ChainTableBatchScan(
+        @VisibleForTesting
+        ChainTableBatchScan(
                 TableSchema tableSchema,
                 ChainGroupReadTable chainGroupReadTable,
                 Function<FileStoreTable, DataTableScan> scanCreator) {
@@ -362,6 +363,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 for (List<BinaryRow> deltaPartitionsInGroup : groupedDeltaPartitions.values()) {
 
                     // Sort delta by chain dimension ascending.
+                    // chainPartitionForCompare avoids copying BinaryRow in the comparator hot path.
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
@@ -497,7 +499,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
 
             for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = unwrapDataSplit(split);
+                DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                 HashMap<String, String> fileBucketPathMapping = new HashMap<>();
                 HashMap<String, String> fileBranchMapping = new HashMap<>();
                 for (DataFileMeta file : dataSplit.dataFiles()) {
@@ -518,10 +520,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     newChainPartitionListingScan(true, getMainPartitionPredicate())
                             .listPartitions());
             return snapshotPartitions;
-        }
-
-        private static DataSplit unwrapDataSplit(Split split) {
-            return (DataSplit) QueryAuthSplit.unwrap(split);
         }
 
         private static Split retainQueryAuth(List<Split> sourceSplits, Split replacement) {

@@ -38,6 +38,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class QueryAuthSplitTest {
 
     @Test
+    public void testUnwrapDataSplit() {
+        DataSplit dataSplit = dataSplit();
+
+        assertThat(QueryAuthSplit.unwrapDataSplit(dataSplit)).isSameAs(dataSplit);
+        assertThat(QueryAuthSplit.unwrapDataSplit(new QueryAuthSplit(dataSplit, authResult())))
+                .isSameAs(dataSplit);
+    }
+
+    @Test
     public void testSerializeAndDeserialize() throws Exception {
         QueryAuthSplit split = new QueryAuthSplit(dataSplit(), authResult());
 

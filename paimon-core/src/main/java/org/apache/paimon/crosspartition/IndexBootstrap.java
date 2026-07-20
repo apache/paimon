@@ -121,7 +121,7 @@ public class IndexBootstrap implements Serializable {
                 options.pageSize(),
                 options.crossPartitionUpsertBootstrapParallelism(),
                 split -> {
-                    DataSplit dataSplit = unwrapDataSplit(split);
+                    DataSplit dataSplit = (DataSplit) split;
                     int bucket = dataSplit.bucket();
                     return partBucketConverter.toGenericRow(
                             new JoinedRow(dataSplit.partition(), GenericRow.of(bucket)));
@@ -131,7 +131,7 @@ public class IndexBootstrap implements Serializable {
 
     @VisibleForTesting
     static boolean filterSplit(Split split, long indexTtl, long currentTime) {
-        List<DataFileMeta> files = unwrapDataSplit(split).dataFiles();
+        List<DataFileMeta> files = ((DataSplit) split).dataFiles();
         for (DataFileMeta file : files) {
             long fileTime = file.creationTimeEpochMillis();
             if (currentTime <= fileTime + indexTtl) {
@@ -139,11 +139,6 @@ public class IndexBootstrap implements Serializable {
             }
         }
         return false;
-    }
-
-    @VisibleForTesting
-    static DataSplit unwrapDataSplit(Split split) {
-        return (DataSplit) split;
     }
 
     public static RowType bootstrapType(TableSchema schema) {

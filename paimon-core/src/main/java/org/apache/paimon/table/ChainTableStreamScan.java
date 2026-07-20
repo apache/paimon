@@ -335,7 +335,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
         for (Map.Entry<BinaryRow, List<Split>> entry : snapshotSplitsByPartition.entrySet()) {
             for (Split split : entry.getValue()) {
-                DataSplit dataSplit = unwrapDataSplit(split);
+                DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                 allSplits.add(
                         QueryAuthSplit.retainAuth(
                                 split, ChainSplit.from(dataSplit, snapshotBranch)));
@@ -355,7 +355,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                                     partitionProjector.extractChainPartition(latestPartition))
                             > 0) {
                 for (Split split : entry.getValue()) {
-                    DataSplit dataSplit = unwrapDataSplit(split);
+                    DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                     allSplits.add(
                             QueryAuthSplit.retainAuth(
                                     split, ChainSplit.from(dataSplit, deltaBranch)));
@@ -487,14 +487,10 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private static Map<BinaryRow, List<Split>> groupByPartition(DataTableScan scan) {
         Map<BinaryRow, List<Split>> grouped = new LinkedHashMap<>();
         for (Split split : scan.plan().splits()) {
-            DataSplit dataSplit = unwrapDataSplit(split);
+            DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
             grouped.computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>()).add(split);
         }
         return grouped;
-    }
-
-    private static DataSplit unwrapDataSplit(Split split) {
-        return (DataSplit) QueryAuthSplit.unwrap(split);
     }
 
     /**
