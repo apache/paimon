@@ -25,6 +25,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.RecordLimiter;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.CloseableIterator;
@@ -114,8 +115,9 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
         Split split = record.getValue();
         // update metric when reading a new split
+        DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
         long eventTime =
-                ((DataSplit) split)
+                dataSplit
                         .earliestFileCreationEpochMillis()
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);

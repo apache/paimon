@@ -22,13 +22,20 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
@@ -62,6 +69,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -216,6 +224,66 @@ public class OperatorSourceTest {
                 .containsExactlyInAnyOrder(
                         new StreamRecord<>(GenericRowData.of(1, 1, 1)),
                         new StreamRecord<>(GenericRowData.of(2, 2, 2)));
+    }
+
+    @Test
+    public void testQueryAuthSplitInDedicatedSourcePath() throws Exception {
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.emptyList())
+                        .build();
+        QueryAuthSplit queryAuthSplit = new QueryAuthSplit(dataSplit, null);
+        assertThat(MonitorSource.splitKey(queryAuthSplit))
+                .isEqualTo(MonitorSource.splitKey(dataSplit));
+
+        AtomicReference<Split> readerSplit = new AtomicReference<>();
+        TableRead capturingRead =
+                new TableRead() {
+                    @Override
+                    public TableRead withMetricRegistry(MetricRegistry registry) {
+                        return this;
+                    }
+
+                    @Override
+                    public TableRead executeFilter() {
+                        return this;
+                    }
+
+                    @Override
+                    public TableRead withIOManager(IOManager ioManager) {
+                        return this;
+                    }
+
+                    @Override
+                    public RecordReader<InternalRow> createReader(Split split) {
+                        readerSplit.set(split);
+                        return new RecordReader<InternalRow>() {
+                            @Override
+                            public RecordIterator<InternalRow> readBatch() {
+                                return null;
+                            }
+
+                            @Override
+                            public void close() {}
+                        };
+                    }
+                };
+
+        ReadOperator readOperator = new ReadOperator(() -> capturingRead, null, null);
+        OneInputStreamOperatorTestHarness<Split, RowData> harness =
+                new OneInputStreamOperatorTestHarness<>(readOperator);
+        harness.setup(
+                InternalSerializers.create(
+                        RowType.of(new IntType(), new IntType(), new IntType())));
+        harness.open();
+        harness.processElement(new StreamRecord<>(queryAuthSplit));
+
+        assertThat(readerSplit.get()).isSameAs(queryAuthSplit);
+        assertThat(harness.getOutput()).isEmpty();
     }
 
     @Test
