@@ -32,7 +32,7 @@ import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.read.VectorSearchResultUtils
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
-import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, ReadBuilder, VectorScan}
+import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, QueryAuthSplit, ReadBuilder, VectorScan}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RoaringNavigableMap64
 
@@ -567,7 +567,7 @@ case class LateralVectorSearchExec(
 
     scan.plan().splits().asScala.iterator.flatMap {
       split =>
-        val indexedSplit = split.asInstanceOf[IndexedSplit]
+        val indexedSplit = QueryAuthSplit.unwrap(split).asInstanceOf[IndexedSplit]
         val dataSplit = indexedSplit.dataSplit()
         val file = LateralVectorSearchPhysicalFile.from(dataSplit)
         val reader =
