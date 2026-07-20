@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.table.connector.source.DynamicFilteringData;
@@ -115,7 +116,7 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
     }
 
     private boolean filter(FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
+        DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(sourceSplit.split());
         BinaryRow partition = dataSplit.partition();
         FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
         return dynamicFilteringData.contains(projected);
