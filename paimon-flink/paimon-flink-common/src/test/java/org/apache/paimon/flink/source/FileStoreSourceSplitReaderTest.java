@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -31,6 +32,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.RecordWriter;
@@ -109,6 +111,38 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
+    public void testQueryAuthSplitUpdatesFetchLagMetric() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
+        FileStoreSourceReaderMetrics metrics =
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup());
+        FileStoreSourceSplitReader reader =
+                createReader(
+                        new TestingTableRead(
+                                new SingleBatchRecordReader(new TrackingRecordIterator())),
+                        null,
+                        metrics);
+
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, kvs());
+        FileStoreSourceSplit split = newSourceSplit("id1", row(1), 0, files);
+        assignSplit(
+                reader,
+                new FileStoreSourceSplit(
+                        split.splitId(),
+                        new QueryAuthSplit(split.split(), new TableQueryAuthResult(null, null)),
+                        split.recordsToSkip()));
+
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
+        assertThat(metrics.getLatestFileCreationTime())
+                .isEqualTo(
+                        files.stream()
+                                .mapToLong(DataFileMeta::creationTimeEpochMillis)
+                                .min()
+                                .orElse(FileStoreSourceReaderMetrics.UNDEFINED));
+        records.recycle();
+        reader.close();
+    }
+
+    @Test
     public void testSplitReaderWakeupAble() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
@@ -138,12 +172,14 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
+        return createReader(
+                tableRead, limit, new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
+    }
+
+    private FileStoreSourceSplitReader createReader(
+            TableRead tableRead, @Nullable Long limit, FileStoreSourceReaderMetrics metrics) {
         return new FileStoreSourceSplitReader(
-                tableRead,
-                limit == null ? null : new RecordLimiter(limit),
-                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
-                null,
-                false);
+                tableRead, limit == null ? null : new RecordLimiter(limit), metrics, null, false);
     }
 
     private void innerTestOnce(int skip) throws Exception {
