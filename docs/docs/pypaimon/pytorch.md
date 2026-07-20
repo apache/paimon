@@ -61,9 +61,7 @@ when it is false, it will read the full amount of data into memory.
 
 ## Parquet Metadata Cache
 
-Long-lived DataLoader workers may read the same immutable Parquet files across
-multiple epochs. Enable the process-local metadata cache to reuse PyArrow
-Dataset and footer-derived metadata such as schema and row-group statistics:
+For repeated Parquet reads in long-lived workers, enable metadata reuse with:
 
 ```python
 table = table.copy({
@@ -73,14 +71,10 @@ table = table.copy({
 read_builder = table.new_read_builder()
 ```
 
-The cache is disabled by default and is isolated by process and `FileIO`.
-Workers benefit when they remain alive and reuse the same table, for example
-with `DataLoader(..., persistent_workers=True)`. Separately deserialized
-`FileIO` instances do not share entries. The limit counts cached entries, not
-retained bytes.
-
-Paimon-managed data files are immutable, so caching by file path is safe. Do
-not enable this cache for paths that may be overwritten in place.
+The cache is disabled by default and is local to each process and `FileIO`.
+It benefits workers reused with `DataLoader(..., persistent_workers=True)`.
+The limit counts entries, not bytes. Only use it with immutable files, such as
+Paimon-managed data files.
 
 ## Shuffle
 
