@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.IOException;
 
 /** Benchmark for {@link BitmapFileIndex}. */
 public class BitmapIndexBenchmark {
@@ -139,11 +139,10 @@ public class BitmapIndexBenchmark {
     }
 
     private static void query(int approxCardinality, File file1) {
-        try {
+        try (LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                new LocalFileIO.LocalSeekableInputStream(file1)) {
             FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
             Options options = new Options();
-            LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                    new LocalFileIO.LocalSeekableInputStream(file1);
             FileIndexReader reader =
                     new BitmapFileIndex(DataTypes.STRING(), options)
                             .createReader(localSeekableInputStream, 0, 0);
@@ -151,7 +150,7 @@ public class BitmapIndexBenchmark {
                     reader.visitEqual(
                             fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
             ((BitmapIndexResult) result).get();
-        } catch (FileNotFoundException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }

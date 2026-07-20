@@ -83,11 +83,10 @@ public class RoaringBitmapBenchmark {
                 "deserialize(DataInputStream(BufferedInputStream))",
                 10,
                 () -> {
-                    try {
-                        LocalFileIO.LocalSeekableInputStream seekableStream =
-                                new LocalFileIO.LocalSeekableInputStream(file);
-                        DataInputStream input =
-                                new DataInputStream(new BufferedInputStream(seekableStream));
+                    try (LocalFileIO.LocalSeekableInputStream seekableStream =
+                                    new LocalFileIO.LocalSeekableInputStream(file);
+                            DataInputStream input =
+                                    new DataInputStream(new BufferedInputStream(seekableStream))) {
                         new RoaringBitmap().deserialize(input);
                     } catch (IOException e) {
                         throw new RuntimeException(e);

@@ -37,7 +37,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -213,51 +212,48 @@ public class RangeBitmapIndexBenchmark {
 
     private void queryBsi(
             File file, BiFunction<FileIndexReader, FieldRef, FileIndexResult> function) {
-        try {
+        try (LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                new LocalFileIO.LocalSeekableInputStream(file)) {
             FieldRef fieldRef = new FieldRef(0, "", DataTypes.INT());
             Options options = new Options();
-            LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                    new LocalFileIO.LocalSeekableInputStream(file);
             FileIndexReader reader =
                     new BitSliceIndexBitmapFileIndex(DataTypes.INT())
                             .createReader(localSeekableInputStream, 0, 0);
             FileIndexResult result = function.apply(reader, fieldRef);
             ((BitmapIndexResult) result).get();
-        } catch (FileNotFoundException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     private void queryBitmap(
             File file, BiFunction<FileIndexReader, FieldRef, FileIndexResult> function) {
-        try {
+        try (LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                new LocalFileIO.LocalSeekableInputStream(file)) {
             FieldRef fieldRef = new FieldRef(0, "", DataTypes.INT());
             Options options = new Options();
-            LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                    new LocalFileIO.LocalSeekableInputStream(file);
             FileIndexReader reader =
                     new BitmapFileIndex(DataTypes.INT(), options)
                             .createReader(localSeekableInputStream, 0, 0);
             FileIndexResult result = function.apply(reader, fieldRef);
             ((BitmapIndexResult) result).get();
-        } catch (FileNotFoundException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     private void queryRangeBitmap(
             File file, BiFunction<FileIndexReader, FieldRef, FileIndexResult> function) {
-        try {
+        try (LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                new LocalFileIO.LocalSeekableInputStream(file)) {
             FieldRef fieldRef = new FieldRef(0, "", DataTypes.INT());
             Options options = new Options();
-            LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                    new LocalFileIO.LocalSeekableInputStream(file);
             FileIndexReader reader =
                     new RangeBitmapFileIndex(DataTypes.INT(), options)
                             .createReader(localSeekableInputStream, 0, 0);
             FileIndexResult result = function.apply(reader, fieldRef);
             ((BitmapIndexResult) result).get();
-        } catch (FileNotFoundException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
