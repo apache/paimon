@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit;
 
 import javax.annotation.Nullable;
 
@@ -49,12 +50,19 @@ public class QueryAuthSplit implements Split {
         return split;
     }
 
-    /** Unwraps one query authorization layer to expose the wrapped split. */
+    /** Unwraps one fallback layer followed by one query authorization layer. */
     public static Split unwrap(Split split) {
+        if (split instanceof FallbackSplit) {
+            Split wrapped = ((FallbackSplit) split).wrapped();
+            // FallbackDataSplit is already a DataSplit and deliberately wraps itself.
+            if (wrapped != split) {
+                split = wrapped;
+            }
+        }
         return split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split;
     }
 
-    /** Unwraps one query authorization layer and returns the wrapped data split. */
+    /** Unwraps one fallback and query authorization layer and returns the data split. */
     public static DataSplit unwrapDataSplit(Split split) {
         return (DataSplit) unwrap(split);
     }

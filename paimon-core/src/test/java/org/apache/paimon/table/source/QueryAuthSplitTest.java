@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,14 @@ public class QueryAuthSplitTest {
         assertThat(QueryAuthSplit.unwrapDataSplit(dataSplit)).isSameAs(dataSplit);
         assertThat(QueryAuthSplit.unwrapDataSplit(new QueryAuthSplit(dataSplit, authResult())))
                 .isSameAs(dataSplit);
+
+        Split fallbackDataSplit = FallbackReadFileStoreTable.toFallbackSplit(dataSplit, false);
+        assertThat(QueryAuthSplit.unwrapDataSplit(fallbackDataSplit)).isSameAs(fallbackDataSplit);
+
+        Split fallbackQueryAuthSplit =
+                new FallbackReadFileStoreTable.FallbackSplitImpl(
+                        new QueryAuthSplit(dataSplit, authResult()), false);
+        assertThat(QueryAuthSplit.unwrapDataSplit(fallbackQueryAuthSplit)).isSameAs(dataSplit);
     }
 
     @Test
