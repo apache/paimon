@@ -32,7 +32,7 @@ the 9 most commonly-used value aggregators: ``primary_key`` /
 the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """
-
+from decimal import localcontext, Inexact
 from typing import Any, List, Dict, Optional, Tuple, Union
 
 from pypaimon.common.options import CoreOptions
@@ -446,8 +446,15 @@ class FieldProductAgg(FieldAggregator):
             return accumulator
 
         if self._base_type in _DECIMAL_TYPES:
+
+            with localcontext() as ctx:
+                ctx.prec = max(self._precision, 38)
+                ctx.traps[Inexact] = True
+
+                div = accumulator / input_field
+
             value = Decimal.from_big_decimal(
-                accumulator / input_field,
+                div,
                 self._precision,
                 self._scale,
             )
@@ -492,6 +499,13 @@ class FieldProductAgg(FieldAggregator):
                 return -(abs(accumulator) // abs(input_field))
 
         elif self._base_type in _FLOAT_TYPES:
+            if input_field == 0.0:
+                if accumulator == 0.0:
+                    return float("nan")
+                elif accumulator > 0:
+                    return float("inf")
+                else:
+                    return float("-inf")
             return accumulator / input_field
 
         raise ValueError(
