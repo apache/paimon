@@ -64,6 +64,25 @@ class UnionGlobalIndexReaderTest(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_scalar_child_failure_is_not_masked_by_unsupported(self):
+        field_ref = FieldRef(0, "f0", "INT")
+        unsupported_reader = Mock(spec=GlobalIndexReader)
+        unsupported_reader.visit_equal.return_value = _completed_future(None)
+        failed_future = Future()
+        failed_future.set_exception(RuntimeError("child failure"))
+        failed_reader = Mock(spec=GlobalIndexReader)
+        failed_reader.visit_equal.return_value = failed_future
+
+        for readers in [
+            [unsupported_reader, failed_reader],
+            [failed_reader, unsupported_reader],
+        ]:
+            with self.subTest(readers=readers):
+                reader = UnionGlobalIndexReader(readers)
+
+                with self.assertRaisesRegex(RuntimeError, "child failure"):
+                    reader.visit_equal(field_ref, 1).result()
+
     def test_all_scalar_visitors_propagate_unsupported(self):
         field_ref = FieldRef(0, "f0", "INT")
         cases = [

@@ -56,8 +56,8 @@ class UnionGlobalIndexReader(GlobalIndexReader):
                 if remaining[0] == 0:
                     try:
                         result: Optional[GlobalIndexResult] = None
-                        for f in futures:
-                            current = f.result()
+                        results = [f.result() for f in futures]
+                        for current in results:
                             if current is None:
                                 if propagate_unsupported:
                                     all_done.set_result(None)
