@@ -2520,6 +2520,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(FormatTableImplementation.PAIMON)
                     .withDescription("Format table uses paimon or engine.");
 
+    public static final ConfigOption<PartitionSource> FORMAT_TABLE_PARTITION_SOURCE =
+            key("format-table.partition-source")
+                    .enumType(PartitionSource.class)
+                    .defaultValue(PartitionSource.FILESYSTEM)
+                    .withDescription(
+                            "Where the partitions of a format table come from. With 'filesystem' "
+                                    + "they are found by listing the table directory. With 'rest' "
+                                    + "the catalog holds them: a scan reads the partitions "
+                                    + "registered there and a write registers the ones it wrote, "
+                                    + "so a directory nobody registered is not part of the table. "
+                                    + "'rest' needs an internal table in a REST catalog and cannot "
+                                    + "be combined with format-table.implementation=engine.");
+
     public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
             ConfigOptions.key("format-table.partition-path-only-value")
                     .booleanType()
@@ -4235,6 +4248,10 @@ public class CoreOptions implements Serializable {
         return options.get(FORMAT_TABLE_IMPLEMENTATION) == FormatTableImplementation.PAIMON;
     }
 
+    public boolean formatTablePartitionsFromCatalog() {
+        return options.get(FORMAT_TABLE_PARTITION_SOURCE) == PartitionSource.REST;
+    }
+
     public boolean formatTablePartitionOnlyValueInPath() {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
@@ -5247,6 +5264,31 @@ public class CoreOptions implements Serializable {
         NONE,
         HASH,
         PARTITION_DYNAMIC
+    }
+
+    /** Where the partitions of a format table come from. */
+    public enum PartitionSource implements DescribedEnum {
+        FILESYSTEM("filesystem", "Partitions are found by listing the table directory."),
+        REST("rest", "Partitions are the ones registered in the REST catalog.");
+
+        private final String value;
+
+        private final String description;
+
+        PartitionSource(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 
     /** Specifies the implementation of format table. */

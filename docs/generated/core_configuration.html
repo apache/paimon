@@ -735,6 +735,12 @@ under the License.
             <td>Format table uses paimon or engine.<br /><br />Possible values:<ul><li>"paimon": Paimon format table implementation.</li><li>"engine": Engine format table implementation.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>format-table.partition-source</h5></td>
+            <td style="word-wrap: break-word;">filesystem</td>
+            <td><p>Enum</p></td>
+            <td>Where the partitions of a format table come from. With 'filesystem' they are found by listing the table directory. With 'rest' the catalog holds them: a scan reads the partitions registered there and a write registers the ones it wrote, so a directory nobody registered is not part of the table. 'rest' needs an internal table in a REST catalog and cannot be combined with format-table.implementation=engine.<br /><br />Possible values:<ul><li>"filesystem": Partitions are found by listing the table directory.</li><li>"rest": Partitions are the ones registered in the REST catalog.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>format-table.partition-path-only-value</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

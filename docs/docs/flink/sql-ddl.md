@@ -34,6 +34,29 @@ Paimon catalogs currently support three types of metastores:
 
 See [CatalogOptions](../maintenance/configurations#catalogoptions) for detailed options when creating a catalog.
 
+:::info
+
+For Format Tables, `format-table.partition-source = rest` makes the catalog the source of truth for
+partitions, which requires an internal table in a catalog that supports it (currently the REST
+catalog) and cannot be combined with `format-table.implementation = engine`. The REST catalog
+validates this combination on `CREATE TABLE`, with catalog-level `table-default.*` options
+participating in the effective options. Other catalogs keep discovering partitions from the
+filesystem and ignore the option.
+
+**A Flink job reads only the partitions the catalog knows.** Directories written before the option
+was enabled, by an older writer, or by anything that does not register what it wrote are invisible,
+and a table whose catalog holds no partitions reads as empty. Flink has no SQL command to register
+them: use Spark's `MSCK REPAIR TABLE` or the catalog's partition API. Flink writes on a current
+version do register the partitions they produce.
+
+In a REST catalog, asking for catalog-managed partitions on a table that cannot have them — an
+external table, or `format-table.implementation = engine` — fails. In any other catalog the option
+keeps the meaning it has always had on a Format Table — none — and partitions come from the
+filesystem. Removing the option needs a catalog that can alter the table; Flink's Format Table path
+cannot, so use another engine.
+
+:::
+
 ### Create Filesystem Catalog
 
 The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.

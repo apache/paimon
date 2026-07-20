@@ -923,9 +923,10 @@ public class RESTCatalogServer {
     private Optional<MockResponse> checkTablePartitioned(Identifier identifier) {
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+            CoreOptions tableOptions = CoreOptions.fromMap(tableMetadata.schema().options());
             boolean partitioned =
-                    CoreOptions.fromMap(tableMetadata.schema().options())
-                            .partitionedTableInMetastore();
+                    tableOptions.partitionedTableInMetastore()
+                            || tableOptions.formatTablePartitionsFromCatalog();
             if (!partitioned) {
                 return Optional.of(mockResponse(new ErrorResponse(null, null, "", 501), 501));
             }
