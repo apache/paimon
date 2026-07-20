@@ -64,6 +64,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public static final long NULL_LENGTH = -1L;
     public static final long PLACE_HOLDER_LENGTH = -2L;
     public static final long ARRAY_NULL_ELEMENT_LENGTH = -1L;
+    public static final int DEFAULT_COPY_BUFFER_SIZE = 4 * 1024;
 
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
@@ -79,40 +80,17 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private String pathString;
 
     public BlobFormatWriter(
-            PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
-        this(out, writeConsumer, type, false, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile) {
-        this(out, writeConsumer, type, writeNullOnMissingFile, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure) {
-        this(
-                out,
-                writeConsumer,
-                type,
-                writeNullOnMissingFile,
-                writeNullOnFetchFailure,
-                BlobFetchMetricReporter.NOOP);
-    }
-
-    public BlobFormatWriter(
             PositionOutputStream out,
             @Nullable BlobConsumer writeConsumer,
             RowType type,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize) {
+        checkArgument(
+                copyBufferSize > 0,
+                "BLOB copy buffer size must be positive, but was %s.",
+                copyBufferSize);
         this.out = out;
         this.writeConsumer = writeConsumer;
         this.blobFetchMetricReporter = blobFetchMetricReporter;
@@ -125,7 +103,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         ? new ArrayBlobElementWriter()
                         : new RawBlobElementWriter();
         this.crc32 = new CRC32();
-        this.tmpBuffer = new byte[4096];
+        this.tmpBuffer = new byte[copyBufferSize];
         this.lengths = new LongArrayList(16);
     }
 

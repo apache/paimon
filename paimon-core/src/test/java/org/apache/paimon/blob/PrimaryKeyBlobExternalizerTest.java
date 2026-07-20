@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.blob.BlobFormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
@@ -79,7 +80,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.BLOB()),
                         Collections.singleton("f0"),
@@ -104,7 +105,7 @@ class PrimaryKeyBlobExternalizerTest {
 
         assertThatThrownBy(
                         () ->
-                                new PrimaryKeyBlobExternalizer(
+                                newExternalizer(
                                         fileIO,
                                         RowType.of(DataTypes.INT()),
                                         Collections.singleton("f0"),
@@ -125,7 +126,7 @@ class PrimaryKeyBlobExternalizerTest {
 
         assertThatThrownBy(
                         () ->
-                                new PrimaryKeyBlobExternalizer(
+                                newExternalizer(
                                         fileIO,
                                         RowType.of(DataTypes.BLOB()),
                                         Collections.singleton("missing"),
@@ -145,8 +146,7 @@ class PrimaryKeyBlobExternalizerTest {
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         RowType valueType = RowType.of(DataTypes.INT(), DataTypes.BLOB());
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
-                        fileIO, valueType, Collections.singleton("f1"), pathFactory, 1024L);
+                newExternalizer(fileIO, valueType, Collections.singleton("f1"), pathFactory, 1024L);
         byte[] expected = "managed-blob".getBytes(StandardCharsets.UTF_8);
 
         InternalRow result =
@@ -172,7 +172,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.BLOB()),
                         Collections.singleton("f1"),
@@ -212,7 +212,7 @@ class PrimaryKeyBlobExternalizerTest {
                         },
                         new String[] {"id", "managed", "unmanaged"});
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO, valueType, Collections.singleton("managed"), pathFactory, 1024L);
         Blob unmanaged = Blob.fromData(new byte[] {2});
 
@@ -233,7 +233,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.BLOB()),
                         Collections.singleton("f1"),
@@ -268,7 +268,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
                         Collections.singleton("f1"),
@@ -309,7 +309,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
                         Collections.singleton("f1"),
@@ -352,7 +352,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.INT(), DataTypes.ARRAY(DataTypes.BLOB())),
                         Collections.singleton("f1"),
@@ -379,5 +379,20 @@ class PrimaryKeyBlobExternalizerTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("placeholder blob array");
         assertThat(fileIO.listStatus(bucketPath)).isEmpty();
+    }
+
+    private static PrimaryKeyBlobExternalizer newExternalizer(
+            LocalFileIO fileIO,
+            RowType valueType,
+            java.util.Set<String> managedBlobFields,
+            DataFilePathFactory pathFactory,
+            long targetFileSize) {
+        return new PrimaryKeyBlobExternalizer(
+                fileIO,
+                valueType,
+                managedBlobFields,
+                pathFactory,
+                targetFileSize,
+                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
     }
 }

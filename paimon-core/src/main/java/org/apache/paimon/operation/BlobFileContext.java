@@ -36,6 +36,7 @@ public class BlobFileContext {
     private final Set<String> blobInlineFields;
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
+    private final int copyBufferSize;
 
     private @Nullable BlobConsumer blobConsumer;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
@@ -44,11 +45,13 @@ public class BlobFileContext {
             Set<String> blobDescriptorFields,
             Set<String> blobInlineFields,
             boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure) {
+            boolean writeNullOnFetchFailure,
+            int copyBufferSize) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
+        this.copyBufferSize = copyBufferSize;
     }
 
     @Nullable
@@ -72,7 +75,8 @@ public class BlobFileContext {
                 descriptorFields,
                 inlineFields,
                 options.blobWriteNullOnMissingFile(),
-                options.blobWriteNullOnFetchFailure());
+                options.blobWriteNullOnFetchFailure(),
+                options.blobCopyBufferSize());
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -112,6 +116,10 @@ public class BlobFileContext {
 
     public boolean writeNullOnFetchFailure() {
         return writeNullOnFetchFailure;
+    }
+
+    public int copyBufferSize() {
+        return copyBufferSize;
     }
 
     public BlobFetchMetricReporter blobFetchMetricReporter() {

@@ -95,7 +95,8 @@ public class BlobFileFormatTest {
 
     @Test
     public void testWriteArrayBlobPlaceholderWithProjectedRow() throws IOException {
-        BlobFileFormat format = new BlobFileFormat();
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
 
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
@@ -162,7 +163,8 @@ public class BlobFileFormatTest {
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {
-        BlobFileFormat format = new BlobFileFormat(blobAsDescriptor);
+        BlobFileFormat format =
+                new BlobFileFormat(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.BLOB());
 
         // write
@@ -235,7 +237,8 @@ public class BlobFileFormatTest {
 
     private void assertMalformedArrayPayload(
             ArrayPayloadCorruptor corruptor, String expectedMessage) throws IOException {
-        BlobFileFormat format = new BlobFileFormat();
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -272,7 +275,8 @@ public class BlobFileFormatTest {
 
     @Test
     public void testReadWithProjectedRowTypeContainingExtraFields() throws IOException {
-        BlobFileFormat format = new BlobFileFormat(false);
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType writeRowType = RowType.of(DataTypes.BLOB());
 
         // write blob data
@@ -310,7 +314,8 @@ public class BlobFileFormatTest {
     }
 
     private void innerTestArray(boolean blobAsDescriptor) throws IOException {
-        BlobFileFormat format = new BlobFileFormat(blobAsDescriptor);
+        BlobFileFormat format =
+                new BlobFileFormat(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
 
         GenericArray first =

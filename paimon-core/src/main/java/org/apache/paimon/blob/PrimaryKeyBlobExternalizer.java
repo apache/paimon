@@ -20,6 +20,7 @@ package org.apache.paimon.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
@@ -61,7 +62,8 @@ public class PrimaryKeyBlobExternalizer {
             RowType valueType,
             Set<String> managedBlobFields,
             DataFilePathFactory pathFactory,
-            long targetFileSize) {
+            long targetFileSize,
+            int copyBufferSize) {
         checkArgument(targetFileSize > 0, "Managed BLOB target file size must be positive.");
         this.fileIO = fileIO;
         this.rowConverter = new RowDataToObjectArrayConverter(valueType);
@@ -97,7 +99,8 @@ public class PrimaryKeyBlobExternalizer {
                                     : new RowType(Collections.singletonList(field)),
                             pathFactory,
                             targetFileSize,
-                            uncommittedPacks));
+                            uncommittedPacks,
+                            copyBufferSize));
         }
         checkArgument(
                 unknownFields.isEmpty(),
@@ -223,6 +226,7 @@ public class PrimaryKeyBlobExternalizer {
         private final DataFilePathFactory pathFactory;
         private final long targetFileSize;
         private final List<Path> uncommittedPacks;
+        private final int copyBufferSize;
 
         private Path currentPath;
         private PositionOutputStream out;
@@ -234,12 +238,14 @@ public class PrimaryKeyBlobExternalizer {
                 RowType blobType,
                 DataFilePathFactory pathFactory,
                 long targetFileSize,
-                List<Path> uncommittedPacks) {
+                List<Path> uncommittedPacks,
+                int copyBufferSize) {
             this.fileIO = fileIO;
             this.blobType = blobType;
             this.pathFactory = pathFactory;
             this.targetFileSize = targetFileSize;
             this.uncommittedPacks = uncommittedPacks;
+            this.copyBufferSize = copyBufferSize;
         }
 
         private BlobDescriptor write(Blob blob) throws IOException {
@@ -271,7 +277,11 @@ public class PrimaryKeyBlobExternalizer {
                                 lastDescriptor = descriptor;
                                 return false;
                             },
-                            blobType);
+                            blobType,
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            copyBufferSize);
             writer.setFile(currentPath);
         }
 
