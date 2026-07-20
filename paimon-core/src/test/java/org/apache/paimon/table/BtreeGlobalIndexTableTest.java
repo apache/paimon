@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -436,6 +437,69 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertNotNull(rowIds);
         assertThat(rowIds.getLongCardinality()).isEqualTo(oldRowCount);
         assertThat(rowIds.toRangeList()).containsExactly(new Range(0L, oldRowCount - 1));
+    }
+
+    @Test
+    public void testUnionAcrossRangesWithMixedFallbackAnswers() throws Exception {
+        write(100L);
+        createIndex("f0");
+
+        appendRows(100, 20100);
+        createIndexIncremental("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+
+        long firstRangeSize = 0;
+        long secondRangeSize = 0;
+        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
+            IndexFileMeta file = entry.indexFile();
+            if (!"btree".equals(file.indexType())) {
+                continue;
+            }
+            if (file.globalIndexMeta().rowRangeStart() == 0) {
+                firstRangeSize += file.fileSize();
+            } else {
+                secondRangeSize += file.fileSize();
+            }
+        }
+        assertThat(firstRangeSize).isGreaterThan(0);
+        assertThat(secondRangeSize).isGreaterThan(firstRangeSize);
+
+        long fallbackScanMaxSize = (firstRangeSize + secondRangeSize) / 2;
+        FileStoreTable capped =
+                table.copy(
+                        Collections.singletonMap(
+                                BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE.key(),
+                                String.valueOf(fallbackScanMaxSize)));
+
+        Predicate predicate = new PredicateBuilder(capped.rowType()).lessThan(0, 150);
+        List<String> result = readF1(capped, predicate);
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 150; i++) {
+            expected.add("a" + i);
+        }
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private void createIndexIncremental(String fieldName) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField(fieldName);
+        List<DataSplit> dataSplits =
+                builder.incrementalScan()
+                        .map(org.apache.paimon.utils.Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incremental scan result when building index."));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
     }
 
     private void createIndex(String fieldName) throws Exception {
