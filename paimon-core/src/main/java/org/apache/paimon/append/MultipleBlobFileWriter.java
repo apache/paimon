@@ -23,7 +23,6 @@ import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.blob.BlobFileFormat;
-import org.apache.paimon.format.blob.BlobFormatWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -53,39 +52,6 @@ import static org.apache.paimon.types.BlobType.fieldsInBlobFile;
 public class MultipleBlobFileWriter implements Closeable {
 
     private final List<BlobProjectedFileWriter> blobWriters;
-
-    public MultipleBlobFileWriter(
-            FileIO fileIO,
-            long schemaId,
-            RowType writeSchema,
-            DataFilePathFactory pathFactory,
-            Supplier<LongCounter> seqNumCounterSupplier,
-            FileSource fileSource,
-            boolean asyncFileWrite,
-            boolean statsDenseStore,
-            long targetFileSize,
-            @Nullable BlobConsumer blobConsumer,
-            Set<String> blobInlineFields,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
-        this(
-                fileIO,
-                schemaId,
-                writeSchema,
-                pathFactory,
-                seqNumCounterSupplier,
-                fileSource,
-                asyncFileWrite,
-                statsDenseStore,
-                targetFileSize,
-                blobConsumer,
-                blobInlineFields,
-                writeNullOnMissingFile,
-                writeNullOnFetchFailure,
-                blobFetchMetricReporter,
-                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-    }
 
     public MultipleBlobFileWriter(
             FileIO fileIO,

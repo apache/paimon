@@ -1120,8 +1120,8 @@ class CoreOptions:
 
     def blob_copy_buffer_size(self):
         size = self.options.get(CoreOptions.BLOB_COPY_BUFFER_SIZE, None).get_bytes()
-        # Upper bound matches Java CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE (256 MiB).
-        max_size = 256 * 1024 * 1024
+        # Java BlobFormatWriter stores the byte-array size in an int.
+        max_size = (1 << 31) - 1
         if not 1 <= size <= max_size:
             raise ValueError(
                 f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be between 1 byte and "

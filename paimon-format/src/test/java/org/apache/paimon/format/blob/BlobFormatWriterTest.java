@@ -62,11 +62,7 @@ public class BlobFormatWriterTest {
         byte[] firstPayload = "first-blob".getBytes();
         byte[] secondPayload = "second-blob-payload".getBytes();
 
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType);
+        BlobFormatWriter writer = newWriter(outputFile, rowType);
         writer.addElement(GenericRow.of(Blob.fromData(firstPayload)));
         writer.addElement(GenericRow.of(Blob.fromData(secondPayload)));
         writer.close();
@@ -92,13 +88,7 @@ public class BlobFormatWriterTest {
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
         java.nio.file.Path outputFile = tempDir.resolve("blob.out");
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType,
-                        false,
-                        true);
+        BlobFormatWriter writer = newWriter(outputFile, rowType, false, true);
 
         writer.addElement(
                 GenericRow.of(
@@ -116,13 +106,7 @@ public class BlobFormatWriterTest {
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
         java.nio.file.Path outputFile = tempDir.resolve("blob.out");
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType,
-                        false,
-                        true);
+        BlobFormatWriter writer = newWriter(outputFile, rowType, false, true);
 
         writer.addElement(
                 GenericRow.of(
@@ -139,14 +123,7 @@ public class BlobFormatWriterTest {
     public void testHttpRateLimitFailsWhenFetchFailureDisabled(@TempDir java.nio.file.Path tempDir)
             throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        false,
-                        false);
+        BlobFormatWriter writer = newWriter(tempDir.resolve("blob.out"), rowType, false, false);
 
         assertThatThrownBy(
                         () ->
@@ -166,14 +143,7 @@ public class BlobFormatWriterTest {
     public void testHttpNotFoundPropagatesWhenFetchFailureDisabled(
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        false,
-                        false);
+        BlobFormatWriter writer = newWriter(tempDir.resolve("blob.out"), rowType, false, false);
 
         assertThatThrownBy(
                         () ->
@@ -200,13 +170,7 @@ public class BlobFormatWriterTest {
                 new BlobDescriptor("https://img.alicdn.com/imgextra/##1304008055350781673", 0, -1)
                         .serialize();
 
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType,
-                        false,
-                        true);
+        BlobFormatWriter writer = newWriter(outputFile, rowType, false, true);
 
         writer.addElement(new DescriptorBytesRow(descriptorBytes, uriReaderFactory));
         writer.close();
@@ -232,13 +196,7 @@ public class BlobFormatWriterTest {
                 new BlobDescriptor("https://img.alicdn.com/imgextra/##1304008055350781673", 0, -1)
                         .serialize();
 
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType,
-                        false,
-                        true);
+        BlobFormatWriter writer = newWriter(outputFile, rowType, false, true);
 
         writer.addElement(
                 GenericRow.of(new DescriptorBytesArray(descriptorBytes, uriReaderFactory)));
@@ -273,13 +231,7 @@ public class BlobFormatWriterTest {
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
         java.nio.file.Path outputFile = tempDir.resolve("blob.out");
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        rowType,
-                        true,
-                        false);
+        BlobFormatWriter writer = newWriter(outputFile, rowType, true, false);
 
         writer.addElement(
                 GenericRow.of(
@@ -304,14 +256,7 @@ public class BlobFormatWriterTest {
         RowType rowType = RowType.of(DataTypes.BLOB());
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        false,
-                        true,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, false, true, metricReporter);
 
         writer.addElement(GenericRow.of(Blob.fromData("image".getBytes())));
         writer.addElement(
@@ -333,14 +278,7 @@ public class BlobFormatWriterTest {
         RowType rowType = RowType.of(DataTypes.BLOB());
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        false,
-                        false,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, false, false, metricReporter);
 
         assertThatThrownBy(
                         () ->
@@ -368,14 +306,7 @@ public class BlobFormatWriterTest {
                 new BlobDescriptor("https://example.com/missing.jpg", 0, -1).serialize();
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        true,
-                        false,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, true, false, metricReporter);
 
         writer.addElement(new DescriptorBytesRow(descriptorBytes, uriReaderFactory, true));
         writer.close();
@@ -390,14 +321,7 @@ public class BlobFormatWriterTest {
         RowType rowType = RowType.of(DataTypes.BLOB());
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        true,
-                        false,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, true, false, metricReporter);
 
         writer.addElement(GenericRow.of((Object) null));
         writer.close();
@@ -412,14 +336,7 @@ public class BlobFormatWriterTest {
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        true,
-                        true,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, true, true, metricReporter);
 
         writer.addElement(
                 GenericRow.of(
@@ -453,14 +370,7 @@ public class BlobFormatWriterTest {
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
         TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
         BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(
-                                tempDir.resolve("blob.out").toFile()),
-                        null,
-                        rowType,
-                        false,
-                        false,
-                        metricReporter);
+                newWriter(tempDir.resolve("blob.out"), rowType, false, false, metricReporter);
 
         assertThatThrownBy(
                         () ->
@@ -501,7 +411,7 @@ public class BlobFormatWriterTest {
 
     @Test
     public void testDefaultCopyBufferSize(@TempDir java.nio.file.Path tempDir) throws Exception {
-        // default preserves the historical 4 KiB copy buffer.
+        // The configured default preserves the historical 4 KiB copy buffer.
         assertThat(BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE).isEqualTo(4 * 1024);
 
         String uri = "mem://file";
@@ -509,12 +419,7 @@ public class BlobFormatWriterTest {
         RecordingUriReader reader = new RecordingUriReader(singleFile(uri, source));
         java.nio.file.Path outputFile = tempDir.resolve("blob.out");
 
-        // default constructor -> default 4 KiB copy buffer.
-        BlobFormatWriter writer =
-                new BlobFormatWriter(
-                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
-                        null,
-                        RowType.of(DataTypes.BLOB()));
+        BlobFormatWriter writer = newWriter(outputFile, RowType.of(DataTypes.BLOB()));
         writer.addElement(GenericRow.of(new BlobRef(reader, new BlobDescriptor(uri, 0, 5000))));
         writer.close();
 
@@ -522,16 +427,70 @@ public class BlobFormatWriterTest {
         assertThat(readBackBlobs(outputFile, 1)).containsExactly(source);
     }
 
+    private static BlobFormatWriter newWriter(java.nio.file.Path outputFile, RowType rowType)
+            throws java.io.FileNotFoundException {
+        return newWriter(
+                outputFile,
+                rowType,
+                false,
+                false,
+                BlobFetchMetricReporter.NOOP,
+                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
+
+    private static BlobFormatWriter newWriter(
+            java.nio.file.Path outputFile,
+            RowType rowType,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure)
+            throws java.io.FileNotFoundException {
+        return newWriter(
+                outputFile,
+                rowType,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                BlobFetchMetricReporter.NOOP,
+                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
+
+    private static BlobFormatWriter newWriter(
+            java.nio.file.Path outputFile,
+            RowType rowType,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter)
+            throws java.io.FileNotFoundException {
+        return newWriter(
+                outputFile,
+                rowType,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                blobFetchMetricReporter,
+                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
+
     private static BlobFormatWriter newWriter(
             java.nio.file.Path outputFile, RowType rowType, int copyBufferSize)
+            throws java.io.FileNotFoundException {
+        return newWriter(
+                outputFile, rowType, false, false, BlobFetchMetricReporter.NOOP, copyBufferSize);
+    }
+
+    private static BlobFormatWriter newWriter(
+            java.nio.file.Path outputFile,
+            RowType rowType,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize)
             throws java.io.FileNotFoundException {
         return new BlobFormatWriter(
                 new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()),
                 null,
                 rowType,
-                false,
-                false,
-                BlobFetchMetricReporter.NOOP,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                blobFetchMetricReporter,
                 copyBufferSize);
     }
 

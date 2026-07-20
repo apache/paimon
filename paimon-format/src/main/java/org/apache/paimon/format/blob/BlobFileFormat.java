@@ -60,14 +60,6 @@ public class BlobFileFormat extends FileFormat {
 
     @Nullable public BlobConsumer writeConsumer;
 
-    public BlobFileFormat() {
-        this(false);
-    }
-
-    public BlobFileFormat(boolean blobAsDescriptor) {
-        this(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-    }
-
     public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;

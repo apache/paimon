@@ -174,17 +174,12 @@ public class CoreOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
 
-        // the max (256 MiB) is accepted, just above it is rejected.
-        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("256 mb"));
-        assertThat(new CoreOptions(conf).blobCopyBufferSize())
-                .isEqualTo(CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE);
+        // There is no arbitrary memory ceiling; only the Java int-sized array limit applies.
         conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("512 mb"));
-        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("blob.copy-buffer-size");
-
-        // way oversized is rejected instead of throwing ArithmeticException / OOM.
-        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("3 gb"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(512 * 1024 * 1024);
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse(Integer.MAX_VALUE + " bytes"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(Integer.MAX_VALUE);
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("2 gb"));
         assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");

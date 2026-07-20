@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.blob;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobConsumer;
@@ -81,51 +80,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private String pathString;
 
     public BlobFormatWriter(
-            PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
-        this(out, writeConsumer, type, false, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile) {
-        this(out, writeConsumer, type, writeNullOnMissingFile, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure) {
-        this(
-                out,
-                writeConsumer,
-                type,
-                writeNullOnMissingFile,
-                writeNullOnFetchFailure,
-                BlobFetchMetricReporter.NOOP);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
-        this(
-                out,
-                writeConsumer,
-                type,
-                writeNullOnMissingFile,
-                writeNullOnFetchFailure,
-                blobFetchMetricReporter,
-                DEFAULT_COPY_BUFFER_SIZE);
-    }
-
-    public BlobFormatWriter(
             PositionOutputStream out,
             @Nullable BlobConsumer writeConsumer,
             RowType type,
@@ -134,9 +88,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
         checkArgument(
-                copyBufferSize > 0 && copyBufferSize <= CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE,
-                "BLOB copy buffer size must be between 1 and %s, but was %s.",
-                CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE,
+                copyBufferSize > 0,
+                "BLOB copy buffer size must be positive, but was %s.",
                 copyBufferSize);
         this.out = out;
         this.writeConsumer = writeConsumer;

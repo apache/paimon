@@ -37,17 +37,15 @@ class BlobFormatWriter:
     PLACE_HOLDER_LENGTH = -2
     ARRAY_NULL_ELEMENT_LENGTH = -1
     BUFFER_SIZE = 4096
-    MAX_BUFFER_SIZE = 256 * 1024 * 1024  # matches Java CoreOptions.MAX_BLOB_COPY_BUFFER_SIZE
     METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
     def __init__(self, output_stream: BinaryIO,
                  blob_consumer: Optional[BlobConsumer] = None,
                  file_path: Optional[str] = None,
                  copy_buffer_size: int = BUFFER_SIZE):
-        if not 1 <= copy_buffer_size <= self.MAX_BUFFER_SIZE:
+        if copy_buffer_size <= 0:
             raise ValueError(
-                f"BLOB copy buffer size must be between 1 and {self.MAX_BUFFER_SIZE}, "
-                f"but was {copy_buffer_size}.")
+                f"BLOB copy buffer size must be positive, but was {copy_buffer_size}.")
         self.output_stream = output_stream
         self._blob_consumer = blob_consumer
         self._file_path = file_path
