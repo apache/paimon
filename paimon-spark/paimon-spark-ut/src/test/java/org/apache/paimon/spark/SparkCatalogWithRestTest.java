@@ -56,6 +56,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.CatalogManager;
+import org.apache.spark.sql.streaming.StreamingQuery;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -761,6 +762,46 @@ public class SparkCatalogWithRestTest {
         assertThat(rows.get(0).getInt(0)).isEqualTo(2);
         assertThat(rows.get(0).getStruct(1).getString(0)).isEqualTo("p2");
         assertThat(rows.get(0).getInt(2)).isBetween(0, 1);
+    }
+
+    @Test
+    public void testStreamingRowFilter() throws Exception {
+        spark.sql(
+                "CREATE TABLE t_stream_auth (id INT, name STRING) TBLPROPERTIES "
+                        + "('query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_stream_auth VALUES (1, 'blocked'), (2, 'allowed')");
+
+        Predicate idEq2Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_stream_auth"),
+                Collections.singletonList(idEq2Predicate));
+
+        StreamingQuery query =
+                spark.readStream()
+                        .format("paimon")
+                        .table("t_stream_auth")
+                        .writeStream()
+                        .format("memory")
+                        .option(
+                                "checkpointLocation",
+                                tempFile.resolve("stream-auth-checkpoint").toString())
+                        .queryName("stream_auth_result")
+                        .outputMode("append")
+                        .start();
+        try {
+            query.processAllAvailable();
+            assertThat(
+                            spark.sql("SELECT * FROM stream_auth_result ORDER BY id")
+                                    .collectAsList()
+                                    .toString())
+                    .isEqualTo("[[2,allowed]]");
+        } finally {
+            query.stop();
+        }
     }
 
     @Test
