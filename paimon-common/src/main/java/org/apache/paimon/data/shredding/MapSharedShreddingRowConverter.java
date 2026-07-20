@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
@@ -42,6 +43,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Converts logical rows containing shared-shredding MAP fields into physical rows. */
 public class MapSharedShreddingRowConverter {
 
@@ -52,7 +55,9 @@ public class MapSharedShreddingRowConverter {
     private final List<String> shreddingFieldNames;
 
     public MapSharedShreddingRowConverter(
-            RowType logicalType, Map<String, Integer> fieldToNumColumns) {
+            RowType logicalType,
+            Map<String, Integer> fieldToNumColumns,
+            Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy) {
         this.logicalType = logicalType;
         this.physicalType =
                 MapSharedShreddingUtils.logicalToPhysicalSchema(logicalType, fieldToNumColumns);
@@ -68,7 +73,14 @@ public class MapSharedShreddingRowConverter {
             }
 
             MapType mapType = (MapType) field.type();
-            ColumnContext context = new ColumnContext(field.name(), numColumns, mapType);
+            MapSharedShreddingColumnPlacementPolicy placementPolicy =
+                    fieldToColumnPlacementPolicy.get(field.name());
+            checkArgument(
+                    placementPolicy != null,
+                    "Missing column placement policy for shared-shredding field '%s'.",
+                    field.name());
+            ColumnContext context =
+                    new ColumnContext(field.name(), numColumns, mapType, placementPolicy);
             contextByFieldName.put(field.name(), context);
             contextByFieldPos[i] = context;
             shreddingFieldNames.add(field.name());
@@ -289,14 +301,33 @@ public class MapSharedShreddingRowConverter {
         private final MapSharedShreddingFieldDict dict;
         private final MapSharedShreddingColumnAllocator allocator;
 
-        private ColumnContext(String fieldName, int numColumns, MapType mapType) {
+        private ColumnContext(
+                String fieldName,
+                int numColumns,
+                MapType mapType,
+                MapSharedShreddingColumnPlacementPolicy placementPolicy) {
             this.fieldName = fieldName;
             this.numColumns = numColumns;
             this.keyGetter = InternalArray.createElementGetter(mapType.getKeyType());
             DataType valueType = mapType.getValueType();
             this.valueGetter = InternalArray.createElementGetter(valueType);
             this.dict = new MapSharedShreddingFieldDict();
-            this.allocator = new MapSharedShreddingColumnAllocator(numColumns);
+            this.allocator = createAllocator(numColumns, placementPolicy);
+        }
+
+        private static MapSharedShreddingColumnAllocator createAllocator(
+                int numColumns, MapSharedShreddingColumnPlacementPolicy placementPolicy) {
+            switch (placementPolicy) {
+                case PLAIN:
+                    return new PlainMapSharedShreddingColumnAllocator(numColumns);
+                case SEQUENTIAL:
+                    return new SequentialMapSharedShreddingColumnAllocator(numColumns);
+                case LRU:
+                    return new LruMapSharedShreddingColumnAllocator(numColumns);
+                default:
+                    throw new IllegalArgumentException(
+                            "Unknown shared-shredding column placement policy: " + placementPolicy);
+            }
         }
     }
 }

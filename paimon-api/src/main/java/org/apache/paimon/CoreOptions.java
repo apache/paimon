@@ -100,6 +100,9 @@ public class CoreOptions implements Serializable {
     public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
             "map.shared-shredding.max-columns";
 
+    public static final String MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY =
+            "map.shared-shredding.column-placement-policy";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -5299,6 +5302,18 @@ public class CoreOptions implements Serializable {
         return maxColumns;
     }
 
+    public MapSharedShreddingColumnPlacementPolicy mapSharedShreddingColumnPlacementPolicy(
+            String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX
+                                + "."
+                                + fieldName
+                                + "."
+                                + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY)
+                        .enumType(MapSharedShreddingColumnPlacementPolicy.class)
+                        .defaultValue(MapSharedShreddingColumnPlacementPolicy.LRU));
+    }
+
     /** MAP storage layout. */
     public enum MapStorageLayout implements DescribedEnum {
         DEFAULT(
@@ -5316,6 +5331,40 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         MapStorageLayout(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Physical column placement policy for shared-shredding MAP fields. */
+    public enum MapSharedShreddingColumnPlacementPolicy implements DescribedEnum {
+        PLAIN(
+                "plain",
+                "Keep each MAP row's input key order and place the first K keys into physical "
+                        + "columns."),
+        SEQUENTIAL(
+                "sequential",
+                "Order keys by their field dictionary IDs and place the first K keys into physical "
+                        + "columns."),
+        LRU(
+                "lru",
+                "Reuse physical columns for recently seen keys and evict the least recently used "
+                        + "column when necessary.");
+
+        private final String value;
+        private final String description;
+
+        MapSharedShreddingColumnPlacementPolicy(String value, String description) {
             this.value = value;
             this.description = description;
         }

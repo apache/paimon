@@ -677,6 +677,7 @@ public class SchemaValidation {
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);
+            options.mapSharedShreddingColumnPlacementPolicy(fieldName);
         }
 
         if (hasSharedShredding) {

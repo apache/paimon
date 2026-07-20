@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -53,7 +54,7 @@ class MapSharedShreddingRowConverterTest {
                         DataTypes.FIELD(
                                 1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("tags", 3));
+                createPlainConverter(logicalType, columns("tags", 3));
         assertThat(converter.shreddingFieldNames()).containsExactly("tags");
         assertThatThrownBy(() -> converter.shreddingFieldNames().add("metrics"))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -109,7 +110,7 @@ class MapSharedShreddingRowConverterTest {
                                 "metrics",
                                 DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("metrics", 2));
+                createPlainConverter(logicalType, columns("metrics", 2));
 
         InternalRow row = converter.convert(GenericRow.of(stringKeyMap("a", null, "b", 20L)));
         InternalRow metrics = row.getRow(0, 4);
@@ -142,7 +143,7 @@ class MapSharedShreddingRowConverterTest {
                                 "metrics",
                                 DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("metrics", 2));
+                createPlainConverter(logicalType, columns("metrics", 2));
 
         InternalRow row =
                 converter.convert(GenericRow.of(stringKeyMap("a", 10L, "b", 20L, "c", 30L)));
@@ -176,7 +177,7 @@ class MapSharedShreddingRowConverterTest {
                                 "metrics",
                                 DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("metrics", 2));
+                createPlainConverter(logicalType, columns("metrics", 2));
 
         InternalRow nullRow = converter.convert(GenericRow.of((InternalMap) null));
         assertThat(nullRow.isNullAt(0)).isTrue();
@@ -212,7 +213,7 @@ class MapSharedShreddingRowConverterTest {
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "tags", DataTypes.MAP(DataTypes.STRING(), valueType)));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("tags", 2));
+                createPlainConverter(logicalType, columns("tags", 2));
 
         InternalRow row =
                 converter.convert(
@@ -253,7 +254,7 @@ class MapSharedShreddingRowConverterTest {
                                 DataTypes.MAP(
                                         DataTypes.STRING(), DataTypes.ARRAY(DataTypes.INT()))));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("tags", 2));
+                createPlainConverter(logicalType, columns("tags", 2));
 
         InternalRow first =
                 converter.convert(
@@ -335,7 +336,7 @@ class MapSharedShreddingRowConverterTest {
                         DataTypes.FIELD(
                                 1, "nested", DataTypes.MAP(DataTypes.STRING(), innerMapType)));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("nested", 2));
+                createPlainConverter(logicalType, columns("nested", 2));
 
         InternalRow first =
                 converter.convert(
@@ -421,7 +422,7 @@ class MapSharedShreddingRowConverterTest {
                         DataTypes.FIELD(0, "id", DataTypes.INT()),
                         DataTypes.FIELD(1, "data", DataTypes.MAP(DataTypes.STRING(), valueType)));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("data", 2));
+                createPlainConverter(logicalType, columns("data", 2));
 
         InternalRow first =
                 converter.convert(
@@ -527,7 +528,7 @@ class MapSharedShreddingRowConverterTest {
         fieldToNumColumns.put("tags", 2);
         fieldToNumColumns.put("attrs", 3);
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, fieldToNumColumns);
+                createPlainConverter(logicalType, fieldToNumColumns);
 
         InternalRow first =
                 converter.convert(
@@ -621,6 +622,106 @@ class MapSharedShreddingRowConverterTest {
     }
 
     @Test
+    void testSequentialPlacementUsesDictionaryOrder() {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
+        MapSharedShreddingRowConverter converter =
+                createConverter(
+                        logicalType, "tags", 3, MapSharedShreddingColumnPlacementPolicy.SEQUENTIAL);
+
+        InternalRow first = converter.convert(GenericRow.of(100, stringKeyMap("a", 1L, "b", 2L)));
+        InternalRow firstTags = first.getRow(1, 5);
+        assertThat(firstTags.getArray(0).toIntArray()).containsExactly(0, 1, -1);
+        assertThat(firstTags.getLong(1)).isEqualTo(1L);
+        assertThat(firstTags.getLong(2)).isEqualTo(2L);
+        assertThat(firstTags.isNullAt(3)).isTrue();
+        assertThat(firstTags.isNullAt(4)).isTrue();
+
+        InternalRow second =
+                converter.convert(GenericRow.of(200, stringKeyMap("b", 3L, "c", 4L, "a", 5L)));
+        InternalRow secondTags = second.getRow(1, 5);
+        assertThat(secondTags.getArray(0).toIntArray()).containsExactly(0, 1, 2);
+        assertThat(secondTags.getLong(1)).isEqualTo(5L);
+        assertThat(secondTags.getLong(2)).isEqualTo(3L);
+        assertThat(secondTags.getLong(3)).isEqualTo(4L);
+        assertThat(secondTags.isNullAt(4)).isTrue();
+
+        assertThat(converter.buildFieldMeta("tags"))
+                .isEqualTo(
+                        new MapSharedShreddingFieldMeta(
+                                nameToId("a", 0, "b", 1, "c", 2),
+                                fieldToColumns(
+                                        0, Collections.singletonList(0),
+                                        1, Collections.singletonList(1),
+                                        2, Collections.singletonList(2)),
+                                new TreeSet<Integer>(),
+                                3,
+                                3));
+    }
+
+    @Test
+    void testLruPlacementPreservesResidentColumns() {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
+        MapSharedShreddingRowConverter converter =
+                createConverter(
+                        logicalType, "tags", 3, MapSharedShreddingColumnPlacementPolicy.LRU);
+
+        InternalRow first =
+                converter.convert(GenericRow.of(1, stringKeyMap("a", 10L, "b", 20L, "c", 30L)));
+        assertThat(first.getRow(1, 5).getArray(0).toIntArray()).containsExactly(0, 1, 2);
+
+        InternalRow second = converter.convert(GenericRow.of(2, stringKeyMap("a", 40L, "b", 50L)));
+        assertThat(second.getRow(1, 5).getArray(0).toIntArray()).containsExactly(0, 1, -1);
+
+        InternalRow third =
+                converter.convert(GenericRow.of(3, stringKeyMap("d", 60L, "e", 70L, "f", 80L)));
+        InternalRow thirdTags = third.getRow(1, 5);
+        assertThat(thirdTags.getArray(0).toIntArray()).containsExactly(4, 5, 3);
+        assertThat(thirdTags.getLong(1)).isEqualTo(70L);
+        assertThat(thirdTags.getLong(2)).isEqualTo(80L);
+        assertThat(thirdTags.getLong(3)).isEqualTo(60L);
+        assertThat(thirdTags.isNullAt(4)).isTrue();
+
+        InternalRow fourth =
+                converter.convert(
+                        GenericRow.of(4, stringKeyMap("a", 90L, "d", 100L, "e", 110L, "f", 120L)));
+        InternalRow fourthTags = fourth.getRow(1, 5);
+        assertThat(fourthTags.getArray(0).toIntArray()).containsExactly(4, 5, 3);
+        assertThat(fourthTags.getLong(1)).isEqualTo(110L);
+        assertThat(fourthTags.getLong(2)).isEqualTo(120L);
+        assertThat(fourthTags.getLong(3)).isEqualTo(100L);
+        assertThat(fourthTags.getMap(4)).isEqualTo(intKeyMap(0, 90L));
+
+        assertThat(converter.buildFieldMeta("tags"))
+                .isEqualTo(
+                        new MapSharedShreddingFieldMeta(
+                                nameToId(
+                                        "a", 0,
+                                        "b", 1,
+                                        "c", 2,
+                                        "d", 3,
+                                        "e", 4,
+                                        "f", 5),
+                                fieldToColumns(
+                                        0, Collections.singletonList(0),
+                                        1, Collections.singletonList(1),
+                                        2, Collections.singletonList(2),
+                                        3, Collections.singletonList(2),
+                                        4, Collections.singletonList(0),
+                                        5, Collections.singletonList(1)),
+                                new TreeSet<>(Collections.singletonList(0)),
+                                3,
+                                4));
+    }
+
+    @Test
     void testBuildFieldMetaInvalidFieldName() {
         RowType logicalType =
                 DataTypes.ROW(
@@ -628,7 +729,7 @@ class MapSharedShreddingRowConverterTest {
                         DataTypes.FIELD(
                                 1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingRowConverter converter =
-                new MapSharedShreddingRowConverter(logicalType, columns("tags", 3));
+                createPlainConverter(logicalType, columns("tags", 3));
 
         assertThat(converter.buildFieldMeta("tags"))
                 .isEqualTo(
@@ -650,6 +751,26 @@ class MapSharedShreddingRowConverterTest {
         Map<String, Integer> columns = new HashMap<>();
         columns.put(fieldName, numColumns);
         return columns;
+    }
+
+    private static MapSharedShreddingRowConverter createPlainConverter(
+            RowType logicalType, Map<String, Integer> fieldToNumColumns) {
+        Map<String, MapSharedShreddingColumnPlacementPolicy> policies = new HashMap<>();
+        for (String fieldName : fieldToNumColumns.keySet()) {
+            policies.put(fieldName, MapSharedShreddingColumnPlacementPolicy.PLAIN);
+        }
+        return new MapSharedShreddingRowConverter(logicalType, fieldToNumColumns, policies);
+    }
+
+    private static MapSharedShreddingRowConverter createConverter(
+            RowType logicalType,
+            String fieldName,
+            int numColumns,
+            MapSharedShreddingColumnPlacementPolicy policy) {
+        return new MapSharedShreddingRowConverter(
+                logicalType,
+                Collections.singletonMap(fieldName, numColumns),
+                Collections.singletonMap(fieldName, policy));
     }
 
     private static GenericMap stringKeyMap(Object... keyValues) {
