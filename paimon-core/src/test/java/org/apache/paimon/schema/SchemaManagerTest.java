@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -676,6 +677,127 @@ public class SchemaManagerTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> table.copy(Collections.singletonMap("type", "table")))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testAlterPartitionDefaultName() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "partition-default-name-table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
+        String customName = "__CUSTOM_DEFAULT_PARTITION__";
+
+        // The option can be changed and reset before the first snapshot.
+        manager.commitChanges(SchemaChange.setOption(option, customName));
+        assertThat(manager.latest().get().options()).containsEntry(option, customName);
+        manager.commitChanges(SchemaChange.removeOption(option));
+        assertThat(manager.latest().get().options()).doesNotContainKey(option);
+        manager.commitChanges(SchemaChange.setOption(option, customName));
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        writeSnapshot(tableRoot, table.schema().id());
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                option, "__ANOTHER_DEFAULT_PARTITION__")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption(option)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+
+        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption(option, customName)))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(
+                        () ->
+                                table.copy(
+                                        Collections.singletonMap(
+                                                option, "__ANOTHER_DEFAULT_PARTITION__")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+    }
+
+    @Test
+    public void testDefaultPartitionNameStrictResetAfterSnapshot() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "default-partition-name-strict-reset-table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        writeSnapshot(tableRoot, table.schema().id());
+
+        String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
+        String defaultName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
+        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption(option, defaultName)))
+                .doesNotThrowAnyException();
+        assertThat(manager.latest().get().options()).doesNotContainKey(option);
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption(option)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+        assertThatCode(() -> table.copy(Collections.singletonMap(option, defaultName)))
+                .doesNotThrowAnyException();
+
+        // RESET remains forbidden when the stored value is explicitly equal to the default.
+        Path explicitTableRoot =
+                new Path(tempDir.toString(), "explicit-default-partition-name-table");
+        SchemaManager explicitManager = new SchemaManager(LocalFileIO.create(), explicitTableRoot);
+        explicitManager.createTable(
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        Collections.singletonMap(option, defaultName),
+                        ""));
+        FileStoreTable explicitTable =
+                FileStoreTableFactory.create(LocalFileIO.create(), explicitTableRoot);
+        writeSnapshot(explicitTableRoot, explicitTable.schema().id());
+        assertThatThrownBy(() -> explicitTable.copy(Collections.singletonMap(option, null)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+    }
+
+    private void writeSnapshot(Path tableRoot, long schemaId) throws IOException {
+        Snapshot snapshot =
+                new Snapshot(
+                        Snapshot.FIRST_SNAPSHOT_ID,
+                        schemaId,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "user",
+                        1L,
+                        Snapshot.CommitKind.APPEND,
+                        System.currentTimeMillis(),
+                        1L,
+                        1L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        LocalFileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, null, null, null);
+        fileIO.tryToWriteAtomic(snapshotManager.snapshotPath(snapshot.id()), snapshot.toJson());
     }
 
     @Test

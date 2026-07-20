@@ -559,6 +559,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
 
+    @Immutable
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
