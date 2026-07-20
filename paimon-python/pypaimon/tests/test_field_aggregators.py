@@ -1792,6 +1792,35 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             fields = self.DEFAULT_FIELDS
         return GenericRow(list(values), fields)
 
+    def test_field_merge_map_with_key_time_dict_row_default_ts(self):
+        agg = self._make()
+
+        result = agg.agg(
+            None,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        self.assertEqual(
+            result,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        result = agg.agg(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
     def test_field_merge_map_with_key_time_agg_using_default_ts(self):
         agg = self._make()
         self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)

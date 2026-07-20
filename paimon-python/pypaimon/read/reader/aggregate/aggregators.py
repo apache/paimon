@@ -767,8 +767,7 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                 )
             )
 
-        self.ts_field_name = options.field_merge_map_ts_field(field_name)
-        self.ts_field_index = self._resolve_ts_field_index(field_type.value, self.ts_field_name, field_name)
+        self._resolve_ts_field_index(field_type.value, options, field_name)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
@@ -780,10 +779,12 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
 
         return result_map
 
-    def _resolve_ts_field_index(self, row_type: RowType, ts_field_name: str, field_name: str) -> int:
+    def _resolve_ts_field_index(self, row_type: RowType, options: CoreOptions, field_name: str) -> None:
+        ts_field_name = options.field_merge_map_ts_field(field_name)
         if ts_field_name is None:
             # default to the last field
             ts_field_index = len(row_type.fields) - 1
+            ts_field_name = row_type.fields[ts_field_index].name
         else:
             ts_field_index = row_type.get_field_index(ts_field_name)
             if ts_field_index < 0:
@@ -793,7 +794,8 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                     )
                 )
 
-        return ts_field_index
+        self.ts_field_name = ts_field_name
+        self.ts_field_index = ts_field_index
 
     def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
         if isinstance(input_field, dict):
