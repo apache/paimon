@@ -31,6 +31,7 @@ from pypaimon.schema.data_types import (
     PyarrowFieldParser,
     is_array_blob_type,
     is_blob_file_field,
+    is_map_blob_type,
 )
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -524,6 +525,8 @@ class TableUpdateByRowId:
     def _blob_placeholder(self, column_name: str):
         for table_field in self.table.fields:
             if table_field.name == column_name:
+                if is_map_blob_type(table_field.type):
+                    return Blob.MAP_PLACE_HOLDER
                 return (
                     Blob.ARRAY_PLACE_HOLDER
                     if is_array_blob_type(table_field.type)

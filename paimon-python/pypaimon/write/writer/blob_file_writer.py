@@ -27,6 +27,7 @@ from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
     is_array_blob_type,
+    is_map_blob_type,
 )
 
 
@@ -80,6 +81,8 @@ class BlobFileWriter:
         self.row_count += 1
 
     def _to_blob_file_value(self, col_data, field_type):
+        if is_map_blob_type(field_type):
+            return self._to_blob_map(col_data)
         if is_array_blob_type(field_type):
             return self._to_blob_array(col_data)
         return self._to_blob(col_data)
@@ -129,9 +132,35 @@ class BlobFileWriter:
             if element is None:
                 result.append(None)
                 continue
-            if element is Blob.PLACE_HOLDER or element is Blob.ARRAY_PLACE_HOLDER:
+            if (
+                element is Blob.PLACE_HOLDER
+                or element is Blob.ARRAY_PLACE_HOLDER
+                or element is Blob.MAP_PLACE_HOLDER
+            ):
                 raise ValueError("ARRAY<BLOB> elements do not support placeholders.")
             result.append(self._to_blob(element))
+        return result
+
+    def _to_blob_map(self, col_data):
+        if col_data is Blob.MAP_PLACE_HOLDER:
+            return Blob.MAP_PLACE_HOLDER
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if col_data is None:
+            return None
+
+        result = []
+        for key, value in BlobFormatWriter._map_entries(col_data):
+            if value is None:
+                result.append((key, None))
+                continue
+            if (
+                value is Blob.PLACE_HOLDER
+                or value is Blob.ARRAY_PLACE_HOLDER
+                or value is Blob.MAP_PLACE_HOLDER
+            ):
+                raise ValueError("MAP<X, BLOB> values do not support placeholders.")
+            result.append((key, self._to_blob(value)))
         return result
 
     @staticmethod

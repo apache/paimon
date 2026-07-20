@@ -762,6 +762,118 @@ class BlobTest(unittest.TestCase):
             [descriptor.uri for descriptor in descriptors],
         )
 
+    def test_blob_fallback_batch_reader_materializes_selected_map_values_in_parallel(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        class RecordingFileIO(LocalFileIO):
+            def __init__(self, path, options):
+                super().__init__(path, options)
+                self.calls = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                self.calls.append((
+                    [blob.to_descriptor() for blob in blobs],
+                    parallelism,
+                ))
+                return super().read_blobs_concurrent(blobs, parallelism)
+
+        field = DataField(
+            0,
+            "pictures",
+            MapType(True, AtomicType("STRING", False), AtomicType("BLOB")),
+        )
+        file_io = RecordingFileIO(self.temp_dir, Options({}))
+
+        def write_blob_file(name, values):
+            path = os.path.join(self.temp_dir, name)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                for value in values:
+                    writer.add_element(
+                        GenericRow([value], [field], RowKind.INSERT)
+                    )
+                writer.close()
+            return path
+
+        old_path = write_blob_file(
+            "old-map.blob",
+            [
+                {"a": BlobData(b"old-0"), "null": None},
+                {"a": BlobData(b"old-1")},
+                {"a": BlobData(b"old-2a"), "b": BlobData(b"old-2b")},
+            ],
+        )
+        new_path = write_blob_file(
+            "new-map.blob",
+            [
+                Blob.MAP_PLACE_HOLDER,
+                {"a": BlobData(b"new-1a"), "b": None, "c": BlobData(b"new-1c")},
+                Blob.MAP_PLACE_HOLDER,
+            ],
+        )
+
+        def data_file(path, max_sequence_number):
+            return DataFileMeta(
+                file_name=os.path.basename(path),
+                file_size=os.path.getsize(path),
+                row_count=3,
+                min_key=None,
+                max_key=None,
+                key_stats=None,
+                value_stats=None,
+                min_sequence_number=max_sequence_number,
+                max_sequence_number=max_sequence_number,
+                schema_id=0,
+                level=0,
+                extra_files=[],
+                first_row_id=0,
+                file_path=path,
+            )
+
+        def supplier(path):
+            return lambda: FormatBlobReader(
+                file_io=file_io,
+                file_path=path,
+                read_fields=[field.name],
+                full_fields=[field],
+                push_down_predicate=None,
+                blob_as_descriptor=False,
+                blob_parallelism=4,
+            )
+
+        reader = BlobFallbackBatchReader(
+            [
+                (data_file(old_path, 1), supplier(old_path)),
+                (data_file(new_path, 2), supplier(new_path)),
+            ],
+            field.name,
+            pa.map_(pa.string(), pa.large_binary()),
+            batch_size=3,
+            blob_parallelism=4,
+        )
+        try:
+            batch = reader.read_arrow_batch()
+            self.assertEqual(
+                [
+                    {"a": b"old-0", "null": None},
+                    {"a": b"new-1a", "b": None, "c": b"new-1c"},
+                    {"a": b"old-2a", "b": b"old-2b"},
+                ],
+                [dict(value) for value in batch.column(field.name).to_pylist()],
+            )
+            self.assertIsNone(reader.read_arrow_batch())
+        finally:
+            reader.close()
+
+        self.assertEqual(1, len(file_io.calls))
+        descriptors, parallelism = file_io.calls[0]
+        self.assertEqual(4, parallelism)
+        self.assertEqual(5, len(descriptors))
+        self.assertEqual(
+            [old_path, new_path, new_path, old_path, old_path],
+            [descriptor.uri for descriptor in descriptors],
+        )
+
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
         test_data = b"interface test data"

@@ -1458,6 +1458,81 @@ class JavaPyReadWriteTest(unittest.TestCase):
             data.column('payloads').to_pylist(),
         )
 
+    def test_read_map_blob_written_by_java(self):
+        table = self.catalog.get_table('default.map_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_map(result.schema.field('payloads').type))
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'java-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'java-omega'},
+            ],
+        )
+
+    def test_write_map_blob_for_java(self):
+        map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        table_name = 'default.map_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    {1: b'python-alpha', 2: None, 3: b''},
+                    {},
+                    None,
+                    {4: b'python-omega'},
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'python-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'python-omega'},
+            ],
+        )
+
     def test_compact_conflict_shard_update(self):
         """
         1. Java writes 5 base files (testCompactConflictWriteBase)

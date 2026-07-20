@@ -23,7 +23,8 @@ from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.options import Options
-from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
+                                        MapType, RowType)
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -116,6 +117,11 @@ class TestBlobPartitionValidation(unittest.TestCase):
         blob_types = [
             AtomicType("BLOB"),
             ArrayType(True, AtomicType("BLOB")),
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                AtomicType("BLOB"),
+            ),
         ]
         for index, blob_type in enumerate(blob_types):
             with self.subTest(blob_type=blob_type):
@@ -143,6 +149,99 @@ class TestBlobPartitionValidation(unittest.TestCase):
             "can not be part of partition keys",
         ):
             manager.commit(table_schema)
+
+    def test_create_table_rejects_unsupported_map_blob_key(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/unsupported_map_key",
+        )
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT")),
+                DataField(
+                    1,
+                    "payload",
+                    MapType(
+                        True,
+                        AtomicType("BOOLEAN", False),
+                        AtomicType("BLOB"),
+                    ),
+                ),
+            ],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported key type for MAP<X, BLOB>"
+        ):
+            manager.create_table(schema)
+
+    def test_create_table_rejects_unsupported_nested_blob(self):
+        nested_types = [
+            MapType(True, AtomicType("BLOB", False), AtomicType("INT")),
+            RowType(
+                True,
+                [DataField(2, "nested_blob", AtomicType("BLOB"))],
+            ),
+            ArrayType(True, ArrayType(True, AtomicType("BLOB"))),
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                ArrayType(True, AtomicType("BLOB")),
+            ),
+        ]
+
+        for index, nested_type in enumerate(nested_types):
+            with self.subTest(nested_type=nested_type):
+                manager = SchemaManager(
+                    self.file_io,
+                    f"{self.temp_dir}/test_db.db/nested_blob_{index}",
+                )
+                schema = Schema(
+                    fields=[
+                        DataField(0, "id", AtomicType("INT")),
+                        DataField(1, "payload", nested_type),
+                    ],
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "unsupported nested BLOB type",
+                ):
+                    manager.create_table(schema)
+
+    def test_create_table_still_rejects_primary_key_map_blob(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/pk_map_blob",
+        )
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT", False)),
+                DataField(
+                    1,
+                    "payload",
+                    MapType(
+                        True,
+                        AtomicType("STRING", False),
+                        AtomicType("BLOB"),
+                    ),
+                ),
+            ],
+            primary_keys=["id"],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "MAP<X, BLOB> type is not supported with primary key",
+        ):
+            manager.create_table(schema)
 
 
 if __name__ == '__main__':

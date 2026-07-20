@@ -22,15 +22,17 @@ from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
+from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
 from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
-                                        MapType, RowType, is_array_blob_type,
-                                        is_blob_file_field, is_blob_file_type,
-                                        is_blob_type, reassign_field_id)
+                                        DataType, MapType, MultisetType, RowType,
+                                        is_array_blob_type, is_blob_file_field,
+                                        is_blob_file_type, is_blob_type,
+                                        is_map_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
@@ -344,7 +346,7 @@ def _assert_not_renaming_blob_column(
     for field in new_fields:
         if field.name == field_name and is_blob_file_field(field):
             raise ValueError(
-                f"Cannot rename BLOB or ARRAY<BLOB> column: [{field_name}]"
+                f"Cannot rename BLOB, ARRAY<BLOB> or MAP<X, BLOB> column: [{field_name}]"
             )
 
 
@@ -361,10 +363,24 @@ def _validate_blob_fields(
     blob_field_names = {field.name for field in fields if is_blob_file_field(field)}
     scalar_blob_field_names = {field.name for field in fields if is_blob_type(field.type)}
     array_blob_field_names = {field.name for field in fields if is_array_blob_type(field.type)}
+    map_blob_fields = [field for field in fields if is_map_blob_type(field.type)]
+    map_blob_field_names = {field.name for field in map_blob_fields}
+
+    for field in fields:
+        if not is_blob_file_type(field.type) and _contains_blob_type(field.type):
+            raise ValueError(
+                f"Field '{field.name}' has unsupported nested BLOB type {field.type}. "
+                f"BLOB is only supported as a top-level BLOB, ARRAY<BLOB>, or "
+                f"MAP<X, BLOB> field."
+            )
+
+    for field in map_blob_fields:
+        create_map_blob_key_serializer(field.type.key)
 
     if len(fields) <= len(blob_field_names):
         raise ValueError(
-            "Table with BLOB or ARRAY<BLOB> type column must have other normal columns."
+            "Table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column must have "
+            "other normal columns."
         )
 
     core_options = CoreOptions(Options(options))
@@ -373,7 +389,8 @@ def _validate_blob_fields(
     for field in configured_blob_fields:
         if field not in blob_field_names:
             raise ValueError(
-                "Field '{}' in '{}' must be a BLOB field or ARRAY<BLOB> field in table schema.".format(
+                "Field '{}' in '{}' must be a BLOB, ARRAY<BLOB> or MAP<X, BLOB> "
+                "field in table schema.".format(
                     field, CoreOptions.BLOB_FIELD.key()
                 )
             )
@@ -384,11 +401,16 @@ def _validate_blob_fields(
     all_inline_fields = descriptor_fields.union(view_fields)
     non_blob_inline_fields = all_inline_fields.difference(scalar_blob_field_names)
     if non_blob_inline_fields:
-        array_inline_fields = sorted(non_blob_inline_fields.intersection(array_blob_field_names))
-        if array_inline_fields:
+        nested_inline_fields = sorted(
+            non_blob_inline_fields.intersection(
+                array_blob_field_names.union(map_blob_field_names)
+            )
+        )
+        if nested_inline_fields:
             raise ValueError(
-                "ARRAY<BLOB> is only supported by '{}'. Invalid inline blob fields: {}".format(
-                    CoreOptions.BLOB_FIELD.key(), array_inline_fields
+                "ARRAY<BLOB> and MAP<X, BLOB> are only supported by '{}'. "
+                "Invalid inline blob fields: {}".format(
+                    CoreOptions.BLOB_FIELD.key(), nested_inline_fields
                 )
             )
         raise ValueError(
@@ -416,18 +438,37 @@ def _validate_blob_fields(
 
         if missing_options:
             raise ValueError(
-                f"Schema contains BLOB or ARRAY<BLOB> type but is missing required options: "
+                f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
+                f"missing required options: "
                 f"{', '.join(missing_options)}. "
                 f"Please add these options to the schema."
             )
 
         if primary_keys:
-            raise ValueError("BLOB or ARRAY<BLOB> type is not supported with primary key.")
+            raise ValueError(
+                "BLOB, ARRAY<BLOB> or MAP<X, BLOB> type is not supported with primary key."
+            )
 
         if blob_field_names.intersection(partition_keys):
             raise ValueError(
-                "The BLOB or ARRAY<BLOB> type column can not be part of partition keys."
+                "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
+                "part of partition keys."
             )
+
+
+def _contains_blob_type(data_type: DataType) -> bool:
+    if is_blob_type(data_type):
+        return True
+    if isinstance(data_type, (ArrayType, MultisetType)):
+        return _contains_blob_type(data_type.element)
+    if isinstance(data_type, MapType):
+        return (
+            _contains_blob_type(data_type.key)
+            or _contains_blob_type(data_type.value)
+        )
+    if isinstance(data_type, RowType):
+        return any(_contains_blob_type(field.type) for field in data_type.fields)
+    return False
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):

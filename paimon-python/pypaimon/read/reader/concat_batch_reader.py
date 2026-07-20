@@ -268,6 +268,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
         self._blob_as_descriptor = blob_as_descriptor
         self._is_array_blob = pa.types.is_list(output_type) or pa.types.is_large_list(output_type)
+        self._is_map_blob = pa.types.is_map(output_type)
         self._data_field = DataField(
             0,
             field_name,
@@ -323,8 +324,17 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     )
                 if blob is None:
                     group[row_id] = (None, False)
-                elif blob is Blob.PLACE_HOLDER or blob is Blob.ARRAY_PLACE_HOLDER:
+                elif (
+                    blob is Blob.PLACE_HOLDER
+                    or blob is Blob.ARRAY_PLACE_HOLDER
+                    or blob is Blob.MAP_PLACE_HOLDER
+                ):
                     group[row_id] = (None, True)
+                elif self._is_map_blob:
+                    if resolve_blobs_concurrently:
+                        group[row_id] = (blob, False)
+                    else:
+                        group[row_id] = (self._map_value_for_arrow(blob), False)
                 elif self._is_array_blob:
                     if resolve_blobs_concurrently:
                         group[row_id] = (blob, False)
@@ -380,12 +390,43 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 result.append(blob.to_data())
         return result
 
+    def _map_value_for_arrow(self, blob_map):
+        if None in blob_map:
+            raise ValueError(
+                "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
+            )
+        result = {}
+        for key, blob in blob_map.items():
+            if blob is None:
+                result[key] = None
+            elif self._blob_as_descriptor:
+                result[key] = blob.to_descriptor().serialize()
+            else:
+                result[key] = blob.to_data()
+        return result
+
     def _resolve_selected_blobs(self, values: List[object]) -> List[object]:
-        """Materialize selected scalar or array BLOBs with the shared FileIO."""
+        """Materialize selected scalar, array, or map BLOBs with the shared FileIO."""
         resolved = []
-        indexed_blobs: List[Tuple[int, Optional[int], Blob]] = []
+        indexed_blobs: List[Tuple[int, object, Blob]] = []
         for row_index, value in enumerate(values):
-            if self._is_array_blob:
+            if self._is_map_blob:
+                if value is None:
+                    resolved.append(None)
+                    continue
+                if None in value:
+                    raise ValueError(
+                        "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
+                    )
+                map_values = {}
+                for key, blob in value.items():
+                    if blob is None:
+                        map_values[key] = None
+                    else:
+                        map_values[key] = None
+                        indexed_blobs.append((row_index, key, blob))
+                resolved.append(map_values)
+            elif self._is_array_blob:
                 if value is None:
                     resolved.append(None)
                     continue
@@ -408,11 +449,13 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
         bodies = self._file_io.read_blobs_concurrent(
             [blob for _, _, blob in indexed_blobs], self._blob_parallelism)
-        for (row_index, element_index, _), body in zip(indexed_blobs, bodies):
-            if element_index is None:
+        for (row_index, slot, _), body in zip(indexed_blobs, bodies):
+            if self._is_map_blob:
+                resolved[row_index][slot] = body
+            elif slot is None:
                 resolved[row_index] = body
             else:
-                resolved[row_index][element_index] = body
+                resolved[row_index][slot] = body
         return resolved
 
     def _compute_target_ranges(self) -> List[Range]:

@@ -89,6 +89,7 @@ class BlobFormatWriter:
                 blob_field_name,
                 blob_value,
                 blob_field_type.key,
+                value_nullable=blob_field_type.value.nullable,
             )
             return
 
@@ -160,7 +161,11 @@ class BlobFormatWriter:
                 continue
             if not isinstance(blob_value, Blob):
                 raise ValueError("ARRAY<BLOB> elements must be Blob/BlobData instances or None")
-            if blob_value is Blob.PLACE_HOLDER or blob_value is Blob.ARRAY_PLACE_HOLDER:
+            if (
+                blob_value is Blob.PLACE_HOLDER
+                or blob_value is Blob.ARRAY_PLACE_HOLDER
+                or blob_value is Blob.MAP_PLACE_HOLDER
+            ):
                 raise ValueError("ARRAY<BLOB> elements do not support placeholders")
 
         previous_pos = self.position
@@ -198,7 +203,12 @@ class BlobFormatWriter:
         if flush:
             self.output_stream.flush()
 
-    def add_blob_map(self, blob_field_name: str, blob_values, key_type) -> None:
+    def add_blob_map(
+            self,
+            blob_field_name: str,
+            blob_values,
+            key_type,
+            value_nullable: bool = True) -> None:
         entries = self._map_entries(blob_values)
         if len(entries) > 0x7fffffff:
             raise ValueError(f"Invalid MAP<X, BLOB> entry count: {len(entries)}")
@@ -216,6 +226,10 @@ class BlobFormatWriter:
 
         for _, blob_value in entries:
             if blob_value is None:
+                if not value_nullable:
+                    raise ValueError(
+                        f"MAP<X, BLOB> field '{blob_field_name}' does not allow null values"
+                    )
                 continue
             if (
                 blob_value is Blob.PLACE_HOLDER
@@ -298,7 +312,7 @@ class BlobFormatWriter:
         from pypaimon.table.row.row_kind import RowKind
 
         is_map_blob = is_map_blob_type(fields[0].type)
-        is_blob = is_blob_file_type(fields[0].type) or is_map_blob
+        is_blob = is_blob_file_type(fields[0].type)
 
         if col_data is None:
             if not is_blob:
@@ -357,7 +371,11 @@ class BlobFormatWriter:
             if element is None:
                 result.append(None)
                 continue
-            if element is Blob.PLACE_HOLDER or element is Blob.ARRAY_PLACE_HOLDER:
+            if (
+                element is Blob.PLACE_HOLDER
+                or element is Blob.ARRAY_PLACE_HOLDER
+                or element is Blob.MAP_PLACE_HOLDER
+            ):
                 raise RuntimeError("ARRAY<BLOB> elements do not support placeholders.")
             result.append(cls._to_blob(element, uri_reader_factory))
         return result
