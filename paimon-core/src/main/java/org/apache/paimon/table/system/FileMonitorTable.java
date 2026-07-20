@@ -66,6 +66,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
@@ -98,6 +99,7 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
         dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
+        dynamicOptions.put(QUERY_AUTH_ENABLED.key(), "false");
         this.wrapped = wrapped.copy(dynamicOptions);
     }
 

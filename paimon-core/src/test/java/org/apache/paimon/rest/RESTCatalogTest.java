@@ -93,8 +93,10 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.CompactBucketsTable;
+import org.apache.paimon.table.system.FileMonitorTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -2858,6 +2860,46 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .allSatisfy(split -> assertThat(split).isInstanceOf(DataSplit.class));
         for (Split split : splits) {
             try (RecordReader<InternalRow> reader = bucketsTable.newRead().createReader(split)) {
+                List<InternalRow> rows = new ArrayList<>();
+                reader.forEachRemaining(rows::add);
+                assertThat(rows).hasSize(1);
+            }
+        }
+    }
+
+    @Test
+    void testFileMonitorTableBypassesQueryAuth() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_file_monitor_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        singletonList(new DataField(0, "id", DataTypes.INT())),
+                        emptyList(),
+                        emptyList(),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        batchWrite(table, singletonList(1));
+        setRowFilter(
+                identifier,
+                singletonList(
+                        LeafPredicate.of(
+                                new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                                GreaterThan.INSTANCE,
+                                singletonList(0))));
+
+        FileMonitorTable monitorTable = new FileMonitorTable(table);
+        ReadBuilder readBuilder = monitorTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        List<Split> splits = scan.plan().splits();
+        assertThat(splits)
+                .isNotEmpty()
+                .allSatisfy(split -> assertThat(split).isNotInstanceOf(QueryAuthSplit.class));
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
                 List<InternalRow> rows = new ArrayList<>();
                 reader.forEachRemaining(rows::add);
                 assertThat(rows).hasSize(1);
