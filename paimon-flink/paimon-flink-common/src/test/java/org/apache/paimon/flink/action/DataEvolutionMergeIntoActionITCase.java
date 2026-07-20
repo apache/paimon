@@ -39,7 +39,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -718,9 +720,48 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
 
         Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
         Assertions.assertTrue(
-                t.getMessage().contains("raw-data BLOB or ARRAY<BLOB> column"),
-                "Expected error about raw-data BLOB or ARRAY<BLOB> column but got: "
+                t.getMessage().contains("raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column"),
+                "Expected error about raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column but got: "
                         + t.getMessage());
+    }
+
+    @Test
+    public void testUpdateRawMapBlobColumnThrowsError() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_MAP_BLOB_T",
+                        Arrays.asList("id INT", "pictures MAP<STRING, BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "pictures");
+                            }
+                        }));
+        insertInto("RAW_MAP_BLOB_T", "(1, MAP['old', X'4F4C44'])");
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_MAP_BLOB_S",
+                        Arrays.asList("id INT", "pictures MAP<STRING, BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_MAP_BLOB_S", "(1, MAP['new', X'4E4557'])");
+
+        DataEvolutionMergeIntoAction action =
+                builder(warehouse, database, "RAW_MAP_BLOB_T")
+                        .withMergeCondition("RAW_MAP_BLOB_T.id=RAW_MAP_BLOB_S.id")
+                        .withMatchedUpdateSet("RAW_MAP_BLOB_T.pictures=RAW_MAP_BLOB_S.pictures")
+                        .withSourceTable("RAW_MAP_BLOB_S")
+                        .withSinkParallelism(1)
+                        .build();
+
+        Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
+        Assertions.assertTrue(
+                t.getMessage().contains("raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column"),
+                "Expected error about raw-data MAP<X, BLOB> column but got: " + t.getMessage());
     }
 
     @Test
@@ -850,6 +891,83 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         testBatchRead(
                 "SELECT id, name, pictures[1], pictures[2] "
                         + "FROM RAW_ARRAY_BLOB_SPLIT_T ORDER BY id",
+                expected);
+    }
+
+    @Test
+    public void testUpdateNonBlobColumnOnRawMapBlobTableWithSplitFiles() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_MAP_BLOB_SPLIT_T",
+                        Arrays.asList("id INT", "name STRING", "pictures MAP<STRING, BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "pictures");
+                                put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                                put("sink.parallelism", "1");
+                            }
+                        }));
+        Map<String, byte[]> firstPictures = new LinkedHashMap<>();
+        firstPictures.put("first", new byte[] {72, 101, 108, 108, 111});
+        firstPictures.put("second", new byte[] {89, 69});
+        Map<String, byte[]> secondPictures = new LinkedHashMap<>();
+        secondPictures.put("first", new byte[] {65, 66, 67});
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, "name1", firstPictures),
+                                Row.of(2, "name2", secondPictures),
+                                Row.of(3, "name3", null)));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_MAP_BLOB_SPLIT_SOURCE "
+                                        + "(id INT, name STRING, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+        sEnv.executeSql(
+                        "INSERT INTO RAW_MAP_BLOB_SPLIT_T "
+                                + "SELECT * FROM RAW_MAP_BLOB_SPLIT_SOURCE")
+                .await();
+        testBatchRead(
+                "SELECT COUNT(*) > 1 FROM `RAW_MAP_BLOB_SPLIT_T$files` "
+                        + "WHERE file_path LIKE '%.blob'",
+                Collections.singletonList(changelogRow("+I", true)));
+
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_MAP_BLOB_SPLIT_S",
+                        Arrays.asList("id INT", "name STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_MAP_BLOB_SPLIT_S", "(1, 'updated_name1')");
+
+        builder(warehouse, database, "RAW_MAP_BLOB_SPLIT_T")
+                .withMergeCondition("RAW_MAP_BLOB_SPLIT_T.id=RAW_MAP_BLOB_SPLIT_S.id")
+                .withMatchedUpdateSet("RAW_MAP_BLOB_SPLIT_T.name=RAW_MAP_BLOB_SPLIT_S.name")
+                .withSourceTable("RAW_MAP_BLOB_SPLIT_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow(
+                                "+I",
+                                1,
+                                "updated_name1",
+                                new byte[] {72, 101, 108, 108, 111},
+                                new byte[] {89, 69}),
+                        changelogRow("+I", 2, "name2", new byte[] {65, 66, 67}, null),
+                        changelogRow("+I", 3, "name3", null, null));
+        testBatchRead(
+                "SELECT id, name, pictures['first'], pictures['second'] "
+                        + "FROM RAW_MAP_BLOB_SPLIT_T ORDER BY id",
                 expected);
     }
 

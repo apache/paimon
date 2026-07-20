@@ -430,8 +430,12 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobFieldNames = rawBlobFields
       .map(_.name())
       .toSet
-    val rawArrayBlobFieldNames = rawBlobFields
-      .filter(_.`type`().getTypeRoot == DataTypeRoot.ARRAY)
+    val rawNestedBlobFieldNames = rawBlobFields
+      .filter(
+        field => {
+          val root = field.`type`().getTypeRoot
+          root == DataTypeRoot.ARRAY || root == DataTypeRoot.MAP
+        })
       .map(_.name())
       .toSet
 
@@ -455,15 +459,15 @@ case class MergeIntoPaimonDataEvolutionTable(
       }.toSet
     }
 
-    val modifiedRawArrayBlobColumnNames = matchedActions
+    val modifiedRawNestedBlobColumnNames = matchedActions
       .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
       .flatten
-      .filter(name => rawArrayBlobFieldNames.exists(arrayBlobName => resolver(arrayBlobName, name)))
+      .filter(name => rawNestedBlobFieldNames.exists(blobName => resolver(blobName, name)))
       .toSet
-    if (modifiedRawArrayBlobColumnNames.nonEmpty) {
+    if (modifiedRawNestedBlobColumnNames.nonEmpty) {
       throw new UnsupportedOperationException(
-        "Should not append/update raw-data ARRAY<BLOB> column through MERGE INTO: " +
-          modifiedRawArrayBlobColumnNames.toSeq.sorted.mkString(", "))
+        "Should not append/update raw-data ARRAY<BLOB> or MAP<X, BLOB> column through MERGE INTO: " +
+          modifiedRawNestedBlobColumnNames.toSeq.sorted.mkString(", "))
     }
 
     val rawBlobMarkerNames =

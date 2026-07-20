@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.apache.paimon.types.BlobType.isBlobFileField;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Collects exact managed BLOB dependencies from the final rows of one data file. */
@@ -58,6 +59,10 @@ public class ManagedBlobReferenceCollector {
                 continue;
             }
             DataTypeRoot typeRoot = valueType.getTypeAt(i).getTypeRoot();
+            checkArgument(
+                    typeRoot != DataTypeRoot.MAP,
+                    "Primary-key managed MAP<X, BLOB> field '%s' is not supported.",
+                    valueType.getFieldNames().get(i));
             if (isBlobFileField(valueType.getTypeAt(i))) {
                 indexes.add(i);
                 arrayFields.add(typeRoot == DataTypeRoot.ARRAY);

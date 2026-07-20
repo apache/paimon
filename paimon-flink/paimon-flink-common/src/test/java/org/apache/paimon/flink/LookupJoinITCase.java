@@ -31,7 +31,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -1664,6 +1666,66 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         String query =
                 "SELECT T.i, D.name, D.pictures[1], D.pictures[2] FROM T "
                         + "LEFT JOIN ARRAY_BLOB_DIM for system_time as of T.proctime AS D "
+                        + "ON T.i = D.id";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result).hasSize(3);
+
+        Row first = result.stream().filter(row -> row.getField(0).equals(1)).findFirst().get();
+        assertThat(first.getField(1)).isEqualTo("cat");
+        assertThat(BlobDescriptor.deserialize((byte[]) first.getField(2)).length()).isEqualTo(5);
+        assertThat(BlobDescriptor.deserialize((byte[]) first.getField(3)).length()).isEqualTo(2);
+
+        Row second = result.stream().filter(row -> row.getField(0).equals(2)).findFirst().get();
+        assertThat(second.getField(1)).isEqualTo("dog");
+        assertThat(BlobDescriptor.deserialize((byte[]) second.getField(2)).length()).isEqualTo(5);
+        assertThat(second.getField(3)).isNull();
+
+        Row missing = result.stream().filter(row -> row.getField(0).equals(3)).findFirst().get();
+        assertThat(missing.getField(1)).isNull();
+        assertThat(missing.getField(2)).isNull();
+        assertThat(missing.getField(3)).isNull();
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = LookupCacheMode.class,
+            names = {"FULL", "MEMORY"})
+    public void testLookupMapBlobAsDescriptorOnNormalBlobTable(LookupCacheMode mode)
+            throws Exception {
+        sql(
+                "CREATE TABLE MAP_BLOB_DIM (id INT, name STRING, pictures MAP<INT, BYTES>) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', "
+                        + "'blob-field'='pictures', "
+                        + "'lookup.blob-as-descriptor'='true', "
+                        + "'lookup.cache'='%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        Map<Integer, byte[]> firstPictures = new LinkedHashMap<>();
+        firstPictures.put(1, new byte[] {72, 101, 108, 108, 111});
+        firstPictures.put(2, new byte[] {89, 69});
+        Map<Integer, byte[]> secondPictures = new LinkedHashMap<>();
+        secondPictures.put(1, new byte[] {87, 111, 114, 108, 100});
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, "cat", firstPictures), Row.of(2, "dog", secondPictures)));
+        sql(
+                "CREATE TEMPORARY TABLE MAP_BLOB_SOURCE "
+                        + "(id INT, name STRING, pictures MAP<INT, BYTES>) WITH ("
+                        + "'connector'='values', 'bounded'='true', 'data-id'='%s')",
+                dataId);
+        sql("INSERT INTO MAP_BLOB_DIM SELECT * FROM MAP_BLOB_SOURCE");
+
+        String query =
+                "SELECT T.i, D.name, D.pictures[1], D.pictures[2] FROM T "
+                        + "LEFT JOIN MAP_BLOB_DIM for system_time as of T.proctime AS D "
                         + "ON T.i = D.id";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 

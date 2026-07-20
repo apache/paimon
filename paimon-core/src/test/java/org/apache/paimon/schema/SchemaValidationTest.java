@@ -149,14 +149,14 @@ class SchemaValidationTest {
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
                 .hasMessage(
-                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+                        "Data evolution config must enabled for table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column.");
 
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
                 .hasMessage(
-                        "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
+                        "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be part of partition keys.");
 
         assertThatThrownBy(
                         () -> {
@@ -171,7 +171,93 @@ class SchemaValidationTest {
                                             ""));
                         })
                 .hasMessage(
-                        "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
+                        "Table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column must have other normal columns.");
+    }
+
+    @Test
+    public void testMapBlobSchemaValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "payloads",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payloads");
+
+        TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        List<DataField> unsupportedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "payloads",
+                                DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BLOB())));
+        TableSchema unsupported =
+                new TableSchema(1, unsupportedFields, 10, emptyList(), emptyList(), options, "");
+        assertThatThrownBy(() -> validateTableSchema(unsupported))
+                .hasMessageContaining("Unsupported key type [BOOLEAN]");
+    }
+
+    @Test
+    public void testUnsupportedNestedBlobTypes() {
+        DataType rowBlob = DataTypes.ROW(DataTypes.FIELD(2, "nested_blob", DataTypes.BLOB()));
+        List<DataType> unsupportedTypes =
+                Arrays.asList(
+                        DataTypes.MAP(DataTypes.BLOB(), DataTypes.INT()),
+                        rowBlob,
+                        DataTypes.ARRAY(rowBlob),
+                        DataTypes.MAP(DataTypes.STRING(), rowBlob),
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.ARRAY(DataTypes.BLOB())),
+                        DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.BLOB())),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(
+                                        2,
+                                        "nested_map",
+                                        DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()))),
+                        DataTypes.MULTISET(DataTypes.BLOB()),
+                        DataTypes.MAP(
+                                DataTypes.STRING(),
+                                DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())));
+
+        for (DataType unsupportedType : unsupportedTypes) {
+            List<DataField> fields =
+                    Arrays.asList(
+                            new DataField(0, "id", DataTypes.INT()),
+                            new DataField(1, "payload", unsupportedType));
+            TableSchema schema =
+                    new TableSchema(1, fields, 10, emptyList(), emptyList(), new HashMap<>(), "");
+
+            assertThatThrownBy(() -> validateTableSchema(schema))
+                    .as("type %s", unsupportedType)
+                    .hasMessageContaining("Field 'payload' has unsupported nested BLOB type")
+                    .hasMessageContaining(
+                            "BLOB is only supported as a top-level BLOB, ARRAY<BLOB>, or MAP<X, BLOB> field.");
+        }
+    }
+
+    @Test
+    public void testPrimaryKeyMapBlobIsRejected() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "payloads", DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payloads");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage(
+                        "Primary-key managed MAP<X, BLOB> fields are not supported: [payloads].");
     }
 
     @Test

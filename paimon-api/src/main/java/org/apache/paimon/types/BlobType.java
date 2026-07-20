@@ -118,6 +118,25 @@ public final class BlobType extends DataType {
         if (type.getTypeRoot() == DataTypeRoot.ARRAY) {
             return ((ArrayType) type).getElementType().getTypeRoot() == DataTypeRoot.BLOB;
         }
+        if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            MapType mapType = (MapType) type;
+            return mapType.getValueType().getTypeRoot() == DataTypeRoot.BLOB
+                    && isSupportedMapBlobKeyType(mapType.getKeyType());
+        }
         return false;
+    }
+
+    private static boolean isSupportedMapBlobKeyType(DataType keyType) {
+        switch (keyType.getTypeRoot()) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case CHAR:
+            case VARCHAR:
+                return true;
+            default:
+                return false;
+        }
     }
 }

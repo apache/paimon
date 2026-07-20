@@ -19,6 +19,7 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
@@ -30,18 +31,7 @@ final class BlobElementSerializerFactory {
     private BlobElementSerializerFactory() {}
 
     static boolean supports(DataType dataType) {
-        switch (dataType.getTypeRoot()) {
-            case BLOB:
-                return true;
-            case ARRAY:
-                return ((ArrayType) dataType).getElementType().getTypeRoot() == DataTypeRoot.BLOB;
-            case MAP:
-                MapType mapType = (MapType) dataType;
-                return MapBlobElementSerializer.supportKeyType(mapType.getKeyType())
-                        && mapType.getValueType().getTypeRoot() == DataTypeRoot.BLOB;
-            default:
-                return false;
-        }
+        return BlobType.isBlobFileField(dataType);
     }
 
     static BlobElementSerializer create(DataType dataType) {
@@ -56,7 +46,7 @@ final class BlobElementSerializerFactory {
             case MAP:
                 MapType mapType = (MapType) dataType;
                 Preconditions.checkArgument(
-                        MapBlobElementSerializer.supportKeyType(mapType.getKeyType()),
+                        supportsMapKey(mapType.getKeyType()),
                         "Unsupported key type [%s] for nested Map-Blob type.",
                         mapType.getKeyType());
                 Preconditions.checkArgument(
@@ -67,5 +57,9 @@ final class BlobElementSerializerFactory {
             default:
                 throw new RuntimeException("Unsupported Element Type for Blob File Format");
         }
+    }
+
+    private static boolean supportsMapKey(DataType keyType) {
+        return BlobType.isBlobFileField(new MapType(keyType, new BlobType()));
     }
 }

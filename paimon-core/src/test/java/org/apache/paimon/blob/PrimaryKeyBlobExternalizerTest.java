@@ -116,6 +116,28 @@ class PrimaryKeyBlobExternalizerTest {
     }
 
     @Test
+    void testRejectsManagedMapBlobField() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+
+        assertThatThrownBy(
+                        () ->
+                                new PrimaryKeyBlobExternalizer(
+                                        fileIO,
+                                        RowType.of(
+                                                DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
+                                        Collections.singleton("f0"),
+                                        pathFactory,
+                                        1024L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Primary-key managed MAP<X, BLOB> field 'f0' is not supported.");
+    }
+
+    @Test
     void testRejectsUnknownManagedField() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());

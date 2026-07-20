@@ -80,6 +80,27 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into rejects updating raw-data map blob column") {
+    withTable("s", "t") {
+      sql("CREATE TABLE t (id INT, name STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql("INSERT INTO t VALUES (1, 'name1', map('old', X'48656C6C6F'))")
+
+      sql("CREATE TABLE s (id INT, pictures MAP<STRING, BINARY>)")
+      sql("INSERT INTO s VALUES (1, map('new', X'4E4557'))")
+
+      val e = intercept[UnsupportedOperationException] {
+        sql("""
+              |MERGE INTO t
+              |USING s
+              |ON t.id = s.id
+              |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
+              |""".stripMargin)
+      }
+      assert(e.getMessage.contains("MAP<X, BLOB>"))
+    }
+  }
+
   test("Blob: merge-into updates raw-data BLOB column to null") {
     withTable("s", "s2", "t") {
       sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +

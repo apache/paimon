@@ -93,20 +93,6 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
         this.keySerializer = createKeySerializer(keyType);
     }
 
-    static boolean supportKeyType(DataType keyType) {
-        switch (keyType.getTypeRoot()) {
-            case TINYINT:
-            case SMALLINT:
-            case INTEGER:
-            case BIGINT:
-            case CHAR:
-            case VARCHAR:
-                return true;
-            default:
-                return false;
-        }
-    }
-
     @Override
     public BlobElementSerializer.Writer createWriter(
             PositionOutputStream out,

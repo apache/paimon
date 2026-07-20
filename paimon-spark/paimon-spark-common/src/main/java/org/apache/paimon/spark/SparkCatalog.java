@@ -642,14 +642,14 @@ public class SparkCatalog extends SparkBaseCatalog
         return schemaBuilder.build();
     }
 
-    private static DataType toBlobType(StructField field, boolean allowArray) {
+    private static DataType toBlobType(StructField field, boolean allowNested) {
         org.apache.spark.sql.types.DataType sparkType = field.dataType();
         if (sparkType instanceof BinaryType) {
             return new BlobType(field.nullable());
         }
         if (sparkType instanceof ArrayType) {
             checkArgument(
-                    allowArray,
+                    allowNested,
                     "ARRAY<BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
             ArrayType arrayType = (ArrayType) sparkType;
             checkArgument(
@@ -658,8 +658,27 @@ public class SparkCatalog extends SparkBaseCatalog
             return new org.apache.paimon.types.ArrayType(
                     field.nullable(), new BlobType(arrayType.containsNull()));
         }
+        if (sparkType instanceof org.apache.spark.sql.types.MapType) {
+            checkArgument(
+                    allowNested,
+                    "MAP<X, BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
+            org.apache.spark.sql.types.MapType mapType =
+                    (org.apache.spark.sql.types.MapType) sparkType;
+            checkArgument(
+                    mapType.valueType() instanceof BinaryType,
+                    "The value type of a MAP<X, BLOB> field must be binary");
+            org.apache.paimon.types.MapType result =
+                    new org.apache.paimon.types.MapType(
+                            field.nullable(),
+                            toPaimonType(mapType.keyType()).copy(false),
+                            new BlobType(mapType.valueContainsNull()));
+            checkArgument(
+                    BlobType.isBlobFileField(result),
+                    "Unsupported key type for MAP<X, BLOB>: " + mapType.keyType());
+            return result;
+        }
         throw new IllegalArgumentException(
-                "The type of blob field must be binary or array of binary");
+                "The type of blob field must be binary, array of binary, or map with binary values");
     }
 
     private void validateAlterProperty(String alterKey) {

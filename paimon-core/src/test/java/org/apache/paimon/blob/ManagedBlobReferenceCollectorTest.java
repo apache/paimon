@@ -34,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ManagedBlobReferenceCollector}. */
 class ManagedBlobReferenceCollectorTest {
@@ -150,6 +151,23 @@ class ManagedBlobReferenceCollectorTest {
                 .containsExactly(
                         new ManagedBlobReferenceFile.Reference(
                                 bucketPath.toString(), managed.getName()));
+    }
+
+    @Test
+    void testRejectsManagedMapBlobField() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dataFile = new Path(tempDir.resolve("data-a.avro").toUri());
+
+        assertThatThrownBy(
+                        () ->
+                                new ManagedBlobReferenceCollector(
+                                        fileIO,
+                                        dataFile,
+                                        RowType.of(
+                                                DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
+                                        Collections.singleton("f0")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Primary-key managed MAP<X, BLOB> field 'f0' is not supported.");
     }
 
     private KeyValue keyValue(RowKind kind, Blob blob) {

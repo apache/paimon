@@ -50,10 +50,10 @@ public class LogicalTypeConversion {
         return toBlobType(logicalType, true);
     }
 
-    public static DataType toBlobType(LogicalType logicalType, boolean allowArray) {
+    public static DataType toBlobType(LogicalType logicalType, boolean allowNested) {
         if (logicalType instanceof org.apache.flink.table.types.logical.ArrayType) {
             checkArgument(
-                    allowArray,
+                    allowNested,
                     "ARRAY<BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
             LogicalType elementType =
                     ((org.apache.flink.table.types.logical.ArrayType) logicalType).getElementType();
@@ -65,10 +65,32 @@ public class LogicalTypeConversion {
             return new org.apache.paimon.types.ArrayType(
                     logicalType.isNullable(), new BlobType(elementType.isNullable()));
         }
+        if (logicalType instanceof org.apache.flink.table.types.logical.MapType) {
+            checkArgument(
+                    allowNested,
+                    "MAP<X, BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
+            org.apache.flink.table.types.logical.MapType mapType =
+                    (org.apache.flink.table.types.logical.MapType) logicalType;
+            LogicalType valueType = mapType.getValueType();
+            checkArgument(
+                    isBinaryType(valueType),
+                    "The value type of a MAP<X, BLOB> field must be BinaryType or "
+                            + "VarBinaryType, but got: "
+                            + logicalType);
+            org.apache.paimon.types.MapType result =
+                    new org.apache.paimon.types.MapType(
+                            logicalType.isNullable(),
+                            toDataType(mapType.getKeyType()),
+                            new BlobType(valueType.isNullable()));
+            checkArgument(
+                    BlobType.isBlobFileField(result),
+                    "Unsupported key type for MAP<X, BLOB>: " + mapType.getKeyType());
+            return result;
+        }
         checkArgument(
                 isBinaryType(logicalType),
-                "Expected BinaryType, VarBinaryType or ArrayType with BinaryType or "
-                        + "VarBinaryType element, but got: "
+                "Expected BinaryType, VarBinaryType, ArrayType with binary element, or "
+                        + "MapType with binary value, but got: "
                         + logicalType);
         return new BlobType(logicalType.isNullable());
     }

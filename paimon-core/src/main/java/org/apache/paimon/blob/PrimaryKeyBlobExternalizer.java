@@ -85,6 +85,10 @@ public class PrimaryKeyBlobExternalizer {
                             && ((ArrayType) field.type()).getElementType().getTypeRoot()
                                     == DataTypeRoot.BLOB;
             checkArgument(
+                    field.type().getTypeRoot() != DataTypeRoot.MAP,
+                    "Primary-key managed MAP<X, BLOB> field '%s' is not supported.",
+                    field.name());
+            checkArgument(
                     blob || blobArray,
                     "Managed BLOB field '%s' must be BLOB or ARRAY<BLOB>, but was %s.",
                     field.name(),

@@ -26,6 +26,7 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -240,10 +241,39 @@ public final class ColumnDirectiveUtils {
                 return new ArrayType(
                         sourceType.isNullable(), new BlobType(elementType.isNullable()));
             }
+            if (root == DataTypeRoot.MAP) {
+                Preconditions.checkArgument(
+                        CoreOptions.BLOB_FIELD.key().equals(directive.optionKey()),
+                        "Column %s declared with '%s' must be of BYTES, BINARY or BLOB type, but was %s. "
+                                + "MAP<X, BLOB> is only supported by '%s'.",
+                        fieldName,
+                        directive.optionKey(),
+                        sourceType,
+                        CoreOptions.BLOB_FIELD.key());
+                MapType mapType = (MapType) sourceType;
+                Preconditions.checkArgument(
+                        isBlobSourceRoot(mapType.getValueType().getTypeRoot()),
+                        "Column %s declared with a BLOB directive must have a BINARY, "
+                                + "VARBINARY or BLOB map value type, but was %s.",
+                        fieldName,
+                        sourceType);
+                MapType result =
+                        new MapType(
+                                sourceType.isNullable(),
+                                mapType.getKeyType(),
+                                new BlobType(mapType.getValueType().isNullable()));
+                Preconditions.checkArgument(
+                        BlobType.isBlobFileField(result),
+                        "Unsupported key type [%s] for MAP<X, BLOB> field '%s'.",
+                        mapType.getKeyType(),
+                        fieldName);
+                return result;
+            }
             Preconditions.checkArgument(
                     isBlobSourceRoot(root),
                     "Column %s declared with a BLOB directive must be of BYTES, BINARY, "
-                            + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, but was %s.",
+                            + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, or a "
+                            + "supported MAP<X, BYTES/BINARY/BLOB> type, but was %s.",
                     fieldName,
                     sourceType);
             return new BlobType(sourceType.isNullable());
@@ -303,7 +333,7 @@ public final class ColumnDirectiveUtils {
 
     /**
      * Remove directive-managed options when a BLOB or VECTOR column is dropped. Only acts on BLOB,
-     * {@code ARRAY<BLOB>} or VECTOR type columns; other types are ignored.
+     * {@code ARRAY<BLOB>}, {@code MAP<X, BLOB>} or VECTOR type columns; other types are ignored.
      */
     public static void removeDroppedDirectiveOptions(
             String fieldName, DataType type, Map<String, String> options) {

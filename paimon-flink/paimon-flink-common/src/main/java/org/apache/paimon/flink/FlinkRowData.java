@@ -152,11 +152,11 @@ public class FlinkRowData implements RowData {
         return new BinaryVariant(variant.value(), variant.metadata());
     }
 
-    private static class FlinkArrayData implements ArrayData {
+    protected static class FlinkArrayData implements ArrayData {
 
         private final InternalArray array;
 
-        private FlinkArrayData(InternalArray array) {
+        protected FlinkArrayData(InternalArray array) {
             this.array = array;
         }
 

@@ -1263,14 +1263,14 @@ public class SchemaValidation {
             if (!primaryKeyManagedBlob) {
                 checkArgument(
                         options.dataEvolutionEnabled(),
-                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+                        "Data evolution config must enabled for table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column.");
             }
             checkArgument(
                     fields.size() > blobNames.size(),
-                    "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
+                    "Table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
-                    "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
+                    "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be part of partition keys.");
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
@@ -1292,6 +1292,8 @@ public class SchemaValidation {
     }
 
     private static void validateBlobFields(RowType rowType, CoreOptions options) {
+        validateMapBlobKeyTypes(rowType.getFields());
+        validateBlobNesting(rowType.getFields(), options);
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
                         .filter(field -> isBlobFileField(field.type()))
@@ -1303,9 +1305,43 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field or ARRAY<BLOB> field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB, ARRAY<BLOB> or MAP<X, BLOB> field in table schema.",
                     field,
                     CoreOptions.BLOB_FIELD.key());
+        }
+    }
+
+    private static void validateBlobNesting(List<DataField> fields, CoreOptions options) {
+        for (DataField field : fields) {
+            // Preserve the more specific shared-shredding validation errors below.
+            if (options.mapStorageLayout(field.name()) == MapStorageLayout.SHARED_SHREDDING) {
+                continue;
+            }
+            DataType type = field.type();
+            checkArgument(
+                    isBlobFileField(type)
+                            || !containsType(type, nested -> nested.is(DataTypeRoot.BLOB)),
+                    "Field '%s' has unsupported nested BLOB type %s. BLOB is only supported as a "
+                            + "top-level BLOB, ARRAY<BLOB>, or MAP<X, BLOB> field.",
+                    field.name(),
+                    type);
+        }
+    }
+
+    private static void validateMapBlobKeyTypes(List<DataField> fields) {
+        for (DataField field : fields) {
+            DataType type = field.type();
+            if (type.getTypeRoot() != DataTypeRoot.MAP) {
+                continue;
+            }
+            MapType mapType = (MapType) type;
+            if (mapType.getValueType().getTypeRoot() == DataTypeRoot.BLOB) {
+                checkArgument(
+                        isBlobFileField(type),
+                        "Unsupported key type [%s] for MAP<X, BLOB> field '%s'.",
+                        mapType.getKeyType(),
+                        field.name());
+            }
         }
     }
 
@@ -1320,7 +1356,7 @@ public class SchemaValidation {
             checkArgument(
                     blobFieldNames.contains(field),
                     "Field '%s' in '%s' must be a BLOB field in table schema. "
-                            + "ARRAY<BLOB> is only supported by '%s'.",
+                            + "ARRAY<BLOB> and MAP<X, BLOB> are only supported by '%s'.",
                     field,
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
                     CoreOptions.BLOB_FIELD.key());
@@ -1340,7 +1376,7 @@ public class SchemaValidation {
             checkArgument(
                     blobFieldNames.contains(field),
                     "Field '%s' in '%s' must be a BLOB field in table schema. "
-                            + "ARRAY<BLOB> is only supported by '%s'.",
+                            + "ARRAY<BLOB> and MAP<X, BLOB> are only supported by '%s'.",
                     field,
                     CoreOptions.BLOB_VIEW_FIELD.key(),
                     CoreOptions.BLOB_FIELD.key());
@@ -1365,6 +1401,17 @@ public class SchemaValidation {
         if (managedBlobFields.isEmpty()) {
             return;
         }
+
+        List<String> mapBlobFields =
+                schema.fields().stream()
+                        .filter(field -> managedBlobFields.contains(field.name()))
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.MAP)
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                mapBlobFields.isEmpty(),
+                "Primary-key managed MAP<X, BLOB> fields are not supported: %s.",
+                mapBlobFields);
 
         List<String> primaryKeyBlobFields =
                 managedBlobFields.stream()
