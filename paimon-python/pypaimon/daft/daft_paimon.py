@@ -144,7 +144,7 @@ def _source_for_table(
     if catalog_options is None:
         catalog_options = {}
 
-    # Keep the caller's io_config as a blob File fallback when nothing else is derivable.
+    # Keep the caller's io_config for source restoration and blob File fallback.
     explicit_io_config_bytes = serialize_io_config(io_config) if io_config is not None else None
 
     io_config = io_config or _convert_paimon_catalog_options_to_io_config(
