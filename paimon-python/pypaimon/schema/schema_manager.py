@@ -300,7 +300,7 @@ def _normalize_key_list(value: str) -> List[str]:
     return [s.strip() for s in value.split(',') if s.strip()]
 
 
-def _is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) -> bool:
+def is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) -> bool:
     """Values whose canonical home is outside the options map (or the implicit
     default) are not a change when replayed. Mirrors the Java SchemaManager's
     isUnchangedNormalizedKey."""
@@ -716,7 +716,7 @@ class SchemaManager:
                 # the same key in one batch apply in order
                 old_value = new_options.get(change.key)
                 unchanged = (old_value == change.value
-                             or _is_unchanged_normalized_key(
+                             or is_unchanged_normalized_key(
                                  change.key, old_value, change.value, old_table_schema))
                 if unchanged:
                     continue

@@ -24,7 +24,8 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
-from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.schema_manager import (SchemaManager,
+                                            is_unchanged_normalized_key)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
@@ -492,11 +493,22 @@ class FileStoreTable(Table):
     def copy(self, options: dict) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
+
+        old_options = self.table_schema.options
+        for key, new_value in options.items():
+            old_value = old_options.get(key)
+            if (old_value != new_value
+                    and not is_unchanged_normalized_key(
+                        key, old_value, new_value, self.table_schema)
+                    and key in CoreOptions.IMMUTABLE_OPTIONS):
+                raise ValueError(f"Change '{key}' is not supported yet.")
+
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
                 new_options.pop(k)
-            else:
+            elif not is_unchanged_normalized_key(
+                    k, old_options.get(k), v, self.table_schema):
                 new_options[k] = v
 
         new_table_schema = self.table_schema.copy(new_options=new_options)

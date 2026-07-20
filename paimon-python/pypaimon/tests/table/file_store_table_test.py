@@ -84,6 +84,36 @@ class FileStoreTableTest(unittest.TestCase):
 
         self.assertIn("Cannot change bucket number", str(context.exception))
 
+    def test_copy_rejects_changing_partition_default_name(self):
+        key = CoreOptions.PARTITION_DEFAULT_NAME.key()
+
+        # An implicit default is not an explicitly stored value. This follows
+        # the same raw-value semantics as the other immutable options.
+        with self.assertRaisesRegex(
+                ValueError, "Change 'partition.default-name' is not supported yet"):
+            self.table.copy({key: CoreOptions.PARTITION_DEFAULT_NAME.default_value()})
+
+        explicit_name = "__CUSTOM_DEFAULT_PARTITION__"
+        identifier = 'default.test_copy_with_partition_default_name'
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                CoreOptions.BUCKET.key(): "2",
+                key: explicit_name,
+            })
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        copied_table = table.copy({key: explicit_name})
+        self.assertEqual(explicit_name, copied_table.table_schema.options[key])
+        with self.assertRaisesRegex(
+                ValueError, "Change 'partition.default-name' is not supported yet"):
+            table.copy({key: "__ANOTHER_DEFAULT_PARTITION__"})
+        with self.assertRaisesRegex(
+                ValueError, "Change 'partition.default-name' is not supported yet"):
+            table.copy({key: None})
+
     def test_consumer_manager(self):
         """Test that FileStoreTable has consumer_manager method."""
         # Get consumer_manager

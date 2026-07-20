@@ -232,6 +232,12 @@ class FileSystemCatalogTest(unittest.TestCase):
             [SchemaChange.set_option("merge-engine", "first-row")],
             False
         )
+        catalog.alter_table(
+            empty_identifier,
+            [SchemaChange.set_option(
+                "partition.default-name", "__CUSTOM_DEFAULT_PARTITION__")],
+            False
+        )
         # the type is rejected even without snapshots: table kinds like format
         # tables never create Paimon snapshots but can still hold data
         with self.assertRaises(RuntimeError) as ctx:
@@ -271,6 +277,25 @@ class FileSystemCatalogTest(unittest.TestCase):
             catalog.alter_table(
                 identifier, [SchemaChange.remove_option("merge-engine")], False)
         self.assertIn("Change 'merge-engine' is not supported yet.", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.set_option(
+                    "partition.default-name", "__CUSTOM_DEFAULT_PARTITION__")],
+                False)
+        self.assertIn(
+            "Change 'partition.default-name' is not supported yet.",
+            str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.remove_option("partition.default-name")],
+                False)
+        self.assertIn(
+            "Change 'partition.default-name' is not supported yet.",
+            str(ctx.exception))
 
         # canonical hyphenated keys are guarded too
         with self.assertRaises(RuntimeError) as ctx:
@@ -340,6 +365,12 @@ class FileSystemCatalogTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             catalog.alter_table(
                 part_identifier, [SchemaChange.set_option("partition", "col1")], False)
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                part_identifier,
+                [SchemaChange.set_option(
+                    "partition.default-name", "__CUSTOM_DEFAULT_PARTITION__")],
+                False)
 
         # the LATEST file is only a hint: the guard must still see the
         # snapshots when it is missing

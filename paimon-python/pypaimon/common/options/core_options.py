@@ -116,6 +116,7 @@ class CoreOptions:
         "bucket-key",
         "bucket-function.type",
         "data-file.path-directory",
+        "partition.default-name",
         "merge-engine",
         "sequence.snapshot-ordering",
         "aggregation.remove-record-on-delete",
