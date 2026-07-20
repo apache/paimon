@@ -163,7 +163,8 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
                 new ArrowFieldWriters.ArrayWriter(
                         fieldVector,
                         elementWriterFactory.create(
-                                ((ListVector) fieldVector).getDataVector(), isNullable),
+                                ((ListVector) fieldVector).getDataVector(),
+                                arrayType.getElementType().isNullable()),
                         isNullable);
     }
 
@@ -175,7 +176,8 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
                         fieldVector,
                         vectorType.getLength(),
                         elementWriterFactory.create(
-                                ((FixedSizeListVector) fieldVector).getDataVector(), isNullable),
+                                ((FixedSizeListVector) fieldVector).getDataVector(),
+                                vectorType.getElementType().isNullable()),
                         isNullable);
     }
 
@@ -194,8 +196,10 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
             List<FieldVector> keyValueVectors = mapVector.getDataVector().getChildrenFromFields();
             return new ArrowFieldWriters.MapWriter(
                     fieldVector,
-                    keyWriterFactory.create(keyValueVectors.get(0), isNullable),
-                    valueWriterFactory.create(keyValueVectors.get(1), isNullable),
+                    keyWriterFactory.create(
+                            keyValueVectors.get(0), mapType.getKeyType().isNullable()),
+                    valueWriterFactory.create(
+                            keyValueVectors.get(1), mapType.getValueType().isNullable()),
                     isNullable);
         };
     }
@@ -207,7 +211,9 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
             ArrowFieldWriter[] fieldWriters = new ArrowFieldWriter[children.size()];
             for (int i = 0; i < children.size(); i++) {
                 fieldWriters[i] =
-                        rowType.getTypeAt(i).accept(this).create(children.get(i), isNullable);
+                        rowType.getTypeAt(i)
+                                .accept(this)
+                                .create(children.get(i), rowType.getTypeAt(i).isNullable());
             }
             return new ArrowFieldWriters.RowWriter(fieldVector, fieldWriters, isNullable);
         };
