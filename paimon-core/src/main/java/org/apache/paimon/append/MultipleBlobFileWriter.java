@@ -67,11 +67,12 @@ public class MultipleBlobFileWriter implements Closeable {
             Set<String> blobInlineFields,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize) {
         RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            BlobFileFormat blobFileFormat = new BlobFileFormat();
+            BlobFileFormat blobFileFormat = new BlobFileFormat(false, copyBufferSize);
             blobFileFormat.setWriteConsumer(blobConsumer);
             blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
             blobFileFormat.setWriteNullOnFetchFailure(writeNullOnFetchFailure);

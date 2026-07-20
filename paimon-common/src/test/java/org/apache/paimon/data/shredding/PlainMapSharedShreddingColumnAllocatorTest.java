@@ -28,12 +28,13 @@ import java.util.TreeSet;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link MapSharedShreddingColumnAllocator}. */
-class MapSharedShreddingColumnAllocatorTest {
+/** Tests for {@link PlainMapSharedShreddingColumnAllocator}. */
+class PlainMapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testBasicAllocation() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(3);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 allocator.allocateRow(Arrays.asList(10, 20));
@@ -44,7 +45,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testExactlyKFields() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(3);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 allocator.allocateRow(Arrays.asList(0, 1, 2));
@@ -55,7 +57,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testOverflowWhenExceedK() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(2);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(2);
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 allocator.allocateRow(Arrays.asList(10, 20, 30, 40));
@@ -68,7 +71,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testEmptyRow() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(3);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 allocator.allocateRow(Arrays.asList());
@@ -79,7 +83,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testMaxRowWidthTracked() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(3);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
 
         allocator.allocateRow(Arrays.asList(1, 2));
         allocator.allocateRow(Arrays.asList(1, 2, 3, 4, 5));
@@ -90,7 +95,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testFieldToColumnsAccumulated() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(3);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
 
         allocator.allocateRow(Arrays.asList(10, 20, 30));
         allocator.allocateRow(Arrays.asList(20, 40));
@@ -108,7 +114,8 @@ class MapSharedShreddingColumnAllocatorTest {
 
     @Test
     void testOverflowFieldSetAccumulated() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(2);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(2);
 
         allocator.allocateRow(Arrays.asList(1, 2, 3));
         allocator.allocateRow(Arrays.asList(4, 5, 6, 7));
@@ -119,20 +126,39 @@ class MapSharedShreddingColumnAllocatorTest {
     }
 
     @Test
-    void testGetNumColumns() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(5);
-
-        assertThat(allocator.numColumns()).isEqualTo(5);
-    }
-
-    @Test
     void testSingleColumnAllocator() {
-        MapSharedShreddingColumnAllocator allocator = new MapSharedShreddingColumnAllocator(1);
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(1);
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 allocator.allocateRow(Arrays.asList(10, 20, 30));
 
         assertThat(allocation.colToField()).containsExactly(10);
         assertThat(allocation.overflowFields()).containsExactly(20, 30);
+        assertThat(allocator.numColumns()).isEqualTo(1);
+    }
+
+    @Test
+    void testUsesInputOrder() {
+        PlainMapSharedShreddingColumnAllocator allocator =
+                new PlainMapSharedShreddingColumnAllocator(3);
+
+        MapSharedShreddingColumnAllocator.RowAllocation row0 =
+                allocator.allocateRow(Arrays.asList(2, 0, 1));
+        assertThat(row0.colToField()).containsExactly(2, 0, 1);
+        assertThat(row0.overflowFields()).isEmpty();
+
+        MapSharedShreddingColumnAllocator.RowAllocation row1 =
+                allocator.allocateRow(Arrays.asList(4, 3, 5, 6));
+        assertThat(row1.colToField()).containsExactly(4, 3, 5);
+        assertThat(row1.overflowFields()).containsExactly(6);
+
+        assertThat(allocator.fieldToColumns().get(0)).containsExactly(1);
+        assertThat(allocator.fieldToColumns().get(1)).containsExactly(2);
+        assertThat(allocator.fieldToColumns().get(2)).containsExactly(0);
+        assertThat(allocator.fieldToColumns().get(3)).containsExactly(1);
+        assertThat(allocator.fieldToColumns().get(4)).containsExactly(0);
+        assertThat(allocator.fieldToColumns().get(5)).containsExactly(2);
+        assertThat(allocator.overflowFieldSet()).containsExactly(6);
     }
 }

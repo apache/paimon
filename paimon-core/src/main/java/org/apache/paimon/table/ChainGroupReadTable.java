@@ -60,7 +60,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Chain table which mainly read from the snapshot branch. However, if the snapshot branch does not
@@ -360,7 +359,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 for (List<BinaryRow> deltaPartitionsInGroup : groupedDeltaPartitions.values()) {
 
                     // Sort delta by chain dimension ascending.
-                    // chainPartitionForCompare avoids copying BinaryRow in the comparator hot path.
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
@@ -432,69 +430,26 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             deltaScan.withPartitionFilter(selectedDeltaPartitions);
                         }
 
-                        List<Split> subSplits = deltaScan.plan().splits();
-                        Set<String> snapshotFileNames = new HashSet<>();
+                        List<DataSplit> deltaSubSplits =
+                                deltaScan.plan().splits().stream()
+                                        .map(s -> (DataSplit) s)
+                                        .collect(Collectors.toList());
+                        List<DataSplit> snapshotSubSplits = new ArrayList<>();
                         if (partitionPairs.getValue() != null) {
                             snapshotScan.withPartitionFilter(
                                     Collections.singletonList(partitionPairs.getValue()));
-                            List<Split> mainSubSplits = snapshotScan.plan().splits();
-                            snapshotFileNames =
-                                    mainSubSplits.stream()
-                                            .flatMap(
-                                                    s ->
-                                                            ((DataSplit) s)
-                                                                    .dataFiles().stream()
-                                                                            .map(
-                                                                                    DataFileMeta
-                                                                                            ::fileName))
-                                            .collect(Collectors.toSet());
-                            subSplits.addAll(mainSubSplits);
+                            snapshotSubSplits =
+                                    snapshotScan.plan().splits().stream()
+                                            .map(s -> (DataSplit) s)
+                                            .collect(Collectors.toList());
                         }
-                        Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
-                        Integer bucketInAll = null;
-                        for (Split split : subSplits) {
-                            DataSplit dataSplit = (DataSplit) split;
-                            Integer totalBuckets = dataSplit.totalBuckets();
-                            checkNotNull(totalBuckets);
-                            if (bucketInAll == null) {
-                                bucketInAll = totalBuckets;
-                            } else {
-                                checkArgument(
-                                        totalBuckets.equals(bucketInAll),
-                                        "Inconsistent bucket num " + dataSplit.bucket());
-                            }
-
-                            bucketSplits
-                                    .computeIfAbsent(dataSplit.bucket(), k -> new ArrayList<>())
-                                    .add(dataSplit);
-                        }
-                        for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
-                            HashMap<String, String> fileBucketPathMapping = new HashMap<>();
-                            HashMap<String, String> fileBranchMapping = new HashMap<>();
-                            List<DataSplit> splitList = entry.getValue();
-                            for (DataSplit dataSplit : splitList) {
-                                for (DataFileMeta file : dataSplit.dataFiles()) {
-                                    fileBucketPathMapping.put(
-                                            file.fileName(), dataSplit.bucketPath());
-                                    String branch =
-                                            snapshotFileNames.contains(file.fileName())
-                                                    ? options.scanFallbackSnapshotBranch()
-                                                    : options.scanFallbackDeltaBranch();
-                                    fileBranchMapping.put(file.fileName(), branch);
-                                }
-                            }
-                            ChainSplit split =
-                                    new ChainSplit(
-                                            partitionPairs.getKey(),
-                                            entry.getValue().stream()
-                                                    .flatMap(
-                                                            dataSplit ->
-                                                                    dataSplit.dataFiles().stream())
-                                                    .collect(Collectors.toList()),
-                                            fileBranchMapping,
-                                            fileBucketPathMapping);
-                            splits.add(split);
-                        }
+                        splits.addAll(
+                                ChainTableUtils.buildChainSplits(
+                                        partitionPairs.getKey(),
+                                        snapshotSubSplits,
+                                        deltaSubSplits,
+                                        options.scanFallbackSnapshotBranch(),
+                                        options.scanFallbackDeltaBranch()));
                     }
                 }
             }

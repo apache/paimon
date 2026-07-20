@@ -16,28 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.blob;
+package org.apache.paimon.data.shredding;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-/** Factory to create {@link BlobFileFormat}. */
-public class BlobFileFormatFactory implements FileFormatFactory {
+/** Allocator that orders fields by dictionary ID before filling physical columns. */
+public class SequentialMapSharedShreddingColumnAllocator
+        extends PlainMapSharedShreddingColumnAllocator {
 
-    public static final String IDENTIFIER = "blob";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+    public SequentialMapSharedShreddingColumnAllocator(int numColumns) {
+        super(numColumns);
     }
 
     @Override
-    public FileFormat create(FormatContext formatContext) {
-        boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
-        int copyBufferSize =
-                CoreOptions.checkedBlobCopyBufferSize(
-                        formatContext.options().get(CoreOptions.BLOB_COPY_BUFFER_SIZE).getBytes());
-        return new BlobFileFormat(blobAsDescriptor, copyBufferSize);
+    public RowAllocation allocateRow(List<Integer> fieldIds) {
+        List<Integer> sortedFieldIds = new ArrayList<>(fieldIds);
+        Collections.sort(sortedFieldIds);
+        RowAllocation allocation = allocateLeadingColumns(sortedFieldIds);
+        commitRow(allocation, sortedFieldIds);
+        return allocation;
     }
 }

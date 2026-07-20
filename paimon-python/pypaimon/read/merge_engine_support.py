@@ -65,6 +65,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "listagg",
     "nested_update",
     "product",
+    "collect",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"

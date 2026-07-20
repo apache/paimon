@@ -144,7 +144,7 @@ def _source_for_table(
     if catalog_options is None:
         catalog_options = {}
 
-    # Keep the caller's io_config as a blob File fallback when nothing else is derivable.
+    # Keep the caller's io_config for source restoration and blob File fallback.
     explicit_io_config_bytes = serialize_io_config(io_config) if io_config is not None else None
 
     io_config = io_config or _convert_paimon_catalog_options_to_io_config(
@@ -178,22 +178,19 @@ def _read_table(
     return _source_for_table(table, catalog_options=catalog_options, io_config=io_config).read()
 
 
-def _normalize_explain_filters(filters: Any) -> tuple[Any, list[Any]]:
+def _normalize_explain_filters(filters: Any) -> Any:
     if filters is None:
-        return None, []
+        return None
 
     if isinstance(filters, (list, tuple)):
         if not filters:
-            return None, []
-        filter_exprs = list(filters)
-        combined = filter_exprs[0]
-        for filter_expr in filter_exprs[1:]:
+            return None
+        combined = filters[0]
+        for filter_expr in filters[1:]:
             combined = combined & filter_expr
-    else:
-        filter_exprs = [filters]
-        combined = filters
+        return combined
 
-    return combined, [getattr(filter_expr, "_expr", filter_expr) for filter_expr in filter_exprs]
+    return filters
 
 
 def _explain_table(
@@ -216,14 +213,10 @@ def _explain_table(
         table, snapshot_id=snapshot_id, tag_name=tag_name, timestamp=timestamp
     )
     source = _source_for_table(table, catalog_options=catalog_options, io_config=io_config)
-    filter_expr, filter_pyexprs = _normalize_explain_filters(filters)
-    partition_filter_expr, _ = _normalize_explain_filters(partition_filters)
-    if filter_pyexprs:
-        source.push_filters(filter_pyexprs)
     return source.explain_scan(
         Pushdowns(
-            filters=filter_expr,
-            partition_filters=partition_filter_expr,
+            filters=_normalize_explain_filters(filters),
+            partition_filters=_normalize_explain_filters(partition_filters),
             columns=columns,
             limit=limit,
         ),

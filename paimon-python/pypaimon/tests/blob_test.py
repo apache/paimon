@@ -130,6 +130,36 @@ class BlobTest(unittest.TestCase):
         except OSError:
             pass  # Ignore cleanup errors
 
+    def test_blob_copy_buffer_size_validation(self):
+        """blob.copy-buffer-size must be positive and fit Java's int-sized array."""
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.common.options.core_options import CoreOptions
+
+        # The internal writer already receives an int-sized value and only rejects non-positive
+        # buffers.
+        for bad in [0, -1]:
+            with self.assertRaises(ValueError):
+                BlobFormatWriter(io.BytesIO(), copy_buffer_size=bad)
+        BlobFormatWriter(io.BytesIO(), copy_buffer_size=8).close()
+
+        # CoreOptions defaults to 4 KiB, accepts values above the old 256 MiB ceiling,
+        # and retains only the Java int technical limit for cross-language consistency.
+        self.assertEqual(CoreOptions(Options({})).blob_copy_buffer_size(), 4096)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '256 kb'})).blob_copy_buffer_size(),
+            256 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '512 mb'})).blob_copy_buffer_size(),
+            512 * 1024 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({
+                'blob.copy-buffer-size': f'{(1 << 31) - 1} bytes'
+            })).blob_copy_buffer_size(),
+            (1 << 31) - 1)
+        for bad in ['0 bytes', '2 gb', '3 gb']:
+            with self.assertRaises(ValueError):
+                CoreOptions(Options({'blob.copy-buffer-size': bad})).blob_copy_buffer_size()
+
     def test_from_data(self):
         """Test Blob.from_data() method."""
         test_data = b"test data"
@@ -2592,12 +2622,81 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
                       (path, 100, -1), (path, None, None)]
             got = fio.read_ranges_coalesced(ranges, parallelism=4)
+            self.assertIsInstance(got[0], bytes)
+            self.assertIsInstance(got[1], bytes)
             self.assertEqual(got[0], data[0:10])
             self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
             self.assertIsNone(got[2])
             self.assertEqual(got[3], data[500:520])
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
+
+    def test_read_ranges_coalesced_views(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            ranges = [(path, 0, 10), (path, 10, 10), None,
+                      (path, 500, 20), (path, 100, -1)]
+            got = file_io.read_ranges_coalesced_views(
+                ranges, parallelism=4, max_gap=100)
+
+            self.assertIsInstance(got[0], memoryview)
+            self.assertIsInstance(got[1], memoryview)
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[10:20])
+            self.assertIs(got[0].obj, got[1].obj)
+            self.assertIsNone(got[2])
+            self.assertEqual(bytes(got[3]), data[500:520])
+            self.assertIsNot(got[0].obj, got[3].obj)
+            self.assertEqual(bytes(got[4]), data[100:])
+
+            array = pa.array(got, type=pa.binary())
+            self.assertEqual(array.to_pylist(), [
+                data[0:10], data[10:20], None, data[500:520], data[100:],
+            ])
+
+    def test_sparse_views_preserve_coalesced_read(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            reads = []
+            original_read = file_io.read_file_range
+
+            def read_file_range(file_path, offset, length):
+                reads.append((file_path, offset, length))
+                return original_read(file_path, offset, length)
+
+            file_io.read_file_range = read_file_range
+            got = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+            )
+
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[1000:1010])
+            self.assertIsNot(got[0].obj, got[1].obj)
+
+            reads.clear()
+            shared = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+                max_retained_amplification=0,
+            )
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertIs(shared[0].obj, shared[1].obj)
 
 
 class ReadFileRangeTest(unittest.TestCase):
