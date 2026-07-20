@@ -19,9 +19,6 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.FileSystemCatalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -32,8 +29,6 @@ import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
 import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -48,7 +43,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.table.data.RowData;
@@ -243,46 +237,12 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testQueryAuthUsesFullCacheAndAppliesRowFilter() throws Exception {
-        Predicate authFilter = new PredicateBuilder(tableRowType()).equal(2, 20L);
-        TableQueryAuthResult authResult =
-                new TableQueryAuthResult(
-                        Collections.singletonList(JsonSerdeUtil.toFlatJson(authFilter)), null);
-        Identifier identifier = Identifier.create("default", "table");
-        CatalogEnvironment catalogEnvironment =
-                new CatalogEnvironment(
-                        identifier,
-                        null,
-                        () ->
-                                new FileSystemCatalog(fileIO, tablePath) {
-                                    @Override
-                                    public TableQueryAuthResult authTableQuery(
-                                            Identifier ignored, List<String> select) {
-                                        return authResult;
-                                    }
-                                },
-                        null,
-                        null,
-                        null,
-                        false,
-                        false);
-        table = createFileStoreTable(false, false, false, null, true, catalogEnvironment);
+    public void testLookupRejectsQueryAuth() throws Exception {
+        table = createFileStoreTable(false, false, false, null, true, CatalogEnvironment.empty());
 
-        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
-        writer.write(GenericRow.of(1, 1, 10L));
-        writer.write(GenericRow.of(2, 2, 20L));
-        commit(writer.prepareCommit(true, 1));
-        writer.close();
-
-        ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
-        serviceManager.resetService(
-                PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
-        lookupFunction = createLookupFunction(table, true);
-        lookupFunction.open(tempDir.toString());
-
-        assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
-        assertThat(lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1)))).isEmpty();
-        assertThat(lookupFunction.lookup(new FlinkRowData(GenericRow.of(2, 2)))).hasSize(1);
+        assertThatThrownBy(() -> createLookupFunction(table, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Lookup join does not support query authorization");
     }
 
     @Test

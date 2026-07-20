@@ -124,6 +124,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             int[] joinKeyIndex,
             @Nullable Predicate predicate,
             @Nullable ShuffleStrategy strategy) {
+        if (table.coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Lookup join does not support query authorization.");
+        }
+
         if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
             TableScanUtils.streamingReadingValidate(table);
         }
@@ -213,8 +218,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 table instanceof FallbackReadFileStoreTable
                         && ((FallbackReadFileStoreTable) table).other()
                                 instanceof ChainGroupReadTable;
-        if (!table.coreOptions().queryAuthEnabled()
-                && !isChainTable
+        if (!isChainTable
                 && options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(table)) {
