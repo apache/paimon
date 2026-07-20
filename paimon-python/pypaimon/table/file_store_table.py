@@ -506,7 +506,7 @@ class FileStoreTable(Table):
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
-                new_options.pop(k)
+                new_options.pop(k, None)
             elif not is_unchanged_normalized_key(
                     k, old_options.get(k), v, self.table_schema):
                 new_options[k] = v

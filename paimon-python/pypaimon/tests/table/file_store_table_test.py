@@ -87,6 +87,9 @@ class FileStoreTableTest(unittest.TestCase):
     def test_copy_rejects_changing_partition_default_name(self):
         key = CoreOptions.PARTITION_DEFAULT_NAME.key()
 
+        copied_table = self.table.copy({key: None})
+        self.assertNotIn(key, copied_table.table_schema.options)
+
         # An implicit default is not an explicitly stored value. This follows
         # the same raw-value semantics as the other immutable options.
         with self.assertRaisesRegex(
