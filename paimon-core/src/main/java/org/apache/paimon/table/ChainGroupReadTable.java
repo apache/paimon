@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -303,6 +304,17 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             // after query authorization instead.
             if (!options.queryAuthEnabled()) {
                 super.withLimit(limit);
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withTopN(TopN topN) {
+            // Query authorization is applied only after the physical chain inputs have been
+            // assembled. Pushing TopN into those raw inputs could prune authorized rows when
+            // unauthorized rows rank higher. The engine applies the logical TopN after auth.
+            if (!options.queryAuthEnabled()) {
+                super.withTopN(topN);
             }
             return this;
         }

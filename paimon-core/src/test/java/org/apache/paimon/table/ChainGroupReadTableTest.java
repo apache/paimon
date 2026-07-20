@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -176,6 +177,36 @@ public class ChainGroupReadTableTest {
         verify(deltaScan, never()).withLimit(anyInt());
         verifyQueryAuthDisabled(snapshotTable);
         verifyQueryAuthDisabled(deltaTable);
+    }
+
+    @Test
+    public void testBatchScanDoesNotPushTopNBeforeQueryAuth() {
+        TableSchema schema = tableSchema();
+        TableQueryAuthResult logicalAuth = maskingAuth("logical");
+        CatalogEnvironment catalogEnvironment = catalogEnvironment(logicalAuth);
+        PrimaryKeyFileStoreTable snapshotTable =
+                table(schema, "snapshot", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawSnapshotTable =
+                table(schema, "snapshot", false, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawDeltaTable = table(schema, "delta", false, catalogEnvironment);
+        when(snapshotTable.copy(anyMap())).thenReturn(rawSnapshotTable);
+        when(deltaTable.copy(anyMap())).thenReturn(rawDeltaTable);
+
+        DataTableScan snapshotScan = mock(DataTableScan.class);
+        DataTableScan deltaScan = mock(DataTableScan.class);
+        ChainGroupReadTable chainTable = new ChainGroupReadTable(snapshotTable, deltaTable);
+        ChainGroupReadTable.ChainTableBatchScan scan =
+                new ChainGroupReadTable.ChainTableBatchScan(
+                        schema,
+                        chainTable,
+                        table -> table == rawSnapshotTable ? snapshotScan : deltaScan);
+
+        TopN topN = mock(TopN.class);
+        scan.withTopN(topN);
+
+        verify(snapshotScan, never()).withTopN(topN);
+        verify(deltaScan, never()).withTopN(topN);
     }
 
     @Test
