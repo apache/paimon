@@ -216,9 +216,15 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    partition_pruning = _partition_pruning(stats, scan)
-    bucket_pruning = _bucket_pruning(stats, scan)
-    file_skipping = _file_skipping(stats, scan)
+    # stats is None when planned natively (pypaimon_rust): no manifest pruning
+    # funnel is tracked, so the split-level signals below are all we can report.
+    native_planned = stats is None
+    if native_planned:
+        partition_pruning = bucket_pruning = file_skipping = None
+    else:
+        partition_pruning = _partition_pruning(stats, scan)
+        bucket_pruning = _bucket_pruning(stats, scan)
+        file_skipping = _file_skipping(stats, scan)
 
     files_per_split = [len(getattr(s, 'files', []) or []) for s in splits]
     sizes = [int(getattr(s, 'file_size', 0) or 0) for s in splits]
@@ -314,6 +320,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
         split_size_p50=sz_p50,
         split_size_p95=sz_p95,
         has_auth=plan_has_auth,
+        native_planned=native_planned,
         splits=split_infos if verbose else None,
     )
 

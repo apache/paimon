@@ -100,6 +100,11 @@ class IndexedSplit(Split):
         """Delegate to data_split."""
         return self._data_split.data_deletion_files
 
+    @property
+    def snapshot_id(self):
+        """Delegate to data_split."""
+        return self._data_split.snapshot_id
+
     def contains_row_id(self, row_id: int) -> bool:
         """Check if the given row ID is in the row ranges."""
         for r in self._row_ranges:
