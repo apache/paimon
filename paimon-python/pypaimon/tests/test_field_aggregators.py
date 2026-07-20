@@ -46,6 +46,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldSumAgg,
     FieldListaggAgg,
     FieldNestedUpdateAgg,
+    FieldCollectAgg,
     FieldMergeMapAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
@@ -549,6 +550,212 @@ class FieldListaggAggTest(unittest.TestCase):
             acc,
             "first line",
         )
+
+
+class FieldCollectAggTest(unittest.TestCase):
+
+    def _make(self, distinct, element_type=None):
+        if element_type is None:
+            element_type = AtomicType("INT")
+
+        options = CoreOptions(Options({"fields.field0.distinct": distinct}))
+
+        return create_field_aggregator(
+            ArrayType(True, element_type),
+            "field0",
+            "collect",
+            options=options,
+        )
+
+    def row(self, *values, fields: List[DataField]):
+        return GenericRow(list(values), fields)
+
+    def test_field_collect_agg_with_distinct(self):
+        agg = self._make(distinct=True)
+        self.assertIsInstance(agg, FieldCollectAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        result = agg.agg(None, [1, 1, 2])
+        self.assertEqual(result, [1, 2])
+
+        result = agg.agg([1, 1, 2], [2, 3])
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_field_collect_agg_without_distinct(self):
+        agg = self._make(distinct=False)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        result = agg.agg(None, [1, 1, 2])
+        self.assertEqual(result, [1, 1, 2])
+
+        result = agg.agg([1, 1, 2], [2, 3])
+        self.assertEqual(result, [1, 1, 2, 2, 3])
+
+    def test_field_collect_agg_retract(self):
+        agg = self._make(distinct=True)
+
+        result = agg.retract([1, 2, 3], [1])
+        self.assertEqual(result, [2, 3])
+        self.assertIsNone(agg.retract(None, [1]))
+        self.assertEqual(agg.retract([1, 2], None), [1, 2])
+
+    def test_field_collect_agg_retract_duplicate_elements(self):
+        # primitive type
+        agg = self._make(distinct=True)
+
+        self.assertEqual(
+            agg.retract([1, 1, 2, 2, 3], [1, 2, 3]),
+            [1, 2],
+        )
+
+        # row type
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [
+                    self.row(1, "A", fields=fields),
+                    self.row(1, "A", fields=fields),
+                    self.row(1, "B", fields=fields),
+                    self.row(2, "B", fields=fields),
+                ],
+                [
+                    self.row(1, "A", fields=fields),
+                    self.row(2, "B", fields=fields),
+                ],
+            ),
+            [
+                self.row(1, "A", fields=fields),
+                self.row(1, "B", fields=fields),
+            ],
+        )
+
+        # array type
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [[1, 1], [1, 1], [1, 2], [2, 1]],
+                [[1, 1], [1, 2]],
+            ),
+            [[1, 1], [2, 1]],
+        )
+
+        # map type
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(True, AtomicType("INT"), AtomicType("STRING")),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [{1: "A"}, {1: "A"}, {1: "A", 2: "B"}, {1: "C"}],
+                [{1: "A"}, {2: "B", 1: "A"}],
+            ),
+            [{1: "A"}, {1: "C"}],
+        )
+
+    def test_field_collect_agg_with_row_type(self):
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields),
+        )
+
+        input1 = [
+            self.row(1, "A", fields=fields),
+            self.row(1, "B", fields=fields),
+        ]
+
+        result = agg.agg(None, input1)
+        self.assertEqual(result, input1)
+
+        input2 = [
+            self.row(1, "A", fields=fields),
+            self.row(2, "A", fields=fields),
+        ]
+
+        result = agg.agg(input1, input2)
+        self.assertEqual(result, [
+            self.row(1, "A", fields=fields),
+            self.row(1, "B", fields=fields),
+            self.row(2, "A", fields=fields),
+        ])
+
+        # retract
+        result = agg.retract(
+            [
+                self.row(1, "A", fields=fields),
+                self.row(1, "B", fields=fields),
+                self.row(2, "B", fields=fields),
+            ],
+            [
+                self.row(1, "A", fields=fields),
+                self.row(2, "B", fields=fields),
+            ],
+        )
+        self.assertEqual(result, [self.row(1, "B", fields=fields)])
+
+    def test_field_collect_agg_with_array_type(self):
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+
+        input1 = [[1, 1], [1, 2]]
+        acc = agg.agg(None, input1)
+        self.assertEqual(acc, input1)
+
+        input2 = [[1, 1], [1, 2], [2, 1]]
+        acc = agg.agg(acc, input2)
+        self.assertEqual(acc, [[1, 1], [1, 2], [2, 1]])
+
+        # retract
+        acc = agg.retract(
+            [[1, 1], [1, 2], [2, 1]],
+            [[1, 1], [1, 2]],
+        )
+        self.assertEqual(acc, [[2, 1]])
+
+    def test_field_collect_agg_with_map_type(self):
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(
+                True,
+                AtomicType("INT"),
+                AtomicType("STRING"),
+            ),
+        )
+
+        input1 = [{1: "A"}, {1: "A", 2: "B"}]
+        acc = agg.agg(None, input1)
+        self.assertEqual(acc, input1)
+
+        input2 = [{1: "A"}, {2: "B", 1: "A"}, {1: "C"}]
+        acc = agg.agg(acc, input2)
+        self.assertEqual(acc, [{1: "A"}, {1: "A", 2: "B"}, {1: "C"}])
+
+        # retract
+        acc = agg.retract(
+            [{1: "A"}, {1: "A", 2: "B"}, {1: "C"}],
+            [{1: "A"}, {2: "B", 1: "A"}],
+        )
+        self.assertEqual(acc, [{1: "C"}])
 
 
 class FieldNestedUpdateAggTest(unittest.TestCase):
