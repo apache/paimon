@@ -36,8 +36,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
@@ -2381,7 +2383,10 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         }
 
         // full value (no projection) -> downloader is wired -> lookup succeeds via download
-        LocalTableQuery query = table.newLocalTableQuery().withIOManager(ioManager);
+        PartialLookupMetrics metrics =
+                new PartialLookupMetrics(new TestMetricRegistry(), table.name());
+        LocalTableQuery query =
+                table.newLocalTableQuery().withIOManager(ioManager).withMetrics(metrics);
         for (DataSplit split : dataSplits) {
             query.refreshFiles(
                     split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
@@ -2394,6 +2399,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         assertThat(value).isNotNull();
         assertThat(BATCH_ROW_TO_STRING.apply(value))
                 .isEqualTo("1|20|200|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(metrics.lookupCount()).isEqualTo(2);
+        assertThat(metrics.remoteAccessCount()).isEqualTo(1);
         query.close();
 
         // value projection -> remote sst (full value) is unsafe to reuse, so the downloader is
