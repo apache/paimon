@@ -312,9 +312,9 @@ public abstract class AbstractIndexReaderTest {
         FieldRef ref = new FieldRef(1, "testField", dataType);
         List<Object> originalKeys = data.stream().map(Pair::getKey).collect(Collectors.toList());
 
-        // No nulls, few nulls, half, many nulls and all nulls. allNonNullRows() must return the
-        // exact non-null row ids on both the complement path (single file, rowCount attached) and
-        // the range-scan fallback (multi file, rowCount unknown).
+        // No nulls, few nulls, half, many nulls and all nulls. The non-null row ids must be exact
+        // on both the complement path (row counts attached, single- or multi-file) and the
+        // full-file scan fallback (row counts unknown).
         for (double nullFraction : new double[] {0.0, 0.01, 0.5, 0.99, 1.0}) {
             applyTailNulls(originalKeys, nullFraction);
             try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
@@ -379,9 +379,9 @@ public abstract class AbstractIndexReaderTest {
         ResultEntry resultEntry = results.get(0);
         Path filePath = new Path(new Path(tempPath.toUri()), resultEntry.fileName());
         long fileSize = fileIO.getFileSize(filePath);
-        // Attaching rowCount lets BTreeIndexReader derive the non-null rows from the null bitmap
-        // instead of scanning. It is only valid when the file's local row ids are dense and
-        // 0-based, which holds here because the whole data set is written to a single file.
+        // Attaching rowCount lets the reader derive the non-null rows from the null bitmaps over
+        // the range's [0, sum-of-row-counts) universe instead of scanning. All files of a range
+        // share that dense id space, so the per-file counts sum to the universe size.
         return attachRowCount
                 ? new GlobalIndexIOMeta(
                         filePath, fileSize, resultEntry.meta(), resultEntry.rowCount())

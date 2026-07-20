@@ -70,6 +70,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     }
 
     private List<GlobalIndexIOMeta> writeData() throws Exception {
+        return writeData(true);
+    }
+
+    private List<GlobalIndexIOMeta> writeData(boolean attachRowCount) throws Exception {
         int fileNum = 10;
         List<GlobalIndexIOMeta> written = new ArrayList<>(fileNum);
 
@@ -77,11 +81,34 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         int recordPerFile = dataNum / fileNum;
         while (currentStart < dataNum) {
             int nextStart = Math.min(currentStart + recordPerFile, dataNum);
-            written.add(writeData(data.subList(currentStart, nextStart)));
+            written.add(writeData(data.subList(currentStart, nextStart), attachRowCount));
             currentStart = nextStart;
         }
 
         return written;
+    }
+
+    @TestTemplate
+    public void testNegationFallbackWithoutRowCount() throws Exception {
+        // Without per-file row counts the range width is unknown, so the negations must fall back
+        // to the full-file scan and still return the exact non-null ids.
+        int nullCount = (int) (dataNum * 0.3);
+        for (int i = dataNum - nullCount; i < dataNum; i++) {
+            data.get(i).setLeft(null);
+        }
+
+        List<GlobalIndexIOMeta> written = writeData(false);
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            GlobalIndexResult notNull = reader.visitIsNotNull(ref).join().get();
+            assertResult(notNull, filter(Objects::nonNull));
+
+            Object literal = data.get(0).getKey(); // lowest key, guaranteed non-null
+            GlobalIndexResult notEqual = reader.visitNotEqual(ref, literal).join().get();
+            assertResult(
+                    notEqual, filter(obj -> obj != null && comparator.compare(obj, literal) != 0));
+        }
     }
 
     private int firstStrictlyGreaterKeyIndex() {

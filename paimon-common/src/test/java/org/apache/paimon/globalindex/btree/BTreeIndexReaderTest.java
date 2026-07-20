@@ -39,9 +39,9 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
 
     @Override
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
-        // Attach rowCount so allNonNullRows() takes the complement path (a single file has dense
-        // 0-based local row ids). The multi-file reader keeps rowCount unknown and stays on the
-        // range-scan fallback.
+        // Attach rowCount so the reader derives the non-null rows from the null bitmap over the
+        // range's [0, rowCount) universe; a single file is the degenerate one-file range. Without
+        // it the reader falls back to a full-file scan.
         GlobalIndexIOMeta written = writeData(data, true);
         return globalIndexer.createReader(
                 fileReader, Collections.singletonList(written), newDirectExecutorService());

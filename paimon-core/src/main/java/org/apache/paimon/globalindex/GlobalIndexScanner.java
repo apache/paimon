@@ -310,10 +310,9 @@ public class GlobalIndexScanner implements Closeable {
             for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
                 Range range = rangeMetas.getKey();
                 List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
-                boolean singleFile = indexFileMetas.size() == 1;
                 List<GlobalIndexIOMeta> globalMetas =
                         indexFileMetas.stream()
-                                .map(meta -> toGlobalMeta(meta, singleFile))
+                                .map(this::toGlobalMeta)
                                 .collect(Collectors.toList());
                 futures.add(
                         CompletableFuture.supplyAsync(
@@ -349,14 +348,12 @@ public class GlobalIndexScanner implements Closeable {
         return readers;
     }
 
-    private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta, boolean attachRowCount) {
+    private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
         Path filePath = indexPathFactory.toPath(meta);
-        return attachRowCount
-                ? new GlobalIndexIOMeta(
-                        filePath, meta.fileSize(), globalIndex.indexMeta(), meta.rowCount())
-                : new GlobalIndexIOMeta(filePath, meta.fileSize(), globalIndex.indexMeta());
+        return new GlobalIndexIOMeta(
+                filePath, meta.fileSize(), globalIndex.indexMeta(), meta.rowCount());
     }
 
     @Override

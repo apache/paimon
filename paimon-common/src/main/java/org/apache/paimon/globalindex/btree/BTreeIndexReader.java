@@ -37,7 +37,6 @@ import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
@@ -65,7 +64,6 @@ public class BTreeIndexReader implements Closeable {
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
-    private final long rowCount;
 
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
@@ -140,7 +138,6 @@ public class BTreeIndexReader implements Closeable {
             throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
-        this.rowCount = globalIndexIOMeta.rowCount();
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         if (indexMeta.getFirstKey() != null) {
@@ -243,6 +240,11 @@ public class BTreeIndexReader implements Closeable {
         for (long rowId : nullBitmap.get()) {
             consumer.accept(rowId);
         }
+    }
+
+    /** Read-only view of this file's null row-id bitmap; callers must not mutate it. */
+    public RoaringNavigableMap64 nullRows() {
+        return nullBitmap.get();
     }
 
     public Optional<GlobalIndexResult> visitIsNotNull() {
@@ -360,17 +362,8 @@ public class BTreeIndexReader implements Closeable {
             // this btree index file only stores nulls, so there are no non-null rows.
             return new RoaringNavigableMap64();
         }
-        if (rowCount > 0) {
-            // The non-null rows are exactly the dense local id universe [0, rowCount) minus the
-            // null rows: the writer assigns one dense row id per logical row and records every
-            // null row in nullBitmap. Deriving the complement avoids scanning the whole file,
-            // which is a large win when null values are few. Fall back to a full range scan only
-            // when rowCount is unknown (e.g. metadata that predates plumbing the count here).
-            RoaringNavigableMap64 result = new RoaringNavigableMap64();
-            result.addRange(new Range(0, rowCount - 1));
-            result.andNot(nullBitmap.get());
-            return result;
-        }
+        // Fallback used only when the range width is unknown; when it is known the complement is
+        // derived cheaply from the null bitmaps in LazyFilteredBTreeReader.
         return rangeQuery(minKey, maxKey, true, true);
     }
 

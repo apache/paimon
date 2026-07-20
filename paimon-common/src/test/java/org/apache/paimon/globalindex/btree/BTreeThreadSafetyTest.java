@@ -362,10 +362,12 @@ public class BTreeThreadSafetyTest {
         Assertions.assertEquals(1, results.size());
         ResultEntry resultEntry = results.get(0);
         String fileName = resultEntry.fileName();
+        // Attach rowCount so the negations take the range-level complement fast path under stress.
         return new GlobalIndexIOMeta(
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.meta());
+                resultEntry.meta(),
+                resultEntry.rowCount());
     }
 
     private List<Long> filter(java.util.function.Predicate<Object> predicate) {
