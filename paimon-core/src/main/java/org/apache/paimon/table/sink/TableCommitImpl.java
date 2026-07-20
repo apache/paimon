@@ -91,7 +91,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
 
-    @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private List<Map<String, String>> overwritePartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -135,7 +135,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (overwritePartition != null) {
+        if (overwritePartitions != null) {
             return true;
         }
         return tagAutoManager != null
@@ -144,8 +144,14 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
-        this.overwritePartition = overwritePartitions;
+    public TableCommitImpl withOverwrite(@Nullable Map<String, String> staticPartition) {
+        return withOverwrite(
+                staticPartition == null ? null : Collections.singletonList(staticPartition));
+    }
+
+    @Override
+    public TableCommitImpl withOverwrite(@Nullable List<Map<String, String>> partitions) {
+        this.overwritePartitions = partitions;
         return this;
     }
 
@@ -267,7 +273,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        if (overwritePartition == null) {
+        if (overwritePartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
@@ -292,9 +298,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            int newSnapshots =
-                    commit.overwritePartition(
-                            overwritePartition, committable, Collections.emptyMap());
+            int newSnapshots = commit.overwritePartition(overwritePartitions, committable);
             maintain(
                     committable.identifier(),
                     maintainExecutor,

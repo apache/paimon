@@ -22,6 +22,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 
 /** Inner {@link TableCommit} contains overwrite setter. */
@@ -29,6 +30,8 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
     InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition);
+
+    InnerTableCommit withOverwrite(@Nullable List<Map<String, String>> partitions);
 
     /**
      * If this is set to true, when there is no new data, no snapshot will be generated. By default,

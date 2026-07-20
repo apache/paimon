@@ -154,13 +154,15 @@ public class FileDeletionTest {
         Map<String, String> partitionSpec = new HashMap<>();
         partitionSpec.put("dt", "0401");
         commit.overwritePartition(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+                Collections.singletonList(partitionSpec),
+                new ManifestCommittable(commitIdentifier++));
 
         // step 3: generate snapshot 3 by cleaning partition dt=0402/hr=10
         partitionSpec.put("dt", "0402");
         partitionSpec.put("hr", "8");
         commit.overwritePartition(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+                Collections.singletonList(partitionSpec),
+                new ManifestCommittable(commitIdentifier++));
         commit.close();
 
         // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0

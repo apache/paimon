@@ -452,19 +452,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public int overwritePartition(
-            Map<String, String> partition,
-            ManifestCommittable committable,
-            Map<String, String> properties) {
+            List<Map<String, String>> staticPartitions, ManifestCommittable committable) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
                 committable.fileCommittables().size());
         if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "Ready to overwrite partition {}\nManifestCommittable: {}\nProperties: {}",
-                    partition,
-                    committable,
-                    properties);
+                    "Ready to overwrite partitions {}\nManifestCommittable: {}",
+                    staticPartitions,
+                    committable);
         }
 
         long started = System.nanoTime();
@@ -507,7 +504,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // partition may be partial partition fields, so here must use predicate way.
                 Predicate partitionPredicate =
                         createPartitionPredicate(
-                                partition, partitionType, options.partitionDefaultName());
+                                staticPartitions, partitionType, options.partitionDefaultName());
                 partitionFilter =
                         PartitionPredicate.fromPredicate(partitionType, partitionPredicate);
                 // sanity check, all changes must be done within the given partition
@@ -515,8 +512,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     for (ManifestEntry entry : changes.appendTableFiles) {
                         if (!partitionFilter.test(entry.partition())) {
                             throw new IllegalArgumentException(
-                                    "Trying to overwrite partition "
-                                            + partition
+                                    "Trying to overwrite partitions "
+                                            + staticPartitions
                                             + ", but the changes in "
                                             + pathFactory.getPartitionString(entry.partition())
                                             + " does not belong to this partition");

@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -58,7 +59,11 @@ public class OverwriteTableTest extends TableTestBase {
             List<String> expected)
             throws Exception {
         innerTestOverwrite(
-                false, dynamicPartitionOverwrite, overwriteData, overwritePartition, expected);
+                false,
+                dynamicPartitionOverwrite,
+                overwriteData,
+                Collections.singletonList(overwritePartition),
+                expected);
     }
 
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
@@ -70,14 +75,34 @@ public class OverwriteTableTest extends TableTestBase {
             List<String> expected)
             throws Exception {
         innerTestOverwrite(
-                true, dynamicPartitionOverwrite, overwriteData, overwritePartition, expected);
+                true,
+                dynamicPartitionOverwrite,
+                overwriteData,
+                Collections.singletonList(overwritePartition),
+                expected);
+    }
+
+    @Test
+    public void testOverwriteMultiplePartitions() throws Exception {
+        innerTestOverwrite(
+                false,
+                false,
+                Arrays.asList(overwriteRow(9, 1, "A", "New"), overwriteRow(10, 2, "B", "Data")),
+                Arrays.asList(
+                        Collections.singletonMap("pt1", "A"), Collections.singletonMap("pt0", "2")),
+                Arrays.asList(
+                        "4, 1, B, To",
+                        "5, 1, B, Apache",
+                        "6, 1, B, Paimon",
+                        "9, 1, A, New",
+                        "10, 2, B, Data"));
     }
 
     private void innerTestOverwrite(
             boolean withPrimaryKey,
             boolean dynamicPartitionOverwrite,
             List<InternalRow> overwriteData,
-            Map<String, String> overwritePartition,
+            List<Map<String, String>> overwritePartitions,
             List<String> expected)
             throws Exception {
         Identifier identifier = identifier("T");
@@ -107,18 +132,16 @@ public class OverwriteTableTest extends TableTestBase {
         // (4, 1, 'B', 'To'), (5, 1, 'B', 'Apache'), (6, 1, 'B', 'Paimon')
         // (7, 2, 'A', 'Test')
         // (8, 2, 'B', 'Case')
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                InnerTableCommit commit = table.newCommit(commitUser)) {
-            write.write(overwriteRow(1, 1, "A", "Hi"));
-            write.write(overwriteRow(2, 1, "A", "Hello"));
-            write.write(overwriteRow(3, 1, "A", "World"));
-            write.write(overwriteRow(4, 1, "B", "To"));
-            write.write(overwriteRow(5, 1, "B", "Apache"));
-            write.write(overwriteRow(6, 1, "B", "Paimon"));
-            write.write(overwriteRow(7, 2, "A", "Test"));
-            write.write(overwriteRow(8, 2, "B", "Case"));
-            commit.commit(0, write.prepareCommit(true, 0));
-        }
+        write(
+                table,
+                overwriteRow(1, 1, "A", "Hi"),
+                overwriteRow(2, 1, "A", "Hello"),
+                overwriteRow(3, 1, "A", "World"),
+                overwriteRow(4, 1, "B", "To"),
+                overwriteRow(5, 1, "B", "Apache"),
+                overwriteRow(6, 1, "B", "Paimon"),
+                overwriteRow(7, 2, "A", "Test"),
+                overwriteRow(8, 2, "B", "Case"));
 
         // overwrite data
         try (StreamTableWrite write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
@@ -126,7 +149,7 @@ public class OverwriteTableTest extends TableTestBase {
             for (InternalRow row : overwriteData) {
                 write.write(row);
             }
-            commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
+            commit.withOverwrite(overwritePartitions).commit(1, write.prepareCommit(true, 1));
         }
 
         // validate
