@@ -62,6 +62,7 @@ NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
 NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
+NAME_COLLECT = "collect"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -455,6 +456,71 @@ class FieldListaggAgg(FieldAggregator):
             return accumulator
 
         return self.delimiter.join(result)
+
+
+class FieldCollectAgg(FieldAggregator):
+
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        super().__init__(name, field_type)
+
+        if not isinstance(field_type, ArrayType):
+            raise ValueError(
+                "Data type for collect column must be 'Array' but was '{}'.".format(field_type)
+            )
+
+        self.distinct = options.field_collect_distinct(field_name)
+
+    def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
+        # we don't need to actually do the reverse here for this agg
+        # because accumulator has been distinct, just let accumulator be accumulator will speed up
+        # distinct process
+        return self.agg(accumulator, input_field)
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None and input_field is None:
+            return None
+
+        if (accumulator is None or input_field is None) and not self.distinct:
+            return input_field if accumulator is None else accumulator
+
+        if self.distinct:
+            result = []
+            self._collect(result, accumulator)
+            self._collect(result, input_field)
+
+            return result
+        else:
+            return list(accumulator) + list(input_field)
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None:
+            return None
+
+        if retract_field is None:
+            return accumulator
+
+        if len(retract_field) == 0:
+            return accumulator
+
+        result = list(accumulator)
+        for element in retract_field:
+            if element in result:
+                result.remove(element)
+
+        return result
+
+    def _collect(self, result: List[Any], data: List[Any]):
+        if data is None:
+            return
+        for element in data:
+            if element not in result:
+                result.append(element)
 
 
 class FieldNestedUpdateAgg(FieldAggregator):
@@ -862,4 +928,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_NESTED_PARTIAL_UPDATE, _build_field_options(FieldNestedPartialUpdateAgg, NAME_NESTED_PARTIAL_UPDATE)
+)
+register_aggregator(
+    NAME_COLLECT, _build_field_options(FieldCollectAgg, NAME_COLLECT)
 )
