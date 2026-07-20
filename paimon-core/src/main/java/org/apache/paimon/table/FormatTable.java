@@ -18,9 +18,12 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -29,6 +32,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.BatchVectorSearchBuilder;
@@ -56,8 +60,9 @@ import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
  * operations on this table allow for reading or writing to these files, facilitating the retrieval
  * of existing data and the addition of new files.
  *
- * <p>Partitioned file format table just like the standard hive format. Partitions are discovered
- * and inferred based on directory structure.
+ * <p>A partitioned file format table uses the standard Hive directory layout. By default,
+ * partitions are discovered from that layout. Format Tables with catalog-managed partitions use
+ * catalog metadata for partition visibility while retaining the same physical layout.
  *
  * @since 0.9.0
  */
@@ -74,6 +79,17 @@ public interface FormatTable extends Table {
     FormatTable copy(Map<String, String> dynamicOptions);
 
     CatalogContext catalogContext();
+
+    /**
+     * The catalog partition registrations of this table, or null when its partitions are discovered
+     * from the filesystem. When non-null, catalog registration decides partition visibility: a
+     * partition directory that is not registered is not visible to scans.
+     */
+    @Experimental
+    @Nullable
+    default FormatTablePartitionManager partitionManager() {
+        return null;
+    }
 
     /** Currently supported formats. */
     enum Format {
@@ -115,6 +131,7 @@ public interface FormatTable extends Table {
         private Map<String, String> options;
         @Nullable private String comment;
         private CatalogContext catalogContext;
+        @Nullable private FormatTablePartitionManager partitionManager;
 
         public Builder fileIO(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -161,6 +178,12 @@ public interface FormatTable extends Table {
             return this;
         }
 
+        @Experimental
+        public Builder partitionManager(@Nullable FormatTablePartitionManager partitionManager) {
+            this.partitionManager = partitionManager;
+            return this;
+        }
+
         public FormatTable build() {
             return new FormatTableImpl(
                     fileIO,
@@ -171,7 +194,8 @@ public interface FormatTable extends Table {
                     format,
                     options,
                     comment,
-                    catalogContext);
+                    catalogContext,
+                    partitionManager);
         }
     }
 
@@ -189,6 +213,7 @@ public interface FormatTable extends Table {
         private final Map<String, String> options;
         @Nullable private final String comment;
         private CatalogContext catalogContext;
+        @Nullable private final FormatTablePartitionManager partitionManager;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -199,7 +224,8 @@ public interface FormatTable extends Table {
                 Format format,
                 Map<String, String> options,
                 @Nullable String comment,
-                CatalogContext catalogContext) {
+                CatalogContext catalogContext,
+                @Nullable FormatTablePartitionManager partitionManager) {
             this.fileIO = fileIO;
             this.identifier = identifier;
             this.rowType = rowType;
@@ -209,6 +235,7 @@ public interface FormatTable extends Table {
             this.options = options;
             this.comment = comment;
             this.catalogContext = catalogContext;
+            this.partitionManager = partitionManager;
         }
 
         @Override
@@ -265,6 +292,30 @@ public interface FormatTable extends Table {
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
+
+            CoreOptions coreOptions = CoreOptions.fromMap(options);
+            CoreOptions copiedCoreOptions = CoreOptions.fromMap(newOptions);
+            boolean hasCatalogManagedPartitions = partitionManager != null;
+            boolean persistedPartitionsFromCatalog = coreOptions.partitionedTableInMetastore();
+            boolean dynamicPartitionsFromCatalog = copiedCoreOptions.partitionedTableInMetastore();
+            if (persistedPartitionsFromCatalog != dynamicPartitionsFromCatalog) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change where a Format Table's partitions come from.",
+                                CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
+            }
+            if (hasCatalogManagedPartitions
+                    && coreOptions.formatTablePartitionOnlyValueInPath()
+                            != copiedCoreOptions.formatTablePartitionOnlyValueInPath()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change the physical partition layout of a Format Table with catalog-managed partitions.",
+                                CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key()));
+            }
+            if (hasCatalogManagedPartitions) {
+                CatalogUtils.validateCatalogManagedPartitionOptions(newOptions);
+            }
+
             return new FormatTableImpl(
                     fileIO,
                     identifier,
@@ -274,7 +325,8 @@ public interface FormatTable extends Table {
                     format,
                     newOptions,
                     comment,
-                    catalogContext);
+                    catalogContext,
+                    partitionManager);
         }
 
         @Override
@@ -301,6 +353,12 @@ public interface FormatTable extends Table {
         @Override
         public CatalogContext catalogContext() {
             return this.catalogContext;
+        }
+
+        @Override
+        @Nullable
+        public FormatTablePartitionManager partitionManager() {
+            return partitionManager;
         }
     }
 

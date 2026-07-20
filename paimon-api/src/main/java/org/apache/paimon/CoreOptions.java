@@ -1850,7 +1850,11 @@ public class CoreOptions implements Serializable {
                             "Whether to create this table as a partitioned table in metastore.\n"
                                     + "For example, if you want to list all partitions of a Paimon table in Hive, "
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
-                                    + "This config option does not affect the default filesystem metastore.");
+                                    + "This config option does not affect the default filesystem metastore.\n"
+                                    + "For an internal format table in a REST catalog, it also makes the "
+                                    + "catalog own the table's partitions: a scan reads the partitions "
+                                    + "registered there and a write registers the ones it wrote, instead of "
+                                    + "listing the table directory.");
 
     public static final ConfigOption<String> METASTORE_TAG_TO_PARTITION =
             key("metastore.tag-to-partition")
