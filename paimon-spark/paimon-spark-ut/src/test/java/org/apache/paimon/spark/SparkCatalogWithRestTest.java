@@ -805,10 +805,10 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
-    public void testLateralPrimaryKeyVectorSearchWithRowFilter() {
+    public void testLateralPrimaryKeyVectorSearchWithRowAndColumnAuth() {
         spark.sql(
                 "CREATE TABLE t_auth_vector ("
-                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>) "
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>, secret STRING) "
                         + "TBLPROPERTIES ("
                         + "'primary-key'='id', "
                         + "'bucket'='1', "
@@ -823,17 +823,18 @@ public class SparkCatalogWithRestTest {
                         + "'query-auth.enabled'='true')");
         spark.sql(
                 "INSERT INTO t_auth_vector VALUES "
-                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f)), "
-                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f))");
+                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f), 's1'), "
+                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f), 's2')");
 
         Predicate idEq1Predicate =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
                         Equal.INSTANCE,
                         Collections.singletonList(1));
-        restCatalogServer.setRowFilterAuth(
-                Identifier.create("db2", "t_auth_vector"),
-                Collections.singletonList(idEq1Predicate));
+        Identifier identifier = Identifier.create("db2", "t_auth_vector");
+        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(idEq1Predicate));
+        restCatalogServer.addTableColumnAuth(
+                identifier, Arrays.asList("id", "embedding", "query_embedding"));
 
         List<Row> rows =
                 spark.sql(
@@ -849,7 +850,7 @@ public class SparkCatalogWithRestTest {
     public void testLateralPrimaryKeyVectorSearchMetadataOnlyWithRowFilter() {
         spark.sql(
                 "CREATE TABLE t_auth_vector_metadata ("
-                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>) "
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>, secret STRING) "
                         + "TBLPROPERTIES ("
                         + "'primary-key'='id', "
                         + "'bucket'='1', "
@@ -864,17 +865,18 @@ public class SparkCatalogWithRestTest {
                         + "'query-auth.enabled'='true')");
         spark.sql(
                 "INSERT INTO t_auth_vector_metadata VALUES "
-                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f)), "
-                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f))");
+                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f), 's1'), "
+                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f), 's2')");
 
         Predicate idEq1Predicate =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
                         Equal.INSTANCE,
                         Collections.singletonList(1));
-        restCatalogServer.setRowFilterAuth(
-                Identifier.create("db2", "t_auth_vector_metadata"),
-                Collections.singletonList(idEq1Predicate));
+        Identifier identifier = Identifier.create("db2", "t_auth_vector_metadata");
+        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(idEq1Predicate));
+        restCatalogServer.addTableColumnAuth(
+                identifier, Arrays.asList("id", "embedding", "query_embedding"));
 
         List<Row> rows =
                 spark.sql(

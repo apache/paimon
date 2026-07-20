@@ -355,7 +355,7 @@ case class LateralVectorSearchExec(
       .withLimit(limit)
       .withOptions(options.asJava)
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
-    pushQueryAuthFilter(coreOptions, vectorSearchBuilder)
+    pushQueryAuthFilter(coreOptions, (readFieldNames :+ columnName).distinct, vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
     val batchSize =
@@ -410,6 +410,7 @@ case class LateralVectorSearchExec(
 
   private def pushQueryAuthFilter(
       coreOptions: CoreOptions,
+      authFieldNames: Seq[String],
       vectorSearchBuilder: BatchVectorSearchBuilder): Unit = {
     if (!coreOptions.queryAuthEnabled()) {
       return
@@ -418,7 +419,10 @@ case class LateralVectorSearchExec(
     // Vector search applies its limit before physical readers enforce QueryAuthSplit. Push the row
     // filter into candidate selection so unauthorized rows cannot consume the limit.
     val table = innerTable.asInstanceOf[FileStoreTable]
-    val authResult = table.catalogEnvironment().tableQueryAuth(coreOptions).auth(null)
+    val authResult = table
+      .catalogEnvironment()
+      .tableQueryAuth(coreOptions)
+      .auth(authFieldNames.asJava)
     Option(authResult)
       .flatMap(result => Option(result.extractPredicate()))
       .flatMap(predicate => Option(TableQueryAuthResult.remapPredicate(predicate, table.rowType())))
