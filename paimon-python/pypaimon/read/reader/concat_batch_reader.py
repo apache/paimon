@@ -395,14 +395,15 @@ class BlobFallbackBatchReader(RecordBatchReader):
             raise ValueError(
                 "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
             )
-        result = {}
+        result = []
         for key, blob in blob_map.items():
             if blob is None:
-                result[key] = None
+                value = None
             elif self._blob_as_descriptor:
-                result[key] = blob.to_descriptor().serialize()
+                value = blob.to_descriptor().serialize()
             else:
-                result[key] = blob.to_data()
+                value = blob.to_data()
+            result.append((key, value))
         return result
 
     def _resolve_selected_blobs(self, values: List[object]) -> List[object]:
@@ -418,13 +419,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     raise ValueError(
                         "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
                     )
-                map_values = {}
-                for key, blob in value.items():
-                    if blob is None:
-                        map_values[key] = None
-                    else:
-                        map_values[key] = None
-                        indexed_blobs.append((row_index, key, blob))
+                map_values = []
+                for entry_index, (key, blob) in enumerate(value.items()):
+                    map_values.append((key, None))
+                    if blob is not None:
+                        indexed_blobs.append((row_index, entry_index, blob))
                 resolved.append(map_values)
             elif self._is_array_blob:
                 if value is None:
@@ -451,7 +450,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             [blob for _, _, blob in indexed_blobs], self._blob_parallelism)
         for (row_index, slot, _), body in zip(indexed_blobs, bodies):
             if self._is_map_blob:
-                resolved[row_index][slot] = body
+                key = resolved[row_index][slot][0]
+                resolved[row_index][slot] = (key, body)
             elif slot is None:
                 resolved[row_index] = body
             else:

@@ -582,7 +582,9 @@ class DataTypeParser:
                     json_data.get("key"), field_id)
                 value = DataTypeParser.parse_data_type(
                     json_data.get("value"), field_id)
-                nullable = "NOT NULL" not in type_string
+                nullable = json_data.get("nullable")
+                if nullable is None:
+                    nullable = not type_string.rstrip().endswith(" NOT NULL")
                 return MapType(nullable, key, value)
 
             elif type_string.startswith("ROW"):

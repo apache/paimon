@@ -851,6 +851,13 @@ class BlobTest(unittest.TestCase):
             batch_size=3,
             blob_parallelism=4,
         )
+        self.assertEqual(
+            [("value", b"body"), ("null", None)],
+            reader._map_value_for_arrow({
+                "value": BlobData(b"body"),
+                "null": None,
+            }),
+        )
         try:
             batch = reader.read_arrow_batch()
             self.assertEqual(
@@ -2682,6 +2689,15 @@ class BlobEndToEndTest(unittest.TestCase):
             push_down_predicate=None,
             blob_as_descriptor=False,
         )
+        self.assertEqual(
+            [("value", b"body"), ("null", None)],
+            reader._map_value_for_arrow(
+                {"value": BlobData(b"body"), "null": None},
+                "blob_map",
+                0,
+                [],
+            ),
+        )
         values = reader.read_arrow_batch().column(0).to_pylist()
         self.assertEqual(dict(values[0]), {"alpha": b"a", "null": None, "empty": b""})
         self.assertIsNone(values[1])
@@ -2758,6 +2774,21 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=False,
             blob_parallelism=4,
         )
+        blobs_to_resolve = []
+        self.assertEqual(
+            [("a", None), ("n", None), ("b", None)],
+            parallel_reader._map_value_for_arrow(
+                {
+                    "a": BlobData(b"x"),
+                    "n": None,
+                    "b": BlobData(b"yz"),
+                },
+                "blob_map",
+                0,
+                blobs_to_resolve,
+            ),
+        )
+        self.assertEqual([0, 2], [target[3] for target in blobs_to_resolve])
         values = dict(parallel_reader.read_arrow_batch().column(0)[0].as_py())
         self.assertEqual(values, {"a": b"x", "b": b"yz", "n": None})
         self.assertEqual(len(calls), 1)

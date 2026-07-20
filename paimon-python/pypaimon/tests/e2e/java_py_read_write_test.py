@@ -1501,10 +1501,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'id': [1, 2, 3, 4],
             'payloads': pa.array(
                 [
-                    {1: b'python-alpha', 2: None, 3: b''},
-                    {},
+                    [(1, b'python-alpha'), (2, None), (3, b'')],
+                    [],
                     None,
-                    {4: b'python-omega'},
+                    [(4, b'python-omega')],
                 ],
                 type=map_blob_type,
             ),

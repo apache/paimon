@@ -1602,7 +1602,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         valid_data = pa.Table.from_pydict({
             'id': [1, 2, 3],
             'payloads': pa.array(
-                [{'first': b'alpha', 'empty': b''}, {}, None],
+                [[('first', b'alpha'), ('empty', b'')], [], None],
                 type=map_blob_type,
             ),
         }, schema=pa_schema)
@@ -1635,7 +1635,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         ])
         incompatible_data = pa.Table.from_pydict({
             'id': [4],
-            'payloads': pa.array([{'bad': None}], type=nullable_map_type),
+            'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
         with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
@@ -1644,7 +1644,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         invalid_data = pa.Table.from_pydict({
             'id': [5],
-            'payloads': pa.array([{'bad': None}], type=map_blob_type),
+            'payloads': pa.array([[('bad', None)]], type=map_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
         with self.assertRaisesRegex(ValueError, "does not allow null values"):

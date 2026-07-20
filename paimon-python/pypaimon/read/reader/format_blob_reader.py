@@ -213,8 +213,9 @@ class FormatBlobReader(RecordBatchReader):
                 pydict_data[field_name][row_index] = data
             elif container_kind == 'array':
                 pydict_data[field_name][row_index][slot] = data
-            else:
-                pydict_data[field_name][row_index][slot] = data
+            elif container_kind == 'map':
+                key = pydict_data[field_name][row_index][slot][0]
+                pydict_data[field_name][row_index][slot] = (key, data)
 
     def _array_value_for_arrow(
         self,
@@ -262,19 +263,20 @@ class FormatBlobReader(RecordBatchReader):
                 "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
             )
 
-        result = {}
-        for key, blob in blob_map.items():
+        result = []
+        for entry_index, (key, blob) in enumerate(blob_map.items()):
             if blob is None:
-                result[key] = None
+                value = None
             elif self._blob_as_descriptor:
-                result[key] = blob.to_descriptor().serialize()
+                value = blob.to_descriptor().serialize()
             elif self._blob_parallelism > 1:
-                result[key] = None
+                value = None
                 blobs_to_resolve.append(
-                    (field_name, row_index, 'map', key, blob)
+                    (field_name, row_index, 'map', entry_index, blob)
                 )
             else:
-                result[key] = blob.to_data()
+                value = blob.to_data()
+            result.append((key, value))
         return result
 
     def close(self):
