@@ -269,17 +269,20 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description(
-            "Cache immutable Parquet file metadata across reads in the current process."
+            "Cache PyArrow Dataset and footer-derived metadata for immutable Paimon "
+            "Parquet data files across reads in the current process. Do not enable this "
+            "for paths that may be overwritten in place."
         )
     )
 
-    PARQUET_METADATA_CACHE_SIZE: ConfigOption[int] = (
-        ConfigOptions.key("parquet.metadata-cache-size")
+    PARQUET_METADATA_CACHE_MAX_ENTRIES: ConfigOption[int] = (
+        ConfigOptions.key("parquet.metadata-cache-max-entries")
         .int_type()
         .default_value(256)
         .with_description(
             "Maximum number of Parquet metadata entries cached per FileIO in the current "
-            "process. When readers share a FileIO, the largest requested value is used."
+            "process. This limit counts entries, not retained bytes. When readers share a "
+            "FileIO, the largest requested value is used."
         )
     )
 
@@ -1045,8 +1048,8 @@ class CoreOptions:
     def parquet_metadata_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_ENABLED, False)
 
-    def parquet_metadata_cache_size(self) -> int:
-        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_SIZE, 256)
+    def parquet_metadata_cache_max_entries(self) -> int:
+        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_MAX_ENTRIES, 256)
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)

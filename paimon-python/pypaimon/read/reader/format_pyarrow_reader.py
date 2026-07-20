@@ -136,7 +136,7 @@ def _reset_parquet_dataset_cache():
 
 
 def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
-                     cache_size: int):
+                     cache_max_entries: int):
     file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
     filesystem = file_io.filesystem
 
@@ -144,11 +144,12 @@ def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
         return ds.dataset(
             file_path_for_pyarrow, format='parquet', filesystem=filesystem)
 
-    if not cache_enabled or cache_size <= 0:
+    if not cache_enabled or cache_max_entries <= 0:
         return load()
 
     key = (_FilesystemIdentity(filesystem), file_path_for_pyarrow)
-    return _parquet_dataset_cache(file_io, cache_size).get_or_load(key, load)
+    return _parquet_dataset_cache(
+        file_io, cache_max_entries).get_or_load(key, load)
 
 
 class FormatPyArrowReader(RecordBatchReader):
@@ -171,12 +172,12 @@ class FormatPyArrowReader(RecordBatchReader):
                 options.parquet_metadata_cache_enabled()
                 if options is not None else False
             )
-            cache_size = (
-                options.parquet_metadata_cache_size()
+            cache_max_entries = (
+                options.parquet_metadata_cache_max_entries()
                 if options is not None else 256
             )
             self.dataset = _parquet_dataset(
-                file_io, file_path, cache_enabled, cache_size)
+                file_io, file_path, cache_enabled, cache_max_entries)
         else:
             file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
             self.dataset = ds.dataset(

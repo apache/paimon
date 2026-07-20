@@ -59,6 +59,29 @@ when it is false, it will read the full amount of data into memory.
 
 **`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
 
+## Parquet Metadata Cache
+
+Long-lived DataLoader workers may read the same immutable Parquet files across
+multiple epochs. Enable the process-local metadata cache to reuse PyArrow
+Dataset and footer-derived metadata such as schema and row-group statistics:
+
+```python
+table = table.copy({
+    "parquet.metadata-cache-enabled": "true",
+    "parquet.metadata-cache-max-entries": "256",
+})
+read_builder = table.new_read_builder()
+```
+
+The cache is disabled by default and is isolated by process and `FileIO`.
+Workers benefit when they remain alive and reuse the same table, for example
+with `DataLoader(..., persistent_workers=True)`. Separately deserialized
+`FileIO` instances do not share entries. The limit counts cached entries, not
+retained bytes.
+
+Paimon-managed data files are immutable, so caching by file path is safe. Do
+not enable this cache for paths that may be overwritten in place.
+
 ## Shuffle
 
 PyPaimon supports streaming shuffle for PyTorch `IterableDataset`. The shuffle

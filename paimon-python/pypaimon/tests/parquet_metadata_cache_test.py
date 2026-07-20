@@ -95,10 +95,10 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     @staticmethod
-    def _options(enabled, size=256):
+    def _options(enabled, max_entries=256):
         return CoreOptions(Options({
             "parquet.metadata-cache-enabled": enabled,
-            "parquet.metadata-cache-size": size,
+            "parquet.metadata-cache-max-entries": max_entries,
         }))
 
     def _read(self, path, options, file_io=None):
@@ -123,7 +123,7 @@ class ParquetMetadataCacheTest(unittest.TestCase):
     def test_disabled_by_default(self):
         options = CoreOptions(Options({}))
         self.assertFalse(options.parquet_metadata_cache_enabled())
-        self.assertEqual(256, options.parquet_metadata_cache_size())
+        self.assertEqual(256, options.parquet_metadata_cache_max_entries())
 
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
@@ -172,7 +172,7 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         self.assertLess(len(counting.reads), uncached_reads)
 
     def test_evicts_least_recently_used_entry(self):
-        options = self._options(True, size=2)
+        options = self._options(True, max_entries=2)
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
             for path in self.paths:
@@ -184,9 +184,9 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
             for path in self.paths:
-                self._read(path, self._options(True, size=3))
-            self._read(self.paths[2], self._options(True, size=1))
-            self._read(self.paths[0], self._options(True, size=1))
+                self._read(path, self._options(True, max_entries=3))
+            self._read(self.paths[2], self._options(True, max_entries=1))
+            self._read(self.paths[0], self._options(True, max_entries=1))
         self.assertEqual(3, dataset.call_count)
         self.assertEqual(
             3, reader_module._parquet_dataset_cache(self.file_io, 1).max_entries)
