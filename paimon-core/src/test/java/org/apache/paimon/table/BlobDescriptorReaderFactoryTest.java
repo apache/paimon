@@ -44,7 +44,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -79,16 +78,29 @@ public class BlobDescriptorReaderFactoryTest {
     }
 
     @Test
-    public void testUseConfiguredSourceTableFileIO() throws Exception {
-        java.nio.file.Path sourceDirectory = Files.createDirectory(tempPath.resolve("source"));
+    public void testRESTTokenFileIOSurvivesSerialization() throws Exception {
+        java.nio.file.Path sourceDirectory = Files.createDirectory(tempPath.resolve("rest-source"));
         java.nio.file.Path blobFile = sourceDirectory.resolve("blob");
         Files.write(blobFile, new byte[] {1, 2});
 
-        FileIO sourceFileIO = spy(isolatedFileIO("isolated://" + sourceDirectory));
+        Identifier sourceIdentifier = Identifier.fromString("db.source$branch_rt");
+        String sourceRoot = "isolated://" + sourceDirectory;
+        RESTApi restApi = mock(RESTApi.class);
+        when(restApi.loadTableToken(sourceIdentifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap(
+                                        IsolatedDirectoryFileIO.ROOT_DIR, sourceRoot),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO sourceFileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options()),
+                        restApi,
+                        sourceIdentifier,
+                        new Path(sourceRoot));
+
         FileStoreTable sourceTable = mock(FileStoreTable.class);
         when(sourceTable.fileIO()).thenReturn(sourceFileIO);
-
-        Identifier sourceIdentifier = Identifier.fromString("db.source$branch_rt");
         Catalog catalog = mock(Catalog.class);
         when(catalog.getTable(sourceIdentifier)).thenReturn(sourceTable);
         CatalogLoader catalogLoader = mock(CatalogLoader.class);
@@ -104,70 +116,25 @@ public class BlobDescriptorReaderFactoryTest {
                                 Collections.singletonMap(
                                         "blob-descriptor.source-table", "db.source$branch_rt")));
 
+        UriReaderFactory readerFactory = BlobDescriptorReaderFactory.create(targetTable);
+        verify(catalogLoader).load();
+        verify(catalog).getTable(sourceIdentifier);
+        // Creating the factory calls isObjectStore(), which initializes the dynamic token before
+        // the REST client is lost during serialization.
+        verify(restApi).loadTableToken(sourceIdentifier);
+
+        readerFactory = InstantiationUtil.clone(readerFactory);
         String blobUri = "isolated://" + blobFile;
         UriReaderFactory contextOnlyFactory =
                 new UriReaderFactory(CatalogContext.create(new Options()));
         assertThatThrownBy(() -> contextOnlyFactory.create(blobUri).newInputStream(blobUri))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(IsolatedDirectoryFileIO.ROOT_DIR);
-
-        UriReaderFactory readerFactory =
-                InstantiationUtil.clone(BlobDescriptorReaderFactory.create(targetTable));
         try (SeekableInputStream inputStream =
                 readerFactory.create(blobUri).newInputStream(blobUri)) {
             assertThat(inputStream.read()).isEqualTo(1);
             assertThat(inputStream.read()).isEqualTo(2);
         }
-
-        verify(catalogLoader).load();
-        verify(catalog).getTable(sourceIdentifier);
-        verify(sourceFileIO).isObjectStore();
-    }
-
-    @Test
-    public void testRESTTokenFileIOSurvivesSerialization() throws Exception {
-        java.nio.file.Path sourceDirectory = Files.createDirectory(tempPath.resolve("rest-source"));
-        java.nio.file.Path blobFile = sourceDirectory.resolve("blob");
-        Files.write(blobFile, new byte[] {1, 2});
-
-        Identifier sourceIdentifier = Identifier.fromString("db.source");
-        RESTApi restApi = mock(RESTApi.class);
-        when(restApi.loadTableToken(sourceIdentifier))
-                .thenReturn(new GetTableTokenResponse(Collections.emptyMap(), Long.MAX_VALUE));
-        RESTTokenFileIO sourceFileIO =
-                new RESTTokenFileIO(
-                        CatalogContext.create(new Options()),
-                        restApi,
-                        sourceIdentifier,
-                        new Path(sourceDirectory.toUri()));
-
-        FileStoreTable sourceTable = mock(FileStoreTable.class);
-        when(sourceTable.fileIO()).thenReturn(sourceFileIO);
-        Catalog catalog = mock(Catalog.class);
-        when(catalog.getTable(sourceIdentifier)).thenReturn(sourceTable);
-        CatalogLoader catalogLoader = mock(CatalogLoader.class);
-        when(catalogLoader.load()).thenReturn(catalog);
-        CatalogEnvironment catalogEnvironment = mock(CatalogEnvironment.class);
-        when(catalogEnvironment.catalogLoader()).thenReturn(catalogLoader);
-
-        FileStoreTable targetTable = mock(FileStoreTable.class);
-        when(targetTable.catalogEnvironment()).thenReturn(catalogEnvironment);
-        when(targetTable.coreOptions())
-                .thenReturn(
-                        CoreOptions.fromMap(
-                                Collections.singletonMap(
-                                        "blob-descriptor.source-table", "db.source")));
-
-        UriReaderFactory readerFactory =
-                InstantiationUtil.clone(BlobDescriptorReaderFactory.create(targetTable));
-        String blobUri = blobFile.toUri().toString();
-        try (SeekableInputStream inputStream =
-                readerFactory.create(blobUri).newInputStream(blobUri)) {
-            assertThat(inputStream.read()).isEqualTo(1);
-            assertThat(inputStream.read()).isEqualTo(2);
-        }
-
-        verify(restApi).loadTableToken(sourceIdentifier);
     }
 
     @Test
@@ -216,12 +183,8 @@ public class BlobDescriptorReaderFactoryTest {
     }
 
     private static FileIO isolatedFileIO(java.nio.file.Path root) {
-        return isolatedFileIO(new Path(root.toUri()).toString());
-    }
-
-    private static FileIO isolatedFileIO(String root) {
         Options options = new Options();
-        options.set(IsolatedDirectoryFileIO.ROOT_DIR, root);
+        options.set(IsolatedDirectoryFileIO.ROOT_DIR, new Path(root.toUri()).toString());
         IsolatedDirectoryFileIO fileIO = new IsolatedDirectoryFileIO();
         fileIO.configure(CatalogContext.create(options));
         return fileIO;

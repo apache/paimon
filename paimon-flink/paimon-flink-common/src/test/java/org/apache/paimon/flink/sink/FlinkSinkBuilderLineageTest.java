@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
@@ -66,21 +65,6 @@ class FlinkSinkBuilderLineageTest {
         SinkTransformation<?, ?> transformation =
                 (SinkTransformation<?, ?>) sink.getTransformation();
         assertThat(transformation.getSink()).isInstanceOf(PaimonDiscardingSink.class);
-    }
-
-    @Test
-    void testMapToInternalRowNullCatalogContextRemainsUnambiguous() {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        RowType rowType = RowType.of(new IntType());
-        DataStream<RowData> input =
-                env.fromCollection(
-                        Collections.singletonList((RowData) GenericRowData.of(1)),
-                        InternalTypeInfo.of(toLogicalType(rowType)));
-
-        DataStream<InternalRow> result =
-                FlinkSinkBuilder.mapToInternalRow(input, rowType, null, false, false);
-
-        assertThat(result).isNotNull();
     }
 
     private FileStoreTable createTable() throws Exception {

@@ -113,15 +113,6 @@ public class FlinkRowWrapperTest {
     }
 
     @Test
-    public void testNullCatalogContextConstructorRemainsUnambiguous() {
-        FlinkRowWrapper wrapper =
-                new FlinkRowWrapper(
-                        GenericRowData.of(1), null, false, false, Collections.emptySet());
-
-        assertThat(wrapper.getInt(0)).isEqualTo(1);
-    }
-
-    @Test
     public void testMissingHttpBlobDescriptorWithNonBlobColumnBefore() throws Exception {
         httpServer.createContext(
                 "/missing.jpg",

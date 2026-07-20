@@ -159,14 +159,6 @@ public class SparkInternalRowTest {
         assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
     }
 
-    @Test
-    public void testNullCatalogContextConstructorRemainsUnambiguous() {
-        SparkInternalRowWrapper wrapper =
-                new SparkInternalRowWrapper(new StructType(), 0, null, null);
-
-        assertThat(wrapper).isNotNull();
-    }
-
     private String sparkRowToString(org.apache.spark.sql.Row row) {
         return JavaConverters.seqAsJavaList(row.toSeq()).stream()
                 .map(

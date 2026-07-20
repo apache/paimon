@@ -314,20 +314,20 @@ public class FlinkSinkBuilder {
             DataStream<InternalRow> input, boolean globalIndex) {
         if (compactSink && !globalIndex) {
             // todo support global index sort compact
-            DynamicBucketCompactSink sink = new DynamicBucketCompactSink(table, overwritePartition);
-            configureBlobDescriptorReaderFactory(sink);
-            return sink.build(input, parallelism);
+            return configureBlobDescriptorReaderFactory(
+                            new DynamicBucketCompactSink(table, overwritePartition))
+                    .build(input, parallelism);
         }
 
         if (globalIndex) {
-            GlobalDynamicBucketSink sink = new GlobalDynamicBucketSink(table, overwritePartition);
-            configureBlobDescriptorReaderFactory(sink);
-            return sink.build(input, parallelism);
+            return configureBlobDescriptorReaderFactory(
+                            new GlobalDynamicBucketSink(table, overwritePartition))
+                    .build(input, parallelism);
         }
 
-        RowDynamicBucketSink sink = new RowDynamicBucketSink(table, overwritePartition);
-        configureBlobDescriptorReaderFactory(sink);
-        return sink.build(input, parallelism);
+        return configureBlobDescriptorReaderFactory(
+                        new RowDynamicBucketSink(table, overwritePartition))
+                .build(input, parallelism);
     }
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
@@ -343,9 +343,8 @@ public class FlinkSinkBuilder {
         }
         DataStream<InternalRow> partitioned =
                 partition(input, new RowDataChannelComputer(table.schema()), parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition);
-        configureBlobDescriptorReaderFactory(sink);
-        return sink.sinkFrom(partitioned);
+        return configureBlobDescriptorReaderFactory(new FixedBucketSink(table, overwritePartition))
+                .sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
@@ -358,9 +357,9 @@ public class FlinkSinkBuilder {
                 channelComputer = new PostponeBucketChannelComputer(table.schema());
             }
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
-            configureBlobDescriptorReaderFactory(sink);
-            return sink.sinkFrom(partitioned);
+            return configureBlobDescriptorReaderFactory(
+                            new PostponeBucketSink(table, overwritePartition))
+                    .sinkFrom(partitioned);
         } else {
             Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
             DataStream<InternalRow> partitioned =
@@ -371,10 +370,10 @@ public class FlinkSinkBuilder {
 
             FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);
 
-            PostponeFixedBucketSink sink =
-                    new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
-            configureBlobDescriptorReaderFactory(sink);
-            return sink.sinkFrom(partitioned);
+            return configureBlobDescriptorReaderFactory(
+                            new PostponeFixedBucketSink(
+                                    tableForWrite, overwritePartition, knownNumBuckets))
+                    .sinkFrom(partitioned);
         }
     }
 
@@ -396,14 +395,15 @@ public class FlinkSinkBuilder {
             }
         }
 
-        RowAppendTableSink sink = new RowAppendTableSink(table, overwritePartition, parallelism);
-        configureBlobDescriptorReaderFactory(sink);
-        return sink.sinkFrom(input);
+        return configureBlobDescriptorReaderFactory(
+                        new RowAppendTableSink(table, overwritePartition, parallelism))
+                .sinkFrom(input);
     }
 
-    private void configureBlobDescriptorReaderFactory(FlinkSink<?> sink) {
+    private <T extends FlinkSink<?>> T configureBlobDescriptorReaderFactory(T sink) {
         sink.setBlobDescriptorReaderFactory(
                 checkNotNull(blobDescriptorReaderFactory, "BLOB descriptor reader is not set."));
+        return sink;
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {
