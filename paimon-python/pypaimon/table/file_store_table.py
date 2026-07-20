@@ -520,8 +520,12 @@ class FileStoreTable(Table):
             )
             catalog_env = self.catalog_environment.copy(new_identifier)
 
-        return FileStoreTable(self.file_io, new_identifier, self.table_path, new_table_schema,
-                              catalog_env)
+        new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                   new_table_schema, catalog_env)
+        # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
+        new_table._applied_dynamic_options = {
+            **getattr(self, '_applied_dynamic_options', {}), **options}
+        return new_table
 
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """
