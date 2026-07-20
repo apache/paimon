@@ -64,6 +64,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "bool_or", "bool_and",
     "listagg",
     "nested_update",
+    "collect",
     "rbm32", "rbm64",
 ])
 _FIELDS_PREFIX = "fields."

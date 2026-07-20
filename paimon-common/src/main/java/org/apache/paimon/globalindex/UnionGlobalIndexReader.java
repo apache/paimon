@@ -187,7 +187,7 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                             futures) {
                                         Optional<GlobalIndexResult> current = f.join();
                                         if (!current.isPresent()) {
-                                            continue;
+                                            return Optional.empty();
                                         }
                                         if (!union.isPresent()) {
                                             union = current;

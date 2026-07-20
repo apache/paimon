@@ -52,6 +52,7 @@ def pread(stream, length: int, offset: int) -> bytes:
 # merged read at SPAN so threads stay busy and memory stays bounded.
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
+_COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
 
 
 def _coalesce_ranges(items, max_gap, max_span):
@@ -185,19 +186,44 @@ class FileIO(ABC):
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
         """
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span,
+            max_retained_amplification=0, return_views=False)
+
+    def read_ranges_coalesced_views(self, ranges, parallelism,
+                                    max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN,
+                                    max_retained_amplification=(
+                                        _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION)):
+        """Read coalesced ranges as zero-copy ``memoryview`` slices.
+
+        Member ranges from the same merged span share the span's backing buffer
+        instead of allocating one ``bytes`` object per member. Callers must
+        accept the Python buffer protocol. Use :meth:`read_ranges_coalesced`
+        when concrete ``bytes`` results are required. Each view keeps its backing
+        buffer alive. Sparse spans use independent views so they do not retain
+        excessive gap bytes; set ``max_retained_amplification`` to a non-positive
+        value to always share the merged buffer.
+        """
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span, max_retained_amplification,
+            return_views=True)
+
+    def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
+                               max_retained_amplification, return_views):
         from concurrent.futures import ThreadPoolExecutor
         # Threads write disjoint results[idx]; safe under the GIL (no list resize).
-        results: List[Optional[bytes]] = [None] * len(ranges)
+        results = [None] * len(ranges)
         coalescible, singletons = [], []
-        for i, r in enumerate(ranges):
+        for index, value in enumerate(ranges):
             # None path/offset/length => null blob, leave result None.
-            if r is None or r[0] is None or r[1] is None or r[2] is None:
+            if (value is None or value[0] is None
+                    or value[1] is None or value[2] is None):
                 continue
-            path, offset, length = r
+            path, offset, length = value
             if length < 0:  # unknown length => read to EOF, never coalesced
-                singletons.append((i, path, offset, length))
+                singletons.append((index, path, offset, length))
             else:
-                coalescible.append((i, path, offset, length))
+                coalescible.append((index, path, offset, length))
 
         spans = _coalesce_ranges(coalescible, max_gap, max_span)
 
@@ -206,12 +232,23 @@ class FileIO(ABC):
             if kind == "span":
                 path, span_off, span_len, members = payload
                 buf = self.read_file_range(path, span_off, span_len)
+                if return_views:
+                    buf = memoryview(buf)
+                    useful = sum(length for _, _, length in members)
+                    share_buffer = (
+                        max_retained_amplification <= 0
+                        or span_len <= useful * max_retained_amplification
+                    )
                 for idx, off, length in members:
                     s = off - span_off
-                    results[idx] = buf[s:s + length]
+                    value = buf[s:s + length]
+                    if return_views and not share_buffer:
+                        value = memoryview(bytes(value))
+                    results[idx] = value
             else:
                 idx, path, off, length = payload
-                results[idx] = self.read_file_range(path, off, length)
+                result = self.read_file_range(path, off, length)
+                results[idx] = memoryview(result) if return_views else result
 
         tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
         if not tasks:

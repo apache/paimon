@@ -533,6 +533,15 @@ class CoreOptions:
         .with_description("Whether to enable deletion vectors.")
     )
 
+    SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("scan.native-plan.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Plan splits via the native (pypaimon_rust) planner "
+                          "instead of the Python manifest scanner; the pypaimon "
+                          "reader still reads the files.")
+    )
+
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
         ConfigOptions.key("changelog-producer")
         .enum_type(ChangelogProducer)
@@ -1224,6 +1233,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def native_plan_enabled(self, default=None):
+        return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
