@@ -47,6 +47,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
@@ -375,13 +376,14 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
-            for (Split dataSplit : splits) {
+            for (Split plannedSplit : splits) {
+                DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(plannedSplit);
                 iteratorList.add(
                         Iterators.transform(
-                                ((DataSplit) dataSplit).dataFiles().iterator(),
+                                dataSplit.dataFiles().iterator(),
                                 file ->
                                         toRow(
-                                                (DataSplit) dataSplit,
+                                                dataSplit,
                                                 partitionCastExecutor,
                                                 keyConverters,
                                                 file,

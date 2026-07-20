@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -34,6 +35,7 @@ import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -47,13 +49,16 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -125,6 +130,25 @@ public class FilesTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder("{1, 10}-1-0");
         assertThat(readPartBucketLevel(builder.equal(5, 5)))
                 .containsExactlyInAnyOrder("{2, 20}-0-5");
+    }
+
+    @Test
+    public void testReadQueryAuthSplits() throws Exception {
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(Collections.emptyList(), Collections.emptyMap());
+        List<Split> splits =
+                table.newScan().plan().splits().stream()
+                        .map(split -> new QueryAuthSplit(split, authResult))
+                        .collect(Collectors.toList());
+        FilesTable.FilesSplit filesSplit = Mockito.mock(FilesTable.FilesSplit.class);
+        Mockito.when(filesSplit.splits(Mockito.any(FileStoreTable.class))).thenReturn(splits);
+
+        List<String> paths = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = filesTable.newRead().createReader(filesSplit)) {
+            reader.forEachRemaining(row -> paths.add(row.getString(2).toString()));
+        }
+
+        assertThat(paths).hasSameSizeAs(read(filesTable));
     }
 
     private List<String> readPartBucketLevel(Predicate predicate) throws IOException {

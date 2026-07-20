@@ -40,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
+
 /** List what data files recorded in manifests are missing from the filesystem. */
 public class ListUnexistingFiles {
 
@@ -48,11 +50,14 @@ public class ListUnexistingFiles {
     private final ThreadPoolExecutor executor;
 
     public ListUnexistingFiles(FileStoreTable table) {
-        this.table = table;
-        this.pathFactory = table.store().pathFactory();
+        this.table =
+                table.coreOptions().queryAuthEnabled()
+                        ? table.copy(Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "false"))
+                        : table;
+        this.pathFactory = this.table.store().pathFactory();
         this.executor =
                 FileOperationThreadPool.getExecutorService(
-                        table.coreOptions().fileOperationThreadNum());
+                        this.table.coreOptions().fileOperationThreadNum());
     }
 
     public Map<Integer, Map<String, DataFileMeta>> list(BinaryRow partition) throws Exception {
