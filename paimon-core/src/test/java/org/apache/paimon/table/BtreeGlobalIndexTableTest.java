@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -45,6 +46,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -60,7 +62,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -500,6 +504,117 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }
+    }
+
+    @Test
+    public void testMultiFileRangeNegationPredicatesUseAbsoluteRowIds() throws Exception {
+        int rowCount = 1000;
+        writeWithNullF1(rowCount);
+
+        // records-per-range (100) << range width (1000), so the single range built below rotates
+        // into ~10 btree files that share one row range.
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.setOption(
+                        BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.key(), "100"),
+                false);
+        createIndex("f1", Collections.singletonList(new Range(0, rowCount - 1)));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+
+        // IS NOT NULL -> exactly the non-null rows, by absolute row id.
+        List<Long> expectedNonNull = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            if (!isNullRow(i)) {
+                expectedNonNull.add((long) i);
+            }
+        }
+        assertThat(toRowIdList(globalIndexScan(table, builder.isNotNull(1))))
+                .containsExactlyInAnyOrderElementsOf(expectedNonNull);
+
+        // NOT EQUAL -> non-null rows minus the ones equal to a present value.
+        int equalIdx = 1; // non-null (1 % 10 != 0)
+        List<Long> expectedNotEqual = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            if (!isNullRow(i) && !f1Value(i).equals(f1Value(equalIdx))) {
+                expectedNotEqual.add((long) i);
+            }
+        }
+        assertThat(
+                        toRowIdList(
+                                globalIndexScan(
+                                        table,
+                                        builder.notEqual(
+                                                1, BinaryString.fromString(f1Value(equalIdx))))))
+                .containsExactlyInAnyOrderElementsOf(expectedNotEqual);
+
+        // NOT IN -> non-null rows minus a set of present values.
+        List<Integer> inIndexes = Arrays.asList(1, 2, 3, 4, 6); // all non-null
+        List<Object> inLiterals = new ArrayList<>();
+        Set<String> inValues = new HashSet<>();
+        for (int idx : inIndexes) {
+            inLiterals.add(BinaryString.fromString(f1Value(idx)));
+            inValues.add(f1Value(idx));
+        }
+        List<Long> expectedNotIn = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            if (!isNullRow(i) && !inValues.contains(f1Value(i))) {
+                expectedNotIn.add((long) i);
+            }
+        }
+        assertThat(toRowIdList(globalIndexScan(table, builder.notIn(1, inLiterals))))
+                .containsExactlyInAnyOrderElementsOf(expectedNotIn);
+    }
+
+    /** Every 10th row has a null indexed value; the rest carry a scrambled, distinct value. */
+    private static boolean isNullRow(int i) {
+        return i % 10 == 0;
+    }
+
+    /**
+     * Zero-padded reverse ordering so the lexicographic (indexed) order scrambles the row-id order,
+     * making each rotated btree file hold a sparse, non-{@code [0, rowCount)} subset of row ids.
+     */
+    private static String f1Value(int i) {
+        return String.format("v%08d", 1_000_000 - i);
+    }
+
+    private void writeWithNullF1(long count) throws Exception {
+        createTableDefault();
+
+        Schema schema = schemaDefault();
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                BinaryString f1 = isNullRow(i) ? null : BinaryString.fromString(f1Value(i));
+                write0.write(GenericRow.of(i, f1));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+
+        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
+    }
+
+    private static List<Long> toRowIdList(RoaringNavigableMap64 rowIds) {
+        List<Long> ids = new ArrayList<>();
+        for (long id : rowIds) {
+            ids.add(id);
+        }
+        return ids;
     }
 
     private void createIndex(String fieldName) throws Exception {
