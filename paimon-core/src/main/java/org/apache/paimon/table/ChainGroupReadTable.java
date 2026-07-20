@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
@@ -46,6 +48,8 @@ import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -119,6 +123,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
     private DataTableScan newDeltaScan(Function<FileStoreTable, DataTableScan> scanCreator) {
         return scanCreator.apply(other());
+    }
+
+    static FileStoreTable withoutQueryAuth(FileStoreTable table) {
+        if (!table.coreOptions().queryAuthEnabled()) {
+            return table;
+        }
+        return table.copy(Collections.singletonMap(CoreOptions.QUERY_AUTH_ENABLED.key(), "false"));
     }
 
     @Override
@@ -212,6 +223,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final ChainGroupReadTable chainGroupReadTable;
         private final RecordComparator chainPartitionComparator;
         private final ChainPartitionProjector partitionProjector;
+        private final TableQueryAuth queryAuth;
+        @Nullable private RowType readType;
         private Predicate dataPredicate;
         private Filter<Integer> bucketFilter;
         protected boolean preloadTargetSnapshot = true;
@@ -230,9 +243,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     chainGroupReadTable.wrapped,
                     chainGroupReadTable.other(),
                     tableSchema,
-                    scanCreator);
+                    physicalScanCreator(scanCreator));
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
+            this.queryAuth = chainGroupReadTable.catalogEnvironment().tableQueryAuth(this.options);
             this.partitionConverter =
                     new RowDataToObjectArrayConverter(tableSchema.logicalPartitionType());
             this.partitionComparator =
@@ -251,6 +265,19 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             partitionProjector.chainPartitionType().getFieldTypes());
         }
 
+        private static Function<FileStoreTable, DataTableScan> physicalScanCreator(
+                Function<FileStoreTable, DataTableScan> scanCreator) {
+            return table -> scanCreator.apply(ChainGroupReadTable.withoutQueryAuth(table));
+        }
+
+        @Override
+        public ChainTableBatchScan withReadType(@Nullable RowType readType) {
+            this.readType = readType;
+            mainScan.withReadType(readType);
+            fallbackScan.withReadType(readType);
+            return this;
+        }
+
         @Override
         public ChainTableBatchScan withFilter(Predicate predicate) {
             super.withFilter(predicate);
@@ -264,6 +291,18 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 tableSchema.partitionKeys());
                 dataPredicate =
                         pair.getRight().isEmpty() ? null : PredicateBuilder.and(pair.getRight());
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withLimit(int limit) {
+            // Query authorization is applied only after the physical chain inputs have been
+            // assembled. Pushing a limit into those raw inputs could exhaust the limit with rows
+            // which are later removed by authorization. ReadBuilderImpl applies the logical limit
+            // after query authorization instead.
+            if (!options.queryAuthEnabled()) {
+                super.withLimit(limit);
             }
             return this;
         }
@@ -335,6 +374,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
          */
         @Override
         public Plan plan() {
+            TableQueryAuthResult queryAuthResult =
+                    queryAuth.auth(readType == null ? null : readType.getFieldNames());
             List<Split> splits = new ArrayList<>();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             Set<BinaryRow> snapshotPartitions = preloadTargetSnapshotSplits(splits);
@@ -451,7 +492,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     }
                 }
             }
-            return new DataFilePlan<>(splits);
+            Plan plan = new DataFilePlan<>(splits);
+            return queryAuthResult == null ? plan : queryAuthResult.convertPlan(plan);
         }
 
         @Override
@@ -500,13 +542,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
                 }
                 splits.add(
-                        QueryAuthSplit.retainAuth(
-                                split,
-                                new ChainSplit(
-                                        dataSplit.partition(),
-                                        dataSplit.dataFiles(),
-                                        fileBranchMapping,
-                                        fileBucketPathMapping)));
+                        new ChainSplit(
+                                dataSplit.partition(),
+                                dataSplit.dataFiles(),
+                                fileBranchMapping,
+                                fileBucketPathMapping));
             }
 
             snapshotPartitions.addAll(
@@ -525,6 +565,9 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
             if (bucketFilter != null) {
                 scan.withBucketFilter(bucketFilter);
+            }
+            if (readType != null) {
+                scan.withReadType(readType);
             }
             return scan;
         }

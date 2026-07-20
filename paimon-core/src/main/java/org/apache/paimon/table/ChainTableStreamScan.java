@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -37,8 +38,10 @@ import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.StartingContext;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
@@ -90,6 +93,11 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     /** Projector for splitting full partition into group and chain parts. */
     private final ChainPartitionProjector partitionProjector;
 
+    /** Query authorization for the logical chain table, applied after physical split assembly. */
+    private final TableQueryAuth queryAuth;
+
+    @Nullable private RowType readType;
+
     /** Comparator for chain partition keys only. */
     private final RecordComparator chainPartitionComparator;
 
@@ -132,7 +140,14 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         this.batchScan =
                 new ChainGroupReadTable.ChainTableBatchScan(
                         chainGroupReadTable.schema(), chainGroupReadTable);
-        this.deltaStreamScan = (DataTableStreamScan) chainGroupReadTable.other().newStreamScan();
+        this.deltaStreamScan =
+                (DataTableStreamScan)
+                        ChainGroupReadTable.withoutQueryAuth(chainGroupReadTable.other())
+                                .newStreamScan();
+        this.queryAuth =
+                chainGroupReadTable
+                        .catalogEnvironment()
+                        .tableQueryAuth(chainGroupReadTable.coreOptions());
 
         ChainTableUtils.validateChainTableForIncrementalRead(chainGroupReadTable);
 
@@ -161,6 +176,13 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
     @Override
     public TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult =
+                queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        TableScan.Plan plan = planWithoutQueryAuth();
+        return queryAuthResult == null ? plan : queryAuthResult.convertPlan(plan);
+    }
+
+    private TableScan.Plan planWithoutQueryAuth() {
         if (!startingDone) {
             return planStarting();
         }
@@ -336,9 +358,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         for (Map.Entry<BinaryRow, List<Split>> entry : snapshotSplitsByPartition.entrySet()) {
             for (Split split : entry.getValue()) {
                 DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
-                allSplits.add(
-                        QueryAuthSplit.retainAuth(
-                                split, ChainSplit.from(dataSplit, snapshotBranch)));
+                allSplits.add(ChainSplit.from(dataSplit, snapshotBranch));
             }
         }
 
@@ -356,9 +376,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                             > 0) {
                 for (Split split : entry.getValue()) {
                     DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
-                    allSplits.add(
-                            QueryAuthSplit.retainAuth(
-                                    split, ChainSplit.from(dataSplit, deltaBranch)));
+                    allSplits.add(ChainSplit.from(dataSplit, deltaBranch));
                 }
             }
         }
@@ -532,6 +550,14 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     }
 
     @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        this.readType = readType;
+        batchScan.withReadType(readType);
+        deltaStreamScan.withReadType(readType);
+        return this;
+    }
+
+    @Override
     public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
         throw new UnsupportedOperationException(
                 "Partition filter is not supported in chain table streaming read.");
@@ -587,6 +613,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshotId));
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "false");
         return options;
     }
 
@@ -603,6 +630,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         }
         if (bucketFilter != null) {
             scan.withBucketFilter(bucketFilter);
+        }
+        if (readType != null) {
+            scan.withReadType(readType);
         }
     }
 

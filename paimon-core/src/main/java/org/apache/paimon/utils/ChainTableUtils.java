@@ -377,15 +377,15 @@ public class ChainTableUtils {
     /**
      * Builds per-bucket {@link ChainSplit}s from the given snapshot and delta splits. Files that
      * originate from the snapshot splits are tagged with {@code snapshotBranch}; all other files
-     * are tagged with {@code deltaBranch}. If an input split carries query authorization, the
-     * corresponding output split retains it.
+     * are tagged with {@code deltaBranch}. Query authorization belongs to the logical chain-table
+     * plan and must be applied by the caller after all physical splits have been assembled.
      *
      * @param logicalPartition the logical partition for the resulting ChainSplits
      * @param snapshotSplits splits from the snapshot branch
      * @param deltaSplits splits from the delta branch
      * @param snapshotBranch name of the snapshot branch
      * @param deltaBranch name of the delta branch
-     * @return one split per bucket, optionally wrapped with query authorization
+     * @return one raw chain split per bucket
      */
     public static List<Split> buildChainSplits(
             BinaryRow logicalPartition,
@@ -432,7 +432,7 @@ public class ChainTableUtils {
                                     .collect(Collectors.toList()),
                             fileBranchMapping,
                             fileBucketPathMapping);
-            result.add(retainQueryAuth(entry.getValue(), chainSplit));
+            result.add(chainSplit);
         }
         return result;
     }
@@ -448,15 +448,6 @@ public class ChainTableUtils {
         }
         bucketSplits.computeIfAbsent(ds.bucket(), k -> new ArrayList<>()).add(split);
         return totalBuckets;
-    }
-
-    private static Split retainQueryAuth(List<Split> sourceSplits, Split replacement) {
-        for (Split sourceSplit : sourceSplits) {
-            if (sourceSplit instanceof QueryAuthSplit) {
-                return QueryAuthSplit.retainAuth(sourceSplit, replacement);
-            }
-        }
-        return replacement;
     }
 
     /**

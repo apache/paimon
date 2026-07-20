@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileTestDataGenerator;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -35,6 +36,8 @@ import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -46,8 +49,13 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,14 +63,22 @@ import static org.mockito.Mockito.when;
 public class ChainGroupReadTableTest {
 
     @Test
-    public void testBatchScanRetainsQueryAuth() throws Exception {
+    public void testBatchScanUsesLogicalQueryAuth() throws Exception {
         TableSchema schema = tableSchema();
-        PrimaryKeyFileStoreTable snapshotTable = table(schema, "snapshot");
-        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta");
+        TableQueryAuthResult logicalAuth = maskingAuth("logical");
+        CatalogEnvironment catalogEnvironment = catalogEnvironment(logicalAuth);
+        PrimaryKeyFileStoreTable snapshotTable =
+                table(schema, "snapshot", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawSnapshotTable =
+                table(schema, "snapshot", false, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawDeltaTable = table(schema, "delta", false, catalogEnvironment);
+        when(snapshotTable.copy(anyMap())).thenReturn(rawSnapshotTable);
+        when(deltaTable.copy(anyMap())).thenReturn(rawDeltaTable);
         ChainGroupReadTable chainTable = new ChainGroupReadTable(snapshotTable, deltaTable);
 
         BinaryRow partition = BinaryRow.singleColumn(1);
-        QueryAuthSplit sourceSplit = queryAuthSplit(dataSplit(partition));
+        QueryAuthSplit sourceSplit = queryAuthSplit(dataSplit(partition), maskingAuth("physical"));
         DataTableScan snapshotScan = mock(DataTableScan.class);
         when(snapshotScan.plan())
                 .thenReturn(new DataFilePlan<>(Collections.singletonList(sourceSplit)));
@@ -75,13 +91,16 @@ public class ChainGroupReadTableTest {
                 new ChainGroupReadTable.ChainTableBatchScan(
                         schema,
                         chainTable,
-                        table -> table == snapshotTable ? snapshotScan : deltaScan);
+                        table -> table == rawSnapshotTable ? snapshotScan : deltaScan);
         List<Split> splits = scan.plan().splits();
 
         assertThat(splits).hasSize(1);
         QueryAuthSplit result = (QueryAuthSplit) splits.get(0);
-        assertThat(result.authResult()).isSameAs(sourceSplit.authResult());
+        assertThat(result.authResult()).isSameAs(logicalAuth);
+        assertThat(result.authResult()).isNotSameAs(sourceSplit.authResult());
         assertThat(result.split()).isInstanceOf(ChainSplit.class);
+        verifyQueryAuthDisabled(snapshotTable);
+        verifyQueryAuthDisabled(deltaTable);
 
         InnerTableRead snapshotRead = mock(InnerTableRead.class);
         InnerTableRead deltaRead = mock(InnerTableRead.class);
@@ -92,6 +111,71 @@ public class ChainGroupReadTableTest {
 
         assertThat(chainTable.newRead().createReader(result)).isSameAs(reader);
         verify(deltaRead).createReader(result);
+    }
+
+    @Test
+    public void testBatchScanKeepsHistoricalAnchorOutsideAuthorizedPartition() {
+        TableSchema schema = tableSchema();
+        RowType rowType = schema.logicalRowType();
+        TableQueryAuthResult logicalAuth =
+                new TableQueryAuthResult(
+                        Collections.singletonList(
+                                JsonSerdeUtil.toFlatJson(
+                                        new PredicateBuilder(rowType).equal(0, 20260720))),
+                        null);
+        CatalogEnvironment catalogEnvironment = catalogEnvironment(logicalAuth);
+        PrimaryKeyFileStoreTable snapshotTable =
+                table(schema, "snapshot", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawSnapshotTable =
+                table(schema, "snapshot", false, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawDeltaTable = table(schema, "delta", false, catalogEnvironment);
+        when(snapshotTable.copy(anyMap())).thenReturn(rawSnapshotTable);
+        when(deltaTable.copy(anyMap())).thenReturn(rawDeltaTable);
+
+        BinaryRow historicalPartition = BinaryRow.singleColumn(20260719);
+        BinaryRow authorizedPartition = BinaryRow.singleColumn(20260720);
+        DataTableScan snapshotScan = mock(DataTableScan.class);
+        when(snapshotScan.listPartitions())
+                .thenReturn(Collections.singletonList(historicalPartition));
+        when(snapshotScan.plan())
+                .thenReturn(
+                        new DataFilePlan<>(
+                                Collections.singletonList(
+                                        queryAuthSplit(
+                                                dataSplit(historicalPartition),
+                                                maskingAuth("snapshot")))));
+        DataTableScan deltaScan = mock(DataTableScan.class);
+        when(deltaScan.listPartitions()).thenReturn(Collections.singletonList(authorizedPartition));
+        when(deltaScan.plan())
+                .thenReturn(
+                        new DataFilePlan<>(
+                                Collections.singletonList(
+                                        queryAuthSplit(
+                                                dataSplit(authorizedPartition),
+                                                maskingAuth("delta")))));
+
+        ChainGroupReadTable chainTable = new ChainGroupReadTable(snapshotTable, deltaTable);
+        ChainGroupReadTable.ChainTableBatchScan scan =
+                new ChainGroupReadTable.ChainTableBatchScan(
+                        schema,
+                        chainTable,
+                        table -> table == rawSnapshotTable ? snapshotScan : deltaScan);
+        scan.skipPreloadTargetSnapshot();
+        scan.withLimit(1);
+
+        List<Split> splits = scan.plan().splits();
+
+        assertThat(splits).hasSize(1);
+        QueryAuthSplit result = (QueryAuthSplit) splits.get(0);
+        assertThat(result.authResult()).isSameAs(logicalAuth);
+        ChainSplit chainSplit = (ChainSplit) result.split();
+        assertThat(chainSplit.logicalPartition()).isEqualTo(authorizedPartition);
+        assertThat(chainSplit.dataFiles()).hasSize(2);
+        verify(snapshotScan, never()).withLimit(anyInt());
+        verify(deltaScan, never()).withLimit(anyInt());
+        verifyQueryAuthDisabled(snapshotTable);
+        verifyQueryAuthDisabled(deltaTable);
     }
 
     @Test
@@ -106,15 +190,21 @@ public class ChainGroupReadTableTest {
 
     private void testStreamStartingPlanRetainsQueryAuth(boolean mergeSnapshot) {
         TableSchema schema = tableSchema(mergeSnapshot);
-        PrimaryKeyFileStoreTable snapshotTable = table(schema, "snapshot");
-        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta");
+        TableQueryAuthResult logicalAuth = maskingAuth("logical");
+        CatalogEnvironment catalogEnvironment = catalogEnvironment(logicalAuth);
+        PrimaryKeyFileStoreTable snapshotTable =
+                table(schema, "snapshot", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable deltaTable = table(schema, "delta", true, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawSnapshotTable =
+                table(schema, "snapshot", false, catalogEnvironment);
+        PrimaryKeyFileStoreTable rawDeltaTable = table(schema, "delta", false, catalogEnvironment);
 
         DataTableScan unusedScan = mock(DataTableScan.class);
-        when(snapshotTable.newScan()).thenReturn(unusedScan);
-        when(deltaTable.newScan()).thenReturn(unusedScan);
+        when(rawSnapshotTable.newScan()).thenReturn(unusedScan);
+        when(rawDeltaTable.newScan()).thenReturn(unusedScan);
 
         DataTableStreamScan deltaStreamScan = mock(DataTableStreamScan.class);
-        when(deltaTable.newStreamScan()).thenReturn(deltaStreamScan);
+        when(rawDeltaTable.newStreamScan()).thenReturn(deltaStreamScan);
 
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
         when(snapshotManager.latestSnapshotId()).thenReturn(null);
@@ -125,13 +215,22 @@ public class ChainGroupReadTableTest {
         when(deltaTable.snapshotManager()).thenReturn(deltaSnapshotManager);
 
         BinaryRow partition = BinaryRow.singleColumn(1);
-        QueryAuthSplit sourceSplit = queryAuthSplit(dataSplit(partition));
+        QueryAuthSplit sourceSplit = queryAuthSplit(dataSplit(partition), maskingAuth("physical"));
         DataTableScan pinnedDeltaScan = mock(DataTableScan.class);
         when(pinnedDeltaScan.plan())
                 .thenReturn(new DataFilePlan<>(Collections.singletonList(sourceSplit)));
-        PrimaryKeyFileStoreTable pinnedDeltaTable = table(schema, "delta");
+        PrimaryKeyFileStoreTable pinnedDeltaTable =
+                table(schema, "delta", false, catalogEnvironment);
         when(pinnedDeltaTable.newScan()).thenReturn(pinnedDeltaScan);
-        when(deltaTable.copy(anyMap())).thenReturn(pinnedDeltaTable);
+        when(snapshotTable.copy(anyMap())).thenReturn(rawSnapshotTable);
+        when(deltaTable.copy(anyMap()))
+                .thenAnswer(
+                        invocation -> {
+                            Map<String, String> options = invocation.getArgument(0);
+                            return options.containsKey(CoreOptions.SCAN_SNAPSHOT_ID.key())
+                                    ? pinnedDeltaTable
+                                    : rawDeltaTable;
+                        });
 
         ChainTableStreamScan scan =
                 new ChainTableStreamScan(new ChainGroupReadTable(snapshotTable, deltaTable));
@@ -139,18 +238,46 @@ public class ChainGroupReadTableTest {
 
         assertThat(splits).hasSize(1);
         QueryAuthSplit result = (QueryAuthSplit) splits.get(0);
-        assertThat(result.authResult()).isSameAs(sourceSplit.authResult());
+        assertThat(result.authResult()).isSameAs(logicalAuth);
+        assertThat(result.authResult()).isNotSameAs(sourceSplit.authResult());
         assertThat(result.split()).isInstanceOf(ChainSplit.class);
         verify(deltaStreamScan).restore(2L);
+        verifyQueryAuthDisabled(snapshotTable);
+        verifyQueryAuthDisabled(deltaTable);
     }
 
-    private static PrimaryKeyFileStoreTable table(TableSchema schema, String branch) {
+    private static PrimaryKeyFileStoreTable table(
+            TableSchema schema,
+            String branch,
+            boolean queryAuthEnabled,
+            CatalogEnvironment catalogEnvironment) {
         PrimaryKeyFileStoreTable table = mock(PrimaryKeyFileStoreTable.class);
         when(table.schema()).thenReturn(schema);
         Map<String, String> options = new HashMap<>(schema.options());
         options.put(CoreOptions.BRANCH.key(), branch);
+        options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), String.valueOf(queryAuthEnabled));
         when(table.coreOptions()).thenReturn(CoreOptions.fromMap(options));
+        when(table.catalogEnvironment()).thenReturn(catalogEnvironment);
         return table;
+    }
+
+    private static CatalogEnvironment catalogEnvironment(TableQueryAuthResult authResult) {
+        CatalogEnvironment catalogEnvironment = mock(CatalogEnvironment.class);
+        when(catalogEnvironment.tableQueryAuth(any(CoreOptions.class)))
+                .thenReturn(select -> authResult);
+        return catalogEnvironment;
+    }
+
+    private static void verifyQueryAuthDisabled(PrimaryKeyFileStoreTable table) {
+        verify(table, atLeastOnce())
+                .copy(
+                        argThat(
+                                (Map<String, String> options) ->
+                                        "false"
+                                                .equals(
+                                                        options.get(
+                                                                CoreOptions.QUERY_AUTH_ENABLED
+                                                                        .key()))));
     }
 
     private static TableSchema tableSchema() {
@@ -166,6 +293,9 @@ public class ChainGroupReadTableTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot");
         options.put(CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta");
+        options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$pt");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
         options.put(
                 CoreOptions.CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT.key(),
                 String.valueOf(mergeSnapshot));
@@ -192,9 +322,11 @@ public class ChainGroupReadTableTest {
                 .build();
     }
 
-    private static QueryAuthSplit queryAuthSplit(DataSplit split) {
-        TableQueryAuthResult authResult =
-                new TableQueryAuthResult(null, Collections.singletonMap("v", "mask"));
+    private static QueryAuthSplit queryAuthSplit(DataSplit split, TableQueryAuthResult authResult) {
         return new QueryAuthSplit(split, authResult);
+    }
+
+    private static TableQueryAuthResult maskingAuth(String value) {
+        return new TableQueryAuthResult(null, Collections.singletonMap("v", value));
     }
 }
