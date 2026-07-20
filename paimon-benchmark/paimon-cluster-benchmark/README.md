@@ -31,7 +31,7 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 
 ### Run Benchmark
 * Run `paimon-benchmark/bin/run_benchmark.sh <query> <sink>` to run `<query>` for `<sink>`. Currently `<query>` can be `q1` or `all`, and sink can only be `paimon`.
-* By default, each query writes for 30 minutes and then reads all records back from the sink to measure read throughput.
+* By default, each query writes the number of rows configured by `row-num` in `paimon-benchmark/queries/queries.yaml` and then reads all records back from the sink to measure read throughput.
 
 ## Queries
 
@@ -45,7 +45,7 @@ Results of each query consist of the following aspects:
 * Throughput (rows/s): Average number of rows inserted into the sink per second.
 * Total Rows: Total number of rows written.
 * Cores: Average CPU cost.
-* Throughput/Cores: Number of bytes inserted into the sink per second per CPU.
+* Throughput/Core: Number of rows inserted into the sink per second per CPU core.
 * Avg Data Freshness: Average time elapsed from the starting point of the last successful checkpoint.
 * Max Data Freshness: Max time elapsed from the starting point of the last successful checkpoint.
 
