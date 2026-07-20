@@ -62,7 +62,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Chain table which mainly read from the snapshot branch. However, if the snapshot branch does not
@@ -435,18 +434,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             deltaScan.withPartitionFilter(selectedDeltaPartitions);
                         }
 
-                        List<DataSplit> deltaSubSplits =
-                                deltaScan.plan().splits().stream()
-                                        .map(s -> (DataSplit) s)
-                                        .collect(Collectors.toList());
-                        List<DataSplit> snapshotSubSplits = new ArrayList<>();
+                        List<Split> deltaSubSplits = deltaScan.plan().splits();
+                        List<Split> snapshotSubSplits = Collections.emptyList();
                         if (partitionPairs.getValue() != null) {
                             snapshotScan.withPartitionFilter(
                                     Collections.singletonList(partitionPairs.getValue()));
-                            snapshotSubSplits =
-                                    snapshotScan.plan().splits().stream()
-                                            .map(s -> (DataSplit) s)
-                                            .collect(Collectors.toList());
+                            snapshotSubSplits = snapshotScan.plan().splits();
                         }
                         splits.addAll(
                                 ChainTableUtils.buildChainSplits(
@@ -520,15 +513,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     newChainPartitionListingScan(true, getMainPartitionPredicate())
                             .listPartitions());
             return snapshotPartitions;
-        }
-
-        private static Split retainQueryAuth(List<Split> sourceSplits, Split replacement) {
-            for (Split sourceSplit : sourceSplits) {
-                if (sourceSplit instanceof QueryAuthSplit) {
-                    return QueryAuthSplit.retainAuth(sourceSplit, replacement);
-                }
-            }
-            return replacement;
         }
 
         private DataTableScan newFilteredScan(boolean snapshot) {

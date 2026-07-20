@@ -31,6 +31,8 @@ import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -375,40 +377,43 @@ public class ChainTableUtils {
     /**
      * Builds per-bucket {@link ChainSplit}s from the given snapshot and delta splits. Files that
      * originate from the snapshot splits are tagged with {@code snapshotBranch}; all other files
-     * are tagged with {@code deltaBranch}.
+     * are tagged with {@code deltaBranch}. If an input split carries query authorization, the
+     * corresponding output split retains it.
      *
      * @param logicalPartition the logical partition for the resulting ChainSplits
      * @param snapshotSplits splits from the snapshot branch
      * @param deltaSplits splits from the delta branch
      * @param snapshotBranch name of the snapshot branch
      * @param deltaBranch name of the delta branch
-     * @return one ChainSplit per bucket
+     * @return one split per bucket, optionally wrapped with query authorization
      */
-    public static List<ChainSplit> buildChainSplits(
+    public static List<Split> buildChainSplits(
             BinaryRow logicalPartition,
-            List<DataSplit> snapshotSplits,
-            List<DataSplit> deltaSplits,
+            List<Split> snapshotSplits,
+            List<Split> deltaSplits,
             String snapshotBranch,
             String deltaBranch) {
         Set<String> snapshotFileNames =
                 snapshotSplits.stream()
+                        .map(QueryAuthSplit::unwrapDataSplit)
                         .flatMap(s -> s.dataFiles().stream().map(DataFileMeta::fileName))
                         .collect(Collectors.toSet());
 
-        Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
+        Map<Integer, List<Split>> bucketSplits = new LinkedHashMap<>();
         Integer bucketInAll = null;
-        for (DataSplit ds : snapshotSplits) {
-            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        for (Split split : snapshotSplits) {
+            bucketInAll = addToBucketMap(split, bucketSplits, bucketInAll);
         }
-        for (DataSplit ds : deltaSplits) {
-            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        for (Split split : deltaSplits) {
+            bucketInAll = addToBucketMap(split, bucketSplits, bucketInAll);
         }
 
-        List<ChainSplit> result = new ArrayList<>();
-        for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
+        List<Split> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<Split>> entry : bucketSplits.entrySet()) {
             Map<String, String> fileBranchMapping = new HashMap<>();
             Map<String, String> fileBucketPathMapping = new HashMap<>();
-            for (DataSplit ds : entry.getValue()) {
+            for (Split split : entry.getValue()) {
+                DataSplit ds = QueryAuthSplit.unwrapDataSplit(split);
                 for (DataFileMeta file : ds.dataFiles()) {
                     fileBucketPathMapping.put(file.fileName(), ds.bucketPath());
                     String branch =
@@ -418,28 +423,40 @@ public class ChainTableUtils {
                     fileBranchMapping.put(file.fileName(), branch);
                 }
             }
-            result.add(
+            ChainSplit chainSplit =
                     new ChainSplit(
                             logicalPartition,
                             entry.getValue().stream()
+                                    .map(QueryAuthSplit::unwrapDataSplit)
                                     .flatMap(ds -> ds.dataFiles().stream())
                                     .collect(Collectors.toList()),
                             fileBranchMapping,
-                            fileBucketPathMapping));
+                            fileBucketPathMapping);
+            result.add(retainQueryAuth(entry.getValue(), chainSplit));
         }
         return result;
     }
 
     private static Integer addToBucketMap(
-            DataSplit ds, Map<Integer, List<DataSplit>> bucketSplits, Integer bucketInAll) {
+            Split split, Map<Integer, List<Split>> bucketSplits, Integer bucketInAll) {
+        DataSplit ds = QueryAuthSplit.unwrapDataSplit(split);
         Integer totalBuckets = ds.totalBuckets();
         checkNotNull(totalBuckets, "totalBuckets should not be null");
         if (bucketInAll != null) {
             checkArgument(
                     totalBuckets.equals(bucketInAll), "Inconsistent bucket num " + ds.bucket());
         }
-        bucketSplits.computeIfAbsent(ds.bucket(), k -> new ArrayList<>()).add(ds);
+        bucketSplits.computeIfAbsent(ds.bucket(), k -> new ArrayList<>()).add(split);
         return totalBuckets;
+    }
+
+    private static Split retainQueryAuth(List<Split> sourceSplits, Split replacement) {
+        for (Split sourceSplit : sourceSplits) {
+            if (sourceSplit instanceof QueryAuthSplit) {
+                return QueryAuthSplit.retainAuth(sourceSplit, replacement);
+            }
+        }
+        return replacement;
     }
 
     /**

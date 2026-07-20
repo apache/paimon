@@ -328,8 +328,8 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private List<Split> buildLightweightStartingSplits(
             String snapshotBranch,
             String deltaBranch,
-            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
-            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<BinaryRow, List<Split>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<Split>> deltaSplitsByPartition,
             Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
@@ -375,15 +375,15 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private List<Split> buildMergedStartingSplits(
             String snapshotBranch,
             String deltaBranch,
-            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
-            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<BinaryRow, List<Split>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<Split>> deltaSplitsByPartition,
             Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
         // Pre-group delta splits and find the latest delta partition per group.
-        Map<Object, List<DataSplit>> deltaSplitsByGroup = new HashMap<>();
+        Map<Object, List<Split>> deltaSplitsByGroup = new HashMap<>();
         Map<Object, BinaryRow> latestDeltaPartitionPerGroup = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<DataSplit>> e : deltaSplitsByPartition.entrySet()) {
+        for (Map.Entry<BinaryRow, List<Split>> e : deltaSplitsByPartition.entrySet()) {
             BinaryRow deltaPartition = e.getKey();
             Object groupKey = toGroupKey(deltaPartition);
             deltaSplitsByGroup
@@ -404,7 +404,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         for (Map.Entry<Object, BinaryRow> entry : latestChainPartitionPerGroup.entrySet()) {
             Object groupKey = entry.getKey();
             BinaryRow snapshotPartition = entry.getValue();
-            List<DataSplit> snapshotSplits =
+            List<Split> snapshotSplits =
                     snapshotSplitsByPartition.getOrDefault(
                             snapshotPartition, Collections.emptyList());
 
@@ -418,15 +418,16 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                                                     snapshotPartition))
                                     > 0;
 
-            List<DataSplit> selectedDeltaSplits = new ArrayList<>();
+            List<Split> selectedDeltaSplits = new ArrayList<>();
             if (hasDeltaAfterSnapshot) {
-                for (DataSplit dataSplit : deltaSplitsByGroup.get(groupKey)) {
+                for (Split split : deltaSplitsByGroup.get(groupKey)) {
+                    DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                     BinaryRow deltaPartition = dataSplit.partition();
                     if (chainPartitionComparator.compare(
                                     partitionProjector.extractChainPartition(deltaPartition),
                                     partitionProjector.extractChainPartition(snapshotPartition))
                             > 0) {
-                        selectedDeltaSplits.add(dataSplit);
+                        selectedDeltaSplits.add(split);
                     }
                 }
             }
@@ -444,7 +445,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
         // Delta-only groups: there is no snapshot anchor, so merge all delta partitions in the
         // group into the latest delta partition.
-        for (Map.Entry<Object, List<DataSplit>> entry : deltaSplitsByGroup.entrySet()) {
+        for (Map.Entry<Object, List<Split>> entry : deltaSplitsByGroup.entrySet()) {
             Object groupKey = entry.getKey();
             if (!latestChainPartitionPerGroup.containsKey(groupKey)) {
                 BinaryRow logicalPartition = latestDeltaPartitionPerGroup.get(groupKey);

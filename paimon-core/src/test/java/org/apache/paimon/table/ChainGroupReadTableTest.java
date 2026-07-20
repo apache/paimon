@@ -96,7 +96,16 @@ public class ChainGroupReadTableTest {
 
     @Test
     public void testStreamStartingPlanRetainsQueryAuth() {
-        TableSchema schema = tableSchema();
+        testStreamStartingPlanRetainsQueryAuth(false);
+    }
+
+    @Test
+    public void testStreamMergedStartingPlanRetainsQueryAuth() {
+        testStreamStartingPlanRetainsQueryAuth(true);
+    }
+
+    private void testStreamStartingPlanRetainsQueryAuth(boolean mergeSnapshot) {
+        TableSchema schema = tableSchema(mergeSnapshot);
         PrimaryKeyFileStoreTable snapshotTable = table(schema, "snapshot");
         PrimaryKeyFileStoreTable deltaTable = table(schema, "delta");
 
@@ -145,6 +154,10 @@ public class ChainGroupReadTableTest {
     }
 
     private static TableSchema tableSchema() {
+        return tableSchema(false);
+    }
+
+    private static TableSchema tableSchema(boolean mergeSnapshot) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "pt", DataTypes.INT()),
@@ -153,6 +166,9 @@ public class ChainGroupReadTableTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot");
         options.put(CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta");
+        options.put(
+                CoreOptions.CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT.key(),
+                String.valueOf(mergeSnapshot));
         return new TableSchema(
                 0,
                 fields,
