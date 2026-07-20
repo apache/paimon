@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -260,6 +261,16 @@ public abstract class OrphanFilesClean implements Serializable {
             Consumer<String> usedFileConsumer,
             Consumer<String> manifestConsumer)
             throws IOException {
+        collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer, name -> {});
+    }
+
+    protected void collectWithoutDataFile(
+            String branch,
+            Snapshot snapshot,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer,
+            Consumer<String> missingManifestListConsumer)
+            throws IOException {
         Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer =
                 fileAndFlag -> {
                     if (fileAndFlag.getRight()) {
@@ -267,7 +278,8 @@ public abstract class OrphanFilesClean implements Serializable {
                     }
                     usedFileConsumer.accept(fileAndFlag.getLeft());
                 };
-        collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileWithFlagConsumer);
+        collectWithoutDataFileWithManifestFlag(
+                branch, snapshot, usedFileWithFlagConsumer, missingManifestListConsumer);
     }
 
     protected void collectWithoutDataFileWithManifestFlag(
@@ -275,36 +287,47 @@ public abstract class OrphanFilesClean implements Serializable {
             Snapshot snapshot,
             Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer)
             throws IOException {
+        collectWithoutDataFileWithManifestFlag(
+                branch, snapshot, usedFileWithFlagConsumer, name -> {});
+    }
+
+    protected void collectWithoutDataFileWithManifestFlag(
+            String branch,
+            Snapshot snapshot,
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
+            Consumer<String> missingManifestListConsumer)
+            throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         ManifestList manifestList = branchTable.store().manifestListFactory().create();
         IndexFileHandler indexFileHandler = branchTable.store().newIndexFileHandler();
         List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
         // changelog manifest
         if (snapshot.changelogManifestList() != null) {
-            usedFileWithFlagConsumer.accept(Pair.of(snapshot.changelogManifestList(), false));
-            manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () ->
-                                    manifestList.readWithIOException(
-                                            snapshot.changelogManifestList()),
-                            emptyList()));
+            collectManifestList(
+                    manifestList,
+                    snapshot.changelogManifestList(),
+                    manifestFileMetas,
+                    usedFileWithFlagConsumer,
+                    missingManifestListConsumer);
         }
 
         // delta manifest
         if (snapshot.deltaManifestList() != null) {
-            usedFileWithFlagConsumer.accept(Pair.of(snapshot.deltaManifestList(), false));
-            manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () -> manifestList.readWithIOException(snapshot.deltaManifestList()),
-                            emptyList()));
+            collectManifestList(
+                    manifestList,
+                    snapshot.deltaManifestList(),
+                    manifestFileMetas,
+                    usedFileWithFlagConsumer,
+                    missingManifestListConsumer);
         }
 
         // base manifest
-        usedFileWithFlagConsumer.accept(Pair.of(snapshot.baseManifestList(), false));
-        manifestFileMetas.addAll(
-                retryReadingFiles(
-                        () -> manifestList.readWithIOException(snapshot.baseManifestList()),
-                        emptyList()));
+        collectManifestList(
+                manifestList,
+                snapshot.baseManifestList(),
+                manifestFileMetas,
+                usedFileWithFlagConsumer,
+                missingManifestListConsumer);
 
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
@@ -314,20 +337,48 @@ public abstract class OrphanFilesClean implements Serializable {
         // index files
         String indexManifest = snapshot.indexManifest();
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
-            retryReadingFiles(
+            AtomicBoolean indexManifestMissing = new AtomicBoolean(false);
+            List<IndexManifestEntry> indexEntries =
+                    retryReadingFiles(
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
-                            Collections.<IndexManifestEntry>emptyList())
-                    .stream()
-                    .map(IndexManifestEntry::indexFile)
-                    .map(IndexFileMeta::fileName)
-                    .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
+                            Collections.<IndexManifestEntry>emptyList(),
+                            indexManifestMissing);
+            if (indexManifestMissing.get()) {
+                missingManifestListConsumer.accept(indexManifest);
+            } else {
+                usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
+                indexEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .map(IndexFileMeta::fileName)
+                        .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
+            }
         }
 
         // statistic file
         if (snapshot.statistics() != null) {
             usedFileWithFlagConsumer.accept(Pair.of(snapshot.statistics(), false));
         }
+    }
+
+    private static void collectManifestList(
+            ManifestList manifestList,
+            String manifestListName,
+            List<ManifestFileMeta> manifestFileMetas,
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
+            Consumer<String> missingManifestListConsumer)
+            throws IOException {
+        AtomicBoolean missing = new AtomicBoolean(false);
+        List<ManifestFileMeta> metas =
+                retryReadingFiles(
+                        () -> manifestList.readWithIOException(manifestListName),
+                        emptyList(),
+                        missing);
+        if (missing.get()) {
+            missingManifestListConsumer.accept(manifestListName);
+            return;
+        }
+        usedFileWithFlagConsumer.accept(Pair.of(manifestListName, false));
+        manifestFileMetas.addAll(metas);
     }
 
     /** List directories that contains data files and manifest files. */
@@ -444,12 +495,23 @@ public abstract class OrphanFilesClean implements Serializable {
      */
     protected static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
             throws IOException {
+        return retryReadingFiles(reader, defaultValue, null);
+    }
+
+    protected static <T> T retryReadingFiles(
+            SupplierWithIOException<T> reader,
+            T defaultValue,
+            @Nullable AtomicBoolean fnfFallback)
+            throws IOException {
         int retryNumber = 0;
         IOException caught = null;
         while (retryNumber++ < READ_FILE_RETRY_NUM) {
             try {
                 return reader.get();
             } catch (FileNotFoundException e) {
+                if (fnfFallback != null) {
+                    fnfFallback.set(true);
+                }
                 return defaultValue;
             } catch (IOException e) {
                 caught = e;

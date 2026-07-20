@@ -63,6 +63,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -74,6 +75,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
     protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
+
+    private static final String MISSING_MANIFEST_SENTINEL =
+            "__PAIMON_ORPHAN_CLEAN_MISSING_MANIFEST__";
 
     @Nullable protected final Integer parallelism;
 
@@ -183,8 +187,14 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                             new Tuple2<>(branch, manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
+                                        Consumer<String> missingManifestListConsumer =
+                                                name -> out.collect(MISSING_MANIFEST_SENTINEL);
                                         collectWithoutDataFile(
-                                                branch, snapshot, out::collect, manifestConsumer);
+                                                branch,
+                                                snapshot,
+                                                out::collect,
+                                                manifestConsumer,
+                                                missingManifestListConsumer);
                                     }
                                 })
                         .name("collect-manifests");
@@ -219,12 +229,15 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                             .store()
                                                                             .manifestFileFactory()
                                                                             .create());
+                                            AtomicBoolean manifestMissing =
+                                                    new AtomicBoolean(false);
                                             retryReadingFiles(
                                                             () ->
                                                                     manifestFile
                                                                             .readWithIOException(
                                                                                     tuple2.f1),
-                                                            Collections.<ManifestEntry>emptyList())
+                                                            Collections.<ManifestEntry>emptyList(),
+                                                            manifestMissing)
                                                     .forEach(
                                                             f -> {
                                                                 List<String> files =
@@ -237,6 +250,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                                         new StreamRecord<>(
                                                                                                 file)));
                                                             });
+                                            if (manifestMissing.get()) {
+                                                output.collect(
+                                                        new StreamRecord<>(
+                                                                MISSING_MANIFEST_SENTINEL));
+                                            }
                                         }
                                     }
                                 });
@@ -369,6 +387,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     private long emittedFilesCount;
                                     private long emittedFilesLen;
 
+                                    private boolean abortDeletion;
+
                                     private final Set<String> used = new HashSet<>();
 
                                     @Override
@@ -385,6 +405,15 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 checkState(!buildEnd, "Should not build ended.");
                                                 LOG.info("Finish build phase.");
                                                 buildEnd = true;
+                                                if (abortDeletion) {
+                                                    LOG.warn(
+                                                            "Detected missing manifest-list/manifest "
+                                                                    + "during used-files collection; "
+                                                                    + "this indicates a concurrent "
+                                                                    + "snapshot expiration. Aborting "
+                                                                    + "orphan files clean to prevent "
+                                                                    + "data loss.");
+                                                }
                                                 break;
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
@@ -404,13 +433,21 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void processElement1(StreamRecord<String> element) {
-                                        used.add(element.getValue());
+                                        String value = element.getValue();
+                                        if (MISSING_MANIFEST_SENTINEL.equals(value)) {
+                                            abortDeletion = true;
+                                            return;
+                                        }
+                                        used.add(value);
                                     }
 
                                     @Override
                                     public void processElement2(
                                             StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
+                                        if (abortDeletion) {
+                                            return;
+                                        }
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
                                         Path path = new Path(value);

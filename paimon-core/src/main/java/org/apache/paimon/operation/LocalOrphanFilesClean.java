@@ -47,6 +47,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -108,11 +109,42 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         }
         candidateDeletes = new HashSet<>(candidates.keySet());
 
+        AtomicLong missingManifestListCount = new AtomicLong(0);
+        AtomicLong missingManifestCount = new AtomicLong(0);
+
         // find used files
         Set<String> usedFiles =
                 branches.stream()
-                        .flatMap(branch -> getUsedFiles(branch).stream())
+                        .flatMap(
+                                branch ->
+                                        getUsedFiles(
+                                                        branch,
+                                                        missingManifestListCount,
+                                                        missingManifestCount)
+                                                .stream())
                         .collect(Collectors.toSet());
+
+        if (usedFiles.isEmpty()) {
+            LOG.warn(
+                    "Collected used files is empty while {} candidates are present, "
+                            + "aborting orphan files clean to prevent data loss.",
+                    candidateDeletes.size());
+            return new CleanOrphanFilesResult(
+                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+        }
+
+        if (missingManifestListCount.get() > 0 || missingManifestCount.get() > 0) {
+            LOG.warn(
+                    "Detected {} missing manifest-list/index-manifest and {} missing manifest "
+                            + "file(s) during used-files collection while {} candidates are "
+                            + "present; this indicates a concurrent snapshot expiration. "
+                            + "Aborting orphan files clean to prevent data loss.",
+                    missingManifestListCount.get(),
+                    missingManifestCount.get(),
+                    candidateDeletes.size());
+            return new CleanOrphanFilesResult(
+                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+        }
 
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
@@ -157,14 +189,21 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     private void collectWithoutDataFile(
-            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
+            String branch,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer,
+            Consumer<String> missingManifestListConsumer)
             throws IOException {
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
                     try {
                         collectWithoutDataFile(
-                                branch, snapshot, usedFileConsumer, manifestConsumer);
+                                branch,
+                                snapshot,
+                                usedFileConsumer,
+                                manifestConsumer,
+                                missingManifestListConsumer);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -172,20 +211,29 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                 safelyGetAllSnapshots(branch));
     }
 
-    private Set<String> getUsedFiles(String branch) {
+    private Set<String> getUsedFiles(
+            String branch,
+            AtomicLong missingManifestListCount,
+            AtomicLong missingManifestCount) {
         Set<String> usedFiles = ConcurrentHashMap.newKeySet();
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
-            collectWithoutDataFile(branch, usedFiles::add, manifests::add);
+            collectWithoutDataFile(
+                    branch,
+                    usedFiles::add,
+                    manifests::add,
+                    name -> missingManifestListCount.incrementAndGet());
             randomlyOnlyExecute(
                     executor,
                     manifestName -> {
                         try {
+                            AtomicBoolean manifestMissing = new AtomicBoolean(false);
                             retryReadingFiles(
                                             () -> manifestFile.readWithIOException(manifestName),
-                                            Collections.<ManifestEntry>emptyList())
+                                            Collections.<ManifestEntry>emptyList(),
+                                            manifestMissing)
                                     .stream()
                                     .map(ManifestEntry::file)
                                     .forEach(
@@ -197,6 +245,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                                                         .filter(candidateDeletes::contains)
                                                         .forEach(usedFiles::add);
                                             });
+                            if (manifestMissing.get()) {
+                                missingManifestCount.incrementAndGet();
+                            }
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }

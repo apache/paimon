@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.SQLConfHelper
 
 import java.util
 import java.util.Collections
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import java.util.function.Consumer
 
 import scala.collection.JavaConverters._
@@ -78,19 +78,40 @@ case class SparkOrphanFilesClean(
           val usedFileConsumer =
             new Consumer[org.apache.paimon.utils.Pair[String, java.lang.Boolean]] {
               override def accept(pair: utils.Pair[String, java.lang.Boolean]): Unit = {
-                usedFileBuffer.append(BranchAndManifestFile(branch, pair.getLeft, pair.getRight))
+                usedFileBuffer.append(
+                  BranchAndManifestFile(branch, pair.getLeft, pair.getRight, isMissing = false))
               }
             }
+          val missingConsumer = new Consumer[String] {
+            override def accept(name: String): Unit = {
+              usedFileBuffer.append(
+                BranchAndManifestFile(branch, name, isManifestFile = false, isMissing = true))
+            }
+          }
           val snapshot = Snapshot.fromJson(snapshotJson)
-          collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileConsumer)
+          collectWithoutDataFileWithManifestFlag(
+            branch,
+            snapshot,
+            usedFileConsumer,
+            missingConsumer)
           usedFileBuffer
       }
       .toDS()
       .cache()
 
-    // find all data files
-    val dataFiles = usedManifestFiles
-      .filter(_.isManifestFile)
+    if (!usedManifestFiles.filter(_.isMissing).isEmpty) {
+      logWarning(
+        "Detected missing manifest-list/index-manifest during used-files collection; this " +
+          "indicates a concurrent snapshot expiration. Aborting orphan files clean to prevent " +
+          "data loss.")
+      return (
+        spark.createDataset(
+          Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
+        usedManifestFiles)
+    }
+
+    val dataFilesWithFlag = usedManifestFiles
+      .filter(f => f.isManifestFile && !f.isMissing)
       .distinct()
       .mapPartitions {
         it =>
@@ -102,18 +123,42 @@ case class SparkOrphanFilesClean(
                 (key: String) =>
                   specifiedTable.switchToBranch(key).store.manifestFileFactory.create)
 
-              retryReadingFiles(
+              val manifestMissing = new AtomicBoolean(false)
+              val entries = retryReadingFiles(
                 () => manifestFile.readWithIOException(branchAndManifestFile.manifestName),
-                Collections.emptyList[ManifestEntry]
-              ).asScala.flatMap {
-                manifestEntry =>
-                  manifestEntry.fileName() +: manifestEntry.file().extraFiles().asScala
+                Collections.emptyList[ManifestEntry],
+                manifestMissing
+              ).asScala
+              if (manifestMissing.get()) {
+                Iterator.single(("", true))
+              } else {
+                entries
+                  .flatMap {
+                    manifestEntry =>
+                      manifestEntry.fileName() +: manifestEntry.file().extraFiles().asScala
+                  }
+                  .map(name => (name, false))
+                  .iterator
               }
           }
       }
+      .cache()
+
+    if (!dataFilesWithFlag.filter(_._2).isEmpty) {
+      logWarning(
+        "Detected missing manifest file(s) while collecting data files; this indicates a " +
+          "concurrent snapshot expiration. Aborting orphan files clean to prevent data loss.")
+      return (
+        spark.createDataset(
+          Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
+        usedManifestFiles)
+    }
+
+    val dataFiles = dataFilesWithFlag.filter(!_._2).map(_._1)
 
     // union manifest and data files
     val usedFiles = usedManifestFiles
+      .filter(!_.isMissing)
       .map(_.manifestName)
       .union(dataFiles)
       .toDF("used_name")
@@ -193,7 +238,11 @@ case class SparkOrphanFilesClean(
  * @param isManifestFile
  *   If it is the manifest file
  */
-case class BranchAndManifestFile(branch: String, manifestName: String, isManifestFile: Boolean)
+case class BranchAndManifestFile(
+    branch: String,
+    manifestName: String,
+    isManifestFile: Boolean,
+    isMissing: Boolean = false)
 
 object SparkOrphanFilesClean extends SQLConfHelper {
   def executeDatabaseOrphanFiles(
