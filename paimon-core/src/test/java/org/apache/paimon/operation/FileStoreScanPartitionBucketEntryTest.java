@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -42,8 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * AbstractFileStoreScan#readBucketEntries}.
  *
  * <p>These methods are exercised through {@code snapshotReader.partitionEntries()} and {@code
- * snapshotReader.bucketEntries()} which directly delegate to {@code scan.readPartitionEntries()} and
- * {@code scan.readBucketEntries()}.
+ * snapshotReader.bucketEntries()} which directly delegate to {@code scan.readPartitionEntries()}
+ * and {@code scan.readBucketEntries()}.
  */
 public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
 
@@ -92,8 +91,7 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
         assertThat(entries).hasSize(3);
 
         Map<Integer, PartitionEntry> entryMap =
-                entries.stream()
-                        .collect(Collectors.toMap(e -> e.partition().getInt(0), e -> e));
+                entries.stream().collect(Collectors.toMap(e -> e.partition().getInt(0), e -> e));
 
         for (int p = 0; p < partitions.length; p++) {
             PartitionEntry entry = entryMap.get(partitions[p]);
@@ -180,8 +178,7 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
         assertThat(entries).hasSize(3);
 
         Map<Integer, PartitionEntry> entryMap =
-                entries.stream()
-                        .collect(Collectors.toMap(e -> e.partition().getInt(0), e -> e));
+                entries.stream().collect(Collectors.toMap(e -> e.partition().getInt(0), e -> e));
 
         for (int pt = 1; pt <= 3; pt++) {
             PartitionEntry entry = entryMap.get(pt);
