@@ -33,6 +33,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -42,6 +43,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.index.HashBucketAssigner;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -337,6 +339,35 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteDynamicBucketHashIndex() throws Exception {
+        Identifier identifier = identifier("dynamic_hash_java_to_python");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("key1", DataTypes.STRING())
+                        .column("key2", DataTypes.BIGINT())
+                        .column("value", DataTypes.STRING())
+                        .primaryKey("key1", "key2")
+                        .option("bucket", "-1")
+                        .option("dynamic-bucket.target-row-num", "1")
+                        .option("file.format", "parquet")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            GenericRow row =
+                    GenericRow.of(
+                            BinaryString.fromString("hello-java"),
+                            42L,
+                            BinaryString.fromString("java-old"));
+            write.write(row, assignDynamicBucket(table, row));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testPKDeletionVectorWrite() throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
@@ -523,6 +554,51 @@ public class JavaPyE2ETest {
                 assertThat(matching.get(0)).contains(String.valueOf(id)).contains(expectedName);
             }
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonDynamicBucketHashIndex() throws Exception {
+        Identifier identifier = identifier("dynamic_hash_python_to_java");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            GenericRow row =
+                    GenericRow.of(
+                            BinaryString.fromString("hello-java"),
+                            42L,
+                            BinaryString.fromString("java-new"));
+            write.write(row, assignDynamicBucket(table, row));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        List<String> result =
+                getResult(
+                        table.newRead(),
+                        table.newScan().plan().splits(),
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "hello-java, 42, java-new", "python-only, 7, python-only");
+    }
+
+    private int assignDynamicBucket(FileStoreTable table, InternalRow row) {
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(DataTypes.STRING(), DataTypes.BIGINT());
+        int keyHash =
+                serializer.toBinaryRow(GenericRow.of(row.getString(0), row.getLong(1))).hashCode();
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        table.store().newIndexFileHandler(),
+                        1,
+                        1,
+                        0,
+                        1,
+                        -1);
+        return assigner.assign(BinaryRow.EMPTY_ROW, keyHash);
     }
 
     @Test

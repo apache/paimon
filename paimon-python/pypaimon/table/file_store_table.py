@@ -476,7 +476,9 @@ class FileStoreTable(Table):
             dry_run=dry_run,
         )
 
-    def create_row_key_extractor(self) -> RowKeyExtractor:
+    def create_row_key_extractor(
+        self, ignore_existing: bool = False
+    ) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
             return FixedBucketRowKeyExtractor(self.table_schema)
@@ -484,8 +486,17 @@ class FileStoreTable(Table):
             return UnawareBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.POSTPONE_MODE:
             return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
-            return DynamicBucketRowKeyExtractor(self.table_schema)
+        elif bucket_mode == BucketMode.HASH_DYNAMIC:
+            return DynamicBucketRowKeyExtractor(
+                self.table_schema,
+                table=self,
+                ignore_existing=ignore_existing,
+            )
+        elif bucket_mode == BucketMode.CROSS_PARTITION:
+            raise ValueError(
+                "CROSS_PARTITION primary-key writes require a persistent "
+                "global primary-key index, which PyPaimon does not yet support"
+            )
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 

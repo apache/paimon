@@ -98,6 +98,7 @@ run_batched_java_write_tests() {
     local result=0
 
     local core_tests="org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable"
+    core_tests="${core_tests}+testJavaWriteDynamicBucketHashIndex"
     core_tests="${core_tests}+testPKDeletionVectorWrite"
     core_tests="${core_tests}+testBtreeIndexWrite"
     core_tests="${core_tests}+testBtreeRawFallbackWrite"
@@ -184,7 +185,7 @@ run_java_write_test() {
     echo "Running Maven test for JavaPyE2ETest.testJavaWriteReadPkTable (Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable -pl paimon-core -Drun.e2e.tests=true; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable+testJavaWriteDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java write Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java write Parquet/Orc/Avro test failed${NC}"
@@ -222,7 +223,7 @@ run_python_read_test() {
 
     # Run the parameterized Python test method (runs for both Parquet/Orc/Avro and Lance)
     echo "Running Python test for JavaPyReadWriteTest.test_read_pk_table..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table or test_read_java_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
 #        source deactivate
         return 0
@@ -241,7 +242,7 @@ run_python_write_test() {
 
     # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
     echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
     else
@@ -260,7 +261,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadPythonDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read Parquet/Orc/Avro test failed${NC}"
