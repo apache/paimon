@@ -693,13 +693,18 @@ public class SchemaManagerTest {
 
         String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
         String customName = "__CUSTOM_DEFAULT_PARTITION__";
+        String defaultName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
 
-        // The option can be changed and reset before the first snapshot.
-        manager.commitChanges(SchemaChange.setOption(option, customName));
-        assertThat(manager.latest().get().options()).containsEntry(option, customName);
+        // The option can be changed and reset before the first snapshot. Changes in the same
+        // commit are applied in order.
+        manager.commitChanges(
+                SchemaChange.setOption(option, customName),
+                SchemaChange.setOption(option, defaultName));
+        assertThat(manager.latest().get().options()).containsEntry(option, defaultName);
         manager.commitChanges(SchemaChange.removeOption(option));
         assertThat(manager.latest().get().options()).doesNotContainKey(option);
         manager.commitChanges(SchemaChange.setOption(option, customName));
+        assertThat(manager.latest().get().options()).containsEntry(option, customName);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
         writeSnapshot(tableRoot, table.schema().id());
@@ -727,8 +732,8 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testDefaultPartitionNameStrictResetAfterSnapshot() throws Exception {
-        Path tableRoot = new Path(tempDir.toString(), "default-partition-name-strict-reset-table");
+    public void testDefaultPartitionNameWithImplicitDefaultAfterSnapshot() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "implicit-default-partition-name-table");
         SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(
                 new Schema(
@@ -743,16 +748,18 @@ public class SchemaManagerTest {
 
         String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
         String defaultName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
-        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption(option, defaultName)))
-                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.setOption(option, defaultName)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
         assertThat(manager.latest().get().options()).doesNotContainKey(option);
         assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption(option)))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'partition.default-name' is not supported yet.");
-        assertThatCode(() -> table.copy(Collections.singletonMap(option, defaultName)))
-                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> table.copy(Collections.singletonMap(option, defaultName)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
 
-        // RESET remains forbidden when the stored value is explicitly equal to the default.
+        // An explicitly stored default can be replayed, but cannot be reset.
         Path explicitTableRoot =
                 new Path(tempDir.toString(), "explicit-default-partition-name-table");
         SchemaManager explicitManager = new SchemaManager(LocalFileIO.create(), explicitTableRoot);
@@ -766,6 +773,16 @@ public class SchemaManagerTest {
         FileStoreTable explicitTable =
                 FileStoreTableFactory.create(LocalFileIO.create(), explicitTableRoot);
         writeSnapshot(explicitTableRoot, explicitTable.schema().id());
+        assertThatCode(
+                        () ->
+                                explicitManager.commitChanges(
+                                        SchemaChange.setOption(option, defaultName)))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> explicitTable.copy(Collections.singletonMap(option, defaultName)))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> explicitManager.commitChanges(SchemaChange.removeOption(option)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
         assertThatThrownBy(() -> explicitTable.copy(Collections.singletonMap(option, null)))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'partition.default-name' is not supported yet.");

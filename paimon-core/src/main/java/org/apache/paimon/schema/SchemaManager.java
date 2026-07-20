@@ -1290,8 +1290,8 @@ public class SchemaManager implements Serializable {
 
     /**
      * Whether an option change is a semantic no-op: 'primary-key'/'partition' are normalized into
-     * dedicated schema fields (old value null), and options with effective defaults compare against
-     * their default value when unset.
+     * dedicated schema fields (old value null), and 'type' compares case-insensitively, defaulting
+     * when unset.
      */
     public static boolean isUnchangedNormalizedKey(
             String key,
@@ -1319,11 +1319,6 @@ public class SchemaManager implements Serializable {
             String effectiveOld =
                     oldValue == null ? CoreOptions.TYPE.defaultValue().toString() : oldValue;
             return newValue.equalsIgnoreCase(effectiveOld);
-        }
-        if (CoreOptions.PARTITION_DEFAULT_NAME.key().equals(key)) {
-            String effectiveOld =
-                    oldValue == null ? CoreOptions.PARTITION_DEFAULT_NAME.defaultValue() : oldValue;
-            return newValue.equals(effectiveOld);
         }
         if (oldValue != null) {
             return false;
