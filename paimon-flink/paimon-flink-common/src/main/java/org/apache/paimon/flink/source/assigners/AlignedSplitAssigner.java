@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.assigners;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.align.PlaceholderSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -66,9 +67,10 @@ public class AlignedSplitAssigner implements SplitAssigner {
 
     @Override
     public void addSplit(int subtask, FileStoreSourceSplit splits) {
-        long snapshotId = ((DataSplit) splits.split()).snapshotId();
+        DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(splits.split());
+        long snapshotId = dataSplit.snapshotId();
         PendingSnapshot last = pendingSplitAssignment.peekLast();
-        boolean isPlaceholder = splits.split() instanceof PlaceholderSplit;
+        boolean isPlaceholder = dataSplit instanceof PlaceholderSplit;
         if (last == null || last.snapshotId != snapshotId) {
             last = new PendingSnapshot(snapshotId, isPlaceholder, new HashMap<>());
             last.add(subtask, splits);
@@ -85,8 +87,9 @@ public class AlignedSplitAssigner implements SplitAssigner {
             return;
         }
 
-        long snapshotId = ((DataSplit) splits.get(0).split()).snapshotId();
-        boolean isPlaceholder = splits.get(0).split() instanceof PlaceholderSplit;
+        DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(splits.get(0).split());
+        long snapshotId = dataSplit.snapshotId();
+        boolean isPlaceholder = dataSplit instanceof PlaceholderSplit;
         PendingSnapshot head = pendingSplitAssignment.peek();
         if (head == null || snapshotId != head.snapshotId) {
             head = new PendingSnapshot(snapshotId, isPlaceholder, new HashMap<>());
@@ -154,7 +157,7 @@ public class AlignedSplitAssigner implements SplitAssigner {
 
         public void add(int subtask, FileStoreSourceSplit split) {
             Preconditions.checkArgument(
-                    ((DataSplit) split.split()).snapshotId() == snapshotId,
+                    QueryAuthSplit.unwrapDataSplit(split.split()).snapshotId() == snapshotId,
                     "SnapshotId not equal. This is a bug, please file an issue.");
             subtaskSplits.computeIfAbsent(subtask, id -> new ArrayList<>()).add(split);
         }
@@ -166,7 +169,8 @@ public class AlignedSplitAssigner implements SplitAssigner {
             splits.forEach(
                     split ->
                             Preconditions.checkArgument(
-                                    ((DataSplit) split.split()).snapshotId() == snapshotId,
+                                    QueryAuthSplit.unwrapDataSplit(split.split()).snapshotId()
+                                            == snapshotId,
                                     "SnapshotId not equal"));
             subtaskSplits.put(subtask, splits);
         }
