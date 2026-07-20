@@ -28,6 +28,7 @@ import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -44,8 +45,8 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** IT cases for {@link DataEvolutionDeleteAction}. */
-public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
+/** Data Evolution IT cases for the unified {@link DeleteAction}. */
+public class DeleteActionDataEvolutionITCase extends ActionITCaseBase {
 
     private static final String TABLE = "T";
 
@@ -154,6 +155,73 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testDeleteWithFilteredBoundedExternalTable() throws Exception {
+        createUnpartitionedUrlTable("URL_T");
+        insertInto(
+                "URL_T",
+                "('cold-url', 'cold')",
+                "('hot-url', 'hot')",
+                "('old-never-requested-url', 'old-never-requested')",
+                "('fresh-never-requested-url', 'fresh-never-requested')",
+                "('url-without-access-state', 'no-access-state')");
+
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                changelogRow(
+                                        "+I",
+                                        "cold-url",
+                                        LocalDateTime.parse("2026-06-01T00:00:00"),
+                                        LocalDateTime.parse("2026-06-15T00:00:00")),
+                                changelogRow(
+                                        "+I",
+                                        "hot-url",
+                                        LocalDateTime.parse("2026-06-01T00:00:00"),
+                                        LocalDateTime.parse("2026-07-15T00:00:00")),
+                                changelogRow(
+                                        "+I",
+                                        "old-never-requested-url",
+                                        LocalDateTime.parse("2026-06-01T00:00:00"),
+                                        null),
+                                changelogRow(
+                                        "+I",
+                                        "fresh-never-requested-url",
+                                        LocalDateTime.parse("2026-07-15T00:00:00"),
+                                        null),
+                                changelogRow(
+                                        "+I",
+                                        "missing-target-url",
+                                        LocalDateTime.parse("2026-06-01T00:00:00"),
+                                        null)));
+        String createAccessState =
+                String.format(
+                        "CREATE TEMPORARY TABLE external_access_state ("
+                                + "url STRING, last_ingest_time TIMESTAMP(3), "
+                                + "last_request_time TIMESTAMP(3)) "
+                                + "WITH ('connector' = 'values', 'bounded' = 'true', "
+                                + "'data-id' = '%s')",
+                        dataId);
+
+        action(
+                        "URL_T",
+                        "url IN (SELECT url FROM external_access_state "
+                                + "WHERE last_ingest_time < TIMESTAMP '2026-07-01 00:00:00' "
+                                + "AND (last_request_time IS NULL "
+                                + "OR last_request_time < TIMESTAMP '2026-07-01 00:00:00'))",
+                        2)
+                .withSourceSqls(createAccessState)
+                .run();
+
+        testBatchRead(
+                "SELECT url, payload FROM URL_T ORDER BY url",
+                Arrays.asList(
+                        changelogRow("+I", "fresh-never-requested-url", "fresh-never-requested"),
+                        changelogRow("+I", "hot-url", "hot"),
+                        changelogRow("+I", "url-without-access-state", "no-access-state")));
+        assertThat(deletionVectorCardinality(getFileStoreTable("URL_T"))).isEqualTo(2L);
+    }
+
+    @Test
     public void testSourceSqlFailureDoesNotLeakSqlOrCreateSnapshot() throws Exception {
         createDataEvolutionTable(TABLE, false, true);
         insertInto(TABLE, "(1, 'one', 'A')");
@@ -213,19 +281,15 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
     @Test
     public void testRewriteGroupOwnership() {
         String bucketPath = "dt=20260719/bucket-0";
-        assertThat(
-                        DataEvolutionDeleteAction.rewriteGroup(
-                                bucketPath, "old-dv-index", "anchor-a", 4))
+        assertThat(DataEvolutionDelete.rewriteGroup(bucketPath, "old-dv-index", "anchor-a", 4))
                 .isEqualTo(
-                        DataEvolutionDeleteAction.rewriteGroup(
+                        DataEvolutionDelete.rewriteGroup(
                                 bucketPath, "old-dv-index", "anchor-b", 4));
-        assertThat(
-                        DataEvolutionDeleteAction.rewriteGroup(
-                                bucketPath, "old-dv-index-a", "anchor-a", 4))
+        assertThat(DataEvolutionDelete.rewriteGroup(bucketPath, "old-dv-index-a", "anchor-a", 4))
                 .isNotEqualTo(
-                        DataEvolutionDeleteAction.rewriteGroup(
+                        DataEvolutionDelete.rewriteGroup(
                                 bucketPath, "old-dv-index-b", "anchor-a", 4));
-        assertThat(DataEvolutionDeleteAction.rewriteGroup(bucketPath, null, "anchor-a", 4))
+        assertThat(DataEvolutionDelete.rewriteGroup(bucketPath, null, "anchor-a", 4))
                 .startsWith(bucketPath + "\u0000new\u0000");
     }
 
@@ -237,8 +301,8 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
         // Both actions intentionally capture the same base snapshot. The second action must use a
         // different commit user so that strict mode detects the first DELETE snapshot instead of
         // treating the second action as an already committed retry.
-        DataEvolutionDeleteAction first = action(TABLE, "id = 1", 1);
-        DataEvolutionDeleteAction stale = action(TABLE, "id = 2", 1);
+        DeleteAction first = action(TABLE, "id = 1", 1);
+        DeleteAction stale = action(TABLE, "id = 2", 1);
 
         first.run();
 
@@ -265,8 +329,8 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
         assertThatThrownBy(
                         () ->
                                 createAction(
-                                        DataEvolutionDeleteAction.class,
-                                        "data_evolution_delete",
+                                        DeleteAction.class,
+                                        "delete",
                                         "--warehouse",
                                         warehouse,
                                         "--database",
@@ -279,8 +343,8 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
         assertThatThrownBy(
                         () ->
                                 createAction(
-                                        DataEvolutionDeleteAction.class,
-                                        "data_evolution_delete",
+                                        DeleteAction.class,
+                                        "delete",
                                         "--warehouse",
                                         warehouse,
                                         "--database",
@@ -343,10 +407,29 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
                         options));
     }
 
-    private DataEvolutionDeleteAction action(String tableName, String filter, int sinkParallelism) {
+    private void createUnpartitionedUrlTable(String tableName) {
+        Map<String, String> options =
+                new java.util.HashMap<String, String>() {
+                    {
+                        put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                        put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                        put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+                        put(CoreOptions.BUCKET.key(), "-1");
+                    }
+                };
+        sEnv.executeSql(
+                buildDdl(
+                        tableName,
+                        Arrays.asList("url STRING", "payload STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options));
+    }
+
+    private DeleteAction action(String tableName, String filter, int sinkParallelism) {
         return createAction(
-                DataEvolutionDeleteAction.class,
-                "data_evolution_delete",
+                DeleteAction.class,
+                "delete",
                 "--warehouse",
                 warehouse,
                 "--database",
@@ -359,15 +442,15 @@ public class DataEvolutionDeleteActionITCase extends ActionITCaseBase {
                 String.valueOf(sinkParallelism));
     }
 
-    private DataEvolutionDeleteAction actionWithSourceSqls(
+    private DeleteAction actionWithSourceSqls(
             String tableName,
             String filter,
             int sinkParallelism,
             String firstSourceSql,
             String secondSourceSql) {
         return createAction(
-                DataEvolutionDeleteAction.class,
-                "data_evolution_delete",
+                DeleteAction.class,
+                "delete",
                 "--warehouse",
                 warehouse,
                 "--database",

@@ -67,7 +67,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Flink action which logically deletes rows from a data-evolution append table.
+ * Internal implementation which logically deletes rows from a data-evolution append table.
  *
  * <p>The action evaluates a Flink SQL filter against a fixed row-tracking snapshot, maps every
  * matched {@code _ROW_ID} to its data-evolution anchor file, and commits deletion-vector index
@@ -84,35 +84,33 @@ import java.util.Map;
  * vectors are split into stable shards. Large deletes should still be split into bounded batches to
  * limit coordinator and deletion-vector memory usage.
  */
-public class DataEvolutionDeleteAction extends TableActionBase {
+class DataEvolutionDelete implements Serializable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionDeleteAction.class);
+    private static final long serialVersionUID = 1L;
 
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionDelete.class);
+
+    private final DeleteAction action;
     private final String filter;
     private final long baseSnapshotId;
 
-    @Nullable private String[] sourceSqls;
     private int sinkParallelism = 1;
 
-    public DataEvolutionDeleteAction(
-            String databaseName,
-            String tableName,
-            String filter,
-            Map<String, String> catalogConfig) {
-        super(databaseName, tableName, catalogConfig);
+    DataEvolutionDelete(DeleteAction action, String filter) {
+        this.action = action;
         Preconditions.checkArgument(
                 filter != null && !filter.trim().isEmpty(),
                 "Deletion filter must not be null or blank.");
         this.filter = filter;
 
-        if (!(table instanceof FileStoreTable)) {
+        if (!(action.table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Only FileStoreTable supports data-evolution delete action. The table type is '%s'.",
-                            table.getClass().getName()));
+                            "Only FileStoreTable supports Data Evolution delete. The table type is '%s'.",
+                            action.table.getClass().getName()));
         }
 
-        FileStoreTable storeTable = (FileStoreTable) table;
+        FileStoreTable storeTable = (FileStoreTable) action.table;
         Long latestSnapshotId = storeTable.snapshotManager().latestSnapshotId();
         if (latestSnapshotId == null) {
             throw new UnsupportedOperationException(
@@ -144,14 +142,14 @@ public class DataEvolutionDeleteAction extends TableActionBase {
                             storeTable.bucketMode()));
         }
 
-        table =
-                table.copy(
+        action.table =
+                action.table.copy(
                         Collections.singletonMap(
                                 CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
                                 latestSnapshotId.toString()));
     }
 
-    public DataEvolutionDeleteAction withSinkParallelism(int sinkParallelism) {
+    DataEvolutionDelete withSinkParallelism(int sinkParallelism) {
         Preconditions.checkArgument(
                 sinkParallelism > 0,
                 "Sink parallelism must be a positive integer, but is %s.",
@@ -160,21 +158,9 @@ public class DataEvolutionDeleteAction extends TableActionBase {
         return this;
     }
 
-    /** SQL statements used to configure the batch environment and register external sources. */
-    public DataEvolutionDeleteAction withSourceSqls(String... sourceSqls) {
-        this.sourceSqls = sourceSqls;
-        return this;
-    }
-
-    @Override
-    public void run() throws Exception {
-        runInternal().await();
-    }
-
-    /** Builds and executes the Flink batch topology. Kept separate for future procedure reuse. */
-    public TableResult runInternal() {
-        FileStoreTable storeTable = (FileStoreTable) table;
-        handleSqls();
+    /** Builds and executes the Flink batch topology. */
+    TableResult runInternal() {
+        FileStoreTable storeTable = (FileStoreTable) action.table;
         List<AnchorRange> anchorRanges = planAnchorRanges(storeTable);
         String commitUser =
                 CoreOptions.createCommitUser(storeTable.coreOptions().toConfiguration());
@@ -183,16 +169,16 @@ public class DataEvolutionDeleteAction extends TableActionBase {
                 String.format(
                         "SELECT `_ROW_ID` FROM `%s`.`%s`.`%s$row_tracking` "
                                 + "/*+ OPTIONS('scan.snapshot-id'='%d') */ WHERE %s",
-                        catalogName,
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName(),
+                        action.catalogName,
+                        action.identifier.getDatabaseName(),
+                        action.identifier.getObjectName(),
                         baseSnapshotId,
                         filter);
         LOG.info("Data-evolution delete source query: {}", query);
 
-        Table matchedRows = batchTEnv.sqlQuery(query);
+        Table matchedRows = action.batchTEnv.sqlQuery(query);
         DataStream<Long> rowIds =
-                batchTEnv
+                action.batchTEnv
                         .toDataStream(matchedRows)
                         .map(
                                 (MapFunction<Row, Long>) row -> (Long) row.getField(0),
@@ -254,9 +240,9 @@ public class DataEvolutionDeleteAction extends TableActionBase {
                         .setParallelism(1)
                         .getTransformation();
 
-        return executeInternal(
+        return action.executeInternal(
                 Collections.singletonList(end),
-                Collections.singletonList(identifier.getFullName()));
+                Collections.singletonList(action.identifier.getFullName()));
     }
 
     private List<AnchorRange> planAnchorRanges(FileStoreTable storeTable) {
@@ -344,30 +330,6 @@ public class DataEvolutionDeleteAction extends TableActionBase {
         }
         int shard = Math.floorMod(anchorFilePath.hashCode(), parallelism);
         return bucketPath + "\u0000new\u0000" + shard;
-    }
-
-    private void handleSqls() {
-        // NOTE: a source SQL statement may change the current catalog and database. The target
-        // row-tracking table is always referenced with its fully-qualified name below.
-        if (sourceSqls != null) {
-            for (int i = 0; i < sourceSqls.length; i++) {
-                try {
-                    batchTEnv.executeSql(sourceSqls[i]).await();
-                } catch (Exception e) {
-                    // Source DDL may contain JDBC credentials. Do not include the SQL or the
-                    // original exception (whose message may echo the SQL) in logs or the wrapper.
-                    if (e instanceof InterruptedException) {
-                        Thread.currentThread().interrupt();
-                    }
-                    String message =
-                            String.format(
-                                    "Failed to execute source SQL statement %s (cause type: %s).",
-                                    i + 1, e.getClass().getName());
-                    LOG.error(message);
-                    throw new RuntimeException(message);
-                }
-            }
-        }
     }
 
     /** A data-evolution anchor file and its covered global row-id range. */

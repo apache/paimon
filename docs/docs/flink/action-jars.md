@@ -263,7 +263,9 @@ For more information of 'delete', see
 
 For a non-primary-key append table in
 [Data Evolution](../multimodal-table/data-evolution) mode, Paimon supports
-logically deleting matching rows through the `data_evolution_delete` action.
+logically deleting matching rows through the same `delete` action used by
+primary-key tables. The action dispatches to the appropriate implementation
+based on the target table type. Regular append-only tables are not supported.
 
 The action evaluates the filter against a fixed snapshot of the
 `$row_tracking` system table and records matched rows in deletion vectors. It
@@ -281,12 +283,12 @@ The target table must:
 
 :::
 
-Run the following command to submit a `data_evolution_delete` job:
+Run the following command to submit a `delete` job:
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    data_evolution_delete \
+    delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
@@ -306,25 +308,39 @@ id >= 100 AND id < 200
 ```
 
 `source_sql` is repeatable. Each statement is executed in order before the
-target query, so a bounded external table and optional views can be registered
-and referenced from a subquery in `filter_spec`. The corresponding connector
-must be available in the action job's classpath. For example:
+target query, so any bounded table supported by Flink SQL and optional views
+can be registered and referenced from a subquery in `filter_spec`. This is not
+limited to a particular external system: JDBC databases, data warehouses, and
+other bounded connectors can all be used as long as the corresponding
+connector is available in the action job's classpath.
+
+The subquery is also where source-side filtering belongs. In the example below,
+the action reads an access-state table, selects only cold URLs, and deletes the
+matching rows from the target Paimon table:
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    data_evolution_delete \
+    delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    --source_sql "CREATE TEMPORARY TABLE deletion_candidates (
-        url STRING
+    --source_sql "CREATE TEMPORARY TABLE access_state (
+        url STRING,
+        last_ingest_time TIMESTAMP(3),
+        last_request_time TIMESTAMP(3)
     ) WITH (
         'connector' = 'jdbc',
         'url' = '<jdbc-url>',
-        'table-name' = '<candidate-table>'
+        'table-name' = '<access-state-table>'
     )" \
-    --where "url IN (SELECT url FROM deletion_candidates)" \
+    --where "url IN (
+        SELECT url
+        FROM access_state
+        WHERE last_ingest_time < TIMESTAMP '2026-07-01 00:00:00'
+          AND (last_request_time IS NULL
+               OR last_request_time < TIMESTAMP '2026-07-01 00:00:00')
+    )" \
     --sink_parallelism 8
 ```
 
@@ -358,7 +374,7 @@ For more information, run:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    data_evolution_delete --help
+    delete --help
 ```
 
 ## Drop Partition
