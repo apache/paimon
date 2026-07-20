@@ -126,24 +126,46 @@ public class CoreOptionsTest {
         assertThat(options.mapStorageLayout("metrics"))
                 .isEqualTo(CoreOptions.MapStorageLayout.DEFAULT);
         assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(256);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.LRU);
 
         conf.setString("fields.metrics.map.storage-layout", "shared-shredding");
         conf.setString("fields.metrics.map.shared-shredding.max-columns", "32");
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "sequential");
         options = new CoreOptions(conf);
         assertThat(options.mapStorageLayout("metrics"))
                 .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
         assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(32);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.SEQUENTIAL);
+
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "lru");
+        options = new CoreOptions(conf);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.LRU);
 
         conf = new Options();
         conf.setString("fields.metrics.map.storage-layout", "Shared-Shredding");
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "PLAIN");
         options = new CoreOptions(conf);
         assertThat(options.mapStorageLayout("metrics"))
                 .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.PLAIN);
 
         conf = new Options();
         conf.setString("fields.metrics.map.storage-layout", "invalid");
         final CoreOptions invalidLayoutOptions = new CoreOptions(conf);
         assertThatThrownBy(() -> invalidLayoutOptions.mapStorageLayout("metrics"))
+                .hasMessageContaining("invalid");
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "invalid");
+        final CoreOptions invalidPlacementPolicyOptions = new CoreOptions(conf);
+        assertThatThrownBy(
+                        () ->
+                                invalidPlacementPolicyOptions
+                                        .mapSharedShreddingColumnPlacementPolicy("metrics"))
                 .hasMessageContaining("invalid");
 
         conf = new Options();
