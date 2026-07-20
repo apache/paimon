@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIterator, ScoreRecordReader}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.{DataSplit, QueryAuthSplit, Split}
 import org.apache.paimon.utils.{CloseableIterator, Preconditions}
 
 import org.apache.spark.sql.PaimonUtils
@@ -37,12 +37,15 @@ case class PaimonRecordReaderIterator(
     split: Split)
   extends CloseableIterator[PaimonInternalRow] {
 
+  private val metadataSplit = QueryAuthSplit.unwrap(split)
+
   if (
-    metadataColumns.exists(c => PARTITION_AND_BUCKET_META_COLUMNS.contains(c.name)) && !split
+    metadataColumns.exists(
+      c => PARTITION_AND_BUCKET_META_COLUMNS.contains(c.name)) && !metadataSplit
       .isInstanceOf[DataSplit]
   ) {
     throw new RuntimeException(
-      "There need be DataSplit when path and index metadata columns are required")
+      "A DataSplit is required when partition or bucket metadata columns are requested")
   }
 
   private val needMetadata = metadataColumns.nonEmpty
@@ -169,9 +172,9 @@ case class PaimonRecordReaderIterator(
           case PaimonMetadataColumn.FILE_PATH_COLUMN =>
             metadataRow.setField(index, BinaryString.fromString(lastFilePath.toString))
           case PaimonMetadataColumn.PARTITION_COLUMN =>
-            metadataRow.setField(index, split.asInstanceOf[DataSplit].partition())
+            metadataRow.setField(index, metadataSplit.asInstanceOf[DataSplit].partition())
           case PaimonMetadataColumn.BUCKET_COLUMN =>
-            metadataRow.setField(index, split.asInstanceOf[DataSplit].bucket())
+            metadataRow.setField(index, metadataSplit.asInstanceOf[DataSplit].bucket())
         }
     }
   }

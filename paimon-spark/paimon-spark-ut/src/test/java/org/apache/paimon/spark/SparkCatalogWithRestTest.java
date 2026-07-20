@@ -734,6 +734,36 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
+    public void testRowFilterWithPartitionAndBucketMetadata() {
+        spark.sql(
+                "CREATE TABLE t_auth_metadata (id INT, name STRING, pt STRING) "
+                        + "PARTITIONED BY (pt) TBLPROPERTIES "
+                        + "('bucket'='2', 'bucket-key'='id', 'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_metadata VALUES "
+                        + "(1, 'blocked', 'p1'), (2, 'allowed', 'p2')");
+
+        Predicate idEq2Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_auth_metadata"),
+                Collections.singletonList(idEq2Predicate));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT id, __paimon_partition, __paimon_bucket "
+                                        + "FROM t_auth_metadata ORDER BY id")
+                        .collectAsList();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(0).getStruct(1).getString(0)).isEqualTo("p2");
+        assertThat(rows.get(0).getInt(2)).isBetween(0, 1);
+    }
+
+    @Test
     public void testRowFilterDeletionVectorsTable() {
         // Deletion-vectors table: deleted rows excluded via the deletion vector, then filtered.
         spark.sql(
