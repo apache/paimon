@@ -44,14 +44,17 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.AdditionalAnswers;
 import org.mockito.Mockito;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -106,10 +109,7 @@ public class IndexBootstrapTest extends TableTestBase {
                         GenericRow.of(2, 1, 3), GenericRow.of(4, 2, 5), GenericRow.of(6, 3, 7));
         result.clear();
 
-        // In ParallelExecution, latch.countDown first, then close the reader, it may not be closed
-        // here, (this is good, beneficial for query speed) but TableTestBase.after will check leak
-        // streams. So sleep here to avoid unstable.
-        Thread.sleep(1000);
+        waitForParallelReadersClosed();
     }
 
     private Table createTable() throws Exception {
@@ -182,6 +182,7 @@ public class IndexBootstrapTest extends TableTestBase {
             reader.forEachRemaining(
                     row -> result.add(GenericRow.of(row.getInt(0), row.getInt(1), row.getInt(2))));
         }
+        waitForParallelReadersClosed();
 
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -213,6 +214,7 @@ public class IndexBootstrapTest extends TableTestBase {
             reader.forEachRemaining(
                     row -> result.add(GenericRow.of(row.getInt(0), row.getInt(1), row.getInt(2))));
         }
+        waitForParallelReadersClosed();
 
         assertThat(result)
                 .containsExactlyInAnyOrder(GenericRow.of(10, 1, 2), GenericRow.of(20, 2, 3));
@@ -226,6 +228,16 @@ public class IndexBootstrapTest extends TableTestBase {
                         "pk",
                         JsonSerdeUtil.toFlatJson(
                                 new FieldTransform(new FieldRef(0, "pt", DataTypes.INT())))));
+    }
+
+    private void waitForParallelReadersClosed() throws Exception {
+        CommonTestUtils.waitUtil(
+                () ->
+                        TraceableFileIO.openInputStreams(
+                                        path -> path.toString().contains(tempPath.toString()))
+                                .isEmpty(),
+                Duration.ofSeconds(10),
+                Duration.ofMillis(10));
     }
 
     private static class QueryAuthFileStoreTable extends DelegatedFileStoreTable {
