@@ -846,6 +846,48 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
+    public void testLateralPrimaryKeyVectorSearchMetadataOnlyWithRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_auth_vector_metadata ("
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>) "
+                        + "TBLPROPERTIES ("
+                        + "'primary-key'='id', "
+                        + "'bucket'='1', "
+                        + "'deletion-vectors.enabled'='true', "
+                        + "'vector-field'='embedding', "
+                        + "'field.embedding.vector-dim'='2', "
+                        + "'pk-vector.index.columns'='embedding', "
+                        + "'fields.embedding.pk-vector.index.type'='test-vector-ann', "
+                        + "'fields.embedding.pk-vector.distance.metric'='l2', "
+                        + "'test.vector.dimension'='2', "
+                        + "'test.vector.metric'='l2', "
+                        + "'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_vector_metadata VALUES "
+                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f)), "
+                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f))");
+
+        Predicate idEq1Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_auth_vector_metadata"),
+                Collections.singletonList(idEq1Predicate));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT q.id AS query_id, r._row_id AS row_id "
+                                        + "FROM t_auth_vector_metadata AS q, "
+                                        + "LATERAL (SELECT _row_id FROM vector_search("
+                                        + "'t_auth_vector_metadata', 'embedding', "
+                                        + "q.query_embedding, 1)) AS r")
+                        .collectAsList();
+        assertThat(rows).isEmpty();
+    }
+
+    @Test
     public void testLateralPrimaryKeyVectorSearchWithAllowedRowFilter() {
         spark.sql(
                 "CREATE TABLE t_auth_vector_allowed ("

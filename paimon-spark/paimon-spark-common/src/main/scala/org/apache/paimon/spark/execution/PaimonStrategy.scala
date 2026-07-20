@@ -315,6 +315,7 @@ case class LateralVectorSearchExec(
   private def createSearchContext(
       rightProjection: UnsafeProjection,
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
+    val coreOptions = new CoreOptions(innerTable.options())
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(
@@ -356,7 +357,7 @@ case class LateralVectorSearchExec(
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
     val batchSize =
-      Math.max(1, new CoreOptions(innerTable.options()).vectorSearchLateralJoinBatchSize())
+      Math.max(1, coreOptions.vectorSearchLateralJoinBatchSize())
 
     LateralVectorSearchContext(
       readBuilder,
@@ -367,7 +368,8 @@ case class LateralVectorSearchExec(
       sparkRow,
       rowIdOrdinal = resultRowType.getFieldIndex(SpecialFields.ROW_ID.name()),
       metaColumnsOnly =
-        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)),
+        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)) &&
+          !coreOptions.queryAuthEnabled(),
       projectionInputOrdinals = vectorSearchOutput.map {
         attr =>
           if (attr.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN) {
