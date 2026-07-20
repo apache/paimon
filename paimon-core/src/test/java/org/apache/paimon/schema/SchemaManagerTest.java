@@ -19,7 +19,6 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -604,6 +603,12 @@ public class SchemaManagerTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'type' is not supported yet.");
 
+        String partitionDefaultName = CoreOptions.PARTITION_DEFAULT_NAME.key();
+        String defaultPartitionName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
+        manager.commitChanges(SchemaChange.setOption(partitionDefaultName, defaultPartitionName));
+        manager.commitChanges(SchemaChange.removeOption(partitionDefaultName));
+        assertThat(manager.latest().get().options()).doesNotContainKey(partitionDefaultName);
+
         // set immutable options and set primary keys
         manager.commitChanges(
                 SchemaChange.setOption("primary-key", "f0, f1"),
@@ -666,6 +671,27 @@ public class SchemaManagerTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
 
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                partitionDefaultName, defaultPartitionName)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.removeOption(partitionDefaultName)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+        assertThatThrownBy(
+                        () ->
+                                table.copy(
+                                        Collections.singletonMap(
+                                                partitionDefaultName, defaultPartitionName)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'partition.default-name' is not supported yet.");
+
         // flipping the type in place would build a different table kind over the same data
         assertThatThrownBy(
                         () -> manager.commitChanges(SchemaChange.setOption("type", "format-table")))
@@ -677,144 +703,6 @@ public class SchemaManagerTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> table.copy(Collections.singletonMap("type", "table")))
                 .doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testAlterPartitionDefaultName() throws Exception {
-        Path tableRoot = new Path(tempDir.toString(), "partition-default-name-table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
-        manager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        ""));
-
-        String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
-        String customName = "__CUSTOM_DEFAULT_PARTITION__";
-        String defaultName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
-
-        // The option can be changed and reset before the first snapshot. Changes in the same
-        // commit are applied in order.
-        manager.commitChanges(
-                SchemaChange.setOption(option, customName),
-                SchemaChange.setOption(option, defaultName));
-        assertThat(manager.latest().get().options()).containsEntry(option, defaultName);
-        manager.commitChanges(SchemaChange.removeOption(option));
-        assertThat(manager.latest().get().options()).doesNotContainKey(option);
-        manager.commitChanges(SchemaChange.setOption(option, customName));
-        assertThat(manager.latest().get().options()).containsEntry(option, customName);
-
-        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
-        writeSnapshot(tableRoot, table.schema().id());
-
-        assertThatThrownBy(
-                        () ->
-                                manager.commitChanges(
-                                        SchemaChange.setOption(
-                                                option, "__ANOTHER_DEFAULT_PARTITION__")))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption(option)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-
-        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption(option, customName)))
-                .doesNotThrowAnyException();
-        assertThatThrownBy(
-                        () ->
-                                table.copy(
-                                        Collections.singletonMap(
-                                                option, "__ANOTHER_DEFAULT_PARTITION__")))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-    }
-
-    @Test
-    public void testDefaultPartitionNameWithImplicitDefaultAfterSnapshot() throws Exception {
-        Path tableRoot = new Path(tempDir.toString(), "implicit-default-partition-name-table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
-        manager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        ""));
-
-        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
-        writeSnapshot(tableRoot, table.schema().id());
-
-        String option = CoreOptions.PARTITION_DEFAULT_NAME.key();
-        String defaultName = CoreOptions.PARTITION_DEFAULT_NAME.defaultValue();
-        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.setOption(option, defaultName)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-        assertThat(manager.latest().get().options()).doesNotContainKey(option);
-        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption(option)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-        assertThatThrownBy(() -> table.copy(Collections.singletonMap(option, defaultName)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-
-        // An explicitly stored default can be replayed, but cannot be reset.
-        Path explicitTableRoot =
-                new Path(tempDir.toString(), "explicit-default-partition-name-table");
-        SchemaManager explicitManager = new SchemaManager(LocalFileIO.create(), explicitTableRoot);
-        explicitManager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        Collections.emptyList(),
-                        Collections.singletonMap(option, defaultName),
-                        ""));
-        FileStoreTable explicitTable =
-                FileStoreTableFactory.create(LocalFileIO.create(), explicitTableRoot);
-        writeSnapshot(explicitTableRoot, explicitTable.schema().id());
-        assertThatCode(
-                        () ->
-                                explicitManager.commitChanges(
-                                        SchemaChange.setOption(option, defaultName)))
-                .doesNotThrowAnyException();
-        assertThatCode(() -> explicitTable.copy(Collections.singletonMap(option, defaultName)))
-                .doesNotThrowAnyException();
-        assertThatThrownBy(() -> explicitManager.commitChanges(SchemaChange.removeOption(option)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-        assertThatThrownBy(() -> explicitTable.copy(Collections.singletonMap(option, null)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'partition.default-name' is not supported yet.");
-    }
-
-    private void writeSnapshot(Path tableRoot, long schemaId) throws IOException {
-        Snapshot snapshot =
-                new Snapshot(
-                        Snapshot.FIRST_SNAPSHOT_ID,
-                        schemaId,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        "user",
-                        1L,
-                        Snapshot.CommitKind.APPEND,
-                        System.currentTimeMillis(),
-                        1L,
-                        1L,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null);
-        LocalFileIO fileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, null, null, null);
-        fileIO.tryToWriteAtomic(snapshotManager.snapshotPath(snapshot.id()), snapshot.toJson());
     }
 
     @Test
