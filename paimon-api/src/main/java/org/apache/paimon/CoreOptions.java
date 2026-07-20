@@ -295,6 +295,22 @@ public class CoreOptions implements Serializable {
                                     + "suffix of the table's partition keys. Comma-separated. "
                                     + "If not set, all partition keys participate in chain.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT =
+            key("chain-table.streaming.merge-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, the starting phase of chain table streaming read performs "
+                                    + "anchor-based chain merging: for each group it merges the "
+                                    + "latest snapshot partition with delta partitions whose chain "
+                                    + "key is strictly greater than the snapshot chain key. This "
+                                    + "allows streaming readers to see cross-branch deletions and "
+                                    + "updates at the cost of a heavier startup scan. When false "
+                                    + "(default), the starting phase only reads the latest snapshot "
+                                    + "partition per group and later delta partitions as separate "
+                                    + "splits, which is lightweight but may not reflect cross-branch "
+                                    + "deletes.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
@@ -4183,6 +4199,10 @@ public class CoreOptions implements Serializable {
             return null;
         }
         return Arrays.stream(value.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public boolean chainTableStreamingMergeSnapshot() {
+        return options.get(CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT);
     }
 
     public boolean formatTableImplementationIsPaimon() {

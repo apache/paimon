@@ -159,6 +159,12 @@ under the License.
             <td>Whether enabled chain table.</td>
         </tr>
         <tr>
+            <td><h5>chain-table.streaming.merge-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the starting phase of chain table streaming read performs anchor-based chain merging: for each group it merges the latest snapshot partition with delta partitions whose chain key is strictly greater than the snapshot chain key. This allows streaming readers to see cross-branch deletions and updates at the cost of a heavier startup scan. When false (default), the starting phase only reads the latest snapshot partition per group and later delta partitions as separate splits, which is lightweight but may not reflect cross-branch deletes.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
