@@ -1402,17 +1402,6 @@ public class SchemaValidation {
             return;
         }
 
-        List<String> mapBlobFields =
-                schema.fields().stream()
-                        .filter(field -> managedBlobFields.contains(field.name()))
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.MAP)
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        checkArgument(
-                mapBlobFields.isEmpty(),
-                "Primary-key managed MAP<X, BLOB> fields are not supported: %s.",
-                mapBlobFields);
-
         List<String> primaryKeyBlobFields =
                 managedBlobFields.stream()
                         .filter(schema.primaryKeys()::contains)

@@ -184,6 +184,33 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test primary-key map blob") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, map('first', X'48656C6C6F', 'null', CAST(NULL AS BINARY), " +
+          "'second', X'5945'))")
+
+      val row = sql(
+        "SELECT id, size(pictures), pictures['first'], pictures['null'], pictures['second'] " +
+          "FROM t").collect()(0)
+      assert(row.getInt(0) == 1)
+      assert(row.getInt(1) == 3)
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(row.isNullAt(3))
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      sql("INSERT INTO t VALUES (1, map('first', X'4E4557'))")
+      val updated = sql("SELECT id, size(pictures), pictures['first'] FROM t").collect()(0)
+      assert(updated.getInt(0) == 1)
+      assert(updated.getInt(1) == 1)
+      assert(util.Arrays.equals(updated.getAs[Array[Byte]](2), Array[Byte](78, 69, 87)))
+    }
+  }
+
   test("Blob: array blob writes descriptor elements and reads descriptors") {
     withTable("t") {
       val blobData = new Array[Byte](1024)
@@ -312,18 +339,6 @@ class BlobTestBase extends PaimonSparkTestBase {
         exceptionMessages(error))
     }
 
-    withTable("pk_map_blob_reject") {
-      val error = intercept[Exception] {
-        sql(
-          "CREATE TABLE pk_map_blob_reject (id INT, pictures MAP<STRING, BINARY>) " +
-            "TBLPROPERTIES ('primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
-      }
-      assert(
-        exceptionContains(
-          error,
-          "Primary-key managed MAP<X, BLOB> fields are not supported: [pictures]."),
-        exceptionMessages(error))
-    }
   }
 
   test("Blob: test write blob descriptor") {

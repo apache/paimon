@@ -239,6 +239,61 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testPrimaryKeyMapBlobField() throws Exception {
+        batchSql(
+                "CREATE TABLE pk_map_blob_table ("
+                        + "id INT, pictures MAP<STRING, BYTES>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED) "
+                        + "WITH ('bucket'='1', 'blob-field'='pictures')");
+        Map<String, byte[]> pictures = new LinkedHashMap<>();
+        pictures.put("first", new byte[] {72, 101, 108, 108, 111});
+        pictures.put("null", null);
+        pictures.put("second", new byte[] {89, 69});
+        String dataId = TestValuesTableFactory.registerData(Arrays.asList(Row.of(1, pictures)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_map_blob_source "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+
+        batchSql("INSERT INTO pk_map_blob_table SELECT * FROM pk_map_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures['first'], "
+                                        + "pictures['null'], pictures['second'] "
+                                        + "FROM pk_map_blob_table"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}));
+
+        Map<String, byte[]> updated = new LinkedHashMap<>();
+        updated.put("first", new byte[] {78, 69, 87});
+        String updateDataId =
+                TestValuesTableFactory.registerData(Arrays.asList(Row.of(1, updated)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_map_blob_update_source "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                updateDataId))
+                .await();
+        batchSql("INSERT INTO pk_map_blob_table SELECT * FROM pk_map_blob_update_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures['first'] "
+                                        + "FROM pk_map_blob_table"))
+                .containsExactly(Row.of(1, 1, new byte[] {78, 69, 87}));
+    }
+
+    @Test
     public void testArrayBlobFieldWithDescriptorElements() throws Exception {
         byte[] blobData = new byte[1024];
         RANDOM.nextBytes(blobData);
@@ -753,17 +808,6 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                                         + "'blob-field'='pictures')")
                                         .await())
                 .hasRootCauseMessage("Unsupported key type for MAP<X, BLOB>: BOOLEAN");
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE pk_map_blob_reject "
-                                                        + "(id INT, pictures MAP<STRING, BYTES>, "
-                                                        + "PRIMARY KEY (id) NOT ENFORCED) "
-                                                        + "WITH ('bucket'='1', 'blob-field'='pictures')")
-                                        .await())
-                .hasRootCauseMessage(
-                        "Primary-key managed MAP<X, BLOB> fields are not supported: [pictures].");
     }
 
     private void assertArrayBlobInlineFieldRejected(String tableName, String blobOptions) {

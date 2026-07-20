@@ -243,7 +243,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testPrimaryKeyMapBlobIsRejected() {
+    public void testPrimaryKeyMapBlobField() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
@@ -255,9 +255,24 @@ class SchemaValidationTest {
 
         TableSchema schema =
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
-        assertThatThrownBy(() -> validateTableSchema(schema))
-                .hasMessage(
-                        "Primary-key managed MAP<X, BLOB> fields are not supported: [payloads].");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyMapBlobManagedByType() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "payloads",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     @Test

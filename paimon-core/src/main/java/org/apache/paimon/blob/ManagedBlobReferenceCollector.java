@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataTypeRoot;
@@ -34,7 +35,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.apache.paimon.types.BlobType.isBlobFileField;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Collects exact managed BLOB dependencies from the final rows of one data file. */
@@ -43,7 +43,7 @@ public class ManagedBlobReferenceCollector {
     private final FileIO fileIO;
     private final Path sidecar;
     private final int[] blobFieldIndexes;
-    private final boolean[] blobArrayFields;
+    private final DataTypeRoot[] blobFieldTypeRoots;
     private final Set<String> descriptorUris;
 
     private boolean closed;
@@ -53,26 +53,19 @@ public class ManagedBlobReferenceCollector {
         this.fileIO = fileIO;
         this.sidecar = ManagedBlobReferenceFile.sidecarPath(dataFile);
         List<Integer> indexes = new ArrayList<>();
-        List<Boolean> arrayFields = new ArrayList<>();
+        List<DataTypeRoot> typeRoots = new ArrayList<>();
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             if (!managedBlobFields.contains(valueType.getFieldNames().get(i))) {
                 continue;
             }
             DataTypeRoot typeRoot = valueType.getTypeAt(i).getTypeRoot();
-            checkArgument(
-                    typeRoot != DataTypeRoot.MAP,
-                    "Primary-key managed MAP<X, BLOB> field '%s' is not supported.",
-                    valueType.getFieldNames().get(i));
             if (isBlobFileField(valueType.getTypeAt(i))) {
                 indexes.add(i);
-                arrayFields.add(typeRoot == DataTypeRoot.ARRAY);
+                typeRoots.add(typeRoot);
             }
         }
         this.blobFieldIndexes = indexes.stream().mapToInt(Integer::intValue).toArray();
-        this.blobArrayFields = new boolean[arrayFields.size()];
-        for (int i = 0; i < arrayFields.size(); i++) {
-            blobArrayFields[i] = arrayFields.get(i);
-        }
+        this.blobFieldTypeRoots = typeRoots.toArray(new DataTypeRoot[0]);
         this.descriptorUris = new HashSet<>();
     }
 
@@ -87,11 +80,19 @@ public class ManagedBlobReferenceCollector {
             if (keyValue.value().isNullAt(fieldIndex)) {
                 continue;
             }
-            if (blobArrayFields[i]) {
+            if (blobFieldTypeRoots[i] == DataTypeRoot.ARRAY) {
                 InternalArray array = keyValue.value().getArray(fieldIndex);
                 for (int j = 0; j < array.size(); j++) {
                     if (!array.isNullAt(j)) {
                         collect(array.getBlob(j));
+                    }
+                }
+            } else if (blobFieldTypeRoots[i] == DataTypeRoot.MAP) {
+                InternalMap map = keyValue.value().getMap(fieldIndex);
+                InternalArray values = map.valueArray();
+                for (int j = 0; j < map.size(); j++) {
+                    if (!values.isNullAt(j)) {
+                        collect(values.getBlob(j));
                     }
                 }
             } else {
