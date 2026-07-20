@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -902,6 +904,21 @@ public class ContinuousFileSplitEnumeratorTest
                         true);
 
         assertThat(enumerator.assignSuggestedTask(split)).isEqualTo(4 % parallelism);
+    }
+
+    @Test
+    public void testQueryAuthSplitAssignedByWrappedDataSplit() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+        DataSplit dataSplit = createDataSplit(1L, 4, Collections.emptyList());
+        QueryAuthSplit queryAuthSplit =
+                new QueryAuthSplit(
+                        dataSplit,
+                        new TableQueryAuthResult(null, Collections.singletonMap("f0", "mask")));
+        FileStoreSourceSplit sourceSplit = new FileStoreSourceSplit("split", queryAuthSplit);
+
+        assertThat(enumerator.assignSuggestedTask(sourceSplit)).isEqualTo(4 % parallelism);
+        assertThat(sourceSplit.split()).isSameAs(queryAuthSplit);
     }
 
     private ContinuousFileSplitEnumerator buildEnumerator(int parallelism) {

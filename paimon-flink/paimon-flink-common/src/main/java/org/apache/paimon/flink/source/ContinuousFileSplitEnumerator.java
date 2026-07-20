@@ -30,7 +30,9 @@ import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -328,13 +330,14 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
+        Split unwrappedSplit = QueryAuthSplit.unwrap(split.split());
         int task;
-        if (split.split() instanceof DataSplit) {
-            task = assignSuggestedTask((DataSplit) split.split());
-        } else if (split.split() instanceof ChainSplit) {
-            task = assignSuggestedTask((ChainSplit) split.split());
+        if (unwrappedSplit instanceof DataSplit) {
+            task = assignSuggestedTask((DataSplit) unwrappedSplit);
+        } else if (unwrappedSplit instanceof ChainSplit) {
+            task = assignSuggestedTask((ChainSplit) unwrappedSplit);
         } else {
-            task = assignSuggestedTask((IncrementalSplit) split.split());
+            task = assignSuggestedTask((IncrementalSplit) unwrappedSplit);
         }
 
         // Split assigners keep splits in a map keyed by task, but only ever hand out splits for
