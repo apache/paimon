@@ -62,9 +62,9 @@ public class WatermarkAligner {
      * internal per-subtask alignment as a side effect, so successive calls see valve-faithful
      * catch-up semantics.
      *
-     * <p>Contract: successive calls must correspond to strictly increasing checkpoint ids.
-     * Calling out of order would apply a later checkpoint's alignment side effects to an earlier
-     * one, silently corrupting the emitted watermark sequence.
+     * <p>Contract: successive calls must correspond to strictly increasing checkpoint ids. Calling
+     * out of order would apply a later checkpoint's alignment side effects to an earlier one,
+     * silently corrupting the emitted watermark sequence.
      *
      * @return the aligned watermark for this call, guaranteed to be monotonically non-decreasing
      *     across successive calls.

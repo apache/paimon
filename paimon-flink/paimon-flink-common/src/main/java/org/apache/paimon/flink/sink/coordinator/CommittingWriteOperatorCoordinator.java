@@ -423,8 +423,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     /**
      * Aggregate each pending checkpoint's per-subtask (watermark, idle) pairs into a single
-     * watermark by delegating to {@link WatermarkAligner}. Returns a map from checkpoint id to
-     * the aligned watermark, covering every checkpoint up to {@code checkpointId} inclusive.
+     * watermark by delegating to {@link WatermarkAligner}. Returns a map from checkpoint id to the
+     * aligned watermark, covering every checkpoint up to {@code checkpointId} inclusive.
      */
     @VisibleForTesting
     static Map<Long, Long> alignWatermarkPerCheckpoint(
