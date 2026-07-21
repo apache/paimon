@@ -259,17 +259,8 @@ public abstract class OrphanFilesClean implements Serializable {
             String branch,
             Snapshot snapshot,
             Consumer<String> usedFileConsumer,
-            Consumer<String> manifestConsumer)
-            throws IOException {
-        collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer, name -> {});
-    }
-
-    protected void collectWithoutDataFile(
-            String branch,
-            Snapshot snapshot,
-            Consumer<String> usedFileConsumer,
             Consumer<String> manifestConsumer,
-            Consumer<String> missingManifestListConsumer)
+            AtomicBoolean missingManifest)
             throws IOException {
         Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer =
                 fileAndFlag -> {
@@ -279,55 +270,42 @@ public abstract class OrphanFilesClean implements Serializable {
                     usedFileConsumer.accept(fileAndFlag.getLeft());
                 };
         collectWithoutDataFileWithManifestFlag(
-                branch, snapshot, usedFileWithFlagConsumer, missingManifestListConsumer);
-    }
-
-    protected void collectWithoutDataFileWithManifestFlag(
-            String branch,
-            Snapshot snapshot,
-            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer)
-            throws IOException {
-        collectWithoutDataFileWithManifestFlag(
-                branch, snapshot, usedFileWithFlagConsumer, name -> {});
+                branch, snapshot, usedFileWithFlagConsumer, missingManifest);
     }
 
     protected void collectWithoutDataFileWithManifestFlag(
             String branch,
             Snapshot snapshot,
             Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
-            Consumer<String> missingManifestListConsumer)
+            AtomicBoolean missingManifest)
             throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         ManifestList manifestList = branchTable.store().manifestListFactory().create();
         IndexFileHandler indexFileHandler = branchTable.store().newIndexFileHandler();
         List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
-        // changelog manifest
+        // collect changelog, delta and base manifest lists
+        List<String> manifestListNames = new ArrayList<>();
         if (snapshot.changelogManifestList() != null) {
-            collectManifestList(
-                    manifestList,
-                    snapshot.changelogManifestList(),
-                    manifestFileMetas,
-                    usedFileWithFlagConsumer,
-                    missingManifestListConsumer);
+            manifestListNames.add(snapshot.changelogManifestList());
         }
-
-        // delta manifest
         if (snapshot.deltaManifestList() != null) {
-            collectManifestList(
-                    manifestList,
-                    snapshot.deltaManifestList(),
-                    manifestFileMetas,
-                    usedFileWithFlagConsumer,
-                    missingManifestListConsumer);
+            manifestListNames.add(snapshot.deltaManifestList());
         }
+        manifestListNames.add(snapshot.baseManifestList());
 
-        // base manifest
-        collectManifestList(
-                manifestList,
-                snapshot.baseManifestList(),
-                manifestFileMetas,
-                usedFileWithFlagConsumer,
-                missingManifestListConsumer);
+        for (String manifestListName : manifestListNames) {
+            List<ManifestFileMeta> metas =
+                    retryReadingFiles(
+                            () -> manifestList.readWithIOException(manifestListName),
+                            emptyList(),
+                            missingManifest);
+            // A missing manifest list means we cannot determine all used files, so abort.
+            if (missingManifest.get()) {
+                return;
+            }
+            usedFileWithFlagConsumer.accept(Pair.of(manifestListName, false));
+            manifestFileMetas.addAll(metas);
+        }
 
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
@@ -337,15 +315,12 @@ public abstract class OrphanFilesClean implements Serializable {
         // index files
         String indexManifest = snapshot.indexManifest();
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            AtomicBoolean indexManifestMissing = new AtomicBoolean(false);
             List<IndexManifestEntry> indexEntries =
                     retryReadingFiles(
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
                             Collections.<IndexManifestEntry>emptyList(),
-                            indexManifestMissing);
-            if (indexManifestMissing.get()) {
-                missingManifestListConsumer.accept(indexManifest);
-            } else {
+                            missingManifest);
+            if (!missingManifest.get()) {
                 usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
                 indexEntries.stream()
                         .map(IndexManifestEntry::indexFile)
@@ -358,27 +333,6 @@ public abstract class OrphanFilesClean implements Serializable {
         if (snapshot.statistics() != null) {
             usedFileWithFlagConsumer.accept(Pair.of(snapshot.statistics(), false));
         }
-    }
-
-    private static void collectManifestList(
-            ManifestList manifestList,
-            String manifestListName,
-            List<ManifestFileMeta> manifestFileMetas,
-            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
-            Consumer<String> missingManifestListConsumer)
-            throws IOException {
-        AtomicBoolean missing = new AtomicBoolean(false);
-        List<ManifestFileMeta> metas =
-                retryReadingFiles(
-                        () -> manifestList.readWithIOException(manifestListName),
-                        emptyList(),
-                        missing);
-        if (missing.get()) {
-            missingManifestListConsumer.accept(manifestListName);
-            return;
-        }
-        usedFileWithFlagConsumer.accept(Pair.of(manifestListName, false));
-        manifestFileMetas.addAll(metas);
     }
 
     /** List directories that contains data files and manifest files. */
@@ -499,9 +453,7 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     protected static <T> T retryReadingFiles(
-            SupplierWithIOException<T> reader,
-            T defaultValue,
-            @Nullable AtomicBoolean fnfFallback)
+            SupplierWithIOException<T> reader, T defaultValue, @Nullable AtomicBoolean fnfFallback)
             throws IOException {
         int retryNumber = 0;
         IOException caught = null;
@@ -511,6 +463,9 @@ public abstract class OrphanFilesClean implements Serializable {
             } catch (FileNotFoundException e) {
                 if (fnfFallback != null) {
                     fnfFallback.set(true);
+                    LOG.warn(
+                            "File not found while collecting used files, aborting orphan files clean.",
+                            e);
                 }
                 return defaultValue;
             } catch (IOException e) {

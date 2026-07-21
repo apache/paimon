@@ -187,14 +187,16 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                             new Tuple2<>(branch, manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
-                                        Consumer<String> missingManifestListConsumer =
-                                                name -> out.collect(MISSING_MANIFEST_SENTINEL);
+                                        AtomicBoolean missingManifest = new AtomicBoolean(false);
                                         collectWithoutDataFile(
                                                 branch,
                                                 snapshot,
                                                 out::collect,
                                                 manifestConsumer,
-                                                missingManifestListConsumer);
+                                                missingManifest);
+                                        if (missingManifest.get()) {
+                                            out.collect(MISSING_MANIFEST_SENTINEL);
+                                        }
                                     }
                                 })
                         .name("collect-manifests");
@@ -407,12 +409,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 buildEnd = true;
                                                 if (abortDeletion) {
                                                     LOG.warn(
-                                                            "Detected missing manifest-list/manifest "
-                                                                    + "during used-files collection; "
-                                                                    + "this indicates a concurrent "
-                                                                    + "snapshot expiration. Aborting "
-                                                                    + "orphan files clean to prevent "
-                                                                    + "data loss.");
+                                                            "Detected missing manifest, aborting clean.");
                                                 }
                                                 break;
                                             case 2:

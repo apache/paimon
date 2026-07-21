@@ -82,28 +82,24 @@ case class SparkOrphanFilesClean(
                   BranchAndManifestFile(branch, pair.getLeft, pair.getRight, isMissing = false))
               }
             }
-          val missingConsumer = new Consumer[String] {
-            override def accept(name: String): Unit = {
-              usedFileBuffer.append(
-                BranchAndManifestFile(branch, name, isManifestFile = false, isMissing = true))
-            }
-          }
+          val missingManifest = new AtomicBoolean(false)
           val snapshot = Snapshot.fromJson(snapshotJson)
           collectWithoutDataFileWithManifestFlag(
             branch,
             snapshot,
             usedFileConsumer,
-            missingConsumer)
+            missingManifest)
+          if (missingManifest.get()) {
+            usedFileBuffer.append(
+              BranchAndManifestFile(branch, "", isManifestFile = false, isMissing = true))
+          }
           usedFileBuffer
       }
       .toDS()
       .cache()
 
     if (!usedManifestFiles.filter(_.isMissing).isEmpty) {
-      logWarning(
-        "Detected missing manifest-list/index-manifest during used-files collection; this " +
-          "indicates a concurrent snapshot expiration. Aborting orphan files clean to prevent " +
-          "data loss.")
+      logWarning("Detected missing manifest during used-files collection, aborting clean.")
       return (
         spark.createDataset(
           Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
@@ -145,9 +141,7 @@ case class SparkOrphanFilesClean(
       .cache()
 
     if (!dataFilesWithFlag.filter(_._2).isEmpty) {
-      logWarning(
-        "Detected missing manifest file(s) while collecting data files; this indicates a " +
-          "concurrent snapshot expiration. Aborting orphan files clean to prevent data loss.")
+      logWarning("Detected missing manifest while collecting data files, aborting clean.")
       return (
         spark.createDataset(
           Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
