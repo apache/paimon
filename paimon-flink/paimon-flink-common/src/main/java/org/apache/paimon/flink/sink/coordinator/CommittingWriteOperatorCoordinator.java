@@ -158,6 +158,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     @Override
     public void close() throws Exception {
+        if (commitExecutor != null) {
+            drainCommitEventLoop();
+        }
         transitionState(State.CLOSED);
         if (commitExecutor != null) {
             commitExecutor.shutdownNow();
@@ -195,11 +198,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     @Override
     public void handleEventFromOperator(int subtask, int attemptNumber, OperatorEvent event) {
-        boolean waitForBatchEndInputCommit =
-                !streamingCheckpointEnabled
-                        && event instanceof CommittableEvent
-                        && ((CommittableEvent) event).getCheckpointId() == END_INPUT_CHECKPOINT_ID;
-        ThrowingRunnable<Throwable> eventHandler =
+        runInEventLoop(
                 () -> {
                     if (event instanceof CommittableEvent) {
                         handleCommittableEvent(subtask, (CommittableEvent) event);
@@ -208,60 +207,29 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     } else {
                         throw new UnsupportedOperationException("Unsupported event type: " + event);
                     }
-                };
-
-        if (waitForBatchEndInputCommit) {
-            runInEventLoopSync(
-                    eventHandler,
-                    "handling operator event %s from subtask %d (#%d)",
-                    event,
-                    subtask,
-                    attemptNumber);
-        } else {
-            runInEventLoop(
-                    eventHandler,
-                    "handling operator event %s from subtask %d (#%d)",
-                    event,
-                    subtask,
-                    attemptNumber);
-        }
+                },
+                "handling operator event %s from subtask %d (#%d)",
+                event,
+                subtask,
+                attemptNumber);
     }
 
-    /**
-     * Runs an action in the commit event loop and waits for completion. This is only used for the
-     * final end-input event in batch mode without checkpointing. It prevents the asynchronous
-     * coordinator event handling from returning before the final commit has completed, which could
-     * otherwise let the batch job finish prematurely.
-     */
-    private void runInEventLoopSync(
-            ThrowingRunnable<Throwable> action,
-            String actionName,
-            Object... actionNameFormatParameters) {
+    /** Waits until all actions submitted before coordinator close have completed. */
+    private void drainCommitEventLoop() {
         checkState(
                 coordinatorThreadFactory == null
                         || !coordinatorThreadFactory.isCurrentThreadCoordinatorThread(),
-                "Cannot synchronously wait for an action submitted to the commit event loop.");
+                "Cannot drain the commit event loop from its own thread.");
         CompletableFuture<Void> completion = new CompletableFuture<>();
-        runInEventLoop(
-                () -> {
-                    try {
-                        action.run();
-                        completion.complete(null);
-                    } catch (Throwable t) {
-                        completion.completeExceptionally(t);
-                        throw t;
-                    }
-                },
-                actionName,
-                actionNameFormatParameters);
+        runInEventLoop(() -> completion.complete(null), "draining commit event loop before close");
 
         try {
             completion.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while committing batch end input", e);
+            throw new RuntimeException("Interrupted while waiting for the commit event loop", e);
         } catch (ExecutionException e) {
-            throw new RuntimeException("Failed to commit batch end input", e.getCause());
+            throw new RuntimeException("Failed to drain the commit event loop", e.getCause());
         }
     }
 

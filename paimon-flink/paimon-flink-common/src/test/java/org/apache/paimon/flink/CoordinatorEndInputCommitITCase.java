@@ -31,6 +31,7 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -126,13 +127,13 @@ public class CoordinatorEndInputCommitITCase {
                 true,
                 true,
                 false,
-                Long.MIN_VALUE);
+                12345L);
         assertEndInputWatermark(
                 EnvironmentSettings.newInstance().inStreamingMode().build(),
                 true,
                 false,
                 false,
-                Long.MIN_VALUE);
+                12345L);
     }
 
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
@@ -195,6 +196,7 @@ public class CoordinatorEndInputCommitITCase {
         TableEnvironment tEnv;
         if (streaming) {
             streamEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+            streamEnv.setRuntimeMode(RuntimeExecutionMode.STREAMING);
             streamEnv.setParallelism(DEFAULT_PARALLELISM);
             streamEnv.enableCheckpointing(200L);
             tEnv = StreamTableEnvironment.create(streamEnv);
@@ -226,15 +228,19 @@ public class CoordinatorEndInputCommitITCase {
                         + endInputWatermark
                         + "')");
         int expectedRowCount;
-        if (streaming && emitAfterFirstCheckpoint) {
-            // Wait for one ordinary checkpoint, then emit and finish before the next checkpoint.
-            // This leaves a non-empty END_INPUT committable to carry end-input.watermark.
+        if (streaming) {
+            // Control the final-commit contents instead of relying on the timing between datagen
+            // completion and periodic checkpoints. Emitting after a completed checkpoint leaves a
+            // non-empty END_INPUT committable; emitting before it and ending only after it has
+            // completed leaves an empty one.
             DataStream<Row> source =
                     streamEnv
                             .fromSource(
-                                    new EmitAfterFirstCheckpointSource(),
+                                    emitAfterFirstCheckpoint
+                                            ? new EmitAfterFirstCheckpointSource()
+                                            : new EmitBeforeFirstCheckpointThenFinishSource(),
                                     WatermarkStrategy.noWatermarks(),
-                                    "Emit After First Checkpoint Source")
+                                    "Controlled End Input Source")
                             .map(row -> row)
                             .returns(Types.ROW(Types.INT, Types.STRING))
                             .setParallelism(1);
@@ -299,6 +305,65 @@ public class CoordinatorEndInputCommitITCase {
                 if (!emitted) {
                     output.collect(Row.of(1, "end-input"));
                     emitted = true;
+                    return InputStatus.MORE_AVAILABLE;
+                }
+                return InputStatus.END_OF_INPUT;
+            }
+
+            @Override
+            public void addSplits(List<SimpleSourceSplit> splits) {
+                emittedState.restoreState(splits);
+                for (Boolean state : emittedState.get()) {
+                    emitted = state;
+                }
+            }
+
+            @Override
+            public List<SimpleSourceSplit> snapshotState(long checkpointId) {
+                emittedState.clear();
+                emittedState.add(emitted);
+                return emittedState.snapshotState();
+            }
+
+            @Override
+            public void notifyCheckpointComplete(long checkpointId) {
+                firstCheckpointCompleted = true;
+            }
+        }
+    }
+
+    /** Emits the only record before checkpoint 1, then ends only after it has completed. */
+    private static class EmitBeforeFirstCheckpointThenFinishSource
+            extends AbstractNonCoordinatedSource<Row> {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public Boundedness getBoundedness() {
+            return Boundedness.BOUNDED;
+        }
+
+        @Override
+        public SourceReader<Row, SimpleSourceSplit> createReader(SourceReaderContext context) {
+            return new Reader();
+        }
+
+        private static class Reader extends AbstractNonCoordinatedSourceReader<Row> {
+
+            private final SplitListState<Boolean> emittedState =
+                    new SplitListState<>(
+                            "emitted", value -> String.valueOf(value), Boolean::parseBoolean);
+            private boolean emitted;
+            private boolean firstCheckpointCompleted;
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<Row> output) {
+                if (!emitted) {
+                    output.collect(Row.of(1, "before-checkpoint"));
+                    emitted = true;
+                    return InputStatus.MORE_AVAILABLE;
+                }
+                if (!firstCheckpointCompleted) {
                     return InputStatus.MORE_AVAILABLE;
                 }
                 return InputStatus.END_OF_INPUT;
