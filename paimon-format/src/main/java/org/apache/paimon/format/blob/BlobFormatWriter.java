@@ -25,6 +25,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobReuseSource;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileAwareFormatWriter;
@@ -43,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.zip.CRC32;
 
@@ -78,6 +80,10 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private final LongArrayList lengths;
 
     private String pathString;
+
+    // Reuses one source stream across consecutive references into the same file, so compaction of
+    // descriptor/remote blobs opens each source once instead of once per blob.
+    private final BlobReuseSource reuseSource = new BlobReuseSource();
 
     public BlobFormatWriter(
             PositionOutputStream out,
@@ -179,8 +185,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     }
 
     private void addBlob(Blob blob) throws IOException {
-        SeekableInputStream in = openBlobInputStream(blob);
-        if (in == null) {
+        BlobCopySource source = prepareBlobSource(blob);
+        if (source == null) {
             writeNullElement();
             return;
         }
@@ -188,7 +194,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         crc32.reset();
         write(MAGIC_NUMBER_BYTES);
 
-        BlobDescriptor descriptor = writeBlobData(in);
+        BlobDescriptor descriptor = writeBlobData(source);
 
         long binLength = out.getPos() - previousPos + 12;
         lengths.add(binLength);
@@ -229,12 +235,12 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
                 continue;
             }
-            SeekableInputStream in = openBlobInputStream(blob);
-            if (in == null) {
+            BlobCopySource source = prepareBlobSource(blob);
+            if (source == null) {
                 elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
                 continue;
             }
-            BlobDescriptor descriptor = writeBlobData(in);
+            BlobDescriptor descriptor = writeBlobData(source);
             elementLengths[i] = descriptor.length();
             if (writeConsumer != null) {
                 flush |= writeConsumer.accept(blobFieldName, descriptor);
@@ -272,44 +278,152 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         }
     }
 
+    /**
+     * Prepares the byte source for a blob, or returns {@code null} to write it as NULL (missing
+     * file / fetch failure). An exact {@link BlobRef} with known length reuses one source stream
+     * (bounded to the descriptor); other blobs open their own stream and read until EOF.
+     */
     @Nullable
-    private SeekableInputStream openBlobInputStream(Blob blob) throws IOException {
+    private BlobCopySource prepareBlobSource(Blob blob) throws IOException {
+        // Exact class only: subclasses may override newInputStream() and must not be bypassed.
+        if (blob != null && blob.getClass() == BlobRef.class) {
+            BlobRef ref = (BlobRef) blob;
+            long length = ref.toDescriptor().length();
+            if (length >= 0) {
+                // Position/release the previous source first; its cleanup error is not this blob's
+                // fetch failure and must not be turned into a NULL write.
+                reuseSource.prepareFor(ref);
+                SeekableInputStream source = openStream(ref, () -> reuseSource.openBounded(ref));
+                if (source == null) {
+                    return null;
+                }
+                return new BlobCopySource(source, length);
+            }
+        }
+        SeekableInputStream in = openStream(blob, blob::newInputStream);
+        if (in == null) {
+            return null;
+        }
+        return new BlobCopySource(in, -1L);
+    }
+
+    @FunctionalInterface
+    private interface StreamOpener {
+        SeekableInputStream open() throws IOException;
+    }
+
+    /**
+     * Opens a source stream via {@code opener}, converting missing-file / fetch-failure errors into
+     * a {@code null} result when the writer is configured to write NULL for such blobs.
+     */
+    @Nullable
+    private SeekableInputStream openStream(Blob blob, StreamOpener opener) throws IOException {
         try {
-            return blob.newInputStream();
+            return opener.open();
         } catch (IOException | RuntimeException e) {
-            if (writeNullOnMissingFile && HttpClientUtils.isNotFoundError(e)) {
-                LOG.warn(
-                        "Failed to open blob from {} (HTTP 404), writing NULL for BLOB field {}.",
-                        blobUri(blob),
-                        blobFieldName,
-                        e);
-                blobFetchMetricReporter.recordMissingFileNullWritten(true);
+            if (writeNullOnError(blob, e)) {
                 return null;
             }
-            if (shouldWriteNullOnFetchFailure(e)) {
-                logWriteNullOnFetchFailure(e, blob);
-                blobFetchMetricReporter.recordFetchFailureNullWritten(e);
-                return null;
-            }
-            blobFetchMetricReporter.recordFetchFailure(e);
             throw e;
         }
     }
 
-    private BlobDescriptor writeBlobData(SeekableInputStream in) throws IOException {
+    /** Applies the write-null-on-missing/fetch-failure policy; returns true to write NULL. */
+    private boolean writeNullOnError(Blob blob, Throwable e) {
+        if (writeNullOnMissingFile && HttpClientUtils.isNotFoundError(e)) {
+            LOG.warn(
+                    "Failed to open blob from {} (HTTP 404), writing NULL for BLOB field {}.",
+                    blobUri(blob),
+                    blobFieldName,
+                    e);
+            blobFetchMetricReporter.recordMissingFileNullWritten(true);
+            return true;
+        }
+        if (shouldWriteNullOnFetchFailure(e)) {
+            logWriteNullOnFetchFailure(e, blob);
+            blobFetchMetricReporter.recordFetchFailureNullWritten(e);
+            return true;
+        }
+        blobFetchMetricReporter.recordFetchFailure(e);
+        return false;
+    }
+
+    private BlobDescriptor writeBlobData(BlobCopySource source) throws IOException {
         long blobPos = out.getPos();
-        try (SeekableInputStream stream = in) {
-            int bytesRead = stream.read(tmpBuffer);
-            while (bytesRead >= 0) {
-                write(tmpBuffer, bytesRead);
-                bytesRead = stream.read(tmpBuffer);
+        if (source.reused()) {
+            // Bounded stream from reuseSource; copy exactly descriptor.length bytes.
+            try {
+                copyExactly(source.stream(), source.length());
+            } catch (IOException | RuntimeException e) {
+                blobFetchMetricReporter.recordFetchFailure(e);
+                // Source is at an unknown position now; drop it so the next blob reopens.
+                reuseSource.discardQuietly();
+                throw e;
             }
-        } catch (IOException | RuntimeException e) {
-            blobFetchMetricReporter.recordFetchFailure(e);
-            throw e;
+        } else {
+            try (SeekableInputStream stream = source.stream()) {
+                int bytesRead = stream.read(tmpBuffer);
+                while (bytesRead >= 0) {
+                    write(tmpBuffer, bytesRead);
+                    bytesRead = stream.read(tmpBuffer);
+                }
+            } catch (IOException | RuntimeException e) {
+                blobFetchMetricReporter.recordFetchFailure(e);
+                throw e;
+            }
         }
 
         return new BlobDescriptor(pathString, blobPos, out.getPos() - blobPos);
+    }
+
+    /** Copies exactly {@code length} bytes from {@code stream}, throwing on premature EOF. */
+    private void copyExactly(SeekableInputStream stream, long length) throws IOException {
+        long remaining = length;
+        while (remaining > 0) {
+            int toRead = (int) Math.min(tmpBuffer.length, remaining);
+            int bytesRead = stream.read(tmpBuffer, 0, toRead);
+            if (bytesRead < 0) {
+                throw new EOFException(
+                        String.format(
+                                "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                        + "bytes but source ended %d bytes early.",
+                                blobFieldName, length, remaining));
+            }
+            if (bytesRead == 0) {
+                throw new IOException(
+                        "Source returned 0 bytes while copying BLOB payload for field "
+                                + blobFieldName);
+            }
+            write(tmpBuffer, bytesRead);
+            remaining -= bytesRead;
+        }
+    }
+
+    /** The byte source of a single blob payload to be copied into the blob file. */
+    private static final class BlobCopySource {
+
+        private final SeekableInputStream stream;
+        private final long length;
+
+        private BlobCopySource(SeekableInputStream stream, long length) {
+            this.stream = stream;
+            this.length = length;
+        }
+
+        /**
+         * Whether the payload is copied from a reused, pre-positioned source (exact-length read).
+         */
+        private boolean reused() {
+            return length >= 0;
+        }
+
+        private SeekableInputStream stream() {
+            return stream;
+        }
+
+        private long length() {
+            return length;
+        }
     }
 
     private boolean shouldWriteNullOnFetchFailure(Throwable e) {
@@ -388,11 +502,28 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     @Override
     public void close() throws IOException {
-        // index
-        byte[] indexBytes = DeltaVarintCompressor.compress(lengths.toArray());
-        out.write(indexBytes);
-        // header
-        out.write(intToLittleEndian(indexBytes.length));
-        out.write(VERSION);
+        Throwable primary = null;
+        try {
+            // index
+            byte[] indexBytes = DeltaVarintCompressor.compress(lengths.toArray());
+            out.write(indexBytes);
+            // header
+            out.write(intToLittleEndian(indexBytes.length));
+            out.write(VERSION);
+        } catch (RuntimeException | Error | IOException e) {
+            primary = e;
+            throw e;
+        } finally {
+            // Surface the footer error as primary and attach a source-close error as suppressed.
+            if (primary == null) {
+                reuseSource.close();
+            } else {
+                try {
+                    reuseSource.close();
+                } catch (RuntimeException | Error | IOException suppressed) {
+                    primary.addSuppressed(suppressed);
+                }
+            }
+        }
     }
 }

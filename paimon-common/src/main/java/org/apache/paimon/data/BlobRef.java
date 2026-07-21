@@ -82,6 +82,11 @@ public class BlobRef implements Blob {
                 descriptor.length());
     }
 
+    /** Package-private, see {@link BlobReuseSource}. */
+    UriReader uriReader() {
+        return uriReader;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) {

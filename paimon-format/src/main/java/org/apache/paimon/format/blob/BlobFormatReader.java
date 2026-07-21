@@ -20,7 +20,9 @@ package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobPlaceholder;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -33,6 +35,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.UriReader;
 
 import javax.annotation.Nullable;
 
@@ -48,7 +51,9 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
     private static final int MIN_ARRAY_PAYLOAD_LENGTH =
             ARRAY_HEADER_LENGTH + ARRAY_INDEX_LENGTH_SIZE;
 
-    private final FileIO fileIO;
+    // Shared by all BlobRefs this reader produces, so a BlobFormatWriter can reuse one source
+    // stream.
+    private final UriReader uriReader;
     private final Path filePath;
     private final String filePathString;
     private final BlobFileMeta fileMeta;
@@ -70,7 +75,7 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
             int blobIndex,
             DataType blobFieldType,
             boolean blobAsDescriptor) {
-        this.fileIO = fileIO;
+        this.uriReader = UriReader.fromFile(fileIO);
         this.filePath = filePath;
         this.filePathString = filePath.toString();
         this.fileMeta = fileMeta;
@@ -144,7 +149,7 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
         if (in != null && !blobAsDescriptor) {
             return Blob.fromData(readInlineBlob(in, position, length));
         }
-        return Blob.fromFile(fileIO, filePathString, position, length);
+        return new BlobRef(uriReader, new BlobDescriptor(filePathString, position, length));
     }
 
     @Override
@@ -259,7 +264,11 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 if (elementLength == BlobFormatWriter.ARRAY_NULL_ELEMENT_LENGTH) {
                     blobs[i] = null;
                 } else if (blobAsDescriptor) {
-                    blobs[i] = Blob.fromFile(fileIO, filePathString, elementOffset, elementLength);
+                    blobs[i] =
+                            new BlobRef(
+                                    uriReader,
+                                    new BlobDescriptor(
+                                            filePathString, elementOffset, elementLength));
                     elementOffset += elementLength;
                 } else {
                     blobs[i] = Blob.fromData(readInlineBlob(in, elementOffset, elementLength));
