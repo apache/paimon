@@ -46,7 +46,7 @@ class IndexFileHandler:
         entry_filter: Optional[Callable[['IndexManifestEntry'], bool]] = None
     ) -> List['IndexManifestEntry']:
         if snapshot is None:
-            snapshot = self._snapshot_manager.latest_snapshot()
+            snapshot = self._snapshot_manager.get_latest_snapshot()
 
         if snapshot is None:
             return []

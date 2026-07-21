@@ -67,6 +67,25 @@ Reads return the payload bytes by default; the existing `blob-as-descriptor` rea
 A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
 reference sidecars.
 
+When descriptor-backed BLOBs are copied to another table, the target normally rebuilds a `FileIO` from its catalog
+context. For a managed `blob-field`, this is a copy flow: the target writes the payload into its own BLOB storage and
+does not retain the source descriptor. If the source table uses table-scoped credentials, configure
+`blob-descriptor.source-table` on the target so that the source table's `FileIO` is used to materialize the payload:
+
+```sql
+ALTER TABLE media_copy SET TBLPROPERTIES (
+    'blob-descriptor.source-table' = 'db.media$branch_rt'
+);
+```
+
+Use `blob-descriptor-field` to retain literal descriptors, or `blob-view-field` to retain a logical, no-copy reference
+to an upstream row. Other `blob-descriptor.*` filesystem options remain sufficient when the source storage can be
+accessed with static configuration; `source-table` is for table-scoped `FileIO` credentials.
+
+The source table must belong to the same catalog. A branch suffix is supported. Target tables without a catalog loader,
+including external tables in REST catalogs, are not supported. When this option is set, it takes precedence over other
+`blob-descriptor.*` options; remove it before switching back to descriptor-specific filesystem configuration.
+
 `ARRAY<BLOB>` is externalized element by element. Every non-null `Blob` element is copied into managed storage, while
 array order, a null array, and null elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses
 `blob-field`; `blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.

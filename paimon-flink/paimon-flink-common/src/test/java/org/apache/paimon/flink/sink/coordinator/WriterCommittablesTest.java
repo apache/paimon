@@ -331,6 +331,28 @@ public class WriterCommittablesTest {
     }
 
     @Test
+    public void testIsIdleAtDistinguishesPresentAndAbsent() {
+        WriterCommittables committables =
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                1L, Collections.emptyList(), 100L, /* idle */ true));
+        committables.mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                2L, Collections.emptyList(), 200L, /* idle */ false)));
+
+        // present + idle=true
+        assertThat(committables.isIdleAt(1L)).isTrue();
+        assertThat(committables.watermarkAt(1L)).isEqualTo(100L);
+        // present + idle=false
+        assertThat(committables.isIdleAt(2L)).isFalse();
+        assertThat(committables.watermarkAt(2L)).isEqualTo(200L);
+        // absent: mirrors Flink valve's "channel exists but never reported" — ACTIVE with MIN_VALUE
+        assertThat(committables.isIdleAt(3L)).isFalse();
+        assertThat(committables.watermarkAt(3L)).isEqualTo(Long.MIN_VALUE);
+    }
+
+    @Test
     public void testDuplicateCheckpointIdRejected() {
         CommitMessage commitMessage = createEmptyCommitMessage();
         // two entries with the same checkpointId must not silently overwrite each other

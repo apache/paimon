@@ -167,7 +167,10 @@ public class RESTUtil {
             try {
                 return RESTApi.toJson(body);
             } catch (JsonProcessingException e) {
-                throw new RESTException(e, "Failed to encode request body: %s", body);
+                // Keep only the body type: a throwing getter can surface the secret in both
+                // the cause chain and Jackson's message, so neither is safe to include.
+                throw new RESTException(
+                        "Failed to encode request body of type %s", body.getClass().getName());
             }
         }
         return null;
@@ -199,7 +202,8 @@ public class RESTUtil {
                 url = builder.build().toString();
             }
         } catch (URISyntaxException e) {
-            throw new RESTException(e, "build request URL failed.");
+            // cause / getMessage() echo the raw URL (may carry credentials); keep only the reason.
+            throw new RESTException("build request URL failed: %s", e.getReason());
         }
 
         return url;
