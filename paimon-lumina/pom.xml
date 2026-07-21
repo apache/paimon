@@ -38,7 +38,7 @@ under the License.
         </repository>
         <repository>
             <id>jindodata</id>
-            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+            <url>https://jindodata-binary.oss-accelerate.aliyuncs.com/mvn-repo/</url>
         </repository>
     </repositories>
 
