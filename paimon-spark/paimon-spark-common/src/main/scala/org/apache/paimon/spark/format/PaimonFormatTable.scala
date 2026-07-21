@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder}
-import org.apache.paimon.spark.write.BaseV2WriteBuilder
+import org.apache.paimon.spark.write.{BaseV2WriteBuilder, PaimonWriteRequirement}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatTablePartitionManager
 import org.apache.paimon.types.RowType
@@ -31,6 +31,8 @@ import org.apache.paimon.utils.PartitionPathUtils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog}
 import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
+import org.apache.spark.sql.connector.distributions.Distribution
+import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
@@ -268,7 +270,13 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
 
   override def partitionRowType(): RowType = table.partitionType
 
-  override def build: Write = new Write() {
+  override def build: Write = new Write with RequiresDistributionAndOrdering {
+    private val writeRequirement = PaimonWriteRequirement(table)
+
+    override def requiredDistribution(): Distribution = writeRequirement.distribution
+
+    override def requiredOrdering(): Array[SortOrder] = writeRequirement.ordering
+
     override def toBatch: BatchWrite = {
       SparkShimLoader.shim
         .createFormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
