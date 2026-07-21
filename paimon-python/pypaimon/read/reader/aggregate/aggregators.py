@@ -32,7 +32,7 @@ the 9 most commonly-used value aggregators: ``primary_key`` /
 the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """
-
+from decimal import localcontext
 from typing import Any, List, Dict, Optional, Tuple, Union
 
 from pypaimon.common.options import CoreOptions
@@ -383,8 +383,18 @@ class FieldSumAgg(FieldAggregator):
             return accumulator if input_field is None else input_field
 
         if self._base_type in _DECIMAL_TYPES:
+            with localcontext() as ctx:
+                ctx.prec = max(
+                    len(accumulator.as_tuple().digits),
+                    len(input_field.as_tuple().digits),
+                    self._precision,
+                    38,
+                ) + 1
+
+                result = accumulator + input_field
+
             value = Decimal.from_big_decimal(
-                accumulator + input_field,
+                result,
                 self._precision,
                 self._scale
             )
@@ -434,8 +444,18 @@ class FieldSumAgg(FieldAggregator):
             return self._negative(retract_field) if accumulator is None else accumulator
 
         if self._base_type in _DECIMAL_TYPES:
+            with localcontext() as ctx:
+                ctx.prec = max(
+                    len(accumulator.as_tuple().digits),
+                    len(retract_field.as_tuple().digits),
+                    self._precision,
+                    38,
+                ) + 1
+
+                result = accumulator - retract_field
+
             value = Decimal.from_big_decimal(
-                accumulator - retract_field,
+                result,
                 self._precision,
                 self._scale,
             )
