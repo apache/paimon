@@ -17,9 +17,10 @@
 
 """Range-aligned join on Ray for two Paimon tables sorted/clustered by the join key.
 
-The driver cuts the key space into ranges from per-file min/max stats in the manifest;
-each range is read and joined in its own Ray task, with no global shuffle. Works best
-when both sides are clustered by the first join key.
+The driver cuts the key space into ranges from each file's parquet-footer min/max (the
+manifest value stats are empty for pypaimon-written tables); each range is read and
+joined in its own Ray task, with no global shuffle. Works best when both sides are
+clustered by the first join key.
 
 Correctness never depends on stats: a split whose min/max is missing joins every range.
 Such a split is read once per range, so the range count is capped to keep those re-reads
@@ -42,50 +43,42 @@ __all__ = ["range_join"]
 _MAX_RANGES = 512
 
 
-def _file_key_range(file, col):
-    """Min/max of ``col`` for one data file from its manifest stats; None when the
-    file has no usable stats for ``col``."""
-    # min_values/max_values are self-describing BinaryRows: index via their own fields
-    # (get_field), not a re-derived column list.
-    min_row = file.value_stats.min_values
-    max_row = file.value_stats.max_values
-    names = [f.name for f in getattr(min_row, "fields", [])]
-    if col not in names:
-        return None
-    idx = names.index(col)
-    if idx >= len(min_row) or idx >= len(max_row):
-        return None
-    fmin = min_row.get_field(idx)
-    fmax = max_row.get_field(idx)
-    if fmin is None or fmax is None:  # all-null or absent stats
-        return None
-    return fmin, fmax
+def _parquet_col_range(metadata, col):
+    """Min/max of ``col`` across a parquet file's row groups; None when a row group
+    lacks usable stats for ``col``."""
+    lo, hi = None, None
+    for i in range(metadata.num_row_groups):
+        rg = metadata.row_group(i)
+        stats = None
+        for j in range(rg.num_columns):
+            if rg.column(j).path_in_schema == col:
+                stats = rg.column(j).statistics
+                break
+        if stats is None or not stats.has_min_max:
+            return None
+        lo = stats.min if lo is None else min(lo, stats.min)
+        hi = stats.max if hi is None else max(hi, stats.max)
+    return None if lo is None else (lo, hi)
 
 
-def _range_stats_by_file(table, col):
-    """{file_name: (min, max)} for ``col``, read straight from the manifest with stats.
-    scan.plan() drops value stats, so read the entries separately (driver-side)."""
-    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-    from pypaimon.manifest.manifest_list_manager import ManifestListManager
-    snapshot = table.snapshot_manager().get_latest_snapshot()
-    if snapshot is None:
-        return {}
-    manifest_files = ManifestListManager(table).read_all(snapshot)
-    entries = ManifestFileManager(table).read_entries_parallel(manifest_files, drop_stats=False)
-    stats = {}
-    for entry in entries:
-        rng = _file_key_range(entry.file, col)
-        if rng is not None:
-            stats[entry.file.file_name] = rng
-    return stats
-
-
-def _split_key_range(split, stats_by_file):
-    """Min/max of the range key over the split's files, or (None, None) when any file
-    lacks stats (the split then joins every range)."""
+def _split_key_range(split, col, file_io):
+    """Min/max of ``col`` over the split's files, read from their parquet footers;
+    (None, None) when any file isn't parquet or lacks usable stats (the split then
+    joins every range). Manifest value stats are empty for pypaimon-written tables,
+    so the footer is the source of truth."""
+    import pyarrow.parquet as pq
     lo, hi = None, None
     for f in split.files:
-        rng = stats_by_file.get(f.file_name)
+        path = f.external_path if f.external_path else f.file_path
+        if path is None or not path.endswith(".parquet"):
+            return None, None
+        stream = file_io.new_input_stream(path)
+        try:
+            rng = _parquet_col_range(pq.read_metadata(stream), col)
+        except Exception:
+            return None, None
+        finally:
+            stream.close()
         if rng is None:
             return None, None
         lo = rng[0] if lo is None else min(lo, rng[0])
@@ -96,19 +89,19 @@ def _split_key_range(split, stats_by_file):
 
 
 def _plan_ranged_splits(table_id, catalog_options, projection, range_col):
-    """Plan the manifest driver-side; returns ``(ranged_splits, schema_id)`` where
-    ranged_splits is a list of (split, lo, hi). Stats come from a separate manifest
-    read (scan.plan() strips them) and never reach the workers."""
+    """Plan driver-side; returns ``(ranged_splits, schema_id)`` where ranged_splits is
+    a list of (split, lo, hi). Ranges come from each file's parquet footer; the splits
+    sent to workers carry no stats."""
     table = get_table(table_id, catalog_options, None, "range_join")
     schema_id = table.table_schema.id
     if pin_latest_snapshot(table) is None:
         return [], schema_id
-    stats_by_file = _range_stats_by_file(table, range_col)
+    file_io = table.file_io
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
     ranged = []
     for s in scan.plan().splits():
-        lo, hi = _split_key_range(s, stats_by_file)
+        lo, hi = _split_key_range(s, range_col, file_io)
         ranged.append((s, lo, hi))
     return ranged, schema_id
 
