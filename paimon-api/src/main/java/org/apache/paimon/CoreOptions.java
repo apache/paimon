@@ -100,6 +100,9 @@ public class CoreOptions implements Serializable {
     public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
             "map.shared-shredding.max-columns";
 
+    public static final String MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY =
+            "map.shared-shredding.column-placement-policy";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -845,6 +848,14 @@ public class CoreOptions implements Serializable {
                                     .text(
                                             "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
+
+    // Keep this default in sync with BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE (= 4 * 1024).
+    public static final ConfigOption<MemorySize> BLOB_COPY_BUFFER_SIZE =
+            key("blob.copy-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription(
+                            "Buffer size used when copying BLOB payloads into BLOB files.");
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
@@ -1839,7 +1850,11 @@ public class CoreOptions implements Serializable {
                             "Whether to create this table as a partitioned table in metastore.\n"
                                     + "For example, if you want to list all partitions of a Paimon table in Hive, "
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
-                                    + "This config option does not affect the default filesystem metastore.");
+                                    + "This config option does not affect the default filesystem metastore.\n"
+                                    + "For an internal format table in a REST catalog, it also makes the "
+                                    + "catalog own the table's partitions: a scan reads the partitions "
+                                    + "registered there and a write registers the ones it wrote, instead of "
+                                    + "listing the table directory.");
 
     public static final ConfigOption<String> METASTORE_TAG_TO_PARTITION =
             key("metastore.tag-to-partition")
@@ -3300,6 +3315,21 @@ public class CoreOptions implements Serializable {
         return options.getOptional(BLOB_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public int blobCopyBufferSize() {
+        return checkedBlobCopyBufferSize(options.get(BLOB_COPY_BUFFER_SIZE).getBytes());
+    }
+
+    /** Validates {@link #BLOB_COPY_BUFFER_SIZE} bytes and narrows to a positive int. */
+    public static int checkedBlobCopyBufferSize(long bytes) {
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                BLOB_COPY_BUFFER_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public boolean blobSplitByFileSize() {
@@ -5276,6 +5306,18 @@ public class CoreOptions implements Serializable {
         return maxColumns;
     }
 
+    public MapSharedShreddingColumnPlacementPolicy mapSharedShreddingColumnPlacementPolicy(
+            String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX
+                                + "."
+                                + fieldName
+                                + "."
+                                + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY)
+                        .enumType(MapSharedShreddingColumnPlacementPolicy.class)
+                        .defaultValue(MapSharedShreddingColumnPlacementPolicy.LRU));
+    }
+
     /** MAP storage layout. */
     public enum MapStorageLayout implements DescribedEnum {
         DEFAULT(
@@ -5293,6 +5335,40 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         MapStorageLayout(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Physical column placement policy for shared-shredding MAP fields. */
+    public enum MapSharedShreddingColumnPlacementPolicy implements DescribedEnum {
+        PLAIN(
+                "plain",
+                "Keep each MAP row's input key order and place the first K keys into physical "
+                        + "columns."),
+        SEQUENTIAL(
+                "sequential",
+                "Order keys by their field dictionary IDs and place the first K keys into physical "
+                        + "columns."),
+        LRU(
+                "lru",
+                "Reuse physical columns for recently seen keys and evict the least recently used "
+                        + "column when necessary.");
+
+        private final String value;
+        private final String description;
+
+        MapSharedShreddingColumnPlacementPolicy(String value, String description) {
             this.value = value;
             this.description = description;
         }

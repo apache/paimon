@@ -66,6 +66,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "nested_update",
     "collect",
     "product",
+    "merge_map_with_keytime",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
@@ -211,8 +212,8 @@ def check_supported(table) -> None:
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
-                "and other aggregators (listagg / collect / "
-                "merge_map* / nested_update* / theta_sketch / "
+                "and other aggregators (product / listagg / collect / "
+                "nested_update* / theta_sketch / "
                 "hll_sketch / roaring_bitmap_*) are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
