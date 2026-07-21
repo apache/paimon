@@ -70,21 +70,6 @@ public class PrimaryKeyBlobExternalizer {
             RowType valueType,
             Set<String> managedBlobFields,
             DataFilePathFactory pathFactory,
-            long targetFileSize) {
-        this(
-                fileIO,
-                valueType,
-                managedBlobFields,
-                pathFactory,
-                targetFileSize,
-                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-    }
-
-    public PrimaryKeyBlobExternalizer(
-            FileIO fileIO,
-            RowType valueType,
-            Set<String> managedBlobFields,
-            DataFilePathFactory pathFactory,
             long targetFileSize,
             int copyBufferSize) {
         checkArgument(targetFileSize > 0, "Managed BLOB target file size must be positive.");

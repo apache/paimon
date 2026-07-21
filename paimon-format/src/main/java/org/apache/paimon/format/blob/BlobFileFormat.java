@@ -58,14 +58,6 @@ public class BlobFileFormat extends FileFormat {
 
     @Nullable public BlobConsumer writeConsumer;
 
-    public BlobFileFormat() {
-        this(false);
-    }
-
-    public BlobFileFormat(boolean blobAsDescriptor) {
-        this(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-    }
-
     public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
@@ -122,27 +114,23 @@ public class BlobFileFormat extends FileFormat {
 
     private class BlobFormatWriterFactory implements FormatWriterFactory {
 
-        private final String blobFieldName;
-        private final BlobElementSerializer elementSerializer;
+        private final RowType type;
 
         private BlobFormatWriterFactory(RowType type) {
             checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
-            this.blobFieldName = type.getFieldNames().get(0);
-            this.elementSerializer = BlobElementSerializerFactory.create(type.getTypeAt(0));
+            this.type = type;
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            BlobElementSerializer.Writer elementWriter =
-                    elementSerializer.createWriter(
-                            out,
-                            blobFieldName,
-                            writeConsumer,
-                            writeNullOnMissingFile,
-                            writeNullOnFetchFailure,
-                            blobFetchMetricReporter,
-                            copyBufferSize);
-            return new BlobFormatWriter(out, writeConsumer, elementWriter);
+            return new BlobFormatWriter(
+                    out,
+                    writeConsumer,
+                    type,
+                    writeNullOnMissingFile,
+                    writeNullOnFetchFailure,
+                    blobFetchMetricReporter,
+                    copyBufferSize);
         }
     }
 
@@ -151,7 +139,7 @@ public class BlobFileFormat extends FileFormat {
         private final boolean blobAsDescriptor;
         private final int fieldCount;
         private final int blobIndex;
-        private final BlobElementSerializer elementSerializer;
+        private final DataType blobFieldType;
 
         public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
             this.blobAsDescriptor = blobAsDescriptor;
@@ -160,8 +148,7 @@ public class BlobFileFormat extends FileFormat {
             Preconditions.checkState(
                     this.blobIndex >= 0,
                     "Read type of a blob format does not contain any blob field.");
-            DataType blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
-            this.elementSerializer = BlobElementSerializerFactory.create(blobFieldType);
+            this.blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
         }
 
         @Override
@@ -177,10 +164,15 @@ public class BlobFileFormat extends FileFormat {
                 throw e;
             }
 
-            BlobElementSerializer.Reader elementReader =
-                    BlobElementSerializer.createReader(
-                            elementSerializer, fileIO, filePath, in, blobAsDescriptor);
-            return new BlobFormatReader(filePath, fileMeta, fieldCount, blobIndex, elementReader);
+            return new BlobFormatReader(
+                    fileIO,
+                    filePath,
+                    fileMeta,
+                    in,
+                    fieldCount,
+                    blobIndex,
+                    blobFieldType,
+                    blobAsDescriptor);
         }
 
         private static int findBlobFieldIndex(RowType rowType) {

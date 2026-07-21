@@ -69,7 +69,15 @@ public class BlobFormatWriterTest {
 
         try (PositionOutputStream out =
                 new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
-            BlobFormatWriter writer = new BlobFormatWriter(out, null, RowType.of(DataTypes.BLOB()));
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
             writer.addElement(GenericRow.of(Blob.fromData("inline".getBytes())));
             writer.addElement(GenericRow.of(Blob.fromLocal(sourceFile.toString())));
             writer.addElement(GenericRow.of((Object) null));
@@ -93,7 +101,14 @@ public class BlobFormatWriterTest {
         try (PositionOutputStream out =
                 new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
             BlobFormatWriter writer =
-                    new BlobFormatWriter(out, null, RowType.of(DataTypes.ARRAY(DataTypes.BLOB())));
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.ARRAY(DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
             writer.addElement(GenericRow.of(new GenericArray(new Object[0])));
             writer.addElement(
                     GenericRow.of(
@@ -134,7 +149,11 @@ public class BlobFormatWriterTest {
                     new BlobFormatWriter(
                             out,
                             null,
-                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
+                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
             writer.addElement(GenericRow.of(new GenericMap(new LinkedHashMap<>())));
             writer.addElement(GenericRow.of(new GenericMap(entries)));
             writer.addElement(GenericRow.of((Object) null));
@@ -716,7 +735,8 @@ public class BlobFormatWriterTest {
                         rowType,
                         true,
                         true,
-                        metricReporter);
+                        metricReporter,
+                        BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
 
         Map<Object, Object> entries = new LinkedHashMap<>();
         entries.put(1, Blob.fromData("image".getBytes()));
@@ -761,7 +781,11 @@ public class BlobFormatWriterTest {
                                 descriptors.add(descriptor);
                                 return descriptors.size() == 1;
                             },
-                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
+                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
             writer.setFile(blobFile);
             Map<Object, Object> entries = new LinkedHashMap<>();
             entries.put(BinaryString.fromString("a"), Blob.fromData("x".getBytes()));

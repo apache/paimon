@@ -132,7 +132,7 @@ class PrimaryKeyBlobExternalizerTest {
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
 
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(
                                 DataTypes.INT(), DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
@@ -403,7 +403,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(
                                 DataTypes.INT(),
@@ -451,7 +451,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
                         Collections.singleton("f0"),
@@ -502,7 +502,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
                         Collections.singleton("f0"),
@@ -548,7 +548,7 @@ class PrimaryKeyBlobExternalizerTest {
                 new DataFilePathFactory(
                         bucketPath, "avro", "data-", "changelog-", false, null, null);
         PrimaryKeyBlobExternalizer externalizer =
-                new PrimaryKeyBlobExternalizer(
+                newExternalizer(
                         fileIO,
                         RowType.of(
                                 DataTypes.INT(), DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),

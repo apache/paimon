@@ -51,30 +51,17 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
             int blobIndex,
             DataType blobFieldType,
             boolean blobAsDescriptor) {
-        this(
-                filePath,
-                fileMeta,
-                fieldCount,
-                blobIndex,
+        this.filePath = filePath;
+        this.fileMeta = fileMeta;
+        this.fieldCount = fieldCount;
+        this.blobIndex = blobIndex;
+        this.elementReader =
                 BlobElementSerializer.createReader(
                         BlobElementSerializerFactory.create(blobFieldType),
                         fileIO,
                         filePath,
                         in,
-                        blobAsDescriptor));
-    }
-
-    BlobFormatReader(
-            Path filePath,
-            BlobFileMeta fileMeta,
-            int fieldCount,
-            int blobIndex,
-            BlobElementSerializer.Reader elementReader) {
-        this.filePath = filePath;
-        this.fileMeta = fileMeta;
-        this.fieldCount = fieldCount;
-        this.blobIndex = blobIndex;
-        this.elementReader = elementReader;
+                        blobAsDescriptor);
         this.returned = false;
     }
 

@@ -52,54 +52,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private final LongArrayList lengths;
 
     public BlobFormatWriter(
-            PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
-        this(out, writeConsumer, type, false, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile) {
-        this(out, writeConsumer, type, writeNullOnMissingFile, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure) {
-        this(
-                out,
-                writeConsumer,
-                type,
-                writeNullOnMissingFile,
-                writeNullOnFetchFailure,
-                BlobFetchMetricReporter.NOOP);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
-        this(
-                out,
-                writeConsumer,
-                createElementWriter(
-                        out,
-                        writeConsumer,
-                        type,
-                        writeNullOnMissingFile,
-                        writeNullOnFetchFailure,
-                        blobFetchMetricReporter,
-                        DEFAULT_COPY_BUFFER_SIZE));
-    }
-
-    public BlobFormatWriter(
             PositionOutputStream out,
             @Nullable BlobConsumer writeConsumer,
             RowType type,
@@ -107,9 +59,9 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
-        this(
-                out,
-                writeConsumer,
+        this.out = out;
+        this.deleteFileUponAbort = writeConsumer == null;
+        this.elementWriter =
                 createElementWriter(
                         out,
                         writeConsumer,
@@ -117,16 +69,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         writeNullOnMissingFile,
                         writeNullOnFetchFailure,
                         blobFetchMetricReporter,
-                        copyBufferSize));
-    }
-
-    BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            BlobElementSerializer.Writer elementWriter) {
-        this.out = out;
-        this.deleteFileUponAbort = writeConsumer == null;
-        this.elementWriter = elementWriter;
+                        copyBufferSize);
         this.lengths = new LongArrayList(16);
     }
 
