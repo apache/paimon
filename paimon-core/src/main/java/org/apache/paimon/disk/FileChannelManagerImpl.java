@@ -59,8 +59,8 @@ public class FileChannelManagerImpl implements FileChannelManager {
 
         this.random = new Random();
 
-        // Creates directories after registering shutdown hook to ensure the directories can be
-        // removed if required.
+        // Directories are created eagerly here and removed when this manager is closed (see
+        // close()).
         this.paths = createFiles(tempDirs, prefix);
 
         LOG.info(
