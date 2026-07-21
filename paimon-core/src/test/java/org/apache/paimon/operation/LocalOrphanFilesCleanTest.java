@@ -550,6 +550,10 @@ public class LocalOrphanFilesCleanTest {
             commit(generateData());
         }
 
+        List<Path> dataFilesBefore = new ArrayList<>();
+        collectDataFiles(tablePath, dataFilesBefore);
+        assertThat(dataFilesBefore).isNotEmpty();
+
         // randomly delete a manifest file of snapshot 1
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot1 = snapshotManager.snapshot(1);
@@ -567,7 +571,12 @@ public class LocalOrphanFilesCleanTest {
         LocalOrphanFilesClean orphanFilesClean =
                 new LocalOrphanFilesClean(
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
-        assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isGreaterThan(0);
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFileCount()).isEqualTo(0);
+        for (Path dataFile : dataFilesBefore) {
+            assertThat(fileIO.exists(dataFile)).isTrue();
+        }
     }
 
     @Test

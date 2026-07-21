@@ -260,7 +260,7 @@ public abstract class OrphanFilesClean implements Serializable {
             Snapshot snapshot,
             Consumer<String> usedFileConsumer,
             Consumer<String> manifestConsumer,
-            AtomicBoolean missingManifest)
+            @Nullable AtomicBoolean missingManifest)
             throws IOException {
         Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer =
                 fileAndFlag -> {
@@ -277,7 +277,7 @@ public abstract class OrphanFilesClean implements Serializable {
             String branch,
             Snapshot snapshot,
             Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
-            AtomicBoolean missingManifest)
+            @Nullable AtomicBoolean missingManifest)
             throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         ManifestList manifestList = branchTable.store().manifestListFactory().create();
@@ -300,7 +300,7 @@ public abstract class OrphanFilesClean implements Serializable {
                             emptyList(),
                             missingManifest);
             // A missing manifest list means we cannot determine all used files, so abort.
-            if (missingManifest.get()) {
+            if (missingManifest != null && missingManifest.get()) {
                 return;
             }
             usedFileWithFlagConsumer.accept(Pair.of(manifestListName, false));
@@ -320,7 +320,7 @@ public abstract class OrphanFilesClean implements Serializable {
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
                             Collections.<IndexManifestEntry>emptyList(),
                             missingManifest);
-            if (!missingManifest.get()) {
+            if (missingManifest == null || !missingManifest.get()) {
                 usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
                 indexEntries.stream()
                         .map(IndexManifestEntry::indexFile)

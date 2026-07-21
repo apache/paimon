@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileStatus;
@@ -53,6 +54,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -175,18 +177,34 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             String branch,
             Consumer<String> usedFileConsumer,
             Consumer<String> manifestConsumer,
+            Consumer<String> liveManifestConsumer,
             AtomicBoolean missingManifest)
             throws IOException {
+        Set<Snapshot> liveSnapshots =
+                DEFAULT_MAIN_BRANCH.equals(branch)
+                        ? new HashSet<>(
+                                table.switchToBranch(branch)
+                                        .snapshotManager()
+                                        .safelyGetAllSnapshots())
+                        : Collections.emptySet();
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
                     try {
+                        boolean live = liveSnapshots.contains(snapshot);
+                        Consumer<String> perSnapshotManifestConsumer =
+                                live
+                                        ? manifest -> {
+                                            manifestConsumer.accept(manifest);
+                                            liveManifestConsumer.accept(manifest);
+                                        }
+                                        : manifestConsumer;
                         collectWithoutDataFile(
                                 branch,
                                 snapshot,
                                 usedFileConsumer,
-                                manifestConsumer,
-                                missingManifest);
+                                perSnapshotManifestConsumer,
+                                live ? missingManifest : null);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -200,15 +218,19 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
-            collectWithoutDataFile(branch, usedFiles::add, manifests::add, missingManifest);
+            Set<String> liveManifests = ConcurrentHashMap.newKeySet();
+            collectWithoutDataFile(
+                    branch, usedFiles::add, manifests::add, liveManifests::add, missingManifest);
             randomlyOnlyExecute(
                     executor,
                     manifestName -> {
                         try {
+                            AtomicBoolean fnfFallback =
+                                    liveManifests.contains(manifestName) ? missingManifest : null;
                             retryReadingFiles(
                                             () -> manifestFile.readWithIOException(manifestName),
                                             Collections.<ManifestEntry>emptyList(),
-                                            missingManifest)
+                                            fnfFallback)
                                     .stream()
                                     .map(ManifestEntry::file)
                                     .forEach(
