@@ -891,6 +891,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         // Check if the commit has been completed. At this point, there will be no more repeated
         // commits and just return success
+        boolean hasOverwriteSinceLastAttempt = false;
         if (retryResult instanceof CommitFailRetryResult && latestSnapshot != null) {
             CommitFailRetryResult commitFailRetry = (CommitFailRetryResult) retryResult;
             Map<Long, Snapshot> snapshotCache = new HashMap<>();
@@ -903,6 +904,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
                 Snapshot snapshot = snapshotCache.computeIfAbsent(i, snapshotManager::snapshot);
+                hasOverwriteSinceLastAttempt |= snapshot.commitKind() == CommitKind.OVERWRITE;
                 if (snapshot.commitUser().equals(commitUser)
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
@@ -959,9 +961,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
+            // An overwrite may replace the base manifest list without recording the replacements
+            // in its delta manifest, so the cached base cannot always be refreshed incrementally.
             if (commitFailRetry != null
                     && commitFailRetry.latestSnapshot != null
-                    && commitFailRetry.baseDataFiles != null) {
+                    && commitFailRetry.baseDataFiles != null
+                    && !hasOverwriteSinceLastAttempt) {
                 baseDataFiles = new ArrayList<>(commitFailRetry.baseDataFiles);
                 List<SimpleFileEntry> incremental =
                         scanner.readIncrementalChanges(
