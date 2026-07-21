@@ -91,8 +91,7 @@ public class BlobFileFormatTest {
 
     @Test
     public void testRawDescriptorReaderDoesNotOwnInputStream() throws IOException {
-        BlobFileFormat format =
-                new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        BlobFileFormat format = new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.BLOB());
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -117,8 +116,7 @@ public class BlobFileFormatTest {
 
     @Test
     public void testPublicRawDescriptorReaderDoesNotOwnInputStream() throws IOException {
-        BlobFileFormat format =
-                new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        BlobFileFormat format = new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.BLOB());
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -149,8 +147,7 @@ public class BlobFileFormatTest {
 
     @Test
     public void testArrayDescriptorReaderOwnsInputStream() throws IOException {
-        BlobFileFormat format =
-                new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        BlobFileFormat format = new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -197,8 +194,7 @@ public class BlobFileFormatTest {
         }
 
         TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
-        BlobFileFormat format =
-                new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        BlobFileFormat format = new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.BLOB());
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
@@ -455,8 +451,7 @@ public class BlobFileFormatTest {
         entries.put(BinaryString.fromString("b"), new BlobData("second".getBytes()));
 
         BlobFileFormat format =
-                new BlobFileFormat(
-                        blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+                new BlobFileFormat(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -816,8 +811,7 @@ public class BlobFileFormatTest {
 
     private void innerTestMap(boolean blobAsDescriptor) throws IOException {
         BlobFileFormat format =
-                new BlobFileFormat(
-                        blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+                new BlobFileFormat(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
 
         Map<Object, Object> firstEntries = new LinkedHashMap<>();
