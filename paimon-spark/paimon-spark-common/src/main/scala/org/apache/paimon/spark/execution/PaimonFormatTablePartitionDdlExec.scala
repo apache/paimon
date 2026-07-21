@@ -32,13 +32,6 @@ import scala.collection.JavaConverters._
 object PaimonFormatTablePartitionDdlExec {
 
   /**
-   * A Format Table uses catalog-managed partitions exactly when the catalog gave it a partition
-   * manager; otherwise its partitions are discovered from the filesystem.
-   */
-  def usesCatalogManagedPartitions(table: PaimonFormatTable): Boolean =
-    table.partitionManager != null
-
-  /**
    * Run an operation and refresh Spark's cached plans afterwards, whether it succeeded or not. A
    * refresh failure never replaces the operation's own failure — that one explains what went wrong
    * — and is attached to it instead, unless the two are the same throwable.
@@ -86,7 +79,7 @@ case class PaimonAddFormatTablePartitionsExec(
   extends LeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    if (!PaimonFormatTablePartitionDdlExec.usesCatalogManagedPartitions(table)) {
+    if (!table.hasCatalogManagedPartitions) {
       throw PaimonFormatTablePartitionDdlExec.unsupportedWithoutCatalogManagedPartitions(
         "ADD",
         table)
@@ -126,7 +119,7 @@ case class PaimonDropFormatTablePartitionsExec(
   extends LeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    if (!PaimonFormatTablePartitionDdlExec.usesCatalogManagedPartitions(table)) {
+    if (!table.hasCatalogManagedPartitions) {
       throw PaimonFormatTablePartitionDdlExec.unsupportedWithoutCatalogManagedPartitions(
         "DROP",
         table)

@@ -70,29 +70,33 @@ class OptionUtilsTest extends AnyFunSuite {
   }
 
   test(
-    "session-level metastore.partitioned-table is ignored, not failed, with catalog-managed partitions") {
+    "conflicting metastore.partitioned-table from SQL conf fails a catalog-managed format table") {
     val sqlConf = new SQLConf
     sqlConf.setConfString(s"spark.paimon.${METASTORE_PARTITIONED_TABLE.key()}", "false")
 
-    val copied = SQLConf.withExistingConf(sqlConf) {
-      OptionUtils.copyWithSQLConf(formatTable(withCatalogManagedPartitions = true))
+    // Whether a format table's partitions are catalog-managed is a persisted property, not a
+    // dynamic option: a conflicting session value fails the load rather than being silently
+    // dropped. Clear the conflicting Spark config to recover.
+    val exception = intercept[IllegalArgumentException] {
+      SQLConf.withExistingConf(sqlConf) {
+        OptionUtils.copyWithSQLConf(formatTable(withCatalogManagedPartitions = true))
+      }
     }
 
-    // The persisted flag wins; the session-global override is dropped with a warning instead of
-    // failing every format table load in the session.
-    assert(copied.options().get(METASTORE_PARTITIONED_TABLE.key()) == "true")
+    assert(exception.getMessage.contains(METASTORE_PARTITIONED_TABLE.key()))
   }
 
-  test(
-    "session-level metastore.partitioned-table is ignored, not failed, with filesystem partitions") {
+  test("conflicting metastore.partitioned-table from SQL conf fails a filesystem format table") {
     val sqlConf = new SQLConf
     sqlConf.setConfString(s"spark.paimon.${METASTORE_PARTITIONED_TABLE.key()}", "true")
 
-    val copied = SQLConf.withExistingConf(sqlConf) {
-      OptionUtils.copyWithSQLConf(formatTable(withCatalogManagedPartitions = false))
+    val exception = intercept[IllegalArgumentException] {
+      SQLConf.withExistingConf(sqlConf) {
+        OptionUtils.copyWithSQLConf(formatTable(withCatalogManagedPartitions = false))
+      }
     }
 
-    assert(copied.options().get(METASTORE_PARTITIONED_TABLE.key()) == "false")
+    assert(exception.getMessage.contains(METASTORE_PARTITIONED_TABLE.key()))
   }
 
   private def engineSQLConf: SQLConf = {

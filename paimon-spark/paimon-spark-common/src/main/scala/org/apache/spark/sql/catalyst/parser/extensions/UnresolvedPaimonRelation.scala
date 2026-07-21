@@ -18,6 +18,9 @@
 
 package org.apache.spark.sql.catalyst.parser.extensions
 
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.format.PaimonFormatTable
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, UnresolvedTable}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -40,7 +43,14 @@ object UnresolvedPaimonRelation extends PaimonLookupCatalog {
     multipartIdentifier match {
       case CatalogAndIdentifier(catalog: TableCatalog, ident) =>
         Try(catalog.loadTable(ident))
-          .map(t => t.isInstanceOf[org.apache.paimon.spark.SparkTable])
+          .map {
+            case _: SparkTable => true
+            // Catalog-managed Format Tables route DROP PARTITION through Paimon so they can resolve
+            // partial specs themselves; those using filesystem partition discovery keep Spark's own
+            // handling and its unsupported error at execution.
+            case formatTable: PaimonFormatTable => formatTable.hasCatalogManagedPartitions
+            case _ => false
+          }
           .getOrElse(false)
       case _ => false
     }

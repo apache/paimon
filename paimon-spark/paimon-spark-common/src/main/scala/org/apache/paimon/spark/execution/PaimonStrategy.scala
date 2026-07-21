@@ -176,8 +176,7 @@ case class PaimonStrategy(spark: SparkSession)
     case RepairTable(
           r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
           enableAddPartitions,
-          enableDropPartitions)
-        if PaimonFormatTablePartitionDdlExec.usesCatalogManagedPartitions(table) =>
+          enableDropPartitions) if table.hasCatalogManagedPartitions =>
       PaimonRepairFormatTablePartitionsExec(
         table,
         enableAddPartitions,
