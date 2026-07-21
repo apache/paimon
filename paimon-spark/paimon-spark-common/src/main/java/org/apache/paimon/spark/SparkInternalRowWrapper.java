@@ -65,7 +65,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
 
     public SparkInternalRowWrapper(StructType tableSchema, int length) {
-        this(tableSchema, length, null, null);
+        this(tableSchema, length, null, (CatalogContext) null);
     }
 
     public SparkInternalRowWrapper(
@@ -73,12 +73,28 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             int length,
             StructType dataSchema,
             CatalogContext catalogContext) {
+        this(tableSchema, length, dataSchema, new UriReaderFactory(catalogContext));
+    }
+
+    public static SparkInternalRowWrapper fromUriReaderFactory(
+            StructType tableSchema,
+            int length,
+            StructType dataSchema,
+            @Nullable UriReaderFactory uriReaderFactory) {
+        return new SparkInternalRowWrapper(tableSchema, length, dataSchema, uriReaderFactory);
+    }
+
+    private SparkInternalRowWrapper(
+            StructType tableSchema,
+            int length,
+            StructType dataSchema,
+            @Nullable UriReaderFactory uriReaderFactory) {
         this.tableSchema = tableSchema;
         this.length = length;
         this.dataSchema = dataSchema;
         this.fieldIndexMap =
                 dataSchema != null ? buildFieldIndexMap(tableSchema, dataSchema) : null;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
@@ -305,10 +321,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (dataSchema != null) {
             StructType nestedDataSchema = (StructType) dataSchema.fields()[actualPos].dataType();
             int dataNumFields = nestedDataSchema.size();
-            return new SparkInternalRowWrapper(nestedTableSchema, numFields, nestedDataSchema, null)
+            return new SparkInternalRowWrapper(
+                            nestedTableSchema, numFields, nestedDataSchema, uriReaderFactory)
                     .replace(internalRow.getStruct(actualPos, dataNumFields));
         }
-        return new SparkInternalRowWrapper(nestedTableSchema, numFields)
+        return new SparkInternalRowWrapper(nestedTableSchema, numFields, null, uriReaderFactory)
                 .replace(internalRow.getStruct(actualPos, numFields));
     }
 
@@ -483,7 +500,8 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public InternalRow getRow(int pos, int numFields) {
-            return new SparkInternalRowWrapper((StructType) elementType, numFields)
+            return new SparkInternalRowWrapper(
+                            (StructType) elementType, numFields, null, uriReaderFactory)
                     .replace(arrayData.getStruct(pos, numFields));
         }
     }

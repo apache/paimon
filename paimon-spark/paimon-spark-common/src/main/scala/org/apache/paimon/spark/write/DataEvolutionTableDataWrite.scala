@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.casting.FallbackMappingRow
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.{BinaryRow, BlobArrayPlaceholder, BlobPlaceholder, GenericRow, InternalRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.disk.IOManager
@@ -33,6 +32,7 @@ import org.apache.paimon.types.{DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 import org.slf4j.LoggerFactory
@@ -47,7 +47,7 @@ case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     firstRowIdToPartitionMap: mutable.HashMap[Long, (Array[Byte], Long)],
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     rawBlobPlaceholderMarkerIndexes: Map[Int, Int])
   extends InnerTableV1DataWrite {
 
@@ -58,7 +58,7 @@ case class DataEvolutionTableDataWrite(
   private val commitMessages = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, -1, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, -1, uriReaderFactory)
   }
   private lazy val rowSerializer = InternalSerializers.create(writeType)
   private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray

@@ -2590,6 +2590,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<String> BLOB_DESCRIPTOR_SOURCE_TABLE =
+            key(BLOB_DESCRIPTOR_PREFIX + "source-table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The source table whose FileIO is used to read descriptor-backed BLOB "
+                                    + "content and copy it into the target table's managed BLOB "
+                                    + "storage. The table must belong to the current catalog and can "
+                                    + "include a branch suffix, for example db.table$branch_rt. This "
+                                    + "option is not supported for target tables without a catalog "
+                                    + "loader, including external tables in REST catalogs. When set, "
+                                    + "other blob-descriptor.* FileIO options are ignored.");
+
     public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
             key("blob-write-null-on-missing-file")
                     .booleanType()

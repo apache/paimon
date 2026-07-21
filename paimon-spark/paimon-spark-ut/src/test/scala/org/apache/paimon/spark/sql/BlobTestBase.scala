@@ -243,6 +243,36 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: materialize descriptor with source table FileIO") {
+    withTable("blob_source", "blob_target") {
+      sql(
+        "CREATE TABLE blob_source (id INT, picture BINARY) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql("INSERT INTO blob_source VALUES (1, X'48656C6C6F'), (2, X'5945')")
+      sql(
+        "ALTER TABLE blob_source SET TBLPROPERTIES (" +
+          "'blob-as-descriptor'='true')")
+
+      sql(
+        "CREATE TABLE blob_target (id INT, picture BINARY) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', " +
+          s"'blob-descriptor.source-table'='$dbName0.blob_source')")
+      sql("INSERT INTO blob_target SELECT * FROM blob_source")
+
+      checkAnswer(
+        sql("SELECT id, picture FROM blob_target ORDER BY id"),
+        Seq(
+          Row(1, Array[Byte](72, 101, 108, 108, 111)),
+          Row(2, Array[Byte](89, 69))
+        )
+      )
+    }
+  }
+
   test("Blob: test write blob descriptor with partition") {
     withTable("t") {
       val blobData = new Array[Byte](1024 * 1024)

@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -360,7 +361,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     private static String blobUri(@Nullable Blob blob) {
         if (blob instanceof BlobRef) {
-            return ((BlobRef) blob).toDescriptor().uri();
+            // Sanitize: a signed URL carries token/signature in its query.
+            return SensitiveConfigUtils.sanitizeUri(((BlobRef) blob).toDescriptor().uri());
         }
         return "unknown";
     }
