@@ -34,6 +34,7 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
     static final int MAX_ROUNDED_ARRAY_LENGTH = Integer.MAX_VALUE - 15;
     static final int DEFAULT_HUGE_VECTOR_THRESHOLD = 1 << 20;
     static final double DEFAULT_HUGE_VECTOR_RESERVE_RATIO = 1.2;
+    static final int DEFAULT_HUGE_VECTOR_SHRINK_RATIO = 4;
 
     // If the whole column vector has no nulls, this is true, otherwise false.
     protected boolean noNulls = true;
@@ -98,8 +99,8 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     @Override
     public void reset() {
-        // Keep normal expanded capacity for reuse, but do not hold very large arrays forever.
-        if (capacity > DEFAULT_HUGE_VECTOR_THRESHOLD) {
+        // Keep normal expanded capacity for reuse, but release buffers inflated by one-off spikes.
+        if (shouldShrinkCapacity()) {
             capacity = initialCapacity;
         }
         noNulls = true;
@@ -126,6 +127,11 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
             }
             capacity = newCapacity;
         }
+    }
+
+    private boolean shouldShrinkCapacity() {
+        return capacity > DEFAULT_HUGE_VECTOR_THRESHOLD
+                && capacity > (long) elementsAppended * DEFAULT_HUGE_VECTOR_SHRINK_RATIO;
     }
 
     static int calculateNewCapacity(int requiredCapacity) {

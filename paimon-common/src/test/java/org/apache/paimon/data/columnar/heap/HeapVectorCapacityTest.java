@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data.columnar.heap;
 
+import org.apache.paimon.data.RowHelper;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,9 +36,24 @@ class HeapVectorCapacityTest {
         assertThat(vector.getCapacity()).isGreaterThan(threshold);
         assertThat(vector.vector.length).isEqualTo(vector.getCapacity());
 
+        vector.addElementsAppended(1);
         vector.reset();
 
         assertThat(vector.getCapacity()).isEqualTo(4);
         assertThat(vector.vector).hasSize(4);
+    }
+
+    @Test
+    void testHugeVectorCapacityIsRetainedWhenUsageIsNotTooSmall() {
+        int threshold = 1 << 20;
+        HeapIntVector vector = new HeapIntVector(4);
+
+        vector.reserve(threshold);
+        int expandedCapacity = vector.getCapacity();
+        vector.addElementsAppended(expandedCapacity / RowHelper.SHRINK_RATIO);
+        vector.reset();
+
+        assertThat(vector.getCapacity()).isEqualTo(expandedCapacity);
+        assertThat(vector.vector).hasSize(expandedCapacity);
     }
 }

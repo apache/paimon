@@ -52,7 +52,7 @@ class AbstractWritableVectorTest {
     }
 
     @Test
-    void testHugeVectorCapacityResetsToInitialCapacity() {
+    void testHugeVectorCapacityResetsToInitialCapacityWhenUsageIsSmall() {
         int threshold = AbstractWritableVector.DEFAULT_HUGE_VECTOR_THRESHOLD;
         TestVector vector = new TestVector(4);
 
@@ -61,6 +61,22 @@ class AbstractWritableVectorTest {
         vector.reset();
 
         assertThat(vector.getCapacity()).isEqualTo(4);
+        assertThat(vector.getElementsAppended()).isZero();
+    }
+
+    @Test
+    void testHugeVectorCapacityIsRetainedWhenUsageIsNotTooSmall() {
+        int threshold = AbstractWritableVector.DEFAULT_HUGE_VECTOR_THRESHOLD;
+        TestVector vector = new TestVector(4);
+
+        vector.reserve(threshold);
+        int expandedCapacity = vector.getCapacity();
+        int retainedUsage =
+                expandedCapacity / AbstractWritableVector.DEFAULT_HUGE_VECTOR_SHRINK_RATIO;
+        vector.addElementsAppended(retainedUsage);
+        vector.reset();
+
+        assertThat(vector.getCapacity()).isEqualTo(expandedCapacity);
         assertThat(vector.getElementsAppended()).isZero();
     }
 
