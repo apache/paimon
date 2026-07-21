@@ -64,6 +64,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CoordinatorCommittingRowDataStoreWriteOperator.class);
+    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     @VisibleForTesting
     static final String PENDING_COMMITTABLE_STATE_NAME = "pending_committable_state";
@@ -123,6 +124,11 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
             List<CheckpointCommittables> restored = new ArrayList<>();
             for (CheckpointCommittables entry : pendingCommittableState.get()) {
+                // End input is newer than every ordinary restored checkpoint and must survive
+                // subsequent snapshots even if Flink does not call endInput again after restore.
+                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
+                    pendingCommittables.put(entry.checkpointId(), entry);
+                }
                 restored.add(entry);
             }
             pendingCommittableState.clear();
@@ -160,6 +166,17 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
                 new CheckpointCommittables(checkpointId, committables, currentWatermark);
+
+        if (checkpointId == END_INPUT_CHECKPOINT_ID) {
+            CheckpointCommittables previous = pendingCommittables.get(checkpointId);
+            if (previous != null) {
+                // A restored writer may receive endInput again. Preserve the previously persisted
+                // final committables and send one authoritative entry to the coordinator.
+                List<Committable> merged = new ArrayList<>(previous.committables());
+                merged.addAll(entry.committables());
+                entry = new CheckpointCommittables(checkpointId, merged, currentWatermark);
+            }
+        }
         // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.
         operatorEventGateway.sendEventToCoordinator(
                 CommittableEvent.create(checkpointId, entry, eventSerializer));

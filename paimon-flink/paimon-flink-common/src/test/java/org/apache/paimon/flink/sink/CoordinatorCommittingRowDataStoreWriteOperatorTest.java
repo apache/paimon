@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.coordinator.CheckpointCommittables;
 import org.apache.paimon.flink.sink.coordinator.CheckpointCommittablesSerializer;
 import org.apache.paimon.flink.sink.coordinator.CommittableEvent;
@@ -91,7 +92,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                                         table, table.newCommit(context.commitUser()), context),
                         true,
                         commitUser,
-                        false);
+                        false,
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -351,6 +353,87 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         assertThat(entries.get(0).watermark()).isEqualTo(Long.MIN_VALUE);
 
         secondHarness.close();
+    }
+
+    @Test
+    public void testEndInputSendsMaxCheckpointAndForwardsCurrentWatermark() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.BUCKET, -1);
+                            options.remove("bucket-key");
+                            options.set(FlinkConnectorOptions.END_INPUT_WATERMARK, 12345L);
+                        });
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        harness.setup(new CommittableTypeInfo().createSerializer(new ExecutionConfig()));
+        harness.open();
+
+        harness.processElement(GenericRow.of(1, 10L), 1);
+        harness.endInput();
+
+        assertThat(events).hasSize(1);
+        CommittableEvent event = (CommittableEvent) events.get(0);
+        assertThat(event.getCheckpointId()).isEqualTo(Long.MAX_VALUE);
+        CheckpointCommittables entry = event.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(entry.checkpointId()).isEqualTo(Long.MAX_VALUE);
+        assertThat(entry.watermark()).isEqualTo(Long.MIN_VALUE);
+        assertThat(entry.committables()).hasSize(1);
+        CoordinatorCommittingRowDataStoreWriteOperator operator =
+                (CoordinatorCommittingRowDataStoreWriteOperator) harness.getOperator();
+        assertThat(operator.getPendingCommittables()).containsKey(Long.MAX_VALUE);
+
+        harness.close();
+    }
+
+    @Test
+    public void testRestoredEndInputSurvivesAnotherSnapshot() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+
+        List<OperatorEvent> firstEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> first =
+                createHarness(table, commitUser, firstEvents::add);
+        first.setup(serializer);
+        first.open();
+        first.processElement(GenericRow.of(1, 10L), 1);
+        first.endInput();
+        OperatorSubtaskState firstSnapshot = first.snapshot(1L, 10L);
+        first.close();
+
+        List<OperatorEvent> secondEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> second =
+                createHarness(table, commitUser, secondEvents::add);
+        second.setup(serializer);
+        restoreWithCheckpointId(second, firstSnapshot, 1L);
+        second.open();
+        CoordinatorCommittingRowDataStoreWriteOperator secondOperator =
+                (CoordinatorCommittingRowDataStoreWriteOperator) second.getOperator();
+        assertThat(secondOperator.getPendingCommittables()).containsKey(Long.MAX_VALUE);
+        RestoredCommittableEvent restored = (RestoredCommittableEvent) secondEvents.get(0);
+        assertThat(restored.deserialize(COMMITTABLES_SERIALIZER))
+                .extracting(CheckpointCommittables::checkpointId)
+                .contains(Long.MAX_VALUE);
+
+        OperatorSubtaskState secondSnapshot = second.snapshot(2L, 20L);
+        second.close();
+
+        List<OperatorEvent> thirdEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> third =
+                createHarness(table, commitUser, thirdEvents::add);
+        third.setup(serializer);
+        restoreWithCheckpointId(third, secondSnapshot, 2L);
+        third.open();
+        RestoredCommittableEvent restoredAgain = (RestoredCommittableEvent) thirdEvents.get(0);
+        assertThat(restoredAgain.deserialize(COMMITTABLES_SERIALIZER))
+                .extracting(CheckpointCommittables::checkpointId)
+                .contains(Long.MAX_VALUE);
+
+        third.close();
     }
 
     private void assertCommittableEventCheckpoint(OperatorEvent event, long expectedCheckpointId) {
