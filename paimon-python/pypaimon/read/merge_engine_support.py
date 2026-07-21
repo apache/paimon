@@ -210,8 +210,8 @@ def check_supported(table) -> None:
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
-                "and other aggregators (product / listagg / collect / "
-                "merge_map* / nested_update* / theta_sketch / "
+                "and other aggregators (product / collect / "
+                "merge_map* / theta_sketch / "
                 "hll_sketch / roaring_bitmap_*) are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
@@ -262,8 +262,7 @@ def aggregation_unsupported_options(table) -> Set[str]:
        ``builtin_seq_comparator``).
     3. Out-of-scope aggregator selections: ``fields.<f>.aggregate-
        function`` and ``fields.default-aggregate-function`` set to an
-       identifier this engine doesn't support yet (e.g. ``collect``,
-       ``nested_update``).
+       identifier this engine doesn't support yet (e.g. ``collect``).
     """
     flagged: Set[str] = set()
     raw = table.options.options.to_map()
