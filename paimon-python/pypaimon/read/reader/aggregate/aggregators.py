@@ -396,8 +396,16 @@ class FieldProductAgg(FieldAggregator):
             return accumulator if input_field is None else input_field
 
         if self._base_type in _DECIMAL_TYPES:
+            with localcontext() as ctx:
+                ctx.prec = max(
+                    len(accumulator.as_tuple().digits) + len(input_field.as_tuple().digits),
+                    38
+                )
+
+                mul = accumulator * input_field
+
             value = Decimal.from_big_decimal(
-                accumulator * input_field,
+                mul,
                 self._precision,
                 self._scale,
             )
