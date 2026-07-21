@@ -42,21 +42,21 @@ __all__ = ["range_join"]
 _MAX_RANGES = 512
 
 
-def _file_key_range(file, col, table_field_names):
+def _file_key_range(file, col):
     """Min/max of ``col`` for one data file from its manifest stats; None when the
     file has no usable stats for ``col``."""
-    # value_stats layout: value_stats_cols when set, else the full schema (see files_table).
-    cols = file.value_stats_cols
-    names = list(cols) if cols else table_field_names
+    # min_values/max_values are self-describing BinaryRows: index via their own fields
+    # (get_field), not a re-derived column list.
+    min_row = file.value_stats.min_values
+    max_row = file.value_stats.max_values
+    names = [f.name for f in getattr(min_row, "fields", [])]
     if col not in names:
         return None
     idx = names.index(col)
-    stats = file.value_stats
-    min_values = getattr(stats.min_values, "values", None) or []
-    max_values = getattr(stats.max_values, "values", None) or []
-    if idx >= len(min_values) or idx >= len(max_values):
+    if idx >= len(min_row) or idx >= len(max_row):
         return None
-    fmin, fmax = min_values[idx], max_values[idx]
+    fmin = min_row.get_field(idx)
+    fmax = max_row.get_field(idx)
     if fmin is None or fmax is None:  # all-null or absent stats
         return None
     return fmin, fmax
@@ -72,10 +72,9 @@ def _range_stats_by_file(table, col):
         return {}
     manifest_files = ManifestListManager(table).read_all(snapshot)
     entries = ManifestFileManager(table).read_entries_parallel(manifest_files, drop_stats=False)
-    field_names = table.field_names
     stats = {}
     for entry in entries:
-        rng = _file_key_range(entry.file, col, field_names)
+        rng = _file_key_range(entry.file, col)
         if rng is not None:
             stats[entry.file.file_name] = rng
     return stats
