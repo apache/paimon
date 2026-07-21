@@ -1041,7 +1041,8 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Boolean</td>
             <td>Whether to create this table as a partitioned table in metastore.
 For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
-This config option does not affect the default filesystem metastore.</td>
+This config option does not affect the default filesystem metastore.
+For an internal format table in a REST catalog, it also makes the catalog own the table's partitions: a scan reads the partitions registered there and a write registers the ones it wrote, instead of listing the table directory.</td>
         </tr>
         <tr>
             <td><h5>metastore.tag-to-partition</h5></td>
