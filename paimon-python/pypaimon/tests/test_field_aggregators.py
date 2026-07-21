@@ -44,13 +44,10 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldMinAgg,
     FieldPrimaryKeyAgg,
     FieldSumAgg,
+    FieldProductAgg,
     FieldListaggAgg,
     FieldNestedUpdateAgg,
-<<<<<<< HEAD
-    FieldProductAgg,
-=======
     FieldCollectAgg,
->>>>>>> origin/master
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
 from pypaimon.table.row.generic_row import GenericRow
