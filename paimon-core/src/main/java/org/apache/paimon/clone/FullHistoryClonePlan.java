@@ -21,6 +21,9 @@ package org.apache.paimon.clone;
 import org.apache.paimon.fs.Path;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** Immutable plan for a full-history clone. */
 public class FullHistoryClonePlan implements Serializable {
@@ -31,16 +34,20 @@ public class FullHistoryClonePlan implements Serializable {
     private final Path targetRoot;
     private final String sourceFingerprint;
     private final FullHistoryCopyPlan payloadCopyPlan;
+    private final List<Path> externalTargetRoots;
 
     FullHistoryClonePlan(
             Path sourceRoot,
             Path targetRoot,
             String sourceFingerprint,
-            FullHistoryCopyPlan payloadCopyPlan) {
+            FullHistoryCopyPlan payloadCopyPlan,
+            List<Path> externalTargetRoots) {
         this.sourceRoot = sourceRoot;
         this.targetRoot = targetRoot;
         this.sourceFingerprint = sourceFingerprint;
         this.payloadCopyPlan = payloadCopyPlan;
+        this.externalTargetRoots =
+                Collections.unmodifiableList(new ArrayList<>(externalTargetRoots));
     }
 
     public Path sourceRoot() {
@@ -57,5 +64,9 @@ public class FullHistoryClonePlan implements Serializable {
 
     public FullHistoryCopyPlan payloadCopyPlan() {
         return payloadCopyPlan;
+    }
+
+    public List<Path> externalTargetRoots() {
+        return externalTargetRoots;
     }
 }

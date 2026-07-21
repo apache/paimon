@@ -224,7 +224,7 @@ public class PathMapping implements Serializable {
                 && isSameOrDescendantForOverlap(right, left);
     }
 
-    private static boolean isSameOrDescendant(String path, String parent) {
+    static boolean isSameOrDescendant(String path, String parent) {
         return isSameOrDescendant(path, parent, false);
     }
 

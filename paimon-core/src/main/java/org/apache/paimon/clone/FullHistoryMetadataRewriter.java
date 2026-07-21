@@ -123,8 +123,12 @@ public class FullHistoryMetadataRewriter {
                         targetSchema.id(),
                         branch);
             } else {
+                Path schemaPath =
+                        new Path(
+                                targetSchemaManager.schemaDirectory(),
+                                SchemaManager.SCHEMA_PREFIX + targetSchema.id());
                 checkState(
-                        targetSchemaManager.restore(targetSchema),
+                        targetFileIO.tryToWriteAtomic(schemaPath, targetSchema.toString()),
                         "Failed to write target schema %s in branch %s.",
                         targetSchema.id(),
                         branch);
