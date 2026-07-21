@@ -40,7 +40,6 @@ from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
-from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
 
@@ -734,6 +733,125 @@ class FieldNestedUpdateAgg(FieldAggregator):
         )
 
 
+class FieldNestedPartialUpdateAgg(FieldAggregator):
+    """
+    Used to partial update a field which representing a nested table.
+    The data type of nested table field is ARRAY<ROW>
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        field_type = _check_array_row(field_name, field_type)
+        super().__init__(name, field_type)
+
+        nested_type: RowType = field_type.element
+        self.nested_fields = len(nested_type.fields)
+
+        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
+        if not self.nested_key:
+            raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
+
+        self.key_projection = FieldProjection.from_fields(
+            [nested_type.get_field_index(name) for name in self.nested_key],
+            self.nested_key
+        )
+
+        self.nested_key_null_strategy = (
+            options.field_nested_update_agg_nested_key_null_strategy(field_name)
+        )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None:
+            return accumulator
+
+        rows: List[Record] = []
+        if accumulator is not None:
+            self._add_non_null_rows(accumulator, rows)
+        self._add_non_null_rows(input_field, rows)
+
+        row_map: Dict[Tuple[Any, ...], Record] = {}
+        for row in rows:
+            key = self.key_projection.apply(row)
+            if not self._apply_nested_key_null_strategy(key):
+                continue
+
+            to_update = row_map.get(key)
+            if to_update is None:
+                if isinstance(row, InternalRow):
+                    to_update = GenericRow([None] * self.nested_fields, row.fields)
+                elif isinstance(row, dict):
+                    to_update = {}.fromkeys(row.keys())
+                else:
+                    raise TypeError(
+                        "Unsupported row type '{}'. Expected InternalRow or dict.".format(
+                            type(row).__name__
+                        )
+                    )
+            self._partial_update(to_update, row)
+            row_map[key] = to_update
+
+        return list(row_map.values())
+
+    def _partial_update(self, to_update: Record, input_row: Record) -> None:
+        if isinstance(to_update, InternalRow) and isinstance(input_row, InternalRow):
+            for i in range(self.nested_fields):
+                value = input_row.get_field(i)
+                if value is not None:
+                    to_update.values[i] = value
+        elif isinstance(to_update, dict) and isinstance(input_row, dict):
+            for k, v in input_row.items():
+                if v is not None:
+                    to_update[k] = v
+        else:
+            raise TypeError(
+                "Unsupported row types: to_update={}, input_row={}. "
+                "Expected both to be either InternalRow or dict.".format(
+                    type(to_update).__name__,
+                    type(input_row).__name__,
+                )
+            )
+
+    def _add_non_null_rows(
+            self,
+            array: List[Record],
+            rows: List[Record],
+    ) -> None:
+        """Append non-null rows from array."""
+
+        for row in array:
+            if row is None:
+                continue
+            rows.append(row)
+
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
+        """Apply nested-key-null-strategy."""
+
+        if all(v is not None for v in key):
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
+            return False
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
+            raise ValueError(
+                "Nested key contains null values. "
+                "Primary key fields must not be null."
+            )
+
+        raise ValueError(
+            "Unsupported nested-key-null-strategy '{}'".format(
+                self.nested_key_null_strategy
+            )
+        )
+
+
 class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
     """
     Aggregator for merging MAP values with key and timestamp.
@@ -853,124 +971,6 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
             )
         )
 
-
-class FieldNestedPartialUpdateAgg(FieldAggregator):
-    """
-    Used to partial update a field which representing a nested table.
-    The data type of nested table field is ARRAY<ROW>
-    """
-    def __init__(
-            self,
-            name: str,
-            field_type: ArrayType,
-            field_name: str,
-            options: CoreOptions,
-    ):
-        field_type = _check_array_row(field_name, field_type)
-        super().__init__(name, field_type)
-
-        nested_type: RowType = field_type.element
-        self.nested_fields = len(nested_type.fields)
-
-        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
-        if not self.nested_key:
-            raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
-
-        self.key_projection = FieldProjection.from_fields(
-            [nested_type.get_field_index(name) for name in self.nested_key],
-            self.nested_key
-        )
-
-        self.nested_key_null_strategy = (
-            options.field_nested_update_agg_nested_key_null_strategy(field_name)
-        )
-
-    def agg(self, accumulator: Any, input_field: Any) -> Any:
-        if input_field is None:
-            return accumulator
-
-        rows: List[Record] = []
-        if accumulator is not None:
-            self._add_non_null_rows(accumulator, rows)
-        self._add_non_null_rows(input_field, rows)
-
-        row_map: Dict[Tuple[Any, ...], Record] = {}
-        for row in rows:
-            key = self.key_projection.apply(row)
-            if not self._apply_nested_key_null_strategy(key):
-                continue
-
-            to_update = row_map.get(key)
-            if to_update is None:
-                if isinstance(row, InternalRow):
-                    to_update = GenericRow([None] * self.nested_fields, row.fields)
-                elif isinstance(row, dict):
-                    to_update = {}.fromkeys(row.keys())
-                else:
-                    raise TypeError(
-                        "Unsupported row type '{}'. Expected InternalRow or dict.".format(
-                            type(row).__name__
-                        )
-                    )
-            self._partial_update(to_update, row)
-            row_map[key] = to_update
-
-        return list(row_map.values())
-
-    def _partial_update(self, to_update: Record, input_row: Record) -> None:
-        if isinstance(to_update, InternalRow) and isinstance(input_row, InternalRow):
-            for i in range(self.nested_fields):
-                value = input_row.get_field(i)
-                if value is not None:
-                    to_update.values[i] = value
-        elif isinstance(to_update, dict) and isinstance(input_row, dict):
-            for k, v in input_row.items():
-                if v is not None:
-                    to_update[k] = v
-        else:
-            raise TypeError(
-                "Unsupported row types: to_update={}, input_row={}. "
-                "Expected both to be either InternalRow or dict.".format(
-                    type(to_update).__name__,
-                    type(input_row).__name__,
-                )
-            )
-
-    def _add_non_null_rows(
-            self,
-            array: List[Record],
-            rows: List[Record],
-    ) -> None:
-        """Append non-null rows from array."""
-
-        for row in array:
-            if row is None:
-                continue
-            rows.append(row)
-
-    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
-        """Apply nested-key-null-strategy."""
-
-        if all(v is not None for v in key):
-            return True
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
-            return True
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
-            return False
-
-        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
-            raise ValueError(
-                "Nested key contains null values. "
-                "Primary key fields must not be null."
-            )
-
-        raise ValueError(
-            "Unsupported nested-key-null-strategy '{}'".format(
-                self.nested_key_null_strategy
-            )
-        )
 
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
