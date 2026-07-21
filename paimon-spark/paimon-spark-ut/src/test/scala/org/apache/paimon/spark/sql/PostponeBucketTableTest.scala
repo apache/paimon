@@ -18,9 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
+import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 
+import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
@@ -230,6 +234,46 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone compaction resolves blob descriptor source outside Spark tasks") {
+    withTable("source", "t") {
+      sql("CREATE TABLE source (k INT, v STRING) TBLPROPERTIES ('primary-key' = 'k')")
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false',
+            |  'blob-descriptor.source-table' = 'test.source'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT id, CAST(id AS STRING) FROM range(0, 20)")
+
+      val table = loadTable("t")
+      val environment = table.catalogEnvironment
+      val driverOnlyEnvironment = new CatalogEnvironment(
+        environment.identifier,
+        environment.uuid,
+        new PostponeBucketTableTest.SourceTableDriverOnlyCatalogLoader(environment.catalogLoader),
+        environment.lockFactory,
+        environment.lockContext,
+        environment.catalogContext,
+        environment.supportsVersionManagement,
+        false
+      )
+      val driverOnlyTable = FileStoreTableFactory.create(
+        table.fileIO,
+        table.location,
+        table.schema,
+        driverOnlyEnvironment)
+
+      SparkPostponeCompactProcedure(driverOnlyTable, spark, null, createRelationV2("t")).execute()
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(20)))
+    }
+  }
+
   test("Postpone partition bucket table: write postpone bucket then compact") {
     withTable("t") {
       sql("""
@@ -372,6 +416,25 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         sql("SELECT distinct(bucket) FROM `t$buckets`"),
         Seq(Row(-2))
       )
+    }
+  }
+}
+
+object PostponeBucketTableTest {
+
+  private class SourceTableDriverOnlyCatalogLoader(delegate: CatalogLoader) extends CatalogLoader {
+
+    override def load(): Catalog = {
+      new DelegateCatalog(delegate.load()) {
+        override def catalogLoader(): CatalogLoader = delegate
+
+        override def getTable(identifier: Identifier) = {
+          if (TaskContext.get() != null && identifier.getTableName == "source") {
+            throw new IllegalStateException("Source table must not be loaded in a Spark task")
+          }
+          super.getTable(identifier)
+        }
+      }
     }
   }
 }
