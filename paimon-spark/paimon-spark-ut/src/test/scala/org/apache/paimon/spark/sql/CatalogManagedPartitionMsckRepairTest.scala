@@ -335,6 +335,40 @@ class CatalogManagedPartitionMsckRepairTest extends PaimonSparkTestWithRestCatal
     }
   }
 
+  test("direct repair surfaces the refresh failure when the operation succeeds") {
+    val tableName = "msck_direct_success_refresh_failure"
+    val filesystemOnly = "20260715"
+
+    withTable(tableName) {
+      createFormatTableWithCatalogManagedPartitions(tableName)
+      writeCsvPartition(tableName, filesystemOnly, 15, "filesystem-only")
+      val gateway = new StatefulFaultCatalog
+      var refreshCalls = 0
+      val command = PaimonRepairFormatTablePartitionsExec(
+        sparkTable(tableName, gateway),
+        addPartitions = true,
+        dropPartitions = false,
+        () => {
+          refreshCalls += 1
+          throw new IllegalStateException(MsckFaultInjection.REFRESH_FAILURE)
+        }
+      )
+
+      val error = intercept[IllegalStateException] {
+        runCommand(command)
+      }
+
+      // With no operation failure to explain the repair, the refresh failure is the primary error
+      // (nothing to suppress it into); the ADD stays durable and refresh is attempted once.
+      assert(error.getMessage == MsckFaultInjection.REFRESH_FAILURE)
+      assert(error.getSuppressed.isEmpty)
+      assert(gateway.partitions == Set(Map("dt" -> filesystemOnly)))
+      assert(gateway.createCalls == 1)
+      assert(gateway.dropCalls == 0)
+      assert(refreshCalls == 1)
+    }
+  }
+
   test("SYNC invalidates cached data and converges after ADD succeeds but DROP fails") {
     val tableName = "msck_partial_sync_failure"
     val filesystemOnly = "20260715"

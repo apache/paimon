@@ -161,6 +161,66 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     assert(createCalls == 0)
   }
 
+  test("catalog-managed ADD rejects a partition value that would escape the table location") {
+    var createCalls = 0
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean): Unit = createCalls += 1
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.emptyList()
+
+      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+        Collections.emptyList()
+    }
+
+    val sparkTable =
+      new PaimonFormatTable(
+        stringFormatTableWithCatalogManagedPartitions(gateway, onlyValueInPath = true))
+    val error = intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(
+        Array(new GenericInternalRow(Array[Any](UTF8String.fromString("..")))),
+        Array[JMap[String, String]](Collections.emptyMap()),
+        ignoreIfExists = true)
+    }
+
+    // Symmetric with DROP: a traversal value is rejected before any catalog mutation or directory
+    // creation, so the whole ADD fails without registering or creating anything.
+    assert(error.getMessage.contains(".."))
+    assert(createCalls == 0)
+  }
+
+  test("catalog-managed ADD keeps the partition registered when directory creation fails") {
+    val delegate = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-add-mkdirs-failure").toUri)
+    val failure = new java.io.IOException("injected mkdirs failure")
+    val fileIO = throwingMkdirsFileIO(delegate, failure)
+    val gateway = new InMemoryPartitionManager
+    try {
+      val sparkTable =
+        new PaimonFormatTable(
+          formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway))
+      val error = intercept[java.io.IOException] {
+        sparkTable.createFormatTablePartitions(
+          Array(partitionRow(20260715, 10)),
+          Array[JMap[String, String]](Collections.emptyMap()),
+          ignoreIfExists = false)
+      }
+
+      // Registration happens before the client-side mkdirs, so a mkdirs failure surfaces while the
+      // partition stays registered; re-running ADD ... IF NOT EXISTS then creates the directory.
+      assert(error eq failure)
+      assert(gateway.partitions == Seq(Map("dt" -> "20260715", "hh" -> "10")))
+    } finally {
+      delegate.delete(tablePath, true)
+    }
+  }
+
   test(
     "catalog-managed DROP PARTITION unregisters first and then deletes the partition directory") {
     var dropped = Seq.empty[JMap[String, String]]
@@ -639,6 +699,28 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
       .catalogContext(CatalogContext.create(new Options))
       .partitionManager(partitionManager)
       .build()
+  }
+
+  private def throwingMkdirsFileIO(delegate: FileIO, failure: Throwable): FileIO = {
+    Proxy
+      .newProxyInstance(
+        classOf[FileIO].getClassLoader,
+        Array(classOf[FileIO]),
+        new InvocationHandler {
+          override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
+            if (method.getName == "mkdirs") {
+              throw failure
+            } else {
+              try {
+                method.invoke(delegate, Option(args).getOrElse(Array.empty[AnyRef]): _*)
+              } catch {
+                case error: InvocationTargetException => throw error.getCause
+              }
+            }
+          }
+        }
+      )
+      .asInstanceOf[FileIO]
   }
 
   private def falseDeleteFileIO(delegate: FileIO): FileIO = {
