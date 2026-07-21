@@ -21,9 +21,13 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.clone.FullHistoryClonePlan;
+import org.apache.paimon.clone.FullHistoryClonePlanner;
 import org.apache.paimon.clone.FullHistoryFileCollector;
+import org.apache.paimon.clone.PathMapping;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -152,6 +156,63 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
         targetFileIO.delete(source.location(), true);
         targetFileIO.delete(new Path(sourceExternal), true);
         validateAllTimeTravel(resumed);
+    }
+
+    @Test
+    public void testInitialCloneRejectsPopulatedExternalTarget() throws Exception {
+        String sourceExternal = fileUri("dirty-source-external");
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), sourceExternal);
+        tableOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ROUND_ROBIN.toString());
+        FileStoreTable source =
+                createFileStoreTable(
+                        RowType.of(DataTypes.INT()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList("f0"),
+                        tableOptions);
+        writeRows(source, 0, 1);
+
+        Path sourceDataFile =
+                new FullHistoryFileCollector(source).collect().dataFiles().iterator().next();
+        String targetRoot = new Path(getTempDirPath("dirty-target-table")).toString();
+        String targetExternal = fileUri("dirty-target-external");
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                source.location() + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        Path targetDataFile = new Path(mapping.rewriteRequired(sourceDataFile.toString()));
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+        assertThat(plan.externalTargetRoots()).containsExactly(new Path(targetExternal));
+        LocalFileIO targetFileIO = LocalFileIO.create();
+        long sourceSize = source.fileIO().getFileSize(sourceDataFile);
+        assertThat(sourceSize).isLessThan(Integer.MAX_VALUE);
+        try (PositionOutputStream output = targetFileIO.newOutputStream(targetDataFile, false)) {
+            output.write(new byte[(int) sourceSize]);
+        }
+
+        Map<String, String> sourceCatalogConfig = Collections.singletonMap("warehouse", warehouse);
+        Map<String, String> targetCatalogConfig =
+                Collections.singletonMap("warehouse", getTempDirPath("dirty-target-warehouse"));
+        CloneAction action =
+                createAction(
+                        source,
+                        sourceCatalogConfig,
+                        targetCatalogConfig,
+                        targetRoot,
+                        sourceExternal,
+                        targetExternal,
+                        false);
+
+        assertThatThrownBy(action::run)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("external target root")
+                .hasMessageContaining(new Path(targetExternal).toString());
+        assertThat(targetFileIO.exists(new Path(targetRoot, "_SUCCESS"))).isFalse();
+        assertThat(targetFileIO.getFileSize(targetDataFile)).isEqualTo(sourceSize);
     }
 
     @Test

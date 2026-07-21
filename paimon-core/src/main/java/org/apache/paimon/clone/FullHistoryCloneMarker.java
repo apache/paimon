@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -53,36 +54,29 @@ public class FullHistoryCloneMarker {
             @Nullable String targetTable,
             boolean cloneIfExists)
             throws IOException {
-        Path marker = new Path(clonePlan.targetRoot(), FILE_NAME);
         String expected = content(clonePlan, mapping, targetDatabase, targetTable);
-        boolean targetEmpty =
-                !targetFileIO.exists(clonePlan.targetRoot())
-                        || targetFileIO.listStatus(clonePlan.targetRoot()).length == 0;
-
-        if (targetEmpty && targetFileIO.tryToWriteAtomic(marker, expected)) {
-            return false;
+        boolean resumed =
+                prepareRoot(
+                        targetFileIO,
+                        clonePlan.targetRoot(),
+                        "Target table root",
+                        expected,
+                        cloneIfExists);
+        for (Path externalRoot : clonePlan.externalTargetRoots()) {
+            prepareRoot(
+                    targetFileIO,
+                    externalRoot,
+                    "The external target root",
+                    expected,
+                    cloneIfExists);
         }
-
-        checkArgument(
-                cloneIfExists,
-                "Target table root already contains files: %s. Set clone_if_exists=true to resume.",
-                clonePlan.targetRoot());
-        checkArgument(
-                targetFileIO.exists(marker),
-                "Target table root %s is not owned by a full-history clone and cannot be resumed.",
-                clonePlan.targetRoot());
-        String actual = targetFileIO.readFileUtf8(marker);
-        checkArgument(
-                expected.equals(actual),
-                "Target table root %s belongs to a different full-history clone.",
-                clonePlan.targetRoot());
         if (isSuccessful(targetFileIO, clonePlan, mapping, targetDatabase, targetTable)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Full-history clone at target table root %s is already completed.",
                             clonePlan.targetRoot()));
         }
-        return true;
+        return resumed;
     }
 
     public static void markSuccessful(
@@ -102,6 +96,7 @@ public class FullHistoryCloneMarker {
                 expected.equals(targetFileIO.readFileUtf8(marker)),
                 "Target table root %s belongs to a different full-history clone.",
                 clonePlan.targetRoot());
+        validateExternalMarkers(targetFileIO, clonePlan, expected);
 
         Path success = new Path(clonePlan.targetRoot(), SUCCESS_FILE_NAME);
         if (isSuccessful(targetFileIO, clonePlan, mapping, targetDatabase, targetTable)) {
@@ -132,6 +127,7 @@ public class FullHistoryCloneMarker {
                 targetFileIO.exists(marker) && expected.equals(targetFileIO.readFileUtf8(marker)),
                 "Target table root %s is not owned by this full-history clone.",
                 clonePlan.targetRoot());
+        validateExternalMarkers(targetFileIO, clonePlan, expected);
         checkArgument(
                 expected.equals(targetFileIO.readFileUtf8(success)),
                 "Success marker at target table root %s belongs to a different clone.",
@@ -145,14 +141,58 @@ public class FullHistoryCloneMarker {
             @Nullable String targetDatabase,
             @Nullable String targetTable) {
         StringBuilder builder = new StringBuilder();
-        appendField(builder, "version", "3");
+        appendField(builder, "version", "4");
         appendField(builder, "source", clonePlan.sourceRoot().toString());
         appendField(builder, "target", clonePlan.targetRoot().toString());
         appendField(builder, "fingerprint", clonePlan.sourceFingerprint());
         appendField(builder, "targetDatabase", normalizeIdentifier(targetDatabase));
         appendField(builder, "targetTable", normalizeIdentifier(targetTable));
         appendField(builder, "mappings", mapping.identity());
+        appendField(
+                builder,
+                "externalTargetRoots",
+                clonePlan.externalTargetRoots().stream()
+                        .map(Path::toString)
+                        .collect(Collectors.joining("\n")));
         return builder.toString();
+    }
+
+    private static boolean prepareRoot(
+            FileIO fileIO, Path root, String description, String expected, boolean cloneIfExists)
+            throws IOException {
+        Path marker = new Path(root, FILE_NAME);
+        boolean empty = !fileIO.exists(root) || fileIO.listStatus(root).length == 0;
+        if (empty && fileIO.tryToWriteAtomic(marker, expected)) {
+            return false;
+        }
+
+        checkArgument(
+                cloneIfExists,
+                "%s already contains files: %s. Set clone_if_exists=true to resume.",
+                description,
+                root);
+        checkArgument(
+                fileIO.exists(marker),
+                "%s %s is not owned by a full-history clone and cannot be resumed.",
+                description,
+                root);
+        checkArgument(
+                expected.equals(fileIO.readFileUtf8(marker)),
+                "%s %s belongs to a different full-history clone.",
+                description,
+                root);
+        return true;
+    }
+
+    private static void validateExternalMarkers(
+            FileIO fileIO, FullHistoryClonePlan clonePlan, String expected) throws IOException {
+        for (Path externalRoot : clonePlan.externalTargetRoots()) {
+            Path marker = new Path(externalRoot, FILE_NAME);
+            checkArgument(
+                    fileIO.exists(marker) && expected.equals(fileIO.readFileUtf8(marker)),
+                    "External target root %s is not owned by this full-history clone.",
+                    externalRoot);
+        }
     }
 
     private static void appendField(StringBuilder builder, String name, String value) {

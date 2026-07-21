@@ -110,7 +110,7 @@ public class FullHistoryMetadataRewriterTest {
                 new Path(tempDir.resolve("location-fingerprint-external").toUri()).toString();
         FileStoreTable first = createTable(firstRoot, externalRoot);
         TableSchema identicalSchema = first.schema();
-        assertThat(new SchemaManager(fileIO, secondRoot).restore(identicalSchema)).isTrue();
+        writeHistoricalSchema(secondRoot, identicalSchema);
         FileStoreTable second = FileStoreTableFactory.create(fileIO, secondRoot, identicalSchema);
 
         String firstFingerprint = FullHistorySourceFingerprint.compute(first);
@@ -326,6 +326,55 @@ public class FullHistoryMetadataRewriterTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Target statistics file does not exist")
                 .hasMessageContaining(statisticsPath.toString());
+    }
+
+    @Test
+    public void testStreamingValidationRejectsSwappedSnapshotRoots() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("swapped-roots-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("swapped-roots-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("swapped-roots-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("swapped-roots-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        writeRows(source, 0, "A", 1);
+        writeRows(source, 1, "B", 2);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        List<Snapshot> snapshots = target.snapshotManager().safelyGetAllSnapshots();
+        assertThat(snapshots).hasSize(2);
+        Snapshot first = snapshots.get(0);
+        Snapshot second = snapshots.get(1);
+        fileIO.overwriteFileUtf8(
+                target.snapshotManager().snapshotPath(first.id()),
+                copyWithManifestRoots(first, second).toJson());
+        fileIO.overwriteFileUtf8(
+                target.snapshotManager().snapshotPath(second.id()),
+                copyWithManifestRoots(second, first).toJson());
+        FileStoreTable corruptedTarget = FileStoreTableFactory.create(fileIO, targetRoot);
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                source,
+                                                corruptedTarget,
+                                                mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("snapshot")
+                .hasMessageContaining("does not match source semantics");
     }
 
     @Test
@@ -1013,6 +1062,32 @@ public class FullHistoryMetadataRewriterTest {
                 snapshot.operation());
     }
 
+    private static Snapshot copyWithManifestRoots(Snapshot snapshot, Snapshot roots) {
+        return new Snapshot(
+                snapshot.version(),
+                snapshot.id(),
+                snapshot.schemaId(),
+                roots.baseManifestList(),
+                roots.baseManifestListSize(),
+                roots.deltaManifestList(),
+                roots.deltaManifestListSize(),
+                roots.changelogManifestList(),
+                roots.changelogManifestListSize(),
+                roots.indexManifest(),
+                snapshot.commitUser(),
+                snapshot.commitIdentifier(),
+                snapshot.commitKind(),
+                snapshot.timeMillis(),
+                snapshot.totalRecordCount(),
+                snapshot.deltaRecordCount(),
+                snapshot.changelogRecordCount(),
+                snapshot.watermark(),
+                snapshot.statistics(),
+                snapshot.properties(),
+                snapshot.nextRowId(),
+                snapshot.operation());
+    }
+
     private void writeRows(
             FileStoreTable table, long commitIdentifier, String partition, int... ids)
             throws Exception {
@@ -1052,5 +1127,12 @@ public class FullHistoryMetadataRewriterTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void writeHistoricalSchema(Path tableRoot, TableSchema schema) throws Exception {
+        SchemaManager manager = new SchemaManager(fileIO, tableRoot);
+        Path schemaPath =
+                new Path(manager.schemaDirectory(), SchemaManager.SCHEMA_PREFIX + schema.id());
+        assertThat(fileIO.tryToWriteAtomic(schemaPath, schema.toString())).isTrue();
     }
 }

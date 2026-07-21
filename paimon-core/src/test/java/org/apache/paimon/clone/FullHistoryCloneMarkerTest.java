@@ -18,6 +18,8 @@
 
 package org.apache.paimon.clone;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -68,6 +70,74 @@ public class FullHistoryCloneMarkerTest {
                                 mapping,
                                 true))
                 .isTrue();
+    }
+
+    @Test
+    public void testPrepareRejectsPopulatedExternalTargetRoot() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("source-external-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("target-external-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("source-external-data").toString());
+        Path targetExternal = new Path(tempDir.resolve("target-external-data").toString());
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+        fileIO.writeFile(new Path(targetExternal, "unrelated"), "data", false);
+
+        assertThat(plan.externalTargetRoots()).containsExactly(targetExternal);
+        assertThatThrownBy(() -> FullHistoryCloneMarker.prepare(fileIO, plan, mapping, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("external target root")
+                .hasMessageContaining(targetExternal.toString());
+    }
+
+    @Test
+    public void testResumeRequiresMatchingExternalTargetMarker() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("resume-source-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("resume-target-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("resume-source-external").toString());
+        Path targetExternal = new Path(tempDir.resolve("resume-target-external").toString());
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+
+        assertThat(FullHistoryCloneMarker.prepare(fileIO, plan, mapping, false)).isFalse();
+        Path externalMarker = new Path(targetExternal, FullHistoryCloneMarker.FILE_NAME);
+        assertThat(fileIO.exists(externalMarker)).isTrue();
+        fileIO.writeFile(new Path(targetExternal, "payload"), "data", false);
+        assertThat(FullHistoryCloneMarker.prepare(fileIO, plan, mapping, true)).isTrue();
+
+        fileIO.delete(externalMarker, false);
+        assertThatThrownBy(() -> FullHistoryCloneMarker.prepare(fileIO, plan, mapping, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("external target root")
+                .hasMessageContaining("not owned");
+    }
+
+    @Test
+    public void testPlannerCoalescesNestedExternalTargetRoots() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("nested-source-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("nested-target-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("nested-source-external").toUri());
+        Path targetExternal = new Path(tempDir.resolve("nested-target-external").toUri());
+        FileStoreTable source =
+                createTable(sourceRoot, sourceExternal, new Path(sourceExternal, "index"));
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+
+        assertThat(plan.externalTargetRoots()).containsExactly(targetExternal);
     }
 
     @Test
@@ -247,11 +317,29 @@ public class FullHistoryCloneMarkerTest {
     }
 
     private FileStoreTable createTable(Path path) throws Exception {
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .option("path", path.toString())
-                        .build();
+        return createTable(path, null);
+    }
+
+    private FileStoreTable createTable(Path path, Path externalPath) throws Exception {
+        return createTable(path, externalPath, null);
+    }
+
+    private FileStoreTable createTable(Path path, Path externalPath, Path globalIndexExternalPath)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder().column("id", DataTypes.INT()).option("path", path.toString());
+        if (externalPath != null) {
+            builder.option(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), externalPath.toString());
+            builder.option(
+                    CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                    ExternalPathStrategy.ROUND_ROBIN.toString());
+        }
+        if (globalIndexExternalPath != null) {
+            builder.option(
+                    CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                    globalIndexExternalPath.toString());
+        }
+        Schema schema = builder.build();
         SchemaUtils.forceCommit(new SchemaManager(fileIO, path), schema);
         return FileStoreTableFactory.create(fileIO, path);
     }

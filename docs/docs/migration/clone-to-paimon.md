@@ -64,11 +64,12 @@ physical target root. `target_database` and `target_table` are optional logical 
 not change that path or register the table. Mapping and source paths must use the same explicit
 filesystem scheme; for example, `file:/path` does not match `/path`.
 
-The target root must initially be absent or empty. A failed clone may be resumed with
-`--clone_if_exists true`; existing same-size files are skipped and conflicting sizes fail. Resume is
-accepted only when the ownership marker matches and `_SUCCESS` is absent. A completed clone cannot
-be resumed. Run at most one full-history clone job for a target root at a time; `clone_if_exists`
-is a failed-job resume protocol, not a concurrent execution protocol.
+The target table root and every mapped external data or index root used by the table must initially
+be absent or empty. The action writes the same ownership marker into each root. A failed clone may
+be resumed with `--clone_if_exists true`; existing same-size files are skipped and conflicting sizes
+fail. Resume is accepted only when every ownership marker matches and `_SUCCESS` is absent. A
+completed clone cannot be resumed. Run at most one full-history clone job for a target root at a
+time; `clone_if_exists` is a failed-job resume protocol, not a concurrent execution protocol.
 
 Mapped external-data and external-index target locations must be dedicated to this clone and must
 not be changed while the initial run or a retry is active. Payload files are published through
