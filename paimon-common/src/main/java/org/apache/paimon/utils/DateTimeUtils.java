@@ -649,8 +649,14 @@ public class DateTimeUtils {
     }
 
     public static Timestamp truncate(Timestamp ts, int precision) {
-        String fraction = Integer.toString(ts.toLocalDateTime().getNano());
-        if (fraction.length() <= precision) {
+        // Pad to 9 digits so leading zeros are preserved, then count the significant
+        // fractional digits by stripping trailing zeros (same approach as formatTimestamp).
+        String fraction = pad(9, ts.toLocalDateTime().getNano());
+        int significant = fraction.length();
+        while (significant > 0 && fraction.charAt(significant - 1) == '0') {
+            significant--;
+        }
+        if (significant <= precision) {
             return ts;
         } else {
             // need to truncate

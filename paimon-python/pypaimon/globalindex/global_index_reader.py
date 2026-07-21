@@ -17,6 +17,7 @@
 
 """Global index reader interface."""
 
+import threading
 from abc import ABC, abstractmethod
 from concurrent.futures import Future
 from typing import List, Optional
@@ -52,6 +53,32 @@ def _map_future(source, transform):
     return result
 
 
+def _collect_futures(futures):
+    """Collect futures in input order without blocking the caller."""
+    result = Future()
+    if not futures:
+        result.set_result([])
+        return result
+
+    remaining = [len(futures)]
+    lock = threading.Lock()
+
+    def on_done(_):
+        with lock:
+            remaining[0] -= 1
+            is_last = remaining[0] == 0
+        if not is_last:
+            return
+        try:
+            result.set_result([future.result() for future in futures])
+        except Exception as e:
+            result.set_exception(e)
+
+    for future in futures:
+        future.add_done_callback(on_done)
+    return result
+
+
 class GlobalIndexReader(ABC):
     """Index reader for global index. All visit methods return Future[Optional[GlobalIndexResult]]."""
 
@@ -61,14 +88,10 @@ class GlobalIndexReader(ABC):
     def visit_batch_vector_search(
             self, batch_vector_search: 'BatchVectorSearch'
     ) -> 'Future[List[Optional[GlobalIndexResult]]]':
-        """Default: fan out to single-vector search; result ``i`` maps to ``vectors[i]``.
-
-        Blocks per future (fine while readers return completed futures); an
-        async reader should override.
-        """
+        """Fan out asynchronously; result ``i`` maps to ``vectors[i]``."""
         singles = [self.visit_vector_search(batch_vector_search.for_index(i))
                    for i in range(batch_vector_search.vector_count)]
-        return _completed_future([f.result() for f in singles])
+        return _collect_futures(singles)
 
     def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Full-text search not supported by this reader")

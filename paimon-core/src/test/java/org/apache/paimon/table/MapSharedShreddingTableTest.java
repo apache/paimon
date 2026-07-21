@@ -104,6 +104,62 @@ public class MapSharedShreddingTableTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "orc,plain",
+        "orc,sequential",
+        "orc,lru",
+        "parquet,plain",
+        "parquet,sequential",
+        "parquet,lru"
+    })
+    public void testColumnPlacementPolicies(String format, String placementPolicy)
+            throws Exception {
+        Table table = createTable(format, 3, "metrics");
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                "fields.metrics.map.shared-shredding.column-placement-policy",
+                                placementPolicy)),
+                false);
+        table = catalog.getTable(identifier(format));
+
+        write(
+                table,
+                GenericRow.of(1, mapOf("a", 10L, "b", 20L, "c", 30L)),
+                GenericRow.of(2, mapOf("a", 40L, "b", 50L)),
+                GenericRow.of(3, mapOf("d", 60L)),
+                GenericRow.of(4, mapOf("a", 70L, "b", 80L, "c", 90L, "d", 100L)));
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
+        assertThat(files).hasSize(1);
+        MapSharedShreddingFieldMeta fieldMeta =
+                readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
+        assertThat(fieldMeta.nameToId()).containsOnlyKeys("a", "b", "c", "d");
+        assertThat(fieldMeta.numColumns()).isEqualTo(3);
+        assertThat(fieldMeta.maxRowWidth()).isEqualTo(4);
+        assertThat(fieldMeta.overflowFieldSet()).hasSize(1);
+
+        if ("lru".equals(placementPolicy)) {
+            assertThat(fieldMeta.overflowFieldSet()).containsExactly(fieldMeta.nameToId().get("c"));
+        } else {
+            assertThat(fieldMeta.overflowFieldSet()).containsExactly(fieldMeta.nameToId().get("d"));
+        }
+
+        Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), toJavaMap(row.getMap(1)));
+        }
+        assertThat(actual)
+                .containsOnlyKeys(1, 2, 3, 4)
+                .containsEntry(1, javaMapOf("a", 10L, "b", 20L, "c", 30L))
+                .containsEntry(2, javaMapOf("a", 40L, "b", 50L))
+                .containsEntry(3, javaMapOf("d", 60L))
+                .containsEntry(4, javaMapOf("a", 70L, "b", 80L, "c", 90L, "d", 100L));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet"})
     public void testAppendOnlyTableReadWriteWithTwoMapFields(String format) throws Exception {
         Table table = createTable(format, "metrics", "labels");

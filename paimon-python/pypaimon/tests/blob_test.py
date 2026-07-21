@@ -130,6 +130,36 @@ class BlobTest(unittest.TestCase):
         except OSError:
             pass  # Ignore cleanup errors
 
+    def test_blob_copy_buffer_size_validation(self):
+        """blob.copy-buffer-size must be positive and fit Java's int-sized array."""
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.common.options.core_options import CoreOptions
+
+        # The internal writer already receives an int-sized value and only rejects non-positive
+        # buffers.
+        for bad in [0, -1]:
+            with self.assertRaises(ValueError):
+                BlobFormatWriter(io.BytesIO(), copy_buffer_size=bad)
+        BlobFormatWriter(io.BytesIO(), copy_buffer_size=8).close()
+
+        # CoreOptions defaults to 4 KiB, accepts values above the old 256 MiB ceiling,
+        # and retains only the Java int technical limit for cross-language consistency.
+        self.assertEqual(CoreOptions(Options({})).blob_copy_buffer_size(), 4096)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '256 kb'})).blob_copy_buffer_size(),
+            256 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '512 mb'})).blob_copy_buffer_size(),
+            512 * 1024 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({
+                'blob.copy-buffer-size': f'{(1 << 31) - 1} bytes'
+            })).blob_copy_buffer_size(),
+            (1 << 31) - 1)
+        for bad in ['0 bytes', '2 gb', '3 gb']:
+            with self.assertRaises(ValueError):
+                CoreOptions(Options({'blob.copy-buffer-size': bad})).blob_copy_buffer_size()
+
     def test_from_data(self):
         """Test Blob.from_data() method."""
         test_data = b"test data"

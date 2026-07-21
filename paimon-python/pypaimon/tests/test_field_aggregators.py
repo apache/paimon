@@ -47,6 +47,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldListaggAgg,
     FieldNestedUpdateAgg,
     FieldCollectAgg,
+    FieldMergeMapWithKeyTimeAgg,
     FieldMergeMapAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
@@ -1764,6 +1765,160 @@ class FieldNestedUpdateAggTest(unittest.TestCase):
         )
         accumulator = agg.retract(accumulator, [self.row(0, 1, "b", 3)])
         self.assertCountEqual(accumulator, [self.row(0, 0, "A", 1), ])
+
+
+class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
+
+    DEFAULT_FIELDS = [
+        DataField(0, "actual_value", AtomicType("STRING")),
+        DataField(1, "dbsync_ts", AtomicType("STRING")),
+    ]
+
+    def _make(self, row_type: RowType = None, options: CoreOptions = None):
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        if not row_type:
+            row_type = RowType(True, self.DEFAULT_FIELDS)
+
+        return create_field_aggregator(
+            MapType(True, AtomicType("STRING"), row_type),
+            "field0",
+            "merge_map_with_keytime",
+            options=options,
+        )
+
+    def row(self, *values, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return GenericRow(list(values), fields)
+
+    def test_field_merge_map_with_key_time_dict_row_default_ts(self):
+        agg = self._make()
+
+        result = agg.agg(
+            None,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        self.assertEqual(
+            result,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        result = agg.agg(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
+    def test_field_merge_map_with_key_time_agg_using_default_ts(self):
+        agg = self._make()
+        self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        acc = agg.agg(
+            None,
+            {
+                "key1": self.row("A", "17682882903686900100"),
+                "key2": self.row("B", "17682882903686900100"),
+            },
+        )
+        self.assertEqual(
+            acc,
+            {
+                "key1": self.row("A", "17682882903686900100"),
+                "key2": self.row("B", "17682882903686900100"),
+            },
+        )
+
+        # newer timestamp replaces old value
+        acc = agg.agg(
+            acc,
+            {
+                "key1": self.row("A1", "17682882903686900200"),
+                "key3": self.row("C", "17682882903686900200"),
+            },
+        )
+        self.assertEqual(
+            acc,
+            {
+                "key1": self.row("A1", "17682882903686900200"),
+                "key2": self.row("B", "17682882903686900100"),
+                "key3": self.row("C", "17682882903686900200"),
+            },
+        )
+
+        # older timestamp keeps existing value
+        acc = agg.agg(
+            acc,
+            {
+                "key2": self.row("B2", "17682882903686900050"),
+            },
+        )
+        self.assertEqual(
+            acc["key2"],
+            self.row("B", "17682882903686900100"),
+        )
+
+    def test_field_merge_map_with_key_time_agg_using_event_time(self):
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "other_field", AtomicType("STRING")),
+            DataField(2, "event_time", AtomicType("STRING")),
+            DataField(3, "dbsync_ts", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            row_type=RowType(True, fields),
+            options=CoreOptions(Options(
+                {"fields.field0.ts-field": "event_time"}
+            ))
+        )
+
+        acc = agg.agg(None, {
+            "key1": self.row("A", "other_a", "2026-07-19 10:00:00", "2026-07-19 12:00:00")
+        })
+
+        acc = agg.agg(acc, {
+            "key1": self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00")
+        })
+        self.assertEqual(
+            acc["key1"],
+            self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
+        )
+
+        acc = agg.agg(acc, {
+            "key1": self.row("A2", "other_a2", "2026-07-19 09:00:00", "2026-07-19 13:00:00")
+        })
+        self.assertEqual(
+            acc["key1"],
+            self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
+        )
+
+    def test_field_merge_map_with_key_time_agg_retract(self):
+        agg = self._make()
+
+        with self.assertRaises(NotImplementedError):
+            agg.retract(
+                {
+                    "key1": self.row("A", "17682882903686900100"),
+                    "key2": self.row("B", "17682882903686900100"),
+                },
+                {
+                    "key1": self.row("A", "17682882903686900100"),
+                },
+            )
 
 
 class FieldMergeMapAggTest(unittest.TestCase):

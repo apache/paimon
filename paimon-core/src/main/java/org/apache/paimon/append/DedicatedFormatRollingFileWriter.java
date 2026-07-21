@@ -201,7 +201,8 @@ public class DedicatedFormatRollingFileWriter
                                     context.blobInlineFields(),
                                     context.writeNullOnMissingFile(),
                                     context.writeNullOnFetchFailure(),
-                                    context.blobFetchMetricReporter());
+                                    context.blobFetchMetricReporter(),
+                                    context.copyBufferSize());
         } else {
             this.blobWriterFactory = null;
         }

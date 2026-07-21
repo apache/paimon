@@ -105,6 +105,12 @@ under the License.
             <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
         </tr>
         <tr>
+            <td><h5>blob.copy-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Buffer size used when copying BLOB payloads into BLOB files.</td>
+        </tr>
+        <tr>
             <td><h5>blob.split-by-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
@@ -1035,7 +1041,8 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Boolean</td>
             <td>Whether to create this table as a partitioned table in metastore.
 For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
-This config option does not affect the default filesystem metastore.</td>
+This config option does not affect the default filesystem metastore.
+For an internal format table in a REST catalog, it also makes the catalog own the table's partitions: a scan reads the partitions registered there and a write registers the ones it wrote, instead of listing the table directory.</td>
         </tr>
         <tr>
             <td><h5>metastore.tag-to-partition</h5></td>
