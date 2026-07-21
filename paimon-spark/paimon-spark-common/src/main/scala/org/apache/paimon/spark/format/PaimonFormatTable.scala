@@ -22,6 +22,7 @@ import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.format.FormatTablePartitionManager
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog}
@@ -40,6 +41,10 @@ case class PaimonFormatTable(table: FormatTable)
   extends BaseTable
   with SupportsRead
   with SupportsWrite {
+
+  // Format Tables with catalog-managed partitions carry their own partition manager; tables using
+  // filesystem partition discovery return null.
+  override def partitionManager: FormatTablePartitionManager = table.partitionManager()
 
   override def capabilities(): util.Set[TableCapability] = {
     util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)

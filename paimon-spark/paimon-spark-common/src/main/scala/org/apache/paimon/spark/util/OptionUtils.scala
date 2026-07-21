@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{FormatTable, Table}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
@@ -186,7 +186,42 @@ object OptionUtils extends SQLConfHelper with Logging {
     if (mergedOptions.isEmpty) {
       table
     } else {
+      normalizeCatalogManagedPartitionOptions(table, mergedOptions)
       table.copy(mergedOptions).asInstanceOf[T]
+    }
+  }
+
+  /**
+   * Whether a format table's partitions are catalog-managed is a persisted property and cannot be
+   * flipped by a dynamic option. A dynamic {@code metastore.partitioned-table} (typically a
+   * session-global {@code spark.paimon.*} config that used to be a harmless no-op) is dropped so
+   * the persisted value always wins, warning only when it actually disagrees, instead of failing
+   * every format table load in that session.
+   */
+  private def normalizeCatalogManagedPartitionOptions(
+      table: Table,
+      dynamicOptions: JMap[String, String]): Unit = {
+    table match {
+      case formatTable: FormatTable =>
+        val partitionSourceKey = CoreOptions.METASTORE_PARTITIONED_TABLE.key()
+        val persistedPartitionsFromCatalog =
+          new CoreOptions(formatTable.options()).partitionedTableInMetastore()
+        if (dynamicOptions.containsKey(partitionSourceKey)) {
+          val dynamicPartitionsFromCatalog =
+            new CoreOptions(dynamicOptions).partitionedTableInMetastore()
+          if (dynamicPartitionsFromCatalog != persistedPartitionsFromCatalog) {
+            logWarning(
+              s"Ignoring dynamic option " +
+                s"'$partitionSourceKey=$dynamicPartitionsFromCatalog' for format table " +
+                s"${formatTable.fullName()}: whether its partitions are catalog-managed is fixed " +
+                s"at creation time (persisted value: $persistedPartitionsFromCatalog). " +
+                s"Use ALTER TABLE to change it.")
+          }
+          dynamicOptions.remove(partitionSourceKey)
+        }
+      // The remaining options are validated by FormatTable#copy, which sees exactly the same
+      // effective combination.
+      case _ =>
     }
   }
 
