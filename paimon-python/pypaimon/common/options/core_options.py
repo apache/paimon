@@ -395,6 +395,13 @@ class CoreOptions:
         .with_description("The target file size for blob files.")
     )
 
+    BLOB_COPY_BUFFER_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("blob.copy-buffer-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(4))
+        .with_description("Buffer size used when copying BLOB payloads into BLOB files.")
+    )
+
     VECTOR_FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("vector.file.format")
         .string_type()
@@ -531,6 +538,15 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
+    )
+
+    SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("scan.native-plan.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Plan splits via the native (pypaimon_rust) planner "
+                          "instead of the Python manifest scanner; the pypaimon "
+                          "reader still reads the files.")
     )
 
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
@@ -1111,6 +1127,16 @@ class CoreOptions:
         else:
             return self.target_file_size(has_primary_key=False)
 
+    def blob_copy_buffer_size(self):
+        size = self.options.get(CoreOptions.BLOB_COPY_BUFFER_SIZE, None).get_bytes()
+        # Java BlobFormatWriter stores the byte-array size in an int.
+        max_size = (1 << 31) - 1
+        if not 1 <= size <= max_size:
+            raise ValueError(
+                f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be between 1 byte and "
+                f"{max_size} bytes, but was {size} bytes.")
+        return size
+
     def vector_file_format(self, default=None):
         return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
 
@@ -1224,6 +1250,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def native_plan_enabled(self, default=None):
+        return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)

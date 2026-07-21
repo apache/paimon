@@ -105,6 +105,12 @@ under the License.
             <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
         </tr>
         <tr>
+            <td><h5>blob.copy-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Buffer size used when copying BLOB payloads into BLOB files.</td>
+        </tr>
+        <tr>
             <td><h5>blob.split-by-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
@@ -157,6 +163,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.streaming.merge-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the starting phase of chain table streaming read performs anchor-based chain merging: for each group it merges the latest snapshot partition with delta partitions whose chain key is strictly greater than the snapshot chain key. This allows streaming readers to see cross-branch deletions and updates at the cost of a heavier startup scan. When false (default), the starting phase only reads the latest snapshot partition per group and later delta partitions as separate splits, which is lightweight but may not reflect cross-branch deletes.</td>
         </tr>
         <tr>
             <td><h5>changelog-file.compression</h5></td>

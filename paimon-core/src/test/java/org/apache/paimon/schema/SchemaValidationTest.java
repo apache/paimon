@@ -504,6 +504,21 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+
+        options.put("fields.metrics.map.shared-shredding.max-columns", "1");
+        options.put("fields.metrics.map.shared-shredding.column-placement-policy", "invalid");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("invalid");
     }
 
     @Test

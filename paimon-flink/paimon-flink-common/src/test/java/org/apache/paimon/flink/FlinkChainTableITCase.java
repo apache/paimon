@@ -68,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -286,21 +287,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_hourly', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_hourly', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_hourly SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_hourly$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_hourly$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_hourly");
 
         // Write main branch
         sql(
@@ -434,21 +421,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_partial', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_partial', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_partial SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_partial$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_partial$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_partial");
 
         // Write main branch
         sql(
@@ -553,21 +526,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'chain-table.chain-partition-keys' = 'dt'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_group', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_group', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_group SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_group$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_group$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_group");
 
         // Write main branch
         sql(
@@ -765,6 +724,36 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
     }
 
     /**
+     * Write Row data (with RowKind and a group partition column) to a specific branch using
+     * DataStream API.
+     */
+    private void writeChangelogToBranchWithRegion(
+            String db, String tableName, String branch, Row... rows) throws Exception {
+        FileStoreTable table = paimonTable(tableName + "$branch_" + branch);
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .parallelism(1)
+                        .build();
+
+        DataStream<Row> stream = env.fromCollection(Arrays.asList(rows));
+
+        new FlinkSinkBuilder(table)
+                .forRow(
+                        stream,
+                        DataTypes.ROW(
+                                DataTypes.FIELD("k", DataTypes.BIGINT()),
+                                DataTypes.FIELD("seq", DataTypes.BIGINT()),
+                                DataTypes.FIELD("v", DataTypes.STRING()),
+                                DataTypes.FIELD("region", DataTypes.STRING()),
+                                DataTypes.FIELD("dt", DataTypes.STRING())))
+                .build();
+        env.execute();
+    }
+
+    /**
      * Collect n rows from a streaming iterator with a timeout. If no data arrives within
      * timeoutSeconds, the iterator is closed and an AssertionError is thrown. This is necessary
      * because it.next() blocks indefinitely when no data is available, and JUnit @Timeout cannot
@@ -827,18 +816,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + ")");
 
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_life_cl', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_life_cl', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_life_cl", "chain_life_cl$branch_snapshot", "chain_life_cl$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_life_cl");
 
         // === Phase 1: Delta-only initial data (all inserts) ===
         sql(
@@ -995,19 +973,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'sequence.field' = 'seq'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restart', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restart', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restart", "chain_restart$branch_snapshot", "chain_restart$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restart");
 
         // Configure checkpoint for stateful restart
         org.apache.flink.configuration.Configuration config = sEnv.getConfig().getConfiguration();
@@ -1159,18 +1125,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + ")");
 
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_overlap', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_overlap', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_overlap", "chain_overlap$branch_snapshot", "chain_overlap$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_overlap");
 
         // Write snapshot data: dt=20250807 (snapshot-only) and dt=20250808 (overlapping)
         sql(
@@ -1223,6 +1178,192 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
     }
 
     /**
+     * Tests streaming read with {@code chain-table.streaming.merge-snapshot=true}. Verifies that
+     * the starting phase merges the latest snapshot partition with later delta partitions, so
+     * cross-branch deletes and updates are visible in the initial snapshot.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "none"})
+    @Timeout(120)
+    public void testStreamingReadWithMergeSnapshot(String changelogProducer) throws Exception {
+        String tableName = "chain_merge_stream_" + changelogProducer;
+        sql(
+                format(
+                        "CREATE TABLE %s ("
+                                + "  k BIGINT, seq BIGINT, v STRING, dt STRING"
+                                + ") PARTITIONED BY (dt) WITH ("
+                                + "  'primary-key' = 'dt,k',"
+                                + "  'bucket-key' = 'k',"
+                                + "  'bucket' = '2',"
+                                + "  'sequence.field' = 'seq',"
+                                + "  'merge-engine' = 'deduplicate',"
+                                + "  'changelog-producer' = '%s',"
+                                + "  'chain-table.enabled' = 'true',"
+                                + "  'chain-table.streaming.merge-snapshot' = 'true',"
+                                + "  'partition.timestamp-pattern' = '$dt',"
+                                + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                                + "  'continuous.discovery-interval' = '1ms'"
+                                + ")",
+                        tableName, changelogProducer));
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches(tableName);
+
+        // Write snapshot data at dt=20250808
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2')");
+
+        // Write delta data spanning dt=20250809 and dt=20250810:
+        // - delete k=1 at dt=20250809
+        // - update k=2: -U old snapshot value at dt=20250809, +U new delta value at dt=20250810
+        // - insert k=3 at dt=20250810
+        writeChangelogToBranch(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 1L, 2L, "snap_1", "20250809"),
+                Row.ofKind(RowKind.UPDATE_BEFORE, 2L, 2L, "snap_2", "20250809"),
+                Row.ofKind(RowKind.UPDATE_AFTER, 2L, 3L, "delta_2", "20250810"),
+                Row.ofKind(RowKind.INSERT, 3L, 1L, "delta_3", "20250810"));
+
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM " + tableName).collect();
+
+        // Starting (merge mode): snapshot@20250808 is anchored to the latest delta partition
+        // dt=20250810.
+        // k=1 is deleted; k=2 is updated from snapshot value to delta value; k=3 is newly inserted.
+        // The logical partition of the merged ChainSplit is the latest delta partition 20250810.
+        // With changelog-producer=input the update is emitted as +U; with changelog-producer=none
+        // the upsert result is emitted as +I.
+        String updatedRowKind = "input".equals(changelogProducer) ? "+U" : "+I";
+        List<String> startingRows = collectRows(it, 2);
+        assertThat(startingRows)
+                .as(
+                        "Starting with merge-snapshot: cross-branch delete/update should be applied, "
+                                + "updated/inserted rows should use the latest delta partition")
+                .containsExactlyInAnyOrder(
+                        updatedRowKind + "[2, 3, delta_2, 20250810]",
+                        "+I[3, 1, delta_3, 20250810]");
+
+        // Incremental: write new delta and verify it streams through
+        writeChangelogToBranch(
+                db, tableName, "delta", Row.ofKind(RowKind.INSERT, 4L, 1L, "delta_4", "20250811"));
+
+        List<String> incr = collectRows(it, 1);
+        assertThat(incr)
+                .as("Incremental: new delta data should stream through")
+                .containsExactlyInAnyOrder("+I[4, 1, delta_4, 20250811]");
+
+        it.close();
+    }
+
+    /**
+     * Tests streaming read with {@code chain-table.streaming.merge-snapshot=true} and a group
+     * partition (region). Verifies that each group is handled independently:
+     *
+     * <ul>
+     *   <li>CN: snapshot anchor at 20250809 + delta at 20250810 (cross-branch delete/insert).
+     *   <li>UK: snapshot anchor at 20250808 + delta at 20250809 (cross-branch delete).
+     *   <li>US: delta-only group (inserts at 20250811, delete at 20250812, later insert at
+     *       20250813).
+     * </ul>
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "none"})
+    @Timeout(120)
+    public void testStreamingReadWithMergeSnapshotAndGroup(String changelogProducer)
+            throws Exception {
+        String tableName = "chain_merge_stream_group_" + changelogProducer;
+        sql(
+                format(
+                        "CREATE TABLE %s ("
+                                + "  k BIGINT, seq BIGINT, v STRING, region STRING, dt STRING"
+                                + ") PARTITIONED BY (region, dt) WITH ("
+                                + "  'primary-key' = 'region,dt,k',"
+                                + "  'bucket-key' = 'k',"
+                                + "  'bucket' = '2',"
+                                + "  'sequence.field' = 'seq',"
+                                + "  'merge-engine' = 'deduplicate',"
+                                + "  'changelog-producer' = '%s',"
+                                + "  'chain-table.enabled' = 'true',"
+                                + "  'chain-table.streaming.merge-snapshot' = 'true',"
+                                + "  'partition.timestamp-pattern' = '$dt',"
+                                + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                                + "  'chain-table.chain-partition-keys' = 'dt',"
+                                + "  'continuous.discovery-interval' = '1ms'"
+                                + ")",
+                        tableName, changelogProducer));
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches(tableName);
+
+        // Snapshot branch: CN and UK have anchors; US has no snapshot.
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot`"
+                        + " PARTITION (region = 'CN', dt = '20250809')"
+                        + " VALUES (1, 1, 'cn_snap_1'), (2, 1, 'cn_snap_2')");
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot`"
+                        + " PARTITION (region = 'UK', dt = '20250808')"
+                        + " VALUES (21, 1, 'uk_snap_21'), (22, 1, 'uk_snap_22')");
+
+        // First delta commit:
+        // - CN: at dt=20250810, delete k=1 and insert k=3 (delta > snapshot anchor 20250809).
+        // - UK: at dt=20250809, delete k=21 (delta > snapshot anchor 20250808).
+        // - US: delta-only group, insert k=11 and k=12 at dt=20250811.
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 1L, 2L, "cn_snap_1", "CN", "20250810"),
+                Row.ofKind(RowKind.INSERT, 3L, 1L, "cn_delta_3", "CN", "20250810"),
+                Row.ofKind(RowKind.INSERT, 11L, 1L, "us_delta_11", "US", "20250811"),
+                Row.ofKind(RowKind.INSERT, 12L, 1L, "us_delta_12", "US", "20250811"),
+                Row.ofKind(RowKind.DELETE, 21L, 2L, "uk_snap_21", "UK", "20250809"));
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 11L, 2L, "us_delta_11", "US", "20250812"));
+
+        // Start streaming read (pinned at the second delta commit)
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM " + tableName).collect();
+
+        // Starting (merge mode):
+        List<String> startingRows = collectRows(it, 4);
+        assertThat(startingRows)
+                .as(
+                        "Starting with merge-snapshot and group: each group should be handled "
+                                + "independently")
+                .containsExactlyInAnyOrder(
+                        "+I[2, 1, cn_snap_2, CN, 20250810]",
+                        "+I[3, 1, cn_delta_3, CN, 20250810]",
+                        "+I[12, 1, us_delta_12, US, 20250812]",
+                        "+I[22, 1, uk_snap_22, UK, 20250809]");
+
+        // Third delta commit (Phase 2 incremental): US delta-only group inserts k=11 at
+        // dt=20250813.
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.INSERT, 11L, 3L, "us_delta_11", "US", "20250813"));
+
+        List<String> incr = collectRows(it, 1);
+        assertThat(incr)
+                .as("Incremental: new insert in delta-only group should stream through")
+                .containsExactlyInAnyOrder("+I[11, 3, us_delta_11, US, 20250813]");
+
+        it.close();
+    }
+
+    /**
      * T2: Tests that non-default startup modes throw an error for chain table streaming read. When
      * scan.mode=latest is specified, an {@link UnsupportedOperationException} is thrown with a
      * helpful message.
@@ -1245,20 +1386,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_bypass', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_bypass', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_bypass", "chain_bypass$branch_snapshot", "chain_bypass$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_bypass");
 
         // Write data to main table (so snapshots exist for copy() to resolve)
         sql(
@@ -1304,25 +1432,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_consumer', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_consumer', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_consumer",
-                    "chain_consumer$branch_snapshot",
-                    "chain_consumer$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
-
-        sql(
-                "INSERT INTO `chain_consumer$branch_delta` PARTITION (dt = '20250808')"
-                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+        setupChainTableBranches("chain_consumer");
 
         FileStoreTable table = paimonTable("chain_consumer");
 
@@ -1372,19 +1482,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_no_cl', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_no_cl', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_no_cl", "chain_no_cl$branch_snapshot", "chain_no_cl$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_no_cl");
 
         // Phase 1: Insert initial data into delta branch
         sql(
@@ -1433,21 +1531,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_stream_group', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_stream_group', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_stream_group",
-                    "chain_stream_group$branch_snapshot",
-                    "chain_stream_group$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_stream_group");
 
         // Write initial delta data for two regions
         sql(
@@ -1520,21 +1604,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_all', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_all', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_all",
-                    "chain_restore_all$branch_snapshot",
-                    "chain_restore_all$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_all");
 
         sql(
                 "INSERT INTO `chain_restore_all$branch_delta` PARTITION (dt = '20250808')"
@@ -1588,21 +1658,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_null', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_null', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_null",
-                    "chain_restore_null$branch_snapshot",
-                    "chain_restore_null$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_null");
 
         sql(
                 "INSERT INTO `chain_restore_null$branch_delta` PARTITION (dt = '20250808')"
@@ -1646,22 +1702,8 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_empty_delta', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_empty_delta', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_empty_delta",
-                    "chain_empty_delta$branch_snapshot",
-                    "chain_empty_delta$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_empty_delta");
 
         // Write ONLY to snapshot branch, delta stays empty
         sql(
@@ -1711,21 +1753,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_empty_snap', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_empty_snap', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_empty_snap",
-                    "chain_empty_snap$branch_snapshot",
-                    "chain_empty_snap$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_empty_snap");
 
         // Write ONLY to delta branch, snapshot stays empty
         sql(
@@ -1767,19 +1795,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_shard', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_shard', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_shard", "chain_shard$branch_snapshot", "chain_shard$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_shard");
 
         sql(
                 "INSERT INTO `chain_shard$branch_delta` PARTITION (dt = '20250808')"
@@ -1823,21 +1839,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_both_empty', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_both_empty', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_both_empty",
-                    "chain_both_empty$branch_snapshot",
-                    "chain_both_empty$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_both_empty");
 
         // Both branches are empty — Phase 1 should produce no splits
         FileStoreTable table = paimonTable("chain_both_empty");
@@ -1874,21 +1876,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_overwrite_p2', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_overwrite_p2', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_overwrite_p2",
-                    "chain_overwrite_p2$branch_snapshot",
-                    "chain_overwrite_p2$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_overwrite_p2");
 
         // Initial delta data
         sql(
@@ -1935,21 +1923,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_newdata', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_newdata', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_newdata",
-                    "chain_restore_newdata$branch_snapshot",
-                    "chain_restore_newdata$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_newdata");
 
         // Write initial snapshot + delta data
         sql(
@@ -2078,22 +2052,8 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_data_filter', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_data_filter', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_data_filter",
-                    "chain_data_filter$branch_snapshot",
-                    "chain_data_filter$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_data_filter");
 
         // Write initial delta data with mixed values of v
         sql(
@@ -2279,21 +2239,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_race', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_race', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_race", "chain_race$branch_snapshot", "chain_race$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta'"
-                            + ")",
-                    tbl);
-        }
+        setupChainTableBranches("chain_race");
 
         // Step 1: Write delta data at dt=20250808
         sql(
@@ -2357,20 +2303,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_phase2', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_phase2', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_phase2", "chain_phase2$branch_snapshot", "chain_phase2$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta'"
-                            + ")",
-                    tbl);
-        }
+        setupChainTableBranches("chain_phase2");
 
         // Write snapshot data at dt=20250808
         sql(
@@ -3387,20 +3320,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + ")");
 
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_bucket_filter', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_bucket_filter', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_bucket_filter",
-                    "chain_bucket_filter$branch_snapshot",
-                    "chain_bucket_filter$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_bucket_filter");
 
         // Write main branch
         sql(
@@ -3410,7 +3330,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
         // Write delta data across many keys to guarantee both buckets are populated
         for (int i = 1; i <= 50; i++) {
             sql(
-                    String.format(
+                    format(
                             "INSERT INTO `chain_bucket_filter$branch_delta`"
                                     + " PARTITION (dt = '%d') VALUES (%d, 1, 'v%d')",
                             20250809 + (i % 5), i, i));
@@ -3609,7 +3529,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
 
         // Submit lookup join job BEFORE inserting source data
         String query =
-                String.format(
+                format(
                         "INSERT INTO sink_refresh "
                                 + "SELECT S.id, D.k, D.v "
                                 + "FROM source_refresh AS S "

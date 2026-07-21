@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -45,7 +46,11 @@ class MapSharedShreddingWritePlanTest {
                         DataTypes.FIELD(
                                 1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
         MapSharedShreddingWritePlan writePlan =
-                new MapSharedShreddingWritePlan(logicalType, Collections.singletonMap("tags", 4));
+                new MapSharedShreddingWritePlan(
+                        logicalType,
+                        Collections.singletonMap("tags", 4),
+                        Collections.singletonMap(
+                                "tags", MapSharedShreddingColumnPlacementPolicy.PLAIN));
 
         InternalRow physicalRow =
                 writePlan.toPhysicalRow(
@@ -117,12 +122,69 @@ class MapSharedShreddingWritePlanTest {
                                 logicalType, Collections.singletonMap("tags", 2)));
     }
 
+    @Test
+    void testFactoryUsesConfiguredColumnPlacementPolicy() {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        MapSharedShreddingWritePlanFactory factory = createFactory(logicalType, 3, "sequential");
+        InternalRow first = GenericRow.of(stringKeyMap("a", 1, "b", 2, "c", 6));
+        InternalRow second = GenericRow.of(stringKeyMap("b", 3, "d", 4, "a", 5));
+        ShreddingWritePlan writePlan = factory.createWritePlan(Collections.singletonList(first));
+
+        writePlan.toPhysicalRow(first).getRow(0, 5);
+        InternalRow physicalMap = writePlan.toPhysicalRow(second).getRow(0, 5);
+
+        assertThat(physicalMap.getArray(0).toIntArray()).containsExactly(0, 1, 3);
+        assertThat(physicalMap.getInt(1)).isEqualTo(5);
+        assertThat(physicalMap.getInt(2)).isEqualTo(3);
+        assertThat(physicalMap.getInt(3)).isEqualTo(4);
+    }
+
+    @Test
+    void testFactoryUsesLruColumnPlacementByDefault() {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        MapSharedShreddingWritePlanFactory factory = createFactory(logicalType, 3);
+        InternalRow first = GenericRow.of(stringKeyMap("a", 10, "b", 20, "c", 30));
+        ShreddingWritePlan writePlan = factory.createWritePlan(Collections.singletonList(first));
+
+        writePlan.toPhysicalRow(first).getRow(0, 5);
+        writePlan.toPhysicalRow(GenericRow.of(stringKeyMap("a", 40, "b", 50))).getRow(0, 5);
+        writePlan
+                .toPhysicalRow(GenericRow.of(stringKeyMap("d", 60, "e", 70, "f", 80)))
+                .getRow(0, 5);
+        InternalRow physicalMap =
+                writePlan
+                        .toPhysicalRow(
+                                GenericRow.of(stringKeyMap("a", 90, "d", 100, "e", 110, "f", 120)))
+                        .getRow(0, 5);
+
+        assertThat(physicalMap.getArray(0).toIntArray()).containsExactly(4, 5, 3);
+        assertThat(physicalMap.getInt(1)).isEqualTo(110);
+        assertThat(physicalMap.getInt(2)).isEqualTo(120);
+        assertThat(physicalMap.getInt(3)).isEqualTo(100);
+        assertThat(physicalMap.getMap(4)).isEqualTo(intKeyMap(0, 90));
+    }
+
     private static MapSharedShreddingWritePlanFactory createFactory(
             RowType logicalType, int maxColumns) {
+        return createFactory(logicalType, maxColumns, null);
+    }
+
+    private static MapSharedShreddingWritePlanFactory createFactory(
+            RowType logicalType, int maxColumns, String placementPolicy) {
         Options options = new Options();
         options.setString("fields.tags.map.storage-layout", "shared-shredding");
         options.setString(
                 "fields.tags.map.shared-shredding.max-columns", String.valueOf(maxColumns));
+        if (placementPolicy != null) {
+            options.setString(
+                    "fields.tags.map.shared-shredding.column-placement-policy", placementPolicy);
+        }
         return new MapSharedShreddingWritePlanFactory(logicalType, options);
     }
 
@@ -130,6 +192,14 @@ class MapSharedShreddingWritePlanTest {
         Map<Object, Object> values = new LinkedHashMap<>();
         for (int i = 0; i < keyValues.length; i += 2) {
             values.put(BinaryString.fromString((String) keyValues[i]), keyValues[i + 1]);
+        }
+        return new GenericMap(values);
+    }
+
+    private static GenericMap intKeyMap(Object... keyValues) {
+        Map<Object, Object> values = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            values.put(keyValues[i], keyValues[i + 1]);
         }
         return new GenericMap(values);
     }

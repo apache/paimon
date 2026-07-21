@@ -269,15 +269,26 @@ def _load_table(
 
 
 def _build_storage_config(
+    table: FileStoreTable,
     catalog_options: dict[str, Any],
     multithreaded_io: bool,
+    explicit_io_config_bytes: bytes | None,
 ) -> StorageConfig:
     from daft import context
     from daft.daft import StorageConfig
 
     from pypaimon.daft.daft_io_config import _convert_paimon_catalog_options_to_io_config
 
-    io_config = _convert_paimon_catalog_options_to_io_config(catalog_options)
+    if explicit_io_config_bytes is not None:
+        from daft.io import IOConfig
+
+        io_config = IOConfig._from_serialized(explicit_io_config_bytes)
+    else:
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+
+        io_config = _convert_paimon_catalog_options_to_io_config(
+            _enrich_options_with_rest_token(catalog_options, table)
+        )
     io_config = io_config or context.get_context().daft_planning_config.default_io_config
     return StorageConfig(multithreaded_io, io_config)
 
@@ -548,9 +559,6 @@ class PaimonDataSource(DataSource):
         table_path = getattr(table, "table_path", None)
         self._table_path = str(table_path) if table_path is not None else None
         self._table_options = _extract_table_options(table)
-        self._pushed_filters: list[PyExpr] | None = None
-        self._paimon_predicate: Predicate | None = None
-        self._remaining_filters: list[PyExpr] | None = None
         self._init_table(table)
 
     def __getstate__(self) -> dict[str, Any]:
@@ -562,9 +570,6 @@ class PaimonDataSource(DataSource):
             "_table_identifier": self._table_identifier,
             "_table_path": self._table_path,
             "_table_options": self._table_options,
-            "_pushed_filters": self._pushed_filters,
-            "_paimon_predicate": self._paimon_predicate,
-            "_remaining_filters": self._remaining_filters,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -574,19 +579,18 @@ class PaimonDataSource(DataSource):
         self._table_identifier = state["_table_identifier"]
         self._table_path = state["_table_path"]
         self._table_options = state["_table_options"]
-        self._pushed_filters = state.get("_pushed_filters")
-        self._paimon_predicate = state["_paimon_predicate"]
-        self._remaining_filters = state["_remaining_filters"]
-        self._storage_config = _build_storage_config(
-            self._table_catalog_options,
-            state["_multithreaded_io"],
-        )
 
         table = _load_table(
             self._table_catalog_options,
             self._table_identifier,
             self._table_path,
             self._table_options,
+        )
+        self._storage_config = _build_storage_config(
+            table,
+            self._table_catalog_options,
+            state["_multithreaded_io"],
+            self._explicit_io_config_bytes,
         )
         self._init_table(table)
 
@@ -659,27 +663,6 @@ class PaimonDataSource(DataSource):
     def get_partition_fields(self) -> list[PartitionField]:
         partition_key_names = set(self._table.partition_keys)
         return [PartitionField.create(f) for f in self._schema if f.name in partition_key_names]
-
-    def push_filters(self, filters: list[PyExpr]) -> tuple[list[PyExpr], list[PyExpr]]:
-        """Push filters down to Paimon scan.
-
-        Converts Daft expressions to Paimon predicates where possible.
-        Returns (pushed_filters, remaining_filters).
-        """
-        pushed_filters, remaining_filters, paimon_predicate = convert_filters_to_paimon(self._table, filters)
-
-        self._pushed_filters = pushed_filters
-        self._paimon_predicate = paimon_predicate
-        self._remaining_filters = remaining_filters
-
-        if pushed_filters:
-            logger.debug(
-                "Paimon filter pushdown: %d filters pushed, %d remaining",
-                len(pushed_filters),
-                len(remaining_filters),
-            )
-
-        return pushed_filters, remaining_filters
 
     def _read_table_for_scan(self) -> FileStoreTable:
         if self._has_blob_columns:
@@ -1068,12 +1051,6 @@ class PaimonDataSource(DataSource):
         return self._format_pyexprs([getattr(pushdowns.partition_filters, "_expr", pushdowns.partition_filters)])
 
     def _filter_pushdown_explain(self, pushdowns: Pushdowns) -> tuple[list[str], list[str]]:
-        if self._remaining_filters is not None:
-            return (
-                self._format_pyexprs(self._pushed_filters or []),
-                self._format_pyexprs(self._remaining_filters),
-            )
-
         if pushdowns.filters is None:
             return [], []
 
@@ -1233,8 +1210,6 @@ class PaimonDataSource(DataSource):
         )
 
     def _pushdown_filter_state(self, pushdowns: Pushdowns) -> tuple[Predicate | None, bool]:
-        if self._remaining_filters is not None:
-            return self._paimon_predicate, not self._remaining_filters
         if pushdowns.filters is None:
             return None, True
 
@@ -1247,9 +1222,7 @@ class PaimonDataSource(DataSource):
             return None
         if not self._can_plan_predicate(pushdown_predicate):
             return None
-        if self._paimon_predicate is not None or self._requires_fallback_reader():
-            return pushdown_predicate
-        return None
+        return pushdown_predicate
 
     def _partition_planning_predicate(self, pushdowns: Pushdowns) -> Predicate | None:
         """partition_filters -> Paimon predicate for plan-time pruning. Excludes
@@ -1293,9 +1266,6 @@ class PaimonDataSource(DataSource):
         if reader_predicate is not None and planning_predicate is None:
             return None
         return pushdowns.limit
-
-    def _requires_fallback_reader(self) -> bool:
-        return not self._is_parquet or self._has_blob_columns or self._table.is_primary_key_table
 
     def _can_plan_predicate(self, predicate: Predicate) -> bool:
         # Missing value null-count stats make isNull unsafe for scan planning.

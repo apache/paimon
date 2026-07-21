@@ -869,6 +869,9 @@ public class AppendOnlyWriterTest {
             options.setString(
                     "fields." + fieldName + ".map.shared-shredding.max-columns",
                     String.valueOf(fieldToMaxColumns[i + 1]));
+            options.setString(
+                    "fields." + fieldName + ".map.shared-shredding.column-placement-policy",
+                    "plain");
         }
         options.setString("metadata.stats-mode", "none");
         return options;

@@ -64,6 +64,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "bool_or", "bool_and",
     "listagg",
     "nested_update",
+    "collect",
     "theta_sketch",
 ])
 _FIELDS_PREFIX = "fields."
