@@ -231,7 +231,7 @@ public class SchemaManagerTest {
                         new DataField(
                                 1,
                                 "metrics",
-                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))),
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))),
                 Collections.emptyList(),
                 Collections.emptyList(),
                 options,
