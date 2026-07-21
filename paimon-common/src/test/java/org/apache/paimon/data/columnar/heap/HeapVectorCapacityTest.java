@@ -18,8 +18,6 @@
 
 package org.apache.paimon.data.columnar.heap;
 
-import org.apache.paimon.data.RowHelper;
-
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,7 +48,8 @@ class HeapVectorCapacityTest {
 
         vector.reserve(threshold);
         int expandedCapacity = vector.getCapacity();
-        vector.addElementsAppended(expandedCapacity / RowHelper.SHRINK_RATIO);
+        // Use ceiling division (shrink ratio = 4) so capacity is not strictly greater than usage * 4.
+        vector.addElementsAppended((expandedCapacity + 3) / 4);
         vector.reset();
 
         assertThat(vector.getCapacity()).isEqualTo(expandedCapacity);

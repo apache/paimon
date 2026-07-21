@@ -71,8 +71,10 @@ class AbstractWritableVectorTest {
 
         vector.reserve(threshold);
         int expandedCapacity = vector.getCapacity();
+        // Use ceiling division so capacity is not strictly greater than usage * 4.
         int retainedUsage =
-                expandedCapacity / AbstractWritableVector.DEFAULT_HUGE_VECTOR_SHRINK_RATIO;
+                (expandedCapacity + AbstractWritableVector.DEFAULT_HUGE_VECTOR_SHRINK_RATIO - 1)
+                        / AbstractWritableVector.DEFAULT_HUGE_VECTOR_SHRINK_RATIO;
         vector.addElementsAppended(retainedUsage);
         vector.reset();
 
