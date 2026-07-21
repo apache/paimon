@@ -970,6 +970,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: partitionFilter
+          description: Optional JSON predicate for partition values. The server may use it as a superset filter together with partitionNamePattern; unsupported semantic nodes should be relaxed rather than rejected. When this parameter is present, a page may be empty while nextPageToken is still set, and nextPageToken is the only end-of-list signal.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
