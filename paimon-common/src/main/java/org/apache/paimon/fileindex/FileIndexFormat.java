@@ -279,7 +279,7 @@ public final class FileIndexFormat {
                         }
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 IOUtils.closeQuietly(seekableInputStream);
                 throw new RuntimeException(
                         "Exception happens while construct file index reader.", e);

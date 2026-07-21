@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -104,5 +105,84 @@ public class FileIndexFormatFormatTest {
         Assertions.assertThat(fileIndexFormatList.size()).isEqualTo(1);
         Assertions.assertThat(new ArrayList<>(fileIndexFormatList).get(0))
                 .isEqualTo(EmptyFileIndexReader.INSTANCE);
+    }
+
+    @Test
+    public void testReaderClosesInputStreamOnBadMagic() {
+        // first 8 bytes are not MAGIC, so the reader throws a RuntimeException from within the
+        // constructor's try block before the resource is returned to the caller.
+        CloseRecordingSeekableStream inputStream = new CloseRecordingSeekableStream(new byte[16]);
+
+        Assertions.assertThatThrownBy(
+                        () -> FileIndexFormat.createReader(inputStream, RowType.builder().build()))
+                .isInstanceOf(RuntimeException.class);
+        Assertions.assertThat(inputStream.isClosed()).isTrue();
+    }
+
+    @Test
+    public void testReaderClosesInputStreamOnUnsupportedVersion() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
+        writer.writeColumnIndexes(new HashMap<>());
+        writer.close();
+
+        // keep the valid MAGIC (bytes 0-7) but corrupt the version int (bytes 8-11) so the reader
+        // throws a RuntimeException after the magic check but still inside the try block.
+        byte[] indexBytes = baos.toByteArray();
+        indexBytes[8] = 0x7f;
+        indexBytes[9] = 0x7f;
+        indexBytes[10] = 0x7f;
+        indexBytes[11] = 0x7f;
+
+        CloseRecordingSeekableStream inputStream = new CloseRecordingSeekableStream(indexBytes);
+
+        Assertions.assertThatThrownBy(
+                        () -> FileIndexFormat.createReader(inputStream, RowType.builder().build()))
+                .isInstanceOf(RuntimeException.class);
+        Assertions.assertThat(inputStream.isClosed()).isTrue();
+    }
+
+    /**
+     * A {@link SeekableInputStream} that records whether {@link #close()} was called and delegates
+     * reads to a backing {@link ByteArraySeekableStream} (whose own {@code close()} is a no-op).
+     */
+    private static class CloseRecordingSeekableStream extends SeekableInputStream {
+
+        private final ByteArraySeekableStream delegate;
+        private boolean closed = false;
+
+        private CloseRecordingSeekableStream(byte[] bytes) {
+            this.delegate = new ByteArraySeekableStream(bytes);
+        }
+
+        private boolean isClosed() {
+            return closed;
+        }
+
+        @Override
+        public void seek(long desired) throws IOException {
+            delegate.seek(desired);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return delegate.getPos();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            return delegate.read(b, off, len);
+        }
+
+        @Override
+        public int read() throws IOException {
+            return delegate.read();
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            delegate.close();
+        }
     }
 }
