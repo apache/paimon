@@ -96,6 +96,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
@@ -1875,6 +1876,96 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 BadRequestException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=01%01"));
+    }
+
+    @Test
+    public void testListPartitionsByFilterPaged() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_filter_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20250103"),
+                        singletonMap("dt", "20260101"));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // The predicate goes on the wire as its own JSON serialization; the server evaluates
+        // the very same tree the scan would evaluate locally.
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}));
+        Predicate range =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, BinaryString.fromString("20250102")),
+                        builder.lessThan(0, BinaryString.fromString("20260101")));
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(identifier, range, null, null, null)
+                                .getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactlyInAnyOrder("20250102", "20250103");
+
+        Predicate in =
+                builder.in(
+                        0,
+                        Arrays.asList(
+                                BinaryString.fromString("20250101"),
+                                BinaryString.fromString("20260101")));
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(identifier, in, null, null, null)
+                                .getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactlyInAnyOrder("20250101", "20260101");
+
+        // A pattern combines with the predicate as a conjunction.
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(identifier, in, null, null, "dt=2025%")
+                                .getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactly("20250101");
+
+        // A predicate the server cannot re-anchor (unknown column) counts as always-true: the
+        // response is a superset of the matching partitions and the client keeps filtering
+        // locally.
+        PredicateBuilder unknownColumn =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"nope"}));
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(
+                                        identifier,
+                                        unknownColumn.equal(0, BinaryString.fromString("x")),
+                                        null,
+                                        null,
+                                        null)
+                                .getElements())
+                .hasSize(4);
     }
 
     @Test
