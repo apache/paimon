@@ -42,26 +42,21 @@ __all__ = ["range_join"]
 _MAX_RANGES = 512
 
 
-def _file_key_range(file, col, table_field_names, table_schema_id):
+def _file_key_range(file, col, table_field_names):
     """Min/max of ``col`` for one data file from its manifest stats; None when the
     file has no usable stats for ``col``."""
-    # value_stats row layout: value_stats_cols, else write_cols, else the full schema.
-    if file.value_stats_cols is not None:
-        names = file.value_stats_cols
-    elif file.write_cols is not None:
-        names = file.write_cols
-    elif file.schema_id == table_schema_id:
-        names = table_field_names
-    else:
-        return None  # stats laid out in an older schema's field order: unsafe
+    # value_stats layout: value_stats_cols when set, else the full schema (see files_table).
+    cols = file.value_stats_cols
+    names = list(cols) if cols else table_field_names
     if col not in names:
         return None
     idx = names.index(col)
     stats = file.value_stats
-    if len(stats.min_values) <= idx:
+    min_values = getattr(stats.min_values, "values", None) or []
+    max_values = getattr(stats.max_values, "values", None) or []
+    if idx >= len(min_values) or idx >= len(max_values):
         return None
-    fmin = stats.min_values.get_field(idx)
-    fmax = stats.max_values.get_field(idx)
+    fmin, fmax = min_values[idx], max_values[idx]
     if fmin is None or fmax is None:  # all-null or absent stats
         return None
     return fmin, fmax
@@ -78,10 +73,9 @@ def _range_stats_by_file(table, col):
     manifest_files = ManifestListManager(table).read_all(snapshot)
     entries = ManifestFileManager(table).read_entries_parallel(manifest_files, drop_stats=False)
     field_names = table.field_names
-    schema_id = table.table_schema.id
     stats = {}
     for entry in entries:
-        rng = _file_key_range(entry.file, col, field_names, schema_id)
+        rng = _file_key_range(entry.file, col, field_names)
         if rng is not None:
             stats[entry.file.file_name] = rng
     return stats

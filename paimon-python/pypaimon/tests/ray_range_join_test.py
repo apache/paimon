@@ -172,7 +172,7 @@ class RayRangeJoinTest(unittest.TestCase):
             pa.Table.from_pydict({"k": [1], "v": [1]}, schema=loc)])
         self._table("default.rj_col_in", ins, [
             pa.Table.from_pydict({"k": [1], "v": [2]}, schema=ins)])
-        with self.assertRaisesRegex(ValueError, "must not share columns"):
+        with self.assertRaisesRegex(ValueError, "collide"):
             range_join("default.rj_col_in", "default.rj_col_loc", self.catalog_options, on="k")
 
     def test_rejects_key_type_mismatch(self):
