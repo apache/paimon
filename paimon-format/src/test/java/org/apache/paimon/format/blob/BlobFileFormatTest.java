@@ -552,7 +552,7 @@ public class BlobFileFormatTest {
                                 BlobElementSerializerFactory.create(
                                         DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.STRING())))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unsupported key type");
+                .hasMessageContaining("value type must be BLOB");
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {

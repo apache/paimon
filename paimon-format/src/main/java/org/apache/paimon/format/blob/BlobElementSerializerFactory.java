@@ -46,10 +46,6 @@ final class BlobElementSerializerFactory {
             case MAP:
                 MapType mapType = (MapType) dataType;
                 Preconditions.checkArgument(
-                        supportsMapKey(mapType.getKeyType()),
-                        "Unsupported key type [%s] for nested Map-Blob type.",
-                        mapType.getKeyType());
-                Preconditions.checkArgument(
                         mapType.getValueType().getTypeRoot() == DataTypeRoot.BLOB,
                         "Map-Blob value type must be BLOB, but is [%s].",
                         mapType.getValueType());
@@ -57,9 +53,5 @@ final class BlobElementSerializerFactory {
             default:
                 throw new RuntimeException("Unsupported Element Type for Blob File Format");
         }
-    }
-
-    private static boolean supportsMapKey(DataType keyType) {
-        return BlobType.isBlobFileField(new MapType(keyType, new BlobType()));
     }
 }

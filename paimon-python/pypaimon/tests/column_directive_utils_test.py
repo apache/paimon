@@ -156,20 +156,21 @@ class TestApplyAddColumnDirective(unittest.TestCase):
                 {},
             )
 
-    def test_blob_field_map_rejects_unsupported_key_type(self):
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported key type for MAP<X, BLOB>"
-        ):
-            apply_add_column_directive(
-                "__BLOB_FIELD",
-                "pictures",
-                MapType(
-                    True,
-                    AtomicType("BOOLEAN", False),
-                    AtomicType("BYTES"),
-                ),
-                {},
-            )
+    def test_blob_field_map_allows_unsupported_key_type(self):
+        result = apply_add_column_directive(
+            "__BLOB_FIELD",
+            "pictures",
+            MapType(
+                True,
+                AtomicType("BOOLEAN", False),
+                AtomicType("BYTES"),
+            ),
+            {},
+        )
+
+        self.assertIsInstance(result.type, MapType)
+        self.assertEqual(result.type.key, AtomicType("BOOLEAN", False))
+        self.assertEqual(result.type.value, AtomicType("BLOB"))
 
     def test_vector_field(self):
         opts = {}

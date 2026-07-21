@@ -326,19 +326,13 @@ class BlobTestBase extends PaimonSparkTestBase {
         }
     }
 
-    withTable("map_blob_unsupported_key") {
-      val error = intercept[Exception] {
-        sql(
-          "CREATE TABLE map_blob_unsupported_key " +
-            "(id INT, pictures MAP<BOOLEAN, BINARY>) TBLPROPERTIES (" +
-            "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
-            "'blob-field'='pictures')")
-      }
-      assert(
-        exceptionContains(error, "Unsupported key type for MAP<X, BLOB>: BooleanType"),
-        exceptionMessages(error))
+    withTable("map_blob_boolean_key") {
+      sql(
+        "CREATE TABLE map_blob_boolean_key " +
+          "(id INT, pictures MAP<BOOLEAN, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures')")
     }
-
   }
 
   test("Blob: test write blob descriptor") {

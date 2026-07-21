@@ -247,15 +247,15 @@ public class ColumnDirectiveUtilsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("MAP<X, BLOB> is only supported by 'blob-field'");
 
-        assertThatThrownBy(
-                        () ->
-                                ColumnDirectiveUtils.applyAddColumnDirective(
-                                        "__BLOB_FIELD",
-                                        "images",
-                                        DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BYTES()),
-                                        new HashMap<>()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unsupported key type [BOOLEAN]");
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BYTES()),
+                        new HashMap<>());
+        MapType mapType = (MapType) result.type();
+        assertThat(mapType.getKeyType()).isEqualTo(DataTypes.BOOLEAN());
+        assertThat(mapType.getValueType()).isEqualTo(DataTypes.BLOB());
     }
 
     @Test

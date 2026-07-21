@@ -150,7 +150,7 @@ class TestBlobPartitionValidation(unittest.TestCase):
         ):
             manager.commit(table_schema)
 
-    def test_create_table_rejects_unsupported_map_blob_key(self):
+    def test_create_table_allows_unsupported_map_blob_key(self):
         manager = SchemaManager(
             self.file_io,
             f"{self.temp_dir}/test_db.db/unsupported_map_key",
@@ -174,10 +174,8 @@ class TestBlobPartitionValidation(unittest.TestCase):
             },
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported key type for MAP<X, BLOB>"
-        ):
-            manager.create_table(schema)
+        table_schema = manager.create_table(schema)
+        self.assertEqual(table_schema.fields[1].type, schema.fields[1].type)
 
     def test_create_table_rejects_unsupported_nested_blob(self):
         nested_types = [

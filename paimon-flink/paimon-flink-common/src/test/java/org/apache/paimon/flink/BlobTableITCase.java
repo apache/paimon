@@ -775,7 +775,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMapBlobValidation() {
+    public void testMapBlobValidation() throws Exception {
         assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
@@ -798,16 +798,13 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                         .await())
                 .hasRootCauseMessage("MAP<X, BLOB> is only supported by 'blob-field'.");
 
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE map_blob_unsupported_key "
-                                                        + "(id INT, pictures MAP<BOOLEAN, BYTES>) "
-                                                        + "WITH ('row-tracking.enabled'='true', "
-                                                        + "'data-evolution.enabled'='true', "
-                                                        + "'blob-field'='pictures')")
-                                        .await())
-                .hasRootCauseMessage("Unsupported key type for MAP<X, BLOB>: BOOLEAN");
+        tEnv.executeSql(
+                        "CREATE TABLE map_blob_boolean_key "
+                                + "(id INT, pictures MAP<BOOLEAN, BYTES>) "
+                                + "WITH ('row-tracking.enabled'='true', "
+                                + "'data-evolution.enabled'='true', "
+                                + "'blob-field'='pictures')")
+                .await();
     }
 
     private void assertArrayBlobInlineFieldRejected(String tableName, String blobOptions) {

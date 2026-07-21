@@ -667,15 +667,10 @@ public class SparkCatalog extends SparkBaseCatalog
             checkArgument(
                     mapType.valueType() instanceof BinaryType,
                     "The value type of a MAP<X, BLOB> field must be binary");
-            org.apache.paimon.types.MapType result =
-                    new org.apache.paimon.types.MapType(
-                            field.nullable(),
-                            toPaimonType(mapType.keyType()).copy(false),
-                            new BlobType(mapType.valueContainsNull()));
-            checkArgument(
-                    BlobType.isBlobFileField(result),
-                    "Unsupported key type for MAP<X, BLOB>: " + mapType.keyType());
-            return result;
+            return new org.apache.paimon.types.MapType(
+                    field.nullable(),
+                    toPaimonType(mapType.keyType()).copy(false),
+                    new BlobType(mapType.valueContainsNull()));
         }
         throw new IllegalArgumentException(
                 "The type of blob field must be binary, array of binary, or map with binary values");

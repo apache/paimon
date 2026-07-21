@@ -192,17 +192,16 @@ class SchemaValidationTest {
         TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
         assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
 
-        List<DataField> unsupportedFields =
+        List<DataField> booleanKeyFields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
                         new DataField(
                                 1,
                                 "payloads",
                                 DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BLOB())));
-        TableSchema unsupported =
-                new TableSchema(1, unsupportedFields, 10, emptyList(), emptyList(), options, "");
-        assertThatThrownBy(() -> validateTableSchema(unsupported))
-                .hasMessageContaining("Unsupported key type [BOOLEAN]");
+        TableSchema booleanKeySchema =
+                new TableSchema(1, booleanKeyFields, 10, emptyList(), emptyList(), options, "");
+        assertThatCode(() -> validateTableSchema(booleanKeySchema)).doesNotThrowAnyException();
     }
 
     @Test

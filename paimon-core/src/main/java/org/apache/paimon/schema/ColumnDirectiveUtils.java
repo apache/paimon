@@ -257,17 +257,10 @@ public final class ColumnDirectiveUtils {
                                 + "VARBINARY or BLOB map value type, but was %s.",
                         fieldName,
                         sourceType);
-                MapType result =
-                        new MapType(
-                                sourceType.isNullable(),
-                                mapType.getKeyType(),
-                                new BlobType(mapType.getValueType().isNullable()));
-                Preconditions.checkArgument(
-                        BlobType.isBlobFileField(result),
-                        "Unsupported key type [%s] for MAP<X, BLOB> field '%s'.",
+                return new MapType(
+                        sourceType.isNullable(),
                         mapType.getKeyType(),
-                        fieldName);
-                return result;
+                        new BlobType(mapType.getValueType().isNullable()));
             }
             Preconditions.checkArgument(
                     isBlobSourceRoot(root),

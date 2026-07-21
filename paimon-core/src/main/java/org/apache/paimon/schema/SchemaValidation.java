@@ -1292,7 +1292,6 @@ public class SchemaValidation {
     }
 
     private static void validateBlobFields(RowType rowType, CoreOptions options) {
-        validateMapBlobKeyTypes(rowType.getFields());
         validateBlobNesting(rowType.getFields(), options);
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
@@ -1325,23 +1324,6 @@ public class SchemaValidation {
                             + "top-level BLOB, ARRAY<BLOB>, or MAP<X, BLOB> field.",
                     field.name(),
                     type);
-        }
-    }
-
-    private static void validateMapBlobKeyTypes(List<DataField> fields) {
-        for (DataField field : fields) {
-            DataType type = field.type();
-            if (type.getTypeRoot() != DataTypeRoot.MAP) {
-                continue;
-            }
-            MapType mapType = (MapType) type;
-            if (mapType.getValueType().getTypeRoot() == DataTypeRoot.BLOB) {
-                checkArgument(
-                        isBlobFileField(type),
-                        "Unsupported key type [%s] for MAP<X, BLOB> field '%s'.",
-                        mapType.getKeyType(),
-                        field.name());
-            }
         }
     }
 

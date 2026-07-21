@@ -77,15 +77,10 @@ public class LogicalTypeConversion {
                     "The value type of a MAP<X, BLOB> field must be BinaryType or "
                             + "VarBinaryType, but got: "
                             + logicalType);
-            org.apache.paimon.types.MapType result =
-                    new org.apache.paimon.types.MapType(
-                            logicalType.isNullable(),
-                            toDataType(mapType.getKeyType()),
-                            new BlobType(valueType.isNullable()));
-            checkArgument(
-                    BlobType.isBlobFileField(result),
-                    "Unsupported key type for MAP<X, BLOB>: " + mapType.getKeyType());
-            return result;
+            return new org.apache.paimon.types.MapType(
+                    logicalType.isNullable(),
+                    toDataType(mapType.getKeyType()),
+                    new BlobType(valueType.isNullable()));
         }
         checkArgument(
                 isBinaryType(logicalType),

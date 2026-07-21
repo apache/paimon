@@ -27,7 +27,6 @@ Mirrors Java's ColumnDirectiveUtils. Supported directives:
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         DataType, MapType, VectorType)
@@ -155,7 +154,6 @@ def _convert_type(directive: ParsedDirective, field_name: str, source_type: Data
                 raise ValueError(
                     f"MAP<X, BLOB> is only supported by '{CoreOptions.BLOB_FIELD.key()}'."
                 )
-            create_map_blob_key_serializer(source_type.key)
             value_type = getattr(source_type.value, 'type', None) \
                 if isinstance(source_type.value, AtomicType) else None
             if not _is_blob_source_type(value_type):

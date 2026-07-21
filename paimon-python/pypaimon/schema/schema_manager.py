@@ -22,7 +22,6 @@ from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
-from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
@@ -373,9 +372,6 @@ def _validate_blob_fields(
                 f"BLOB is only supported as a top-level BLOB, ARRAY<BLOB>, or "
                 f"MAP<X, BLOB> field."
             )
-
-    for field in map_blob_fields:
-        create_map_blob_key_serializer(field.type.key)
 
     if len(fields) <= len(blob_field_names):
         raise ValueError(
