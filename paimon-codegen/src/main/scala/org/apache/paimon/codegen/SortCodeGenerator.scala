@@ -410,9 +410,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
     t.getTypeRoot match {
       case _ if TypeUtils.isPrimitive(t) => true
       case VARCHAR | CHAR | VARBINARY | BINARY | DATE | TIME_WITHOUT_TIME_ZONE => true
-      case TIMESTAMP_WITHOUT_TIME_ZONE =>
-        // TODO: support normalize key for non-compact timestamp
-        Timestamp.isCompact(t.asInstanceOf[TimestampType].getPrecision)
+      case TIMESTAMP_WITHOUT_TIME_ZONE => true
       case DECIMAL => Decimal.isCompact(t.asInstanceOf[DecimalType].getPrecision)
       case _ => false
     }
@@ -430,6 +428,8 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
       case TIMESTAMP_WITHOUT_TIME_ZONE
           if Timestamp.isCompact(t.asInstanceOf[TimestampType].getPrecision) =>
         8
+      // non-compact timestamp: millisecond (8) + nanoOfMillisecond (4)
+      case TIMESTAMP_WITHOUT_TIME_ZONE => 12
       case DATE => 4
       case TIME_WITHOUT_TIME_ZONE => 4
       case DECIMAL if Decimal.isCompact(t.asInstanceOf[DecimalType].getPrecision) => 8
