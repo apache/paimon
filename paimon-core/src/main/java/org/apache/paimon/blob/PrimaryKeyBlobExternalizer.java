@@ -22,8 +22,10 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.blob.BlobFormatWriter;
 import org.apache.paimon.fs.FileIO;
@@ -32,29 +34,35 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Externalizes primary-key BLOB values before they enter the MergeTree write buffer. */
 public class PrimaryKeyBlobExternalizer {
 
+    private static final RowType BLOB_ROW_TYPE = RowType.of(DataTypes.BLOB());
+
     private final FileIO fileIO;
     private final RowDataToObjectArrayConverter rowConverter;
-    private final int[] blobFieldIndexes;
-    private final boolean[] blobArrayFields;
-    private final ManagedBlobPackWriter[] packWriters;
+    private final ManagedBlobField[] blobFields;
     private final List<Path> uncommittedPacks;
 
     public PrimaryKeyBlobExternalizer(
@@ -69,9 +77,7 @@ public class PrimaryKeyBlobExternalizer {
         this.rowConverter = new RowDataToObjectArrayConverter(valueType);
         this.uncommittedPacks = new ArrayList<>();
 
-        List<Integer> indexes = new ArrayList<>();
-        List<Boolean> arrayFields = new ArrayList<>();
-        List<ManagedBlobPackWriter> writers = new ArrayList<>();
+        List<ManagedBlobField> blobFields = new ArrayList<>();
         Set<String> unknownFields = new TreeSet<>(managedBlobFields);
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             DataField field = valueType.getFields().get(i);
@@ -84,38 +90,37 @@ public class PrimaryKeyBlobExternalizer {
                     field.type().getTypeRoot() == DataTypeRoot.ARRAY
                             && ((ArrayType) field.type()).getElementType().getTypeRoot()
                                     == DataTypeRoot.BLOB;
+            boolean blobMap =
+                    field.type().getTypeRoot() == DataTypeRoot.MAP && isBlobFileField(field.type());
             checkArgument(
-                    blob || blobArray,
-                    "Managed BLOB field '%s' must be BLOB or ARRAY<BLOB>, but was %s.",
+                    blob || blobArray || blobMap,
+                    "Managed BLOB field '%s' must be BLOB, ARRAY<BLOB> or MAP<X, BLOB>, but was %s.",
                     field.name(),
                     field.type());
-            indexes.add(i);
-            arrayFields.add(blobArray);
-            writers.add(
-                    new ManagedBlobPackWriter(
-                            fileIO,
-                            blobArray
-                                    ? RowType.of(((ArrayType) field.type()).getElementType())
-                                    : new RowType(Collections.singletonList(field)),
-                            pathFactory,
-                            targetFileSize,
-                            uncommittedPacks,
-                            copyBufferSize));
+            blobFields.add(
+                    new ManagedBlobField(
+                            i,
+                            field.type(),
+                            blobMap
+                                    ? InternalArray.createElementGetter(
+                                            ((MapType) field.type()).getKeyType())
+                                    : null,
+                            new ManagedBlobPackWriter(
+                                    fileIO,
+                                    pathFactory,
+                                    targetFileSize,
+                                    uncommittedPacks,
+                                    copyBufferSize)));
         }
         checkArgument(
                 unknownFields.isEmpty(),
                 "Managed BLOB fields do not exist in value type: %s.",
                 unknownFields);
-        this.blobFieldIndexes = indexes.stream().mapToInt(Integer::intValue).toArray();
-        this.blobArrayFields = new boolean[arrayFields.size()];
-        for (int i = 0; i < arrayFields.size(); i++) {
-            blobArrayFields[i] = arrayFields.get(i);
-        }
-        this.packWriters = writers.toArray(new ManagedBlobPackWriter[0]);
+        this.blobFields = blobFields.toArray(new ManagedBlobField[0]);
     }
 
     public boolean enabled() {
-        return blobFieldIndexes.length > 0;
+        return blobFields.length > 0;
     }
 
     public InternalRow externalize(RowKind valueKind, InternalRow value) throws IOException {
@@ -125,8 +130,8 @@ public class PrimaryKeyBlobExternalizer {
 
         GenericRow result = null;
         try {
-            for (int i = 0; i < blobFieldIndexes.length; i++) {
-                int fieldIndex = blobFieldIndexes[i];
+            for (ManagedBlobField blobField : blobFields) {
+                int fieldIndex = blobField.index;
                 if (value.isNullAt(fieldIndex)) {
                     continue;
                 }
@@ -136,9 +141,24 @@ public class PrimaryKeyBlobExternalizer {
                         result = copy(value);
                     }
                     result.setField(fieldIndex, null);
-                } else if (blobArrayFields[i]) {
+                } else if (blobField.type.getTypeRoot() == DataTypeRoot.ARRAY) {
                     InternalArray array = value.getArray(fieldIndex);
-                    GenericArray externalized = externalizeArray(array, packWriters[i]);
+                    GenericArray externalized = externalizeArray(array, blobField.packWriter);
+                    if (externalized != null) {
+                        if (result == null) {
+                            result = copy(value);
+                        }
+                        result.setField(fieldIndex, externalized);
+                    }
+                } else if (blobField.type.getTypeRoot() == DataTypeRoot.MAP) {
+                    InternalMap map = value.getMap(fieldIndex);
+                    MapType mapType = (MapType) blobField.type;
+                    GenericMap externalized =
+                            externalizeMap(
+                                    map,
+                                    mapType.getKeyType(),
+                                    blobField.mapKeyGetter,
+                                    blobField.packWriter);
                     if (externalized != null) {
                         if (result == null) {
                             result = copy(value);
@@ -150,7 +170,7 @@ public class PrimaryKeyBlobExternalizer {
                     if (result == null) {
                         result = copy(value);
                     }
-                    BlobDescriptor descriptor = packWriters[i].write(blob);
+                    BlobDescriptor descriptor = blobField.packWriter.write(blob);
                     result.setField(
                             fieldIndex,
                             Blob.fromFile(
@@ -191,10 +211,55 @@ public class PrimaryKeyBlobExternalizer {
         return elements == null ? null : new GenericArray(elements);
     }
 
+    private GenericMap externalizeMap(
+            InternalMap map,
+            DataType keyType,
+            InternalArray.ElementGetter keyGetter,
+            ManagedBlobPackWriter packWriter)
+            throws IOException {
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        checkArgument(
+                keys.size() == map.size() && values.size() == map.size(),
+                "MAP<X, BLOB> key/value array size does not match map size.");
+
+        Map<Object, Blob> blobs = new LinkedHashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            Object key = InternalRowUtils.copy(keyGetter.getElementOrNull(keys, i), keyType);
+            blobs.put(key, values.isNullAt(i) ? null : values.getBlob(i));
+        }
+
+        boolean hasBlob = false;
+        for (Blob blob : blobs.values()) {
+            if (blob != null) {
+                hasBlob = true;
+                break;
+            }
+        }
+        if (!hasBlob) {
+            return blobs.size() == map.size() ? null : new GenericMap(blobs);
+        }
+
+        Map<Object, Object> externalized = new LinkedHashMap<>();
+        for (Map.Entry<Object, Blob> entry : blobs.entrySet()) {
+            Blob blob = entry.getValue();
+            if (blob == null) {
+                externalized.put(entry.getKey(), null);
+                continue;
+            }
+            BlobDescriptor descriptor = packWriter.write(blob);
+            externalized.put(
+                    entry.getKey(),
+                    Blob.fromFile(
+                            fileIO, descriptor.uri(), descriptor.offset(), descriptor.length()));
+        }
+        return new GenericMap(externalized);
+    }
+
     public void prepareCommit() throws IOException {
         try {
-            for (ManagedBlobPackWriter packWriter : packWriters) {
-                packWriter.closeCurrent();
+            for (ManagedBlobField blobField : blobFields) {
+                blobField.packWriter.closeCurrent();
             }
             uncommittedPacks.clear();
         } catch (IOException e) {
@@ -204,8 +269,8 @@ public class PrimaryKeyBlobExternalizer {
     }
 
     public void abort() {
-        for (ManagedBlobPackWriter packWriter : packWriters) {
-            packWriter.abortCurrent();
+        for (ManagedBlobField blobField : blobFields) {
+            blobField.packWriter.abortCurrent();
         }
         for (Path path : uncommittedPacks) {
             fileIO.deleteQuietly(path);
@@ -219,10 +284,28 @@ public class PrimaryKeyBlobExternalizer {
         return row;
     }
 
+    private static class ManagedBlobField {
+
+        private final int index;
+        private final DataType type;
+        private final InternalArray.ElementGetter mapKeyGetter;
+        private final ManagedBlobPackWriter packWriter;
+
+        private ManagedBlobField(
+                int index,
+                DataType type,
+                InternalArray.ElementGetter mapKeyGetter,
+                ManagedBlobPackWriter packWriter) {
+            this.index = index;
+            this.type = type;
+            this.mapKeyGetter = mapKeyGetter;
+            this.packWriter = packWriter;
+        }
+    }
+
     private static class ManagedBlobPackWriter {
 
         private final FileIO fileIO;
-        private final RowType blobType;
         private final DataFilePathFactory pathFactory;
         private final long targetFileSize;
         private final List<Path> uncommittedPacks;
@@ -235,13 +318,11 @@ public class PrimaryKeyBlobExternalizer {
 
         private ManagedBlobPackWriter(
                 FileIO fileIO,
-                RowType blobType,
                 DataFilePathFactory pathFactory,
                 long targetFileSize,
                 List<Path> uncommittedPacks,
                 int copyBufferSize) {
             this.fileIO = fileIO;
-            this.blobType = blobType;
             this.pathFactory = pathFactory;
             this.targetFileSize = targetFileSize;
             this.uncommittedPacks = uncommittedPacks;
@@ -277,7 +358,7 @@ public class PrimaryKeyBlobExternalizer {
                                 lastDescriptor = descriptor;
                                 return false;
                             },
-                            blobType,
+                            BLOB_ROW_TYPE,
                             false,
                             false,
                             BlobFetchMetricReporter.NOOP,

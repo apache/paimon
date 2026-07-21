@@ -180,7 +180,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public InternalMap getMap(int pos) {
-        return vectorizedColumnBatch.getMap(rowId, pos);
+        InternalMap map = vectorizedColumnBatch.getMap(rowId, pos);
+        if (map instanceof ColumnarMap) {
+            ((ColumnarMap) map).setFileIO(fileIO);
+        }
+        return map;
     }
 
     @Override

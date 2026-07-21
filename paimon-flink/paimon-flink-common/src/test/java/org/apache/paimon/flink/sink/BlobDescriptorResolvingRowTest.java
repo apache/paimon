@@ -19,8 +19,12 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -34,7 +38,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BlobDescriptorResolvingRow}. */
@@ -62,6 +69,40 @@ class BlobDescriptorResolvingRowTest {
                         serialized, UriReaderFactory.fromFileIO(LocalFileIO.create()));
 
         assertThat(resolvingRow.getArray(0).getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testMapBlobAfterFlinkSerialization() throws Exception {
+        byte[] expected = new byte[] {1, 2, 3};
+        java.nio.file.Path blobPath = tempPath.resolve("map-blob");
+        Files.write(blobPath, expected);
+
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
+        Map<Object, Object> values = new LinkedHashMap<>();
+        values.put(
+                fromString("key"),
+                Blob.fromFile(LocalFileIO.create(), blobPath.toUri().toString()));
+        InternalRow serialized =
+                serializeAndDeserialize(GenericRow.of(new GenericMap(values)), rowType);
+
+        BlobDescriptorResolvingRow resolvingRow =
+                new BlobDescriptorResolvingRow(
+                        serialized, UriReaderFactory.fromFileIO(LocalFileIO.create()));
+
+        InternalMap map = resolvingRow.getMap(0);
+        assertThat(map.keyArray().getString(0)).isEqualTo(fromString("key"));
+        assertThat(map.valueArray().getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testBlobPlaceholdersArePreserved() {
+        BlobDescriptorResolvingRow resolvingRow =
+                new BlobDescriptorResolvingRow(
+                        GenericRow.of(BlobArrayPlaceholder.INSTANCE, BlobMapPlaceholder.INSTANCE),
+                        UriReaderFactory.fromFileIO(LocalFileIO.create()));
+
+        assertThat(resolvingRow.getArray(0)).isSameAs(BlobArrayPlaceholder.INSTANCE);
+        assertThat(resolvingRow.getMap(1)).isSameAs(BlobMapPlaceholder.INSTANCE);
     }
 
     private static InternalRow serializeAndDeserialize(InternalRow row, RowType rowType)

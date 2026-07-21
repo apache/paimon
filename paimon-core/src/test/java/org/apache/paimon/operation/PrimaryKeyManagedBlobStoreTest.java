@@ -23,10 +23,13 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -57,6 +60,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -118,6 +122,40 @@ class PrimaryKeyManagedBlobStoreTest {
         KeyValue read =
                 store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()).get(0);
         assertThat(read.value().getArray(1).getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
+    void testPostponeBucketExternalizesBlobMap() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store =
+                createStore(
+                        fileIO,
+                        "pictures",
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()),
+                        BucketMode.POSTPONE_BUCKET);
+        byte[] expected = "postpone-bucket-blob-map".getBytes(StandardCharsets.UTF_8);
+        KeyValue keyValue =
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                RowKind.INSERT,
+                                GenericRow.of(1, blobMap("picture", Blob.fromData(expected))));
+
+        store.commitData(
+                Collections.singletonList(keyValue),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> BucketMode.POSTPONE_BUCKET);
+
+        ManifestEntry entry = store.newScan().plan().files().get(0);
+        assertThat(entry.bucket()).isEqualTo(BucketMode.POSTPONE_BUCKET);
+        assertThat(references(fileIO, store, entry)).hasSize(1);
+        InternalMap result =
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId())
+                        .get(0)
+                        .value()
+                        .getMap(1);
+        assertThat(result.keyArray().getString(0).toString()).isEqualTo("picture");
+        assertThat(result.valueArray().getBlob(0).toData()).isEqualTo(expected);
     }
 
     @Test
@@ -220,6 +258,52 @@ class PrimaryKeyManagedBlobStoreTest {
     }
 
     @Test
+    void testExternalizeAndReadBlobMap() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store = createMapStore(fileIO);
+        byte[] expected = "map-payload".getBytes(StandardCharsets.UTF_8);
+        byte[] second = "second-map-payload".getBytes(StandardCharsets.UTF_8);
+        Path source = new Path(tempDir.resolve("external-map.blob").toUri());
+        try (org.apache.paimon.fs.PositionOutputStream out =
+                fileIO.newOutputStream(source, false)) {
+            out.write(second);
+        }
+        Map<Object, Object> input = new LinkedHashMap<>();
+        input.put(BinaryString.fromString("first"), Blob.fromData(expected));
+        input.put(BinaryString.fromString("null"), null);
+        input.put(BinaryString.fromString("second"), Blob.fromFile(fileIO, source.toString()));
+
+        store.commitData(
+                Collections.singletonList(
+                        new KeyValue()
+                                .replace(
+                                        GenericRow.of(1),
+                                        RowKind.INSERT,
+                                        GenericRow.of(1, new GenericMap(input)))),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> 0);
+
+        ManifestEntry entry = store.newScan().plan().files().get(0);
+        assertThat(references(fileIO, store, entry)).hasSize(2);
+        InternalMap blobs =
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId())
+                        .get(0)
+                        .value()
+                        .getMap(1);
+        Map<String, Blob> actual = new HashMap<>();
+        InternalArray keys = blobs.keyArray();
+        InternalArray values = blobs.valueArray();
+        for (int i = 0; i < blobs.size(); i++) {
+            actual.put(keys.getString(i).toString(), values.isNullAt(i) ? null : values.getBlob(i));
+        }
+        assertThat(actual).containsOnlyKeys("first", "null", "second");
+        assertThat(actual.get("first").toData()).isEqualTo(expected);
+        assertThat(actual.get("null")).isNull();
+        assertThat(actual.get("second").toDescriptor().uri()).isNotEqualTo(source.toString());
+        assertThat(actual.get("second").toData()).isEqualTo(second);
+    }
+
+    @Test
     void testCompactionRebuildsExactBlobReferences() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         TestFileStore store = createStore(fileIO);
@@ -296,12 +380,54 @@ class PrimaryKeyManagedBlobStoreTest {
                 .isEqualTo("new".getBytes(StandardCharsets.UTF_8));
     }
 
+    @Test
+    void testBlobMapCompactionRebuildsExactReferences() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store = createMapStore(fileIO);
+
+        store.commitData(
+                Arrays.asList(
+                        mapKeyValue(1, RowKind.INSERT, "old"),
+                        mapKeyValue(2, RowKind.INSERT, "deleted")),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> 0);
+        List<ManagedBlobReferenceFile.Reference> oldReferences = new java.util.ArrayList<>();
+        for (ManifestEntry file : store.newScan().plan().files()) {
+            oldReferences.addAll(references(fileIO, store, file));
+        }
+        assertThat(oldReferences).hasSize(2);
+
+        store.commitData(
+                Arrays.asList(
+                        mapKeyValue(1, RowKind.UPDATE_AFTER, "new"),
+                        mapKeyValue(2, RowKind.DELETE, "must-not-be-written")),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> 0);
+        forceFullCompaction(store);
+
+        List<ManifestEntry> files = store.newScan().plan().files();
+        assertThat(files).hasSize(1);
+        assertThat(references(fileIO, store, files.get(0)))
+                .hasSize(1)
+                .doesNotContainAnyElementsOf(oldReferences);
+        List<KeyValue> rows = store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId());
+        assertThat(rows).hasSize(1);
+        InternalMap result = rows.get(0).value().getMap(1);
+        assertThat(result.keyArray().getString(0).toString()).isEqualTo("key");
+        assertThat(result.valueArray().getBlob(0).toData())
+                .isEqualTo("new".getBytes(StandardCharsets.UTF_8));
+    }
+
     private TestFileStore createStore(FileIO fileIO) throws Exception {
         return createStore(fileIO, "payload", DataTypes.BLOB());
     }
 
     private TestFileStore createArrayStore(FileIO fileIO) throws Exception {
         return createStore(fileIO, "payloads", DataTypes.ARRAY(DataTypes.BLOB()));
+    }
+
+    private TestFileStore createMapStore(FileIO fileIO) throws Exception {
+        return createStore(fileIO, "payloads", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
     }
 
     private TestFileStore createStore(FileIO fileIO, String payloadName, DataType payloadType)
@@ -410,5 +536,23 @@ class PrimaryKeyManagedBlobStoreTest {
                                         new Object[] {
                                             Blob.fromData(value.getBytes(StandardCharsets.UTF_8))
                                         })));
+    }
+
+    private KeyValue mapKeyValue(int id, RowKind kind, String value) {
+        return new KeyValue()
+                .replace(
+                        GenericRow.of(id),
+                        kind,
+                        GenericRow.of(
+                                id,
+                                blobMap(
+                                        "key",
+                                        Blob.fromData(value.getBytes(StandardCharsets.UTF_8)))));
+    }
+
+    private GenericMap blobMap(String key, Blob value) {
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(BinaryString.fromString(key), value);
+        return new GenericMap(map);
     }
 }

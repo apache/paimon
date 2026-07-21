@@ -286,8 +286,16 @@ def is_array_blob_type(data_type: DataType) -> bool:
     return isinstance(data_type, ArrayType) and is_blob_type(data_type.element)
 
 
+def is_map_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, MapType) and is_blob_type(data_type.value)
+
+
 def is_blob_file_type(data_type: DataType) -> bool:
-    return is_blob_type(data_type) or is_array_blob_type(data_type)
+    return (
+        is_blob_type(data_type)
+        or is_array_blob_type(data_type)
+        or is_map_blob_type(data_type)
+    )
 
 
 def is_blob_file_field(field: 'DataField') -> bool:
@@ -574,7 +582,9 @@ class DataTypeParser:
                     json_data.get("key"), field_id)
                 value = DataTypeParser.parse_data_type(
                     json_data.get("value"), field_id)
-                nullable = "NOT NULL" not in type_string
+                nullable = json_data.get("nullable")
+                if nullable is None:
+                    nullable = not type_string.rstrip().endswith(" NOT NULL")
                 return MapType(nullable, key, value)
 
             elif type_string.startswith("ROW"):
@@ -656,7 +666,7 @@ class PyarrowFieldParser:
                 return pyarrow.int8()
             elif type_name == 'SMALLINT':
                 return pyarrow.int16()
-            elif type_name == 'INT':
+            elif type_name in ('INT', 'INTEGER'):
                 return pyarrow.int32()
             elif type_name == 'BIGINT':
                 return pyarrow.int64()
@@ -723,7 +733,14 @@ class PyarrowFieldParser:
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
-            return pyarrow.map_(key_type, value_type)
+            return pyarrow.map_(
+                pyarrow.field("key", key_type, nullable=False),
+                pyarrow.field(
+                    "value",
+                    value_type,
+                    nullable=data_type.value.nullable,
+                ),
+            )
         elif isinstance(data_type, RowType):
             pa_fields = []
             for field in data_type.fields:
@@ -798,8 +815,10 @@ class PyarrowFieldParser:
             return ArrayType(nullable, element_type)
         elif types.is_map(pa_type):
             pa_type: pyarrow.MapType
-            key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
-            value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
+            key_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.key_type, pa_type.key_field.nullable)
+            value_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.item_type, pa_type.item_field.nullable)
             return MapType(nullable, key_type, value_type)
         elif types.is_struct(pa_type) and is_variant_struct(pa_type):
             return AtomicType('VARIANT', nullable)

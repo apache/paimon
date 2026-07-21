@@ -21,6 +21,7 @@ package org.apache.paimon.blob;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -32,6 +33,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -150,6 +153,54 @@ class ManagedBlobReferenceCollectorTest {
                 .containsExactly(
                         new ManagedBlobReferenceFile.Reference(
                                 bucketPath.toString(), managed.getName()));
+    }
+
+    @Test
+    void testCollectManagedReferencesFromBlobMap() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        Path otherBucketPath = new Path(tempDir.resolve("bucket-1").toUri());
+        fileIO.mkdirs(bucketPath);
+        Path dataFile = new Path(bucketPath, "data-a.avro");
+        Path first = new Path(bucketPath, "data-b.managed.blob");
+        Path second = new Path(otherBucketPath, "data-c.managed.blob");
+        Path ordinary = new Path(tempDir.resolve("external/data-d.blob").toUri());
+        ManagedBlobReferenceCollector collector =
+                new ManagedBlobReferenceCollector(
+                        fileIO,
+                        dataFile,
+                        RowType.of(
+                                DataTypes.INT(), DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
+                        Collections.singleton("f1"));
+        Map<Object, Object> values = new LinkedHashMap<>();
+        values.put(1, Blob.fromFile(fileIO, first.toString()));
+        values.put(2, null);
+        values.put(3, Blob.fromFile(fileIO, ordinary.toString()));
+        values.put(4, Blob.fromFile(fileIO, first.toString()));
+        values.put(5, Blob.fromFile(fileIO, second.toString()));
+
+        collector.write(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                RowKind.INSERT,
+                                GenericRow.of(1, new GenericMap(values))));
+        collector.write(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(2),
+                                RowKind.DELETE,
+                                GenericRow.of(2, new GenericMap(values))));
+        collector.close();
+
+        assertThat(
+                        ManagedBlobReferenceFile.read(
+                                fileIO, ManagedBlobReferenceFile.sidecarPath(dataFile)))
+                .containsExactly(
+                        new ManagedBlobReferenceFile.Reference(
+                                bucketPath.toString(), first.getName()),
+                        new ManagedBlobReferenceFile.Reference(
+                                otherBucketPath.toString(), second.getName()));
     }
 
     private KeyValue keyValue(RowKind kind, Blob blob) {

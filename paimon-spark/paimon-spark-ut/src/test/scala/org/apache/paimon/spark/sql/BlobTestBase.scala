@@ -129,6 +129,41 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test map blob") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'paimon', map('first', X'48656C6C6F', 'null', CAST(NULL AS BINARY), " +
+          "'second', X'5945')), " +
+          "(2, 'empty', CAST(map() AS MAP<STRING, BINARY>)), " +
+          "(3, 'null-map', CAST(NULL AS MAP<STRING, BINARY>))")
+
+      val first = sql(
+        "SELECT id, size(pictures), pictures['first'], pictures['null'], pictures['second'] " +
+          "FROM t WHERE id = 1").collect()(0)
+      assert(first.getInt(0) == 1)
+      assert(first.getInt(1) == 3)
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(first.isNullAt(3))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      checkAnswer(
+        sql("SELECT id, size(pictures) FROM t WHERE id = 2"),
+        Seq(Row(2, 0))
+      )
+      checkAnswer(
+        sql("SELECT id, pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(3, true))
+      )
+      checkAnswer(
+        sql("SELECT COUNT(*) > 0 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+    }
+  }
+
   test("Blob: test primary-key array blob") {
     withTable("t") {
       sql(
@@ -146,6 +181,33 @@ class BlobTestBase extends PaimonSparkTestBase {
       assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
       assert(row.isNullAt(3))
       assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+    }
+  }
+
+  test("Blob: test primary-key map blob") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, map('first', X'48656C6C6F', 'null', CAST(NULL AS BINARY), " +
+          "'second', X'5945'))")
+
+      val row = sql(
+        "SELECT id, size(pictures), pictures['first'], pictures['null'], pictures['second'] " +
+          "FROM t").collect()(0)
+      assert(row.getInt(0) == 1)
+      assert(row.getInt(1) == 3)
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(row.isNullAt(3))
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      sql("INSERT INTO t VALUES (1, map('first', X'4E4557'))")
+      val updated = sql("SELECT id, size(pictures), pictures['first'] FROM t").collect()(0)
+      assert(updated.getInt(0) == 1)
+      assert(updated.getInt(1) == 1)
+      assert(util.Arrays.equals(updated.getAs[Array[Byte]](2), Array[Byte](78, 69, 87)))
     }
   }
 
@@ -186,6 +248,47 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: map blob writes descriptor values and reads descriptors") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_map_blob"
+      writeFile(fileIO, uri, blobData)
+
+      sql(
+        "CREATE TABLE t (id INT, data STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', " +
+          "'blob-as-descriptor'='true')")
+      sql(
+        s"INSERT INTO t VALUES (1, 'paimon', " +
+          s"map('external', sys.path_to_descriptor('$uri'), 'inline', X'5945'))")
+
+      val descriptorRow =
+        sql("SELECT pictures['external'], pictures['inline'] FROM t WHERE id = 1").collect()(0)
+      val firstDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](0))
+      val secondDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1))
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val firstBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(firstDescriptor.uri), firstDescriptor)
+      val secondBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(secondDescriptor.uri), secondDescriptor)
+      assert(util.Arrays.equals(blobData, firstBlob.toData))
+      assert(util.Arrays.equals(Array[Byte](89, 69), secondBlob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val dataRow =
+        sql("SELECT pictures['external'], pictures['inline'] FROM t WHERE id = 1").collect()(0)
+      assert(util.Arrays.equals(blobData, dataRow.getAs[Array[Byte]](0)))
+      assert(util.Arrays.equals(Array[Byte](89, 69), dataRow.getAs[Array[Byte]](1)))
+    }
+  }
+
   test("Blob: array blob inline fields are rejected") {
     Seq(
       ("array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
@@ -202,6 +305,33 @@ class BlobTestBase extends PaimonSparkTestBase {
             exceptionContains(error, "ARRAY<BLOB> is only supported by 'blob-field'."),
             exceptionMessages(error))
         }
+    }
+  }
+
+  test("Blob: map blob validation") {
+    Seq(
+      ("map_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
+      ("map_blob_view_reject", "'blob-view-field'='pictures'")
+    ).foreach {
+      case (tableName, blobOptions) =>
+        withTable(tableName) {
+          val error = intercept[Exception] {
+            sql(
+              s"CREATE TABLE $tableName (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+                s"'row-tracking.enabled'='true', 'data-evolution.enabled'='true', $blobOptions)")
+          }
+          assert(
+            exceptionContains(error, "MAP<X, BLOB> is only supported by 'blob-field'."),
+            exceptionMessages(error))
+        }
+    }
+
+    withTable("map_blob_boolean_key") {
+      sql(
+        "CREATE TABLE map_blob_boolean_key " +
+          "(id INT, pictures MAP<BOOLEAN, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures')")
     }
   }
 
@@ -644,6 +774,44 @@ class BlobTestBase extends PaimonSparkTestBase {
       assert(util.Arrays.equals(second.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
       assert(second.getInt(1) == 1)
 
+      checkAnswer(
+        sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on raw map blob table with split files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', map('first', X'48656C6C6F', 'second', X'5945')), " +
+          "(2, 'name2', map('only', X'414243')), " +
+          "(3, 'name3', CAST(NULL AS MAP<STRING, BINARY>))")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) > 1 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      val first =
+        sql("SELECT name, pictures['first'], pictures['second'] FROM t WHERE id = 1").collect()(0)
+      assert(first.getString(0) == "updated_name1")
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](89, 69)))
       checkAnswer(
         sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
         Seq(Row(true))

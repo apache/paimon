@@ -22,19 +22,32 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.data.serializer.InternalMapSerializer.convertToJavaMap;
+import static org.apache.paimon.types.DataTypes.BLOB;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.apache.paimon.types.DataTypes.STRING;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link InternalMapSerializer}. */
 public class InternalMapSerializerTest extends SerializerTestBase<InternalMap> {
@@ -84,6 +97,48 @@ public class InternalMapSerializerTest extends SerializerTestBase<InternalMap> {
     protected InternalMap[] getSerializableTestData() {
         InternalMap[] testData = getTestData();
         return Arrays.copyOfRange(testData, 0, testData.length - 1);
+    }
+
+    @Test
+    void testCopyColumnarBlobMapPreservesReader(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        byte[] payload = "blob-payload".getBytes(StandardCharsets.UTF_8);
+        Path path = new Path(tempDir.resolve("blob.data").toUri());
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            out.write(payload);
+        }
+
+        byte[] descriptor = new BlobDescriptor(path.toString(), 0, payload.length).serialize();
+        HeapBytesVector values = new HeapBytesVector(2);
+        values.putByteArray(0, descriptor, 0, descriptor.length);
+        values.setNullAt(1);
+        ColumnarArray valueArray = new ColumnarArray(values, 0, 2);
+        valueArray.setFileIO(fileIO);
+        InternalMap map =
+                new InternalMap() {
+                    @Override
+                    public int size() {
+                        return 2;
+                    }
+
+                    @Override
+                    public InternalArray keyArray() {
+                        return new GenericArray(new Object[] {1, 2});
+                    }
+
+                    @Override
+                    public InternalArray valueArray() {
+                        return valueArray;
+                    }
+                };
+
+        InternalMap copied = new InternalMapSerializer(INT(), BLOB()).copy(map);
+
+        assertThat(copied).isInstanceOf(GenericMap.class);
+        assertThat(copied.keyArray().getInt(0)).isEqualTo(1);
+        assertThat(copied.valueArray().getBlob(0).toData()).isEqualTo(payload);
+        assertThat(copied.valueArray().isNullAt(1)).isTrue();
     }
 
     private static BinaryArray createArray(int... vs) {

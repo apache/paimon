@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.casting.FallbackMappingRow
-import org.apache.paimon.data.{BinaryRow, BlobArrayPlaceholder, BlobPlaceholder, GenericRow, InternalRow}
+import org.apache.paimon.data.{BinaryRow, BlobArrayPlaceholder, BlobMapPlaceholder, BlobPlaceholder, GenericRow, InternalRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
@@ -76,6 +76,8 @@ case class DataEvolutionTableDataWrite(
     case (fieldIndex, _) =>
       if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.ARRAY) {
         BlobArrayPlaceholder.INSTANCE
+      } else if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.MAP) {
+        BlobMapPlaceholder.INSTANCE
       } else {
         BlobPlaceholder.INSTANCE
       }

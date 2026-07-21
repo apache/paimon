@@ -19,15 +19,22 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.data.BlobMapPlaceholder;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -53,6 +60,114 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BlobFormatWriter}. */
 public class BlobFormatWriterTest {
+
+    @Test
+    public void testRawBlobGoldenBytes(@TempDir java.nio.file.Path tempDir) throws Exception {
+        java.nio.file.Path sourceFile = tempDir.resolve("source.bin");
+        Files.write(sourceFile, "descriptor".getBytes());
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            writer.addElement(GenericRow.of(Blob.fromData("inline".getBytes())));
+            writer.addElement(GenericRow.of(Blob.fromLocal(sourceFile.toString())));
+            writer.addElement(GenericRow.of((Object) null));
+            writer.addElement(GenericRow.of(BlobPlaceholder.INSTANCE));
+            writer.close();
+        }
+
+        assertThat(toHex(Files.readAllBytes(outputFile)))
+                .isEqualTo(
+                        "cf114e58696e6c696e6516000000000000002960c8e9"
+                                + "cf114e5864657363726970746f721a000000000000003f69146b"
+                                + "2c0835010400000001");
+    }
+
+    @Test
+    public void testArrayBlobGoldenBytes(@TempDir java.nio.file.Path tempDir) throws Exception {
+        java.nio.file.Path sourceFile = tempDir.resolve("source.bin");
+        Files.write(sourceFile, "descriptor".getBytes());
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.ARRAY(DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            writer.addElement(GenericRow.of(new GenericArray(new Object[0])));
+            writer.addElement(
+                    GenericRow.of(
+                            new GenericArray(
+                                    new Object[] {
+                                        Blob.fromData("inline".getBytes()),
+                                        null,
+                                        Blob.fromData(new byte[0]),
+                                        Blob.fromLocal(sourceFile.toString())
+                                    })));
+            writer.addElement(GenericRow.of((Object) null));
+            writer.addElement(GenericRow.of(BlobArrayPlaceholder.INSTANCE));
+            writer.close();
+        }
+
+        assertThat(toHex(Files.readAllBytes(outputFile)))
+                .isEqualTo(
+                        "cf114e58424342410100000000000000001d000000000000009bd49157"
+                                + "cf114e58424342410104000000696e6c696e6564657363726970746f72"
+                                + "0c0d0214040000003100000000000000d08307713a2863010400000001");
+    }
+
+    @Test
+    public void testMapBlobGoldenBytes(@TempDir java.nio.file.Path tempDir) throws Exception {
+        java.nio.file.Path sourceFile = tempDir.resolve("source.bin");
+        Files.write(sourceFile, "descriptor".getBytes());
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(null, null);
+        entries.put(BinaryString.fromString(""), Blob.fromData(new byte[0]));
+        entries.put(BinaryString.fromString("inline"), Blob.fromData("data".getBytes()));
+        entries.put(BinaryString.fromString("descriptor"), Blob.fromLocal(sourceFile.toString()));
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            writer.addElement(GenericRow.of(new GenericMap(new LinkedHashMap<>())));
+            writer.addElement(GenericRow.of(new GenericMap(entries)));
+            writer.addElement(GenericRow.of((Object) null));
+            writer.addElement(GenericRow.of(BlobMapPlaceholder.INSTANCE));
+            writer.close();
+        }
+
+        assertThat(toHex(Files.readAllBytes(outputFile)))
+                .isEqualTo(
+                        "cf114e584243424d010000000000000000000000002100000000000000"
+                                + "8360591ecf114e584243424d0104000000696e6c696e65646573637269"
+                                + "70746f726461746164657363726970746f7201020c080102080c040000"
+                                + "000400000047000000000000006c9f5981424c8f01010500000001");
+    }
 
     @Test
     public void testTwoConsecutiveBlobsPreserveReadback(@TempDir java.nio.file.Path tempDir)
@@ -607,12 +722,99 @@ public class BlobFormatWriterTest {
         public void close() {}
     }
 
+    @Test
+    public void testMapBlobFetchMetricReporter(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()));
+        TestingBlobFetchMetricReporter metricReporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                new BlobFormatWriter(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("blob.out").toFile()),
+                        null,
+                        rowType,
+                        true,
+                        true,
+                        metricReporter,
+                        BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(1, Blob.fromData("image".getBytes()));
+        entries.put(
+                2,
+                new BlobRef(
+                        failingHttpReader(500),
+                        new BlobDescriptor("https://example.com/error.jpg", 0, -1)));
+        entries.put(
+                3,
+                new BlobRef(
+                        failingHttpReader(404),
+                        new BlobDescriptor("https://example.com/missing.jpg", 0, -1)));
+        entries.put(4, null);
+        writer.addElement(GenericRow.of(new GenericMap(entries)));
+        writer.addElement(GenericRow.of((Object) null));
+        writer.close();
+
+        assertThat(metricReporter.success).isEqualTo(1);
+        assertThat(metricReporter.successBytes).isEqualTo(5);
+        assertThat(metricReporter.missingFileNullWritten).isEqualTo(1);
+        assertThat(metricReporter.httpNotFound).isEqualTo(1);
+        assertThat(metricReporter.fetchFailureNullWritten).isEqualTo(1);
+        assertThat(metricReporter.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testMapBlobConsumerDescriptorsAndFlush(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        Path blobFile = new Path(outputFile.toUri());
+        List<BlobDescriptor> descriptors = new ArrayList<>();
+
+        try (CountingPositionOutputStream out =
+                new CountingPositionOutputStream(
+                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()))) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            (fieldName, descriptor) -> {
+                                assertThat(fieldName).isEqualTo("f0");
+                                descriptors.add(descriptor);
+                                return descriptors.size() == 1;
+                            },
+                            RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            writer.setFile(blobFile);
+            Map<Object, Object> entries = new LinkedHashMap<>();
+            entries.put(BinaryString.fromString("a"), Blob.fromData("x".getBytes()));
+            entries.put(BinaryString.fromString("b"), Blob.fromData("yz".getBytes()));
+            writer.addElement(GenericRow.of(new GenericMap(entries)));
+            writer.close();
+
+            assertThat(out.flushCount).isEqualTo(1);
+        }
+
+        assertThat(descriptors).hasSize(2);
+        assertThat(descriptors.get(0)).isEqualTo(new BlobDescriptor(blobFile.toString(), 15, 1));
+        assertThat(descriptors.get(1)).isEqualTo(new BlobDescriptor(blobFile.toString(), 16, 2));
+    }
+
     private static void assertBlobPayload(Blob blob, byte[] expected) throws Exception {
         try (SeekableInputStream blobIn = blob.newInputStream()) {
             byte[] actual = new byte[expected.length];
             org.apache.paimon.utils.IOUtils.readFully(blobIn, actual);
             assertThat(actual).isEqualTo(expected);
         }
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder result = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            result.append(String.format("%02x", value & 0xff));
+        }
+        return result.toString();
     }
 
     private static UriReader failingHttpReader(int statusCode) {
@@ -779,6 +981,21 @@ public class BlobFormatWriterTest {
         @Override
         public void recordFetchFailure(Throwable throwable) {
             failure++;
+        }
+    }
+
+    private static final class CountingPositionOutputStream extends PositionOutputStreamWrapper {
+
+        private int flushCount;
+
+        private CountingPositionOutputStream(PositionOutputStream out) {
+            super(out);
+        }
+
+        @Override
+        public void flush() throws java.io.IOException {
+            flushCount++;
+            super.flush();
         }
     }
 

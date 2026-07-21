@@ -30,8 +30,10 @@ import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
@@ -95,6 +97,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -1419,6 +1422,94 @@ public class JavaPyE2ETest {
         assertThat(rows.get(3)).isNull();
         assertThat(rows.get(4)).hasSize(1);
         assertThat(rows.get(4).get(0)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Java writes a MAP&lt;INT, BLOB&gt; table for Python to read. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteMapBlobTable() throws Exception {
+        Identifier identifier = identifier("map_blob_java_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payloads", DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()))
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        Map<Object, Object> first = new LinkedHashMap<>();
+        first.put(1, new BlobData("java-alpha".getBytes(StandardCharsets.UTF_8)));
+        first.put(2, null);
+        first.put(3, new BlobData(new byte[0]));
+        Map<Object, Object> last = new LinkedHashMap<>();
+        last.put(4, new BlobData("java-omega".getBytes(StandardCharsets.UTF_8)));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, new GenericMap(first)));
+            write.write(GenericRow.of(2, new GenericMap(Collections.emptyMap())));
+            write.write(GenericRow.of(3, null));
+            write.write(GenericRow.of(4, new GenericMap(last)));
+            commit.commit(write.prepareCommit());
+        }
+
+        assertMapBlobRows(readMapBlobRows(table), "java-alpha", "java-omega");
+    }
+
+    /** Java reads a MAP&lt;INT, BLOB&gt; table written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadMapBlobTable() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(identifier("map_blob_python_test"));
+        assertMapBlobRows(readMapBlobRows(table), "python-alpha", "python-omega");
+    }
+
+    private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
+            throws Exception {
+        Map<Integer, Map<Integer, byte[]>> rows = new HashMap<>();
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        if (row.isNullAt(1)) {
+                            rows.put(id, null);
+                            return;
+                        }
+
+                        InternalMap map = row.getMap(1);
+                        InternalArray keys = map.keyArray();
+                        InternalArray values = map.valueArray();
+                        Map<Integer, byte[]> converted = new HashMap<>();
+                        for (int i = 0; i < map.size(); i++) {
+                            converted.put(
+                                    keys.getInt(i),
+                                    values.isNullAt(i) ? null : values.getBlob(i).toData());
+                        }
+                        rows.put(id, converted);
+                    });
+        }
+        return rows;
+    }
+
+    private void assertMapBlobRows(
+            Map<Integer, Map<Integer, byte[]>> rows, String firstValue, String lastValue) {
+        assertThat(rows).containsOnlyKeys(1, 2, 3, 4);
+        assertThat(rows.get(1)).containsOnlyKeys(1, 2, 3);
+        assertThat(rows.get(1).get(1)).isEqualTo(firstValue.getBytes(StandardCharsets.UTF_8));
+        assertThat(rows.get(1).get(2)).isNull();
+        assertThat(rows.get(1).get(3)).isEmpty();
+        assertThat(rows.get(2)).isEmpty();
+        assertThat(rows.get(3)).isNull();
+        assertThat(rows.get(4)).containsOnlyKeys(4);
+        assertThat(rows.get(4).get(4)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */
