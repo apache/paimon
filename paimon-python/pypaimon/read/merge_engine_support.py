@@ -64,7 +64,8 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "bool_or", "bool_and",
     "listagg",
     "nested_update",
-    "collect"
+    "collect",
+    "theta_sketch",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
