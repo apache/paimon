@@ -704,6 +704,46 @@ public class LocalOrphanFilesCleanTest {
         assertThat(fileIO.exists(unknownDir)).isTrue();
     }
 
+    @Test
+    void testAbortWhenManifestListMissingDuringConcurrentExpiration() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+        commit(Collections.singletonList(new TestPojo(2, 0, "b", "v2")));
+        commit(Collections.singletonList(new TestPojo(3, 1, "c", "v3")));
+
+        List<Path> dataFilesBefore = new ArrayList<>();
+        collectDataFiles(tablePath, dataFilesBefore);
+        assertThat(dataFilesBefore).isNotEmpty();
+
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        Path missingManifestList = new Path(manifestDir, latest.baseManifestList());
+        assertThat(fileIO.exists(missingManifestList)).isTrue();
+        fileIO.deleteQuietly(missingManifestList);
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFileCount()).isEqualTo(0);
+        for (Path dataFile : dataFilesBefore) {
+            assertThat(fileIO.exists(dataFile)).isTrue();
+        }
+    }
+
+    private void collectDataFiles(Path dir, List<Path> result) throws IOException {
+        FileStatus[] statuses = fileIO.listStatus(dir);
+        if (statuses == null) {
+            return;
+        }
+        for (FileStatus status : statuses) {
+            if (status.isDir()) {
+                collectDataFiles(status.getPath(), result);
+            } else if (status.getPath().getParent().getName().startsWith(BUCKET_PATH_PREFIX)) {
+                result.add(status.getPath());
+            }
+        }
+    }
+
     private void writeData(
             SnapshotManager snapshotManager,
             List<List<TestPojo>> committedData,
