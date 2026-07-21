@@ -238,7 +238,11 @@ class Decimal:
         with localcontext() as ctx:
             # Java BigDecimal is arbitrary precision.
             # Paimon DECIMAL supports precision up to 38.
-            ctx.prec = max(precision, 38)
+            ctx.prec = max(
+                precision + scale,
+                len(value.as_tuple().digits) + abs(value.as_tuple().exponent) + scale,
+                38,
+            )
 
             value = value.quantize(
                 quant,
