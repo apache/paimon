@@ -252,6 +252,21 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
+    public void testWriteNullKeyInMapColumnFailsLoud() {
+        // the map key type is nullable, but the Arrow map key is always NOT NULL by spec, so a null
+        // key must fail loud rather than be written into a schema that forbids it
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(null, 1);
+            InternalRow row = GenericRow.of(new GenericMap(map));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
     public void testWriteNullFieldInNotNullNestedRowField() {
         // the row column is nullable, but its nested field is NOT NULL
         RowType rowType =
