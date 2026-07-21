@@ -18,9 +18,12 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -76,5 +79,34 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                                         Lists.newArrayList(PropertyChange.removeProperty("a")),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testPartitionsFromCatalogAreRejectedOutsideRestCatalog() throws Exception {
+        String database = "rest_partition_source_db";
+        Identifier identifier = Identifier.create(database, "rest_partition_source_table");
+        catalog.createDatabase(database, false);
+        // Write the schema file directly to simulate a format table carrying the REST-only
+        // partition source in a filesystem catalog.
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .build();
+        Path tablePath =
+                ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
+                        .getTableLocation(identifier);
+        new SchemaManager(fileIO, tablePath).createTable(schema);
+
+        // The option names one thing only, so a catalog that cannot serve it says so rather than
+        // reading the table's partitions from somewhere the option did not ask for.
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.METASTORE_PARTITIONED_TABLE.key())
+                .hasMessageContaining("REST catalog");
     }
 }

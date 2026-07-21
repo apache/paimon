@@ -174,25 +174,36 @@ public class IcebergDataFileMeta {
             }
 
             int idx = indexMap.get(field.name());
-            nullValueCounts.put(field.id(), stats.nullCounts().getLong(idx));
+            // an unknown null count must be omitted, not published as 0
+            if (!stats.nullCounts().isNullAt(idx)) {
+                nullValueCounts.put(field.id(), stats.nullCounts().getLong(idx));
+            }
 
+            // these types have no bounds; skip before reading the stats slots
+            DataTypeRoot typeRoot = field.dataType().getTypeRoot();
+            if (typeRoot == DataTypeRoot.ARRAY
+                    || typeRoot == DataTypeRoot.MAP
+                    || typeRoot == DataTypeRoot.ROW
+                    || typeRoot == DataTypeRoot.MULTISET
+                    || typeRoot == DataTypeRoot.VARIANT
+                    || typeRoot == DataTypeRoot.VECTOR
+                    || typeRoot == DataTypeRoot.BLOB) {
+                continue;
+            }
+
+            // use the nullable copy of the type, so that an unknown (null) min/max slot
+            // of a required field reads as null instead of garbage
             InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(field.dataType(), idx);
+                    InternalRow.createFieldGetter(field.dataType().nullable(), idx);
             Object minValue = fieldGetter.getFieldOrNull(stats.minValues());
             Object maxValue = fieldGetter.getFieldOrNull(stats.maxValues());
             if (minValue != null && maxValue != null) {
-                DataTypeRoot typeRoot = field.dataType().getTypeRoot();
-                if (typeRoot != DataTypeRoot.ARRAY
-                        && typeRoot != DataTypeRoot.MAP
-                        && typeRoot != DataTypeRoot.ROW
-                        && typeRoot != DataTypeRoot.MULTISET) {
-                    lowerBounds.put(
-                            field.id(),
-                            IcebergConversions.toByteBuffer(field.dataType(), minValue).array());
-                    upperBounds.put(
-                            field.id(),
-                            IcebergConversions.toByteBuffer(field.dataType(), maxValue).array());
-                }
+                lowerBounds.put(
+                        field.id(),
+                        IcebergConversions.toByteBuffer(field.dataType(), minValue).array());
+                upperBounds.put(
+                        field.id(),
+                        IcebergConversions.toByteBuffer(field.dataType(), maxValue).array());
             }
         }
 

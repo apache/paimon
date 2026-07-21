@@ -96,7 +96,8 @@ public class KeyValueFileWriterFactory {
                                 valueType,
                                 managedBlobFields,
                                 formatContext.pathFactory(new WriteFormatKey(0, false)),
-                                options.blobTargetFileSize());
+                                options.blobTargetFileSize(),
+                                options.blobCopyBufferSize());
     }
 
     public RowType keyType() {

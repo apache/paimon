@@ -572,6 +572,52 @@ def test_read_paimon_filter(catalog_options):
     }
 
 
+def test_read_paimon_filter_pruning_matches_explain(catalog_options, monkeypatch):
+    from daft.io.source import DataSourceTask
+
+    pa_schema = pa.schema([
+        ("id", pa.int64()),
+        ("name", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "read_filter_pruning",
+        pa_schema,
+        options={
+            "bucket": "1",
+            "file.format": "parquet",
+            "metadata.stats-mode": "full",
+        },
+    )
+    _write_arrow(table, pa.table({"id": [1], "name": ["file-a"]}, schema=pa_schema))
+    _write_arrow(table, pa.table({"id": [999], "name": ["file-b"]}, schema=pa_schema))
+
+    planned_paths = []
+    original_parquet = DataSourceTask.parquet
+
+    def capture_parquet_task(**kwargs):
+        planned_paths.append(kwargs["path"])
+        return original_parquet(**kwargs)
+
+    monkeypatch.setattr(DataSourceTask, "parquet", capture_parquet_task)
+    predicate = col("id") == 999
+
+    result = read_paimon(identifier, catalog_options).where(predicate).to_pydict()
+    explain = explain_paimon_scan(
+        identifier,
+        catalog_options,
+        filters=predicate,
+        verbose=True,
+    )
+
+    assert result == {"id": [999], "name": ["file-b"]}
+    assert len(planned_paths) == 1
+    assert explain.total_file_count == len(planned_paths)
+    assert explain.paimon_scan.file_skipping is not None
+    assert explain.paimon_scan.file_skipping.before == 2
+    assert explain.paimon_scan.file_skipping.after == 1
+
+
 def test_read_paimon_limit(catalog_options):
     data = pa.table(
         {

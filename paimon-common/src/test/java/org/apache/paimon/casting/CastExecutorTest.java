@@ -51,6 +51,7 @@ import org.apache.paimon.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -824,6 +825,29 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new LocalZonedTimestampType(5), new TimeType(2)),
                 Timestamp.fromEpochMillis(mills),
                 DateTimeUtils.timestampWithLocalZoneToTime(timestamp, TimeZone.getDefault()));
+    }
+
+    @Test
+    public void testTimestampToTimePreEpoch() {
+        CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(3), new TimeType(3));
+
+        // pre-epoch 1969-12-31 23:00:00 -> time-of-day 23:00:00 == 82_800_000 ms
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 12, 31, 23, 0, 0)),
+                82800000);
+
+        // pre-epoch 1969-12-31 12:34:56.789 -> 12*3600000 + 34*60000 + 56*1000 + 789
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 12, 31, 12, 34, 56, 789000000)),
+                45296789);
+
+        // post-epoch 1970-01-01 10:00:00 -> 36_000_000 ms (unchanged behavior)
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 10, 0, 0)),
+                36000000);
     }
 
     @Test
