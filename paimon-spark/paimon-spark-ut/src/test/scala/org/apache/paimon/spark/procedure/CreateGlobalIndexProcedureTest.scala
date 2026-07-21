@@ -339,9 +339,8 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .map(meta => SortedIndexFileMeta.deserialize(meta))
         .map(m => (deserialize(m.getFirstKey), deserialize(m.getLastKey)))
         .sortWith((a, b) => reversedComparator.compare(a._1, b._1) < 0)
-      metas.sliding(2).foreach {
-        case Seq(prev, next) => assert(reversedComparator.compare(prev._2, next._1) <= 0)
-        case _ => // ignore
+      metas.zip(metas.drop(1)).foreach {
+        case (prev, next) => assert(reversedComparator.compare(prev._2, next._1) <= 0)
       }
 
       val nameIdx = table.rowType().getFieldIndex("name")

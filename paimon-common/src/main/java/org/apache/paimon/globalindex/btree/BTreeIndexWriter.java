@@ -111,7 +111,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             if (cmp < 0) {
                 throw new IllegalStateException(
                         "BTreeIndexWriter requires keys in non-decreasing order of the index"
-                                + " comparator, cmp received key smaller than the previous one.");
+                                + " comparator, but received key smaller than the previous one.");
             }
             if (cmp != 0) {
                 try {
