@@ -40,6 +40,7 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,6 +80,15 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     /** Latest watermark observed on the input; forwarded on subsequent events. */
     private transient long currentWatermark;
 
+    /**
+     * Latest {@code WatermarkStatus} observed on the input, mirroring what Flink's upstream {@code
+     * StatusWatermarkValve} exposes. Frozen at barrier time alongside {@link #currentWatermark} so
+     * the coordinator can reproduce valve-faithful idle handling from the per-checkpoint entries.
+     * Not checkpointed: on restore we default to ACTIVE and let upstream re-emit {@link
+     * WatermarkStatus#IDLE} if it still applies, matching Flink valve's rebuilt initial state.
+     */
+    private transient boolean currentIdle;
+
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
 
@@ -116,6 +126,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                         stateSerializer);
         pendingCommittables = new TreeMap<>();
         currentWatermark = Long.MIN_VALUE;
+        currentIdle = false;
 
         if (context.isRestored()) {
             Preconditions.checkState(context.getRestoredCheckpointId().isPresent());
@@ -159,7 +170,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
-                new CheckpointCommittables(checkpointId, committables, currentWatermark);
+                new CheckpointCommittables(
+                        checkpointId, committables, currentWatermark, currentIdle);
         // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.
         operatorEventGateway.sendEventToCoordinator(
                 CommittableEvent.create(checkpointId, entry, eventSerializer));
@@ -180,6 +192,12 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         if (mark.getTimestamp() != Long.MAX_VALUE) {
             currentWatermark = mark.getTimestamp();
         }
+    }
+
+    @Override
+    public void processWatermarkStatus(WatermarkStatus watermarkStatus) throws Exception {
+        super.processWatermarkStatus(watermarkStatus);
+        currentIdle = watermarkStatus.isIdle();
     }
 
     @VisibleForTesting
