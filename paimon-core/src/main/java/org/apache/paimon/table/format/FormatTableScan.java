@@ -121,7 +121,8 @@ public class FormatTableScan implements InnerTableScan {
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         if (partitionManager != null) {
-            List<Partition> partitions = partitionManager.listPartitions(Collections.emptyMap());
+            List<Partition> partitions =
+                    partitionManager.listPartitions(Collections.emptyMap(), null);
             if (partitions.isEmpty()) {
                 warnIfFilesystemPartitionsExist();
             }
@@ -228,13 +229,17 @@ public class FormatTableScan implements InnerTableScan {
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
         if (partitionManager != null) {
-            Map<String, String> prefix = leadingEqualityPrefix();
-            List<Partition> partitions = partitionManager.listPartitions(prefix);
-            if (partitions.isEmpty() && prefix.isEmpty()) {
+            Optional<Predicate> extracted = extractPartitionPredicate(partitionFilter);
+            Map<String, String> prefix = leadingEqualityPrefix(extracted);
+            // The whole predicate goes to the manager as a pushdown hint, together with the
+            // prefix; the catalog may return a superset.
+            Predicate catalogFilter = extracted.orElse(null);
+            List<Partition> partitions = partitionManager.listPartitions(prefix, catalogFilter);
+            if (partitions.isEmpty() && prefix.isEmpty() && catalogFilter == null) {
                 warnIfFilesystemPartitionsExist();
             }
-            // The prefix is a coarse pre-filter; the full predicate is applied per partition in
-            // the plan, as it is for filesystem discovery.
+            // The prefix and filter are coarse pre-filters; the full predicate is applied per
+            // partition in the plan, as it is for filesystem discovery.
             return toSpecsAndPaths(partitions, coreOptions.formatTablePartitionOnlyValueInPath());
         }
         LOG.debug(
@@ -342,8 +347,7 @@ public class FormatTableScan implements InnerTableScan {
      * to the partition catalog. Empty when there is no predicate or it does not start with
      * equalities on the leading partition keys.
      */
-    private Map<String, String> leadingEqualityPrefix() {
-        Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
+    private Map<String, String> leadingEqualityPrefix(Optional<Predicate> predicate) {
         if (!predicate.isPresent()) {
             return Collections.emptyMap();
         }

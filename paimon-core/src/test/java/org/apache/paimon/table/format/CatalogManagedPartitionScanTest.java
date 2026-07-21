@@ -41,6 +41,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -54,9 +56,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for Format Table scans whose partitions are catalog-managed. */
@@ -71,6 +75,18 @@ class CatalogManagedPartitionScanTest {
     void testLeadingPatternResidualFilterAndUnregisteredDirectory() throws Exception {
         Catalog catalog = mock(Catalog.class);
         when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), eq("year=2025/%")))
+                .thenReturn(
+                        new PagedList<>(
+                                Arrays.asList(partition("2025", "10"), partition("2025", "11")),
+                                null));
+        // The residual predicate beyond the prefix goes to the filter endpoint; the filter is a
+        // hint, so returning a superset here is legal and the plan still filters per partition.
+        when(catalog.listPartitionsByFilterPaged(
+                        eq(IDENTIFIER),
+                        any(Predicate.class),
+                        eq(1000),
+                        isNull(),
+                        eq("year=2025/%")))
                 .thenReturn(
                         new PagedList<>(
                                 Arrays.asList(partition("2025", "10"), partition("2025", "11")),
@@ -93,6 +109,13 @@ class CatalogManagedPartitionScanTest {
         assertThat(plannedFiles).containsExactly(novemberFile);
         assertThat(plannedFiles).doesNotContain(octoberFile, unregisteredFile);
         assertThat(fileIO.listedPaths).containsExactly(new Path(tablePath, "year=2025/month=11"));
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER),
+                        any(Predicate.class),
+                        eq(1000),
+                        isNull(),
+                        eq("year=2025/%"));
     }
 
     @Test
@@ -313,7 +336,8 @@ class CatalogManagedPartitionScanTest {
         List<Map<String, String>> prefixes = requestedPrefixes;
         return new FormatTablePartitionManager() {
             @Override
-            public List<Partition> listPartitions(Map<String, String> prefix) {
+            public List<Partition> listPartitions(
+                    Map<String, String> prefix, @Nullable Predicate filter) {
                 prefixes.add(new LinkedHashMap<>(prefix));
                 List<Partition> matching = new ArrayList<>();
                 for (Partition partition : partitions) {

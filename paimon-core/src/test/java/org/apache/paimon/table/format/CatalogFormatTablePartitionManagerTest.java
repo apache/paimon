@@ -22,7 +22,13 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
@@ -46,6 +52,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -66,6 +73,14 @@ class CatalogFormatTablePartitionManagerTest {
     /** One catalog request never carries more than this many partitions. */
     private static final int REQUEST_SIZE = 1000;
 
+    /** Any non-null partition predicate; the manager passes it through untouched. */
+    private static final Predicate FILTER =
+            new PredicateBuilder(
+                            RowType.of(
+                                    new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                                    new String[] {"year", "month"}))
+                    .greaterThan(1, BinaryString.fromString("01"));
+
     /** Handed to the serializable loader, which cannot capture a test instance field. */
     private static Catalog staticCatalog;
 
@@ -84,7 +99,7 @@ class CatalogFormatTablePartitionManagerTest {
                         new PagedList<>(Collections.singletonList(second), null));
 
         List<Partition> partitions =
-                partitionManager(catalog).listPartitions(Collections.emptyMap());
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), null);
 
         assertThat(partitions).containsExactly(first, second);
         ArgumentCaptor<String> pageTokens = ArgumentCaptor.forClass(String.class);
@@ -101,7 +116,7 @@ class CatalogFormatTablePartitionManagerTest {
                 .thenReturn(new PagedList<>(Collections.singletonList(only), ""));
 
         List<Partition> partitions =
-                partitionManager(catalog).listPartitions(Collections.emptyMap());
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), null);
 
         assertThat(partitions).containsExactly(only);
         verify(catalog, times(1)).listPartitionsPaged(any(), any(), any(), any());
@@ -119,10 +134,190 @@ class CatalogFormatTablePartitionManagerTest {
 
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
-        assertThatThrownBy(() -> partitionManager.listPartitions(Collections.emptyMap()))
+        assertThatThrownBy(() -> partitionManager.listPartitions(Collections.emptyMap(), null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("repeated partition page token")
                 .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+    }
+
+    // ------------------------------------------------------------------------
+    //  filtered listing and its fallback
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testFilteredListingPassesFilterPrefixAndTokens() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Partition first = partition("2025", "01");
+        Partition second = partition("2025", "02");
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(
+                        new PagedList<>(Collections.singletonList(first), "page-2"),
+                        new PagedList<>(Collections.singletonList(second), null));
+
+        List<Partition> partitions =
+                partitionManager(catalog)
+                        .listPartitions(Collections.singletonMap("year", "2025"), FILTER);
+
+        assertThat(partitions).containsExactly(first, second);
+        ArgumentCaptor<String> pageTokens = ArgumentCaptor.forClass(String.class);
+        verify(catalog, times(2))
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER),
+                        eq(FILTER),
+                        eq(REQUEST_SIZE),
+                        pageTokens.capture(),
+                        eq("year=2025/%"));
+        assertThat(pageTokens.getAllValues()).containsExactly(null, "page-2");
+        verify(catalog, never()).listPartitionsPaged(any(), any(), any(), any());
+    }
+
+    @Test
+    void testFilteredListingFollowsSparsePages() throws Exception {
+        // Filtering may leave a page empty while more partitions remain to check: only an empty
+        // token ends the loop.
+        Catalog catalog = mock(Catalog.class);
+        Partition only = partition("2025", "02");
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(
+                        new PagedList<>(Collections.emptyList(), "page-2"),
+                        new PagedList<>(Collections.singletonList(only), null));
+
+        List<Partition> partitions =
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), FILTER);
+
+        assertThat(partitions).containsExactly(only);
+        verify(catalog, times(2)).listPartitionsByFilterPaged(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void testFilteredListingRepeatedTokenFailsFast() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(
+                        new PagedList<>(Collections.singletonList(partition("2025", "01")), "a"),
+                        new PagedList<>(Collections.singletonList(partition("2025", "02")), "a"));
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+
+        assertThatThrownBy(() -> partitionManager.listPartitions(Collections.emptyMap(), FILTER))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("repeated partition page token");
+    }
+
+    @Test
+    void testFilteredPrefixIsEnforcedOnCatalogsThatIgnoreThePattern() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(
+                        new PagedList<>(
+                                Arrays.asList(partition("2024", "12"), partition("2025", "01")),
+                                null));
+
+        List<Partition> partitions =
+                partitionManager(catalog)
+                        .listPartitions(Collections.singletonMap("year", "2025"), FILTER);
+
+        assertThat(partitions).containsExactly(partition("2025", "01"));
+    }
+
+    @Test
+    void testFallbackOnCatalogWithoutFilteredListing() throws Exception {
+        // UnsupportedOperationException is the Catalog-level capability signal (the Catalog
+        // default method, or a REST catalog translating HTTP 501).
+        Catalog catalog = mock(Catalog.class);
+        Partition only = partition("2025", "01");
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenThrow(new UnsupportedOperationException("no filtered listing"));
+        when(catalog.listPartitionsPaged(any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.singletonList(only), null));
+
+        List<Partition> partitions =
+                partitionManager(catalog)
+                        .listPartitions(Collections.singletonMap("year", "2025"), FILTER);
+
+        assertThat(partitions).containsExactly(only);
+        verify(catalog).listPartitionsPaged(eq(IDENTIFIER), eq(REQUEST_SIZE), any(), any());
+    }
+
+    @Test
+    void testFallbackOnEndpointMissing() throws Exception {
+        // An old REST server without the route reports the endpoint's 404 as
+        // TableNotExistException; the plain retry serves the listing.
+        Catalog catalog = mock(Catalog.class);
+        Partition only = partition("2025", "01");
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenThrow(new Catalog.TableNotExistException(IDENTIFIER));
+        when(catalog.listPartitionsPaged(any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.singletonList(only), null));
+
+        List<Partition> partitions =
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), FILTER);
+
+        assertThat(partitions).containsExactly(only);
+    }
+
+    @Test
+    void testFallbackUsesTheSameCatalog() throws Exception {
+        // One high-level operation loads one catalog: the fallback retries on the catalog the
+        // filtered attempt used instead of loading a second one.
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenThrow(new UnsupportedOperationException("no filtered listing"));
+        when(catalog.listPartitionsPaged(any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+        int[] loads = new int[1];
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(
+                        IDENTIFIER,
+                        PARTITION_KEYS,
+                        () -> {
+                            loads[0]++;
+                            return catalog;
+                        });
+
+        partitionManager.listPartitions(Collections.emptyMap(), FILTER);
+
+        assertThat(loads[0]).isEqualTo(1);
+        verify(catalog, times(1)).close();
+    }
+
+    @Test
+    void testOtherFilteredFailuresDoNotFallBack() throws Exception {
+        // Permission problems, server failures and malformed requests must fail loudly; a
+        // silent plain retry would hide them.
+        Catalog catalog = mock(Catalog.class);
+        RuntimeException failure = new IllegalStateException("permission denied");
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenThrow(failure);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+
+        Throwable thrown =
+                catchThrowable(
+                        () -> partitionManager.listPartitions(Collections.emptyMap(), FILTER));
+
+        assertThat(thrown).isSameAs(failure);
+        verify(catalog, never()).listPartitionsPaged(any(), any(), any(), any());
+    }
+
+    @Test
+    void testMissingTableStillFailsAfterFallback() throws Exception {
+        // The endpoint's 404 and a missing table cannot be told apart, so the plain retry is
+        // the arbiter: a genuinely missing table fails there with full context.
+        Catalog catalog = mock(Catalog.class);
+        Catalog.TableNotExistException notExist = new Catalog.TableNotExistException(IDENTIFIER);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenThrow(new Catalog.TableNotExistException(IDENTIFIER));
+        when(catalog.listPartitionsPaged(any(), any(), any(), any())).thenThrow(notExist);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+
+        Throwable thrown =
+                catchThrowable(
+                        () -> partitionManager.listPartitions(Collections.emptyMap(), FILTER));
+
+        assertThat(thrown)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("list partitions")
+                .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+        assertThat(thrown.getCause()).isSameAs(notExist);
     }
 
     // ------------------------------------------------------------------------
@@ -135,7 +330,7 @@ class CatalogFormatTablePartitionManagerTest {
         when(catalog.listPartitionsPaged(any(), any(), any(), any()))
                 .thenReturn(new PagedList<>(Collections.emptyList(), null));
 
-        partitionManager(catalog).listPartitions(Collections.singletonMap("year", "2025"));
+        partitionManager(catalog).listPartitions(Collections.singletonMap("year", "2025"), null);
 
         verify(catalog)
                 .listPartitionsPaged(eq(IDENTIFIER), eq(REQUEST_SIZE), isNull(), eq("year=2025/%"));
@@ -147,7 +342,7 @@ class CatalogFormatTablePartitionManagerTest {
         when(catalog.listPartitionsPaged(any(), any(), any(), any()))
                 .thenReturn(new PagedList<>(Collections.emptyList(), null));
 
-        partitionManager(catalog).listPartitions(Collections.emptyMap());
+        partitionManager(catalog).listPartitions(Collections.emptyMap(), null);
 
         verify(catalog).listPartitionsPaged(eq(IDENTIFIER), eq(REQUEST_SIZE), isNull(), isNull());
     }
@@ -161,7 +356,8 @@ class CatalogFormatTablePartitionManagerTest {
                 .thenReturn(new PagedList<>(Arrays.asList(matching, other), null));
 
         List<Partition> partitions =
-                partitionManager(catalog).listPartitions(Collections.singletonMap("year", "2025"));
+                partitionManager(catalog)
+                        .listPartitions(Collections.singletonMap("year", "2025"), null);
 
         assertThat(partitions).containsExactly(matching);
     }
@@ -173,7 +369,7 @@ class CatalogFormatTablePartitionManagerTest {
         // "month" without "year" cannot be expressed as a partition path prefix.
         Map<String, String> prefix = Collections.singletonMap("month", "10");
 
-        assertThatThrownBy(() -> partitionManager.listPartitions(prefix))
+        assertThatThrownBy(() -> partitionManager.listPartitions(prefix, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("leading prefix");
     }
@@ -268,7 +464,7 @@ class CatalogFormatTablePartitionManagerTest {
         Catalog listCatalog = mock(Catalog.class);
         when(listCatalog.listPartitionsPaged(any(), any(), any(), any()))
                 .thenReturn(new PagedList<>(Collections.emptyList(), null));
-        partitionManager(listCatalog).listPartitions(Collections.emptyMap());
+        partitionManager(listCatalog).listPartitions(Collections.emptyMap(), null);
         verify(listCatalog).close();
 
         Catalog byNamesCatalog = mock(Catalog.class);
@@ -293,7 +489,7 @@ class CatalogFormatTablePartitionManagerTest {
                 .thenThrow(new RuntimeException("catalog unavailable"));
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
-        assertThatThrownBy(() -> partitionManager.listPartitions(Collections.emptyMap()))
+        assertThatThrownBy(() -> partitionManager.listPartitions(Collections.emptyMap(), null))
                 .isInstanceOf(RuntimeException.class);
 
         verify(catalog).close();
@@ -305,7 +501,7 @@ class CatalogFormatTablePartitionManagerTest {
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
         Map<String, String> prefix = Collections.singletonMap("month", "10");
 
-        assertThatThrownBy(() -> partitionManager.listPartitions(prefix))
+        assertThatThrownBy(() -> partitionManager.listPartitions(prefix, null))
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(catalog);
@@ -323,7 +519,7 @@ class CatalogFormatTablePartitionManagerTest {
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
         Throwable thrown =
-                catchThrowable(() -> partitionManager.listPartitions(Collections.emptyMap()));
+                catchThrowable(() -> partitionManager.listPartitions(Collections.emptyMap(), null));
 
         assertThat(thrown)
                 .isInstanceOf(RuntimeException.class)
@@ -360,7 +556,7 @@ class CatalogFormatTablePartitionManagerTest {
                 FormatTablePartitionManager.create(IDENTIFIER, PARTITION_KEYS, new TestLoader());
         FormatTablePartitionManager cloned = InstantiationUtil.clone(partitionManager);
 
-        assertThat(cloned.listPartitions(Collections.emptyMap())).containsExactly(only);
+        assertThat(cloned.listPartitions(Collections.emptyMap(), null)).containsExactly(only);
         verify(catalog).close();
     }
 

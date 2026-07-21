@@ -23,9 +23,12 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,7 +65,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
     }
 
     @Override
-    public List<Partition> listPartitions(Map<String, String> prefix) {
+    public List<Partition> listPartitions(Map<String, String> prefix, @Nullable Predicate filter) {
         LinkedHashMap<String, String> ordered = orderedPrefix(partitionKeys, prefix);
         checkArgument(
                 ordered.size() == prefix.size(),
@@ -73,29 +76,86 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
         String pattern = PartitionPathUtils.buildPartitionNamePrefixPattern(partitionKeys, ordered);
         return execute(
                 catalog -> {
-                    List<Partition> partitions = new ArrayList<>();
-                    Set<String> seenPageTokens = new HashSet<>();
-                    String pageToken = null;
-                    do {
-                        PagedList<Partition> page =
-                                catalog.listPartitionsPaged(
-                                        identifier, REQUEST_SIZE, pageToken, pattern);
-                        if (page.getElements() != null) {
-                            partitions.addAll(page.getElements());
+                    if (filter != null) {
+                        try {
+                            return collectAllPages(
+                                    prefix,
+                                    pageToken ->
+                                            catalog.listPartitionsByFilterPaged(
+                                                    identifier,
+                                                    filter,
+                                                    REQUEST_SIZE,
+                                                    pageToken,
+                                                    pattern));
+                        } catch (Exception e) {
+                            if (!indicatesNoFilterListing(e)) {
+                                throw e;
+                            }
+                            // The filtered listing endpoint is optional: retry as the plain
+                            // prefix listing, which returns a superset the caller filters
+                            // anyway. A genuinely missing table also lands here (the
+                            // endpoint's 404 cannot be told apart); the plain listing below
+                            // then reports it properly.
                         }
-                        pageToken = page.getNextPageToken();
-                        if (StringUtils.isNotEmpty(pageToken) && !seenPageTokens.add(pageToken)) {
-                            throw new IllegalStateException(
-                                    String.format(
-                                            "Catalog returned repeated partition page token '%s' for format table %s.",
-                                            pageToken, identifier.getFullName()));
-                        }
-                    } while (StringUtils.isNotEmpty(pageToken));
-                    // A catalog may ignore the pattern, so the prefix is enforced here as well.
-                    partitions.removeIf(partition -> !matchesPrefix(partition, prefix));
-                    return Collections.unmodifiableList(partitions);
+                    }
+                    return collectAllPages(
+                            prefix,
+                            pageToken ->
+                                    catalog.listPartitionsPaged(
+                                            identifier, REQUEST_SIZE, pageToken, pattern));
                 },
                 "list partitions");
+    }
+
+    /**
+     * Drains a paged listing. Pages may be sparse (fewer elements than requested, or none, with a
+     * next page token), so only an empty token ends the loop.
+     */
+    private List<Partition> collectAllPages(Map<String, String> prefix, PageSupplier pageSupplier)
+            throws Exception {
+        List<Partition> partitions = new ArrayList<>();
+        Set<String> seenPageTokens = new HashSet<>();
+        String pageToken = null;
+        do {
+            PagedList<Partition> page = pageSupplier.page(pageToken);
+            if (page == null) {
+                // A missing page cannot be told apart from an empty listing; failing loudly
+                // beats silently reading fewer partitions.
+                throw new IllegalStateException(
+                        String.format(
+                                "Catalog returned a null partition page for format table %s.",
+                                identifier.getFullName()));
+            }
+            if (page.getElements() != null) {
+                partitions.addAll(page.getElements());
+            }
+            pageToken = page.getNextPageToken();
+            if (StringUtils.isNotEmpty(pageToken) && !seenPageTokens.add(pageToken)) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Catalog returned repeated partition page token '%s' for format table %s.",
+                                pageToken, identifier.getFullName()));
+            }
+        } while (StringUtils.isNotEmpty(pageToken));
+        // A catalog may ignore the pattern, so the prefix is enforced here as well.
+        partitions.removeIf(partition -> !matchesPrefix(partition, prefix));
+        return Collections.unmodifiableList(partitions);
+    }
+
+    /** A single page of a partition listing. */
+    private interface PageSupplier {
+        PagedList<Partition> page(@Nullable String pageToken) throws Exception;
+    }
+
+    /**
+     * Whether the failure means the catalog cannot serve a filtered partition listing. {@link
+     * Catalog.TableNotExistException} doubles as the endpoint-missing signal — a REST catalog
+     * cannot tell an endpoint 404 from a missing table — and the plain retry reports a genuinely
+     * missing table properly.
+     */
+    private static boolean indicatesNoFilterListing(Exception exception) {
+        return exception instanceof UnsupportedOperationException
+                || exception instanceof Catalog.TableNotExistException;
     }
 
     @Override

@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.types.DataTypes;
@@ -32,6 +33,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -307,7 +310,8 @@ class FormatTablePartitionRepairTest {
         RecordingPartitionManager catalog =
                 new RecordingPartitionManager() {
                     @Override
-                    public List<Partition> listPartitions(Map<String, String> prefix) {
+                    public List<Partition> listPartitions(
+                            Map<String, String> prefix, @Nullable Predicate filter) {
                         listCount.incrementAndGet();
                         throw listFailure;
                     }
@@ -456,7 +460,8 @@ class FormatTablePartitionRepairTest {
         }
 
         @Override
-        public List<Partition> listPartitions(Map<String, String> prefix) {
+        public List<Partition> listPartitions(
+                Map<String, String> prefix, @Nullable Predicate filter) {
             requestedPrefixes.add(prefix);
             List<Partition> partitions = new ArrayList<>(registered.size());
             for (Map<String, String> spec : registered) {

@@ -258,19 +258,19 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         FormatTable table = (FormatTable) restCatalog.getTable(identifier);
         FormatTablePartitionManager partitionManager = table.partitionManager();
         assertThat(partitionManager).isNotNull();
-        assertThat(partitionManager.listPartitions(Collections.emptyMap())).isEmpty();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
         Map<String, String> partition = Collections.singletonMap("dt", "20260717");
 
         restCatalog.createPartitions(identifier, Collections.singletonList(partition));
 
         // Listings are not cached, so a mutation through the catalog is visible to the next read.
-        assertThat(partitionManager.listPartitions(Collections.emptyMap()))
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .extracting(org.apache.paimon.partition.Partition::spec)
                 .containsExactly(partition);
 
         restCatalog.dropPartitions(identifier, Collections.singletonList(partition));
 
-        assertThat(partitionManager.listPartitions(Collections.emptyMap())).isEmpty();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
     }
 
     @Test
@@ -284,7 +284,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         FormatTablePartitionManager roundTripped =
                 InstantiationUtil.clone(table.partitionManager());
 
-        assertThat(roundTripped.listPartitions(Collections.emptyMap()))
+        assertThat(roundTripped.listPartitions(Collections.emptyMap(), null))
                 .extracting(org.apache.paimon.partition.Partition::spec)
                 .containsExactly(partition);
     }

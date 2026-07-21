@@ -164,7 +164,7 @@ case class PaimonFormatTable(table: FormatTable)
       // One unfiltered traversal resolves every partial spec; the requested constraints are
       // enforced client-side.
       requirePartitionManager()
-        .listPartitions(Collections.emptyMap[String, String]())
+        .listPartitions(Collections.emptyMap[String, String](), null)
         .asScala
         .foreach {
           partition =>
