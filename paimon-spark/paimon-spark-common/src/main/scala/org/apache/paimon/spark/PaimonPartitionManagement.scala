@@ -46,47 +46,41 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
 
   private def toPaimonPartitions(rows: Array[InternalRow]): Array[java.util.Map[String, String]] = {
     table match {
-      case fileStoreTable: FileStoreTable =>
+      case _: FileStoreTable =>
         val partitionKeys = table.partitionKeys().asScala.toSeq
-        val partitionDefaultName = fileStoreTable.coreOptions().partitionDefaultName()
-        val legacyPartitionName = CoreOptions.fromMap(table.options()).legacyPartitionName
-
         rows.map {
           r =>
-            val partitionFieldCount = r.numFields
             require(
-              partitionFieldCount <= partitionKeys.length,
-              s"Partition values length $partitionFieldCount exceeds partition keys " +
+              r.numFields <= partitionKeys.length,
+              s"Partition values length ${r.numFields} exceeds partition keys " +
                 s"${partitionKeys.mkString("[", ", ", "]")}."
             )
-            val partitionNames = partitionKeys.take(partitionFieldCount)
-            val currentPartitionRowType =
-              if (partitionFieldCount == partitionRowType.getFieldCount) {
-                partitionRowType
-              } else {
-                TypeUtils.project(table.rowType, partitionNames.asJava)
-              }
-            val currentPartitionSchema =
-              if (partitionFieldCount == partitionSchema.length) {
-                partitionSchema
-              } else {
-                SparkTypeUtils.fromPaimonRowType(currentPartitionRowType)
-              }
-            val rowConverter = CatalystTypeConverters.createToScalaConverter(
-              CharVarcharUtils.replaceCharVarcharWithString(currentPartitionSchema))
-            val rowDataPartitionComputer = new InternalRowPartitionComputer(
-              partitionDefaultName,
-              currentPartitionRowType,
-              partitionNames.toArray,
-              legacyPartitionName
-            )
-
-            rowDataPartitionComputer.generatePartValues(
-              new SparkRow(currentPartitionRowType, rowConverter(r).asInstanceOf[Row]))
+            toPaimonPartition(r, partitionKeys.take(r.numFields))
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports partitions.")
     }
+  }
+
+  protected def toPaimonPartition(
+      row: InternalRow,
+      partitionNames: Seq[String]): java.util.Map[String, String] = {
+    val coreOptions = CoreOptions.fromMap(table.options())
+    val partitionDefaultName = coreOptions.partitionDefaultName()
+    val legacyPartitionName = coreOptions.legacyPartitionName
+    val currentPartitionRowType = TypeUtils.project(table.rowType, partitionNames.asJava)
+    val currentPartitionSchema = SparkTypeUtils.fromPaimonRowType(currentPartitionRowType)
+    val rowConverter = CatalystTypeConverters.createToScalaConverter(
+      CharVarcharUtils.replaceCharVarcharWithString(currentPartitionSchema))
+    val rowDataPartitionComputer = new InternalRowPartitionComputer(
+      partitionDefaultName,
+      currentPartitionRowType,
+      partitionNames.toArray,
+      legacyPartitionName
+    )
+
+    rowDataPartitionComputer.generatePartValues(
+      new SparkRow(currentPartitionRowType, rowConverter(row).asInstanceOf[Row]))
   }
 
   override def dropPartitions(rows: Array[InternalRow]): Boolean = {
