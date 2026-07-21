@@ -99,4 +99,38 @@ public class DateTimeUtilsTest {
             TimeZone.setDefault(timeZone);
         }
     }
+
+    @Test
+    public void testTruncateDropsSubPrecisionFraction() {
+        // A fractional second below 0.1s has leading zeros in its nano representation.
+        // The narrowing cast to precision 3 must drop all nanoseconds below the millisecond.
+        Timestamp nineNanos = Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 9));
+        assertThat(nineNanos.toLocalDateTime().getNano()).isEqualTo(9);
+        assertThat(DateTimeUtils.truncate(nineNanos, 3).toLocalDateTime().getNano()).isEqualTo(0);
+
+        // Truncating .000123456 to precision 6 must keep exactly 6 fractional digits (.000123).
+        Timestamp micros =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_456));
+        assertThat(micros.toLocalDateTime().getNano()).isEqualTo(123_456);
+        assertThat(DateTimeUtils.truncate(micros, 6).toLocalDateTime().getNano())
+                .isEqualTo(123_000);
+    }
+
+    @Test
+    public void testTruncateIsIdempotent() {
+        // An already-truncated value stays unchanged when truncated again to the same precision.
+        Timestamp truncated =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_000));
+        assertThat(DateTimeUtils.truncate(truncated, 6).toLocalDateTime().getNano())
+                .isEqualTo(123_000);
+    }
+
+    @Test
+    public void testTruncateNoOpAtMaxPrecision() {
+        // Precision 9 preserves all nanoseconds.
+        Timestamp full =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_456_789));
+        assertThat(DateTimeUtils.truncate(full, 9).toLocalDateTime().getNano())
+                .isEqualTo(123_456_789);
+    }
 }
