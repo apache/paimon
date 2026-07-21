@@ -32,6 +32,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
@@ -59,12 +60,14 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,9 +84,10 @@ public class FormatTableScan implements InnerTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
 
-    private final FormatTable table;
-    private final CoreOptions coreOptions;
+    final FormatTable table;
+    final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
+    @Nullable private final FormatTablePartitionManager partitionManager;
     @Nullable private final Integer limit;
     private final long targetSplitSize;
     private final long openFileCost;
@@ -97,6 +101,7 @@ public class FormatTableScan implements InnerTableScan {
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
+        this.partitionManager = table.partitionManager();
         this.targetSplitSize = coreOptions.splitTargetSize();
         this.openFileCost = coreOptions.splitOpenFileCost();
         this.format = table.format();
@@ -115,6 +120,29 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        if (partitionManager != null) {
+            List<Partition> partitions = partitionManager.listPartitions(Collections.emptyMap());
+            if (partitions.isEmpty()) {
+                warnIfFilesystemPartitionsExist();
+            }
+            boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
+            List<PartitionEntry> entries = new ArrayList<>(partitions.size());
+            Set<Map<String, String>> seen = new HashSet<>(partitions.size());
+            for (Partition partition : partitions) {
+                if (!seen.add(partition.spec())) {
+                    continue;
+                }
+                entries.add(
+                        new PartitionEntry(
+                                toPartitionRow(normalizeSpec(partition.spec(), onlyValueInPath)),
+                                partition.recordCount(),
+                                partition.fileSizeInBytes(),
+                                partition.fileCount(),
+                                partition.lastFileCreationTime(),
+                                partition.totalBuckets()));
+            }
+            return entries;
+        }
         List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                 searchPartSpecAndPaths(
                         table.fileIO(),
@@ -142,7 +170,7 @@ public class FormatTableScan implements InnerTableScan {
         return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
     }
 
-    private BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
+    BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
         RowType partitionType = table.partitionType();
         GenericRow row =
                 convertSpecToInternalRow(partitionSpec, partitionType, table.defaultPartName());
@@ -160,7 +188,28 @@ public class FormatTableScan implements InnerTableScan {
                         LinkedHashMap<String, String> partitionSpec = pair.getKey();
                         BinaryRow partitionRow = toPartitionRow(partitionSpec);
                         if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
+                            try {
+                                splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
+                            } catch (FileNotFoundException e) {
+                                if (partitionManager == null) {
+                                    throw e;
+                                }
+                                // A registered partition without a directory reads as empty,
+                                // matching Hive (e.g. ADD PARTITION before the first INSERT).
+                                // Warn so a directory removed behind the catalog's back stays
+                                // discoverable.
+                                LOG.warn(
+                                        "Partition '{}' of format table {} is registered in "
+                                                + "the catalog but its directory '{}' does not "
+                                                + "exist; treating the partition as empty. If the "
+                                                + "directory was removed on purpose, drop the "
+                                                + "partition or repair the metadata, e.g. with "
+                                                + "MSCK REPAIR TABLE.",
+                                        PartitionPathUtils.generatePartitionName(
+                                                partitionSpec, false),
+                                        table.fullName(),
+                                        pair.getValue());
+                            }
                         }
                     }
                 } else {
@@ -178,6 +227,16 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        if (partitionManager != null) {
+            Map<String, String> prefix = leadingEqualityPrefix();
+            List<Partition> partitions = partitionManager.listPartitions(prefix);
+            if (partitions.isEmpty() && prefix.isEmpty()) {
+                warnIfFilesystemPartitionsExist();
+            }
+            // The prefix is a coarse pre-filter; the full predicate is applied per partition in
+            // the plan, as it is for filesystem discovery.
+            return toSpecsAndPaths(partitions, coreOptions.formatTablePartitionOnlyValueInPath());
+        }
         LOG.debug(
                 "Find partitions for format table {}, partition filter: {}",
                 table.name(),
@@ -219,6 +278,101 @@ public class FormatTableScan implements InnerTableScan {
                     predicate.orElse(null),
                     table.partitionType(),
                     table.defaultPartName());
+        }
+    }
+
+    /**
+     * Turn the partitions a catalog reports into the specs and directories to read. Catalog
+     * metadata is not trusted for path construction: a spec that cannot form a partition directory
+     * of this table is rejected rather than resolved to some other directory.
+     */
+    private List<Pair<LinkedHashMap<String, String>, Path>> toSpecsAndPaths(
+            List<Partition> partitions, boolean onlyValueInPath) {
+        List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>(partitions.size());
+        Path tablePath = new Path(table.location());
+        // Do not trust the catalog to be duplicate-free: a repeated spec would double every split
+        // of that partition and silently duplicate query results.
+        Set<String> seenPartitionPaths = new HashSet<>(partitions.size());
+        for (Partition partition : partitions) {
+            LinkedHashMap<String, String> spec = normalizeSpec(partition.spec(), onlyValueInPath);
+            String partitionPath =
+                    PartitionPathUtils.generatePartitionPathUtil(spec, onlyValueInPath);
+            if (seenPartitionPaths.add(partitionPath)) {
+                result.add(Pair.of(spec, new Path(tablePath, partitionPath)));
+            }
+        }
+        return result;
+    }
+
+    /** Order a catalog spec by the table partition keys and check it can form a directory. */
+    private LinkedHashMap<String, String> normalizeSpec(
+            @Nullable Map<String, String> spec, boolean onlyValueInPath) {
+        List<String> partitionKeys = table.partitionKeys();
+        if (spec == null
+                || spec.size() != partitionKeys.size()
+                || !spec.keySet().containsAll(partitionKeys)) {
+            throw corruptPartitionSpec(spec);
+        }
+        LinkedHashMap<String, String> normalized = new LinkedHashMap<>();
+        for (String partitionKey : partitionKeys) {
+            String value = spec.get(partitionKey);
+            // In a value-only layout, '.' and '..' are complete path components and would resolve
+            // to a directory outside the table.
+            try {
+                PartitionPathUtils.validatePartitionValueForPath(value, onlyValueInPath);
+            } catch (IllegalArgumentException e) {
+                throw corruptPartitionSpec(spec);
+            }
+            normalized.put(partitionKey, value);
+        }
+        return normalized;
+    }
+
+    private IllegalStateException corruptPartitionSpec(@Nullable Map<String, String> spec) {
+        return new IllegalStateException(
+                String.format(
+                        "Catalog returned corrupt partition metadata %s for format table %s; "
+                                + "expected exactly the partition keys %s with values usable as "
+                                + "path components.",
+                        spec, table.fullName(), table.partitionKeys()));
+    }
+
+    /**
+     * The leading equality prefix of the partition predicate, in partition-key order, pushed down
+     * to the partition catalog. Empty when there is no predicate or it does not start with
+     * equalities on the leading partition keys.
+     */
+    private Map<String, String> leadingEqualityPrefix() {
+        Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
+        if (!predicate.isPresent()) {
+            return Collections.emptyMap();
+        }
+        return extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+                table.partitionKeys(), predicate.get(), table.partitionType());
+    }
+
+    /**
+     * Warn when the catalog knows no partitions but the table directory contains subdirectories:
+     * typically a table that predates catalog-managed partitions (or was written by a client that
+     * does not register partitions) and needs a metadata sync before its data becomes visible.
+     */
+    private void warnIfFilesystemPartitionsExist() {
+        try {
+            for (FileStatus status : table.fileIO().listStatus(new Path(table.location()))) {
+                if (status.isDir() && !status.getPath().getName().startsWith(".")) {
+                    LOG.warn(
+                            "Format table {} has no partitions registered in the catalog "
+                                    + "but its location {} contains directories. Data written "
+                                    + "before enabling catalog-managed partitions (or by clients "
+                                    + "that do not register partitions) is invisible until the "
+                                    + "partition metadata is synced, e.g. with MSCK REPAIR TABLE.",
+                            table.fullName(),
+                            table.location());
+                    return;
+                }
+            }
+        } catch (IOException ignored) {
+            // Best-effort hint only; never fail or slow down the scan because of it.
         }
     }
 

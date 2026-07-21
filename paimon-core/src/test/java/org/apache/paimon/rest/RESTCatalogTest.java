@@ -76,6 +76,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -1535,8 +1536,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testCreatePartitionsForManagedFormatTable() throws Exception {
-        Identifier identifier = Identifier.create("format_partition_db", "managed_table");
+    void testCreatePartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier = Identifier.create("format_partition_db", "catalog_partition_table");
         catalog.createDatabase(identifier.getDatabaseName(), true);
         catalog.createTable(
                 identifier,
@@ -1576,8 +1577,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testDropPartitionsForManagedFormatTable() throws Exception {
-        Identifier identifier = Identifier.create("format_partition_db", "managed_drop_table");
+    void testDropPartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_drop_table");
         catalog.createDatabase(identifier.getDatabaseName(), true);
         catalog.createTable(
                 identifier,
@@ -1637,6 +1639,70 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         catalogSpy.dropPartitions(identifier, singletonList(singletonMap("col1", "20260717")));
 
         Mockito.verify(catalogSpy, Mockito.times(1)).getTable(identifier);
+    }
+
+    @Test
+    void testCatalogManagedPartitionCommitAndScanMatchesFileSystemMode() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_scan_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "csv")
+                        .column("id", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .build(),
+                false);
+
+        FormatTable managedTable = (FormatTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = managedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 2024, 10));
+            write.write(GenericRow.of(2, 2025, 10));
+            write.write(GenericRow.of(3, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Map<String, String>> registeredPartitions =
+                Arrays.asList(
+                        ImmutableMap.of("year", "2024", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "11"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(registeredPartitions);
+        // The table carries the catalog partition metadata its scan reads from.
+        assertThat(managedTable.partitionManager()).isNotNull();
+
+        Map<String, String> fileSystemOptions = new HashMap<>(managedTable.options());
+        fileSystemOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        FormatTable fileSystemTable =
+                FormatTable.builder()
+                        .fileIO(managedTable.fileIO())
+                        .identifier(Identifier.create("format_partition_db", "filesystem_scan"))
+                        .rowType(managedTable.rowType())
+                        .partitionKeys(managedTable.partitionKeys())
+                        .location(managedTable.location())
+                        .format(managedTable.format())
+                        .options(fileSystemOptions)
+                        .catalogContext(managedTable.catalogContext())
+                        .build();
+
+        Map<String, String> partitionFilter = singletonMap("year", "2025");
+        List<InternalRow> readFromCatalog = read(managedTable, null, null, partitionFilter, null);
+        // Assert the rows themselves first: comparing the two reads alone would also pass if
+        // both stopped returning anything.
+        assertThat(readFromCatalog)
+                .extracting(row -> row.getInt(0) + "," + row.getInt(1) + "," + row.getInt(2))
+                .containsExactlyInAnyOrder("2,2025,10", "3,2025,11");
+        assertThat(readFromCatalog)
+                .containsExactlyInAnyOrderElementsOf(
+                        read(fileSystemTable, null, null, partitionFilter, null));
     }
 
     @Test

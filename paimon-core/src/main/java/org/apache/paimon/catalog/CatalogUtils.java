@@ -39,6 +39,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -213,6 +214,41 @@ public class CatalogUtils {
         }
     }
 
+    /** Validate options which are specific to a Format Table with catalog-managed partitions. */
+    public static void validateCatalogManagedPartitionOptions(Map<String, String> tableOptions) {
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+    }
+
+    private static void validateCatalogManagedPartitionOptions(Options options) {
+        // The caller has already established that this is a format table with catalog-managed
+        // partitions; only the engine implementation is incompatible with them.
+        checkArgument(
+                options.get(FORMAT_TABLE_IMPLEMENTATION)
+                        != CoreOptions.FormatTableImplementation.ENGINE,
+                "Cannot combine catalog-managed partitions (%s=true) with %s=engine: the engine "
+                        + "implementation reads the table directory itself.",
+                CoreOptions.METASTORE_PARTITIONED_TABLE.key(),
+                FORMAT_TABLE_IMPLEMENTATION.key());
+    }
+
+    /**
+     * Validate a create or replace request that asks for catalog-managed partitions on a Format
+     * Table: the option combination must be valid and the table must be internal. Only the REST
+     * catalog calls this; other catalogs keep treating the option as inert.
+     */
+    public static void validateCatalogManagedFormatTablePartitions(
+            Identifier identifier, Map<String, String> tableOptions, boolean isExternal) {
+        CoreOptions options = CoreOptions.fromMap(tableOptions);
+        if (options.type() != TableType.FORMAT_TABLE || !options.partitionedTableInMetastore()) {
+            return;
+        }
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+        checkArgument(
+                !isExternal,
+                "Catalog-managed partitions are only supported for internal tables, but format table %s is external.",
+                identifier.getFullName());
+    }
+
     public static void validateNamePattern(Catalog catalog, String namePattern) {
         if (Objects.nonNull(namePattern) && !catalog.supportsListByPattern()) {
             throw new UnsupportedOperationException(
@@ -304,7 +340,21 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
+            FormatTablePartitionManager partitionManager = null;
+            if (options.partitionedTableInMetastore()) {
+                checkArgument(
+                        isRestCatalog,
+                        "Format table %s asks for catalog-managed partitions with %s=true, which "
+                                + "is only available in a REST catalog.",
+                        identifier.getFullName(),
+                        CoreOptions.METASTORE_PARTITIONED_TABLE.key());
+                validateCatalogManagedFormatTablePartitions(
+                        identifier, schema.options(), metadata.isExternal());
+                partitionManager =
+                        FormatTablePartitionManager.create(
+                                identifier, schema.partitionKeys(), catalog.catalogLoader());
+            }
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext, partitionManager);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -453,7 +503,8 @@ public class CatalogUtils {
             Identifier identifier,
             TableSchema schema,
             Function<Path, FileIO> fileIO,
-            CatalogContext catalogContext) {
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -471,6 +522,7 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .catalogContext(catalogContext)
+                .partitionManager(partitionManager)
                 .build();
     }
 

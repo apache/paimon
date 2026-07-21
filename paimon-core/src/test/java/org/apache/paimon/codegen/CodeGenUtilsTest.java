@@ -19,6 +19,7 @@
 package org.apache.paimon.codegen;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
@@ -28,7 +29,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
@@ -38,6 +41,7 @@ import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.types.DataTypes.DOUBLE;
 import static org.apache.paimon.types.DataTypes.FLOAT;
 import static org.apache.paimon.types.DataTypes.INT;
+import static org.apache.paimon.types.DataTypes.MAP;
 import static org.apache.paimon.types.DataTypes.STRING;
 import static org.apache.paimon.types.DataTypes.VECTOR;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -155,6 +159,28 @@ class CodeGenUtilsTest {
 
     private static int sign(int value) {
         return Integer.compare(value, 0);
+    }
+
+    @Test
+    public void testMapComparatorComparesValuesWithValueType() {
+        // MAP<INT, STRING>: the generated comparator must compare the value array using the
+        // value type (STRING), not the key type (INT). With equal keys, ordering is decided by
+        // the values, so a wrong value type yields an incorrect result or a runtime failure.
+        RecordComparator comparator =
+                newRecordComparator(Arrays.asList(MAP(INT(), STRING())), new int[] {0});
+
+        InternalRow rowA = GenericRow.of(singletonMap(1, "a"));
+        InternalRow rowB = GenericRow.of(singletonMap(1, "b"));
+
+        assertThat(comparator.compare(rowA, rowB)).isLessThan(0);
+        assertThat(comparator.compare(rowB, rowA)).isGreaterThan(0);
+        assertThat(comparator.compare(rowA, GenericRow.of(singletonMap(1, "a")))).isZero();
+    }
+
+    private static GenericMap singletonMap(int key, String value) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(key, BinaryString.fromString(value));
+        return new GenericMap(map);
     }
 
     @Test
