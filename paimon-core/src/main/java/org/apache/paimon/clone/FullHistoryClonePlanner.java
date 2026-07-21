@@ -27,7 +27,13 @@ import org.apache.paimon.table.FileStoreTable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_FIELD;
 import static org.apache.paimon.CoreOptions.BLOB_VIEW_FIELD;
@@ -54,7 +60,8 @@ public class FullHistoryClonePlanner {
                 structure.sourceRoot(),
                 structure.targetRoot(),
                 structure.sourceFingerprint(),
-                payloadPlan);
+                payloadPlan,
+                structure.externalTargetRoots());
     }
 
     public FullHistoryClonePlan planStructure() throws IOException {
@@ -66,11 +73,13 @@ public class FullHistoryClonePlanner {
                 "Source and target table roots must not overlap: %s and %s",
                 sourceTable.location(),
                 targetRoot);
+        List<Path> externalTargetRoots = externalTargetRoots(sourceTable, pathMapping, targetRoot);
         return new FullHistoryClonePlan(
                 sourceTable.location(),
                 targetRoot,
                 FullHistorySourceFingerprint.compute(sourceTable),
-                FullHistoryCopyPlan.empty());
+                FullHistoryCopyPlan.empty(),
+                externalTargetRoots);
     }
 
     public static void validateSupportedSchemas(FileStoreTable table) {
@@ -112,5 +121,68 @@ public class FullHistoryClonePlanner {
                         schema.options(), mapping, branchTable.location());
             }
         }
+    }
+
+    private static List<Path> externalTargetRoots(
+            FileStoreTable table, PathMapping mapping, Path targetTableRoot) {
+        Set<Path> roots = new LinkedHashSet<>();
+        List<String> branches = new ArrayList<>(table.branchManager().branches());
+        branches.add(DEFAULT_MAIN_BRANCH);
+        for (String branch : branches) {
+            FileStoreTable branchTable = table.switchToBranch(branch);
+            for (TableSchema schema : branchTable.schemaManager().listAll()) {
+                Map<String, String> targetOptions =
+                        FullHistoryMetadataRewriter.rewriteOptions(
+                                schema.options(), mapping, branchTable.location());
+                CoreOptions options = CoreOptions.fromMap(targetOptions);
+                if (options.externalPathStrategy() != CoreOptions.ExternalPathStrategy.NONE
+                        && options.dataFileExternalPaths() != null) {
+                    Arrays.stream(options.dataFileExternalPaths().split(","))
+                            .map(String::trim)
+                            .map(Path::new)
+                            .forEach(roots::add);
+                }
+                if (options.globalIndexExternalPath() != null) {
+                    roots.add(options.globalIndexExternalPath());
+                }
+                if (options.dataFilePathDirectory() != null) {
+                    Path dataRoot = new Path(targetTableRoot, options.dataFilePathDirectory());
+                    if (!PathMapping.isSameOrDescendant(
+                            dataRoot.toString(), targetTableRoot.toString())) {
+                        roots.add(dataRoot);
+                    }
+                }
+            }
+        }
+
+        List<Path> externalRoots = new ArrayList<>();
+        for (Path root : roots) {
+            if (PathMapping.isSameOrDescendant(root.toString(), targetTableRoot.toString())) {
+                continue;
+            }
+            checkArgument(
+                    !PathMapping.isSameOrDescendant(targetTableRoot.toString(), root.toString()),
+                    "External target root must not contain the target table root: %s and %s",
+                    root,
+                    targetTableRoot);
+
+            boolean covered = false;
+            Iterator<Path> iterator = externalRoots.iterator();
+            while (iterator.hasNext()) {
+                Path existing = iterator.next();
+                if (PathMapping.isSameOrDescendant(root.toString(), existing.toString())) {
+                    covered = true;
+                    break;
+                }
+                if (PathMapping.isSameOrDescendant(existing.toString(), root.toString())) {
+                    iterator.remove();
+                }
+            }
+            if (!covered) {
+                externalRoots.add(root);
+            }
+        }
+        externalRoots.sort(Comparator.comparing(Path::toString));
+        return externalRoots;
     }
 }

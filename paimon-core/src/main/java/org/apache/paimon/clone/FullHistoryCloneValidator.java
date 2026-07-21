@@ -143,6 +143,7 @@ public class FullHistoryCloneValidator {
                     changelogIds(source).equals(changelogIds(target)),
                     "Target changelog IDs in branch %s do not match the source.",
                     branch);
+            FullHistoryRootValidator.validate(source, target, pathMapping, branch);
         }
     }
 
