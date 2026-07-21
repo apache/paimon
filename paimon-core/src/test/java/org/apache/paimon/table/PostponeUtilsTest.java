@@ -117,7 +117,9 @@ public class PostponeUtilsTest {
         FileStoreTable copied = mock(FileStoreTable.class);
         when(table.copy(anyMap())).thenReturn(copied);
 
-        assertThat(PostponeUtils.tableForPostponeCompact(table, 4, 5L)).isSameAs(copied);
+        FileStoreTable result = PostponeUtils.tableForPostponeCompact(table, 4, 5L);
+        assertThat(result).isInstanceOf(SchemaBucketFileStoreTable.class);
+        assertThat(((DelegatedFileStoreTable) result).wrapped()).isSameAs(copied);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> options = ArgumentCaptor.forClass(Map.class);

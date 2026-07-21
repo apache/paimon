@@ -147,6 +147,12 @@ under the License.
             <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
         </tr>
         <tr>
+            <td><h5>bucket.per-partition-count-enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to allow individual partitions of a fixed-bucket table to keep their own bucket count, so that a single partition can be rescaled independently. Enabling this scans the manifest to resolve each partition's bucket count on write.</td>
+        </tr>
+        <tr>
             <td><h5>cache-page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>

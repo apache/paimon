@@ -29,24 +29,27 @@ import org.apache.paimon.schema.TableSchema;
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
 public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
-    private final int numBuckets;
+    private transient Projection bucketKeyProjection;
+
     private final boolean sameBucketKeyAndTrimmedPrimaryKey;
-    private final Projection bucketKeyProjection;
+    private final PartitionBucketMapping partitionBucketMapping;
 
     private BinaryRow reuseBucketKey;
     private Integer reuseBucket;
     private final BucketFunction bucketFunction;
 
-    public FixedBucketRowKeyExtractor(TableSchema schema) {
+    public FixedBucketRowKeyExtractor(
+            TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
         super(schema);
-        numBuckets = new CoreOptions(schema.options()).bucket();
-        bucketFunction =
-                BucketFunction.create(
-                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
-        sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
-        bucketKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.bucketKeys()));
+        this.bucketFunction = createBucketFunction(schema);
+        this.sameBucketKeyAndTrimmedPrimaryKey =
+                schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
+        this.partitionBucketMapping = partitionBucketMapping;
+    }
+
+    private static BucketFunction createBucketFunction(TableSchema schema) {
+        return BucketFunction.create(
+                new CoreOptions(schema.options()), schema.logicalBucketKeyType());
     }
 
     @Override
@@ -62,7 +65,7 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
         }
 
         if (reuseBucketKey == null) {
-            reuseBucketKey = bucketKeyProjection.apply(record);
+            reuseBucketKey = bucketKeyProjection().apply(record);
         }
         return reuseBucketKey;
     }
@@ -70,6 +73,7 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
     @Override
     public int bucket() {
         if (reuseBucket == null) {
+            int numBuckets = partitionBucketMapping.resolveNumBuckets(partition());
             reuseBucket = bucket(numBuckets);
         }
         return reuseBucket;
@@ -77,5 +81,14 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
     public int bucket(int numBuckets) {
         return bucketFunction.bucket(bucketKey(), numBuckets);
+    }
+
+    private Projection bucketKeyProjection() {
+        if (bucketKeyProjection == null) {
+            bucketKeyProjection =
+                    CodeGenUtils.newProjection(
+                            schema.logicalRowType(), schema.projection(schema.bucketKeys()));
+        }
+        return bucketKeyProjection;
     }
 }

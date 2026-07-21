@@ -28,17 +28,20 @@ public class FixedBucketWriteSelector implements WriteSelector {
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
+    private final PartitionBucketMapping partitionBucketMapping;
 
     private transient KeyAndBucketExtractor<InternalRow> extractor;
 
-    public FixedBucketWriteSelector(TableSchema schema) {
+    public FixedBucketWriteSelector(
+            TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
         this.schema = schema;
+        this.partitionBucketMapping = partitionBucketMapping;
     }
 
     @Override
     public int select(InternalRow row, int numWriters) {
         if (extractor == null) {
-            extractor = new FixedBucketRowKeyExtractor(schema);
+            extractor = new FixedBucketRowKeyExtractor(schema, partitionBucketMapping);
         }
         extractor.setRecord(row);
         return ChannelComputer.select(extractor.partition(), extractor.bucket(), numWriters);

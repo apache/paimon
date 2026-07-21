@@ -25,11 +25,11 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -40,6 +40,7 @@ public class FileSystemWriteRestore implements WriteRestore {
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
+    private final PartitionBucketMapping partitionBucketMapping;
     private final @Nullable Long snapshotId;
 
     public FileSystemWriteRestore(
@@ -74,6 +75,10 @@ public class FileSystemWriteRestore implements WriteRestore {
                 this.scan.dropStats();
             }
         }
+        this.partitionBucketMapping =
+                options.bucketPerPartitionCountEnabled()
+                        ? PartitionBucketMapping.loadFromScan(scan, options.bucket())
+                        : PartitionBucketMapping.defaultBuckets(options.bucket());
     }
 
     @Override
@@ -101,10 +106,12 @@ public class FileSystemWriteRestore implements WriteRestore {
             return RestoreFiles.empty();
         }
 
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
+
+        Integer totalBuckets =
+                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {

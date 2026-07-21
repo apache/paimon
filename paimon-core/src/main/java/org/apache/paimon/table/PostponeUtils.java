@@ -188,7 +188,7 @@ public class PostponeUtils {
         compactOptions.put(BUCKET.key(), String.valueOf(numBuckets));
         compactOptions.put(WRITE_ONLY.key(), "false");
         compactOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
-        return table.copy(compactOptions);
+        return new SchemaBucketFileStoreTable(table.copy(compactOptions));
     }
 
     public static FileStoreTable tableForCommit(FileStoreTable table) {

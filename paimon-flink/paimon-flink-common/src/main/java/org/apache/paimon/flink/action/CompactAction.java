@@ -385,7 +385,7 @@ public class CompactAction extends TableActionBase {
                                     sourcePair.getLeft(),
                                     realTable.rowType(),
                                     table.catalogEnvironment().catalogContext()),
-                            new RowDataChannelComputer(realTable.schema()),
+                            new RowDataChannelComputer(realTable.createRowKeyExtractor()),
                             null);
             List<CompactBucket> compactBuckets =
                     compactBucketsByPartition.getOrDefault(partition, Collections.emptyList());

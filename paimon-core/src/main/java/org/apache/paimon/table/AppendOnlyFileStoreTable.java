@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -161,11 +162,17 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser, @Nullable Integer writeId) {
+        return newWrite(commitUser, writeId, createRowKeyExtractor());
+    }
+
+    @Override
+    public TableWriteImpl<InternalRow> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
         BaseAppendFileStoreWrite writer = store().newWrite(commitUser, writeId);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,
-                createRowKeyExtractor(),
+                rowKeyExtractor,
                 (record, rowKind) -> {
                     Preconditions.checkState(
                             rowKind.isAdd(),
