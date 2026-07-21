@@ -387,6 +387,36 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMaterializeDescriptorWithSourceTableFileIO() {
+        tEnv.executeSql(
+                "CREATE TABLE blob_descriptor_source (id INT, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql("INSERT INTO blob_descriptor_source VALUES" + " (1, X'48656C6C6F'), (2, X'5945')");
+        batchSql("ALTER TABLE blob_descriptor_source SET ('blob-as-descriptor'='true')");
+
+        String sourceTable = tEnv.getCurrentDatabase() + ".blob_descriptor_source";
+        tEnv.executeSql(
+                "CREATE TABLE blob_descriptor_target ("
+                        + "id INT, picture BYTES, PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='2',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-descriptor.source-table'='"
+                        + sourceTable
+                        + "')");
+        batchSql(
+                "INSERT INTO blob_descriptor_target "
+                        + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                        + "SELECT * FROM blob_descriptor_source");
+
+        assertThat(batchSql("SELECT * FROM blob_descriptor_target ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, new byte[] {72, 101, 108, 108, 111}),
+                        Row.of(2, new byte[] {89, 69}));
+    }
+
+    @Test
     public void testWriteBlobWithBuiltInFunction() throws Exception {
         byte[] blobData = new byte[1024 * 1024];
         RANDOM.nextBytes(blobData);
