@@ -637,8 +637,54 @@ public class SchemaManager implements Serializable {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        checkMapStorageLayoutUnchanged(oldTableSchema, newTableSchema);
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
+    }
+
+    private static void checkMapStorageLayoutUnchanged(
+            TableSchema oldTableSchema, TableSchema newTableSchema) {
+        Map<Integer, CoreOptions.MapStorageLayout> oldLayouts =
+                mapStorageLayoutByFieldId(oldTableSchema);
+        Map<Integer, CoreOptions.MapStorageLayout> newLayouts =
+                mapStorageLayoutByFieldId(newTableSchema);
+        Map<Integer, String> oldNames = fieldNameById(oldTableSchema);
+        Map<Integer, String> newNames = fieldNameById(newTableSchema);
+
+        for (Map.Entry<Integer, CoreOptions.MapStorageLayout> oldLayout : oldLayouts.entrySet()) {
+            Integer fieldId = oldLayout.getKey();
+            CoreOptions.MapStorageLayout newLayout = newLayouts.get(fieldId);
+            if (newLayout == null || oldLayout.getValue() == newLayout) {
+                continue;
+            }
+
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot change map storage layout for field id %s ('%s' -> '%s') from '%s' to '%s'.",
+                            fieldId,
+                            oldNames.get(fieldId),
+                            newNames.get(fieldId),
+                            oldLayout.getValue(),
+                            newLayout));
+        }
+    }
+
+    private static Map<Integer, CoreOptions.MapStorageLayout> mapStorageLayoutByFieldId(
+            TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        Map<Integer, CoreOptions.MapStorageLayout> layouts = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            layouts.put(field.id(), options.mapStorageLayout(field.name()));
+        }
+        return layouts;
+    }
+
+    private static Map<Integer, String> fieldNameById(TableSchema schema) {
+        Map<Integer, String> names = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            names.put(field.id(), field.name());
+        }
+        return names;
     }
 
     // gets the rootType at the defined depth

@@ -101,8 +101,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // optimization rules
     extensions.injectOptimizerRule(spark => ReplacePaimonFunctions(spark))
     extensions.injectOptimizerRule(spark => OptimizeMetadataOnlyDeleteFromPaimonTable(spark))
-    // TODO: Enable MAP selected-key pushdown after core reader supports
-    // __PAIMON_MAP_SELECTED_KEYS read type.
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
     extensions.injectOptimizerRule(_ => RepartitionLateralVectorSearchInput)
     extensions.injectOptimizerRule(_ => PushDownLateralVectorSearchFilter)
