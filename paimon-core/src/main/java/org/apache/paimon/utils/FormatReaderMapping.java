@@ -333,7 +333,7 @@ public class FormatReaderMapping {
                                 field -> {
                                     if (selectedKeysFieldIds.contains(field.id())) {
                                         checkSelectedKeysDataField(dataField);
-                                        readDataFields.add(field);
+                                        readDataFields.add(selectedKeysDataField(field, dataField));
                                         return;
                                     }
 
@@ -345,6 +345,18 @@ public class FormatReaderMapping {
                                 });
             }
             return readDataFields;
+        }
+
+        private DataField selectedKeysDataField(DataField expectedField, DataField dataField) {
+            RowType selectedKeysType = (RowType) expectedField.type();
+            DataType dataValueType = ((MapType) dataField.type()).getValueType();
+            List<DataField> selectedKeysDataFields = new ArrayList<>();
+            for (DataField selectedKeyField : selectedKeysType.getFields()) {
+                selectedKeysDataFields.add(
+                        selectedKeyField.newType(
+                                dataValueType.copy(selectedKeyField.type().isNullable())));
+            }
+            return expectedField.newType(selectedKeysType.copy(selectedKeysDataFields));
         }
 
         private void checkSelectedKeysDataField(DataField dataField) {

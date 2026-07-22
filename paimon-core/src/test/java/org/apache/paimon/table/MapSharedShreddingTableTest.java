@@ -199,6 +199,57 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet"})
+    public void testReadSelectedKeysAfterMapValueTypeEvolution(String format) throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.INT()))
+                        .option("bucket", "-1")
+                        .option("file.format", format)
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "1")
+                        .build(),
+                true);
+        Table table = catalog.getTable(identifier(format));
+        Map<BinaryString, Integer> values = new LinkedHashMap<>();
+        values.put(BinaryString.fromString("key1"), 10);
+        write(table, GenericRow.of(1, new GenericMap(values)));
+
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(
+                        SchemaChange.updateColumnType(
+                                new String[] {"metrics", "value"}, DataTypes.BIGINT(), false)),
+                false);
+        table = catalog.getTable(identifier(format));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(selectedKeysReadType());
+        List<List<Long>> actual = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> {
+                            InternalRow selectedKeys = row.getRow(1, 3);
+                            actual.add(
+                                    Arrays.asList(
+                                            selectedKeys.getLong(0),
+                                            selectedKeys.isNullAt(1)
+                                                    ? null
+                                                    : selectedKeys.getLong(1),
+                                            selectedKeys.isNullAt(2)
+                                                    ? null
+                                                    : selectedKeys.getLong(2)));
+                        });
+        assertThat(actual).containsExactly(Arrays.asList(10L, null, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
     public void testAppendOnlyTableReadWriteWithTwoMapFields(String format) throws Exception {
         Table table = createTable(format, "metrics", "labels");
 
