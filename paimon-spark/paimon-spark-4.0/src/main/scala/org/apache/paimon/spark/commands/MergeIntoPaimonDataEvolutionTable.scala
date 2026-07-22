@@ -926,6 +926,12 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def checkUpdateResult(updateCommit: Seq[CommitMessage]): Seq[CommitMessage] = {
+    if (
+      table.coreOptions().globalIndexColumnUpdateAction() == GlobalIndexColumnUpdateAction.IGNORE
+    ) {
+      return updateCommit
+    }
+
     val affectedParts: Set[BinaryRow] = updateCommit.map(_.partition()).toSet
     val rowType = table.rowType()
 

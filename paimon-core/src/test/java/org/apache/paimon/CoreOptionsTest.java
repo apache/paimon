@@ -99,6 +99,15 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testIgnoreGlobalIndexColumnUpdateAction() {
+        Options conf = new Options();
+        conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
+
+        assertThat(new CoreOptions(conf).globalIndexColumnUpdateAction())
+                .isEqualTo(CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
+    }
+
+    @Test
     public void testBlobSplitByFileSizeDefault() {
         Options conf = new Options();
         conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);

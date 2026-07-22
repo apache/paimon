@@ -561,6 +561,21 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 .hasMessageContaining(
                         "MergeInto: update columns contain globally indexed columns, not supported now.");
 
+        // 2. IGNORE should allow the update and leave the index unchanged
+        executeSQL(
+                "ALTER TABLE T SET ('global-index.column-update-action' = 'IGNORE')", false, true);
+
+        assertDoesNotThrow(
+                () ->
+                        executeSQL(
+                                String.format(
+                                        "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T._ROW_ID=S.id', 'name=S.name,id=1', 2)",
+                                        database),
+                                false,
+                                true));
+
+        assertTrue(indexFileExists("T"));
+
         insertInto(
                 "T",
                 "(31, 'name31', 3.1, '01-23')",
@@ -576,7 +591,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
 
         insertInto("S", "(35, 'new_name25', 125.1)");
 
-        // 2. updating unindexed partitions is not affected
+        // 3. updating unindexed partitions is not affected
         assertDoesNotThrow(
                 () ->
                         executeSQL(
@@ -588,7 +603,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                                 false,
                                 true));
 
-        // 3. alter table's UpdateAction option to DROP_INDEX
+        // 4. alter table's UpdateAction option to DROP_INDEX
         executeSQL(
                 "ALTER TABLE T SET ('global-index.column-update-action' = 'DROP_PARTITION_INDEX')",
                 false,

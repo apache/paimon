@@ -87,6 +87,12 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
     }
 
     private void checkUpdatedColumns() {
+        CoreOptions.GlobalIndexColumnUpdateAction updateAction =
+                table.coreOptions().globalIndexColumnUpdateAction();
+        if (updateAction == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {
+            return;
+        }
+
         Optional<Snapshot> latestSnapshot = table.latestSnapshot();
         RowType rowType = table.rowType();
         Preconditions.checkState(latestSnapshot.isPresent());
@@ -112,8 +118,6 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                 });
 
         if (!affectedEntries.isEmpty()) {
-            CoreOptions.GlobalIndexColumnUpdateAction updateAction =
-                    table.coreOptions().globalIndexColumnUpdateAction();
             switch (updateAction) {
                 case THROW_ERROR:
                     Set<String> conflictedColumns =
