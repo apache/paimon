@@ -198,7 +198,7 @@ public class RESTApi {
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
-                            ? ImmutableMap.of(WAREHOUSE.key(), RESTUtil.encodeString(warehouse))
+                            ? ImmutableMap.of(WAREHOUSE.key(), warehouse)
                             : ImmutableMap.of();
             options =
                     new Options(
