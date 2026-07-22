@@ -19,6 +19,7 @@ import os
 import tempfile
 import unittest
 import shutil
+from unittest import mock
 
 import pyarrow as pa
 import pyarrow.types as pa_types
@@ -26,7 +27,45 @@ import ray
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.read.datasource.ray_datasource import RayDatasource
 from pypaimon.schema.data_types import PyarrowFieldParser
+
+
+class RayDatasourceUnitTest(unittest.TestCase):
+
+    def test_ray_task_disables_inner_split_parallelism(self):
+        schema = pa.schema([('value', pa.int64())])
+        batch = pa.record_batch([pa.array([1])], schema=schema)
+        split = mock.Mock()
+        split.file_size = 1
+        split.row_count = 1
+        split.merged_row_count.return_value = None
+        split.file_paths = []
+        table = mock.Mock()
+        table.is_primary_key_table = False
+        provider = mock.Mock()
+        provider.table.return_value = table
+        provider.predicate.return_value = None
+        provider.read_type.return_value = []
+        provider.nested_name_paths.return_value = None
+        provider.splits.return_value = [split]
+        provider.limit.return_value = None
+        reader = mock.Mock()
+        reader.read_next_batch.side_effect = [batch, StopIteration]
+
+        with mock.patch(
+            'pypaimon.read.datasource.ray_datasource.'
+            'PyarrowFieldParser.from_paimon_schema',
+            return_value=schema,
+        ), mock.patch('pypaimon.read.table_read.TableRead') as table_read:
+            table_read.return_value.to_arrow_batch_reader.return_value = reader
+            task = RayDatasource(provider).get_read_tasks(1)[0]
+            result = list(task())
+
+        self.assertEqual([pa.Table.from_batches([batch])], result)
+        table_read.return_value.to_arrow_batch_reader.assert_called_once_with(
+            [split], parallelism=1)
+        reader.close.assert_called_once()
 
 
 class RayDataTest(unittest.TestCase):
