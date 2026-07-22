@@ -1021,7 +1021,7 @@ public class RESTApi {
                         restAuthFunction);
         List<Partition> partitions = response.getPartitions();
         if (partitions == null) {
-            return new PagedList<>(emptyList(), null);
+            return new PagedList<>(emptyList(), response.getNextPageToken());
         }
         return new PagedList<>(partitions, response.getNextPageToken());
     }

@@ -158,8 +158,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -201,9 +203,11 @@ public class RESTCatalogServer {
     private final Map<String, Database> databaseStore = new HashMap<>();
     private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
 
-    /** Received filtered-listing requests, so tests can assert the transport path was taken. */
-    public final List<ListPartitionsByFilterRequest> receivedListPartitionsByFilterRequests =
+    private final List<ListPartitionsByFilterRequest> receivedListPartitionsByFilterRequests =
             new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private final Queue<ListPartitionsResponse> scriptedListPartitionsByFilterResponses =
+            new ConcurrentLinkedQueue<>();
 
     private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     private final Map<String, View> viewStore = new HashMap<>();
@@ -289,6 +293,25 @@ public class RESTCatalogServer {
 
     public void setPartitionListingSupported(boolean partitionListingSupported) {
         this.partitionListingSupported = partitionListingSupported;
+    }
+
+    public void clearReceivedListPartitionsByFilterRequests() {
+        receivedListPartitionsByFilterRequests.clear();
+    }
+
+    public List<ListPartitionsByFilterRequest> getReceivedListPartitionsByFilterRequests() {
+        return Collections.unmodifiableList(
+                new ArrayList<>(receivedListPartitionsByFilterRequests));
+    }
+
+    public boolean hasReceivedListPartitionsByFilterRequest() {
+        return !receivedListPartitionsByFilterRequests.isEmpty();
+    }
+
+    public void enqueueListPartitionsByFilterResponse(
+            @Nullable List<Partition> partitions, @Nullable String nextPageToken) {
+        scriptedListPartitionsByFilterResponses.add(
+                new ListPartitionsResponse(partitions, nextPageToken));
     }
 
     public void addNoPermissionDatabase(String database) {
@@ -1969,6 +1992,10 @@ public class RESTCatalogServer {
     private MockResponse listPartitionsByFilter(
             Identifier tableIdentifier, ListPartitionsByFilterRequest request) {
         receivedListPartitionsByFilterRequests.add(request);
+        ListPartitionsResponse scriptedResponse = scriptedListPartitionsByFilterResponses.poll();
+        if (scriptedResponse != null) {
+            return mockResponse(scriptedResponse, 200);
+        }
         if (request.getFilter() == null || request.getFilter().isEmpty()) {
             return mockResponse(new ErrorResponse(null, null, "filter is required", 400), 400);
         }
@@ -1991,21 +2018,17 @@ public class RESTCatalogServer {
             predicate = null;
         }
         List<Partition> partitions = new ArrayList<>();
-        for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
-            String objectName = Identifier.fromString(entry.getKey()).getObjectName();
-            if (objectName.equals(tableIdentifier.getObjectName())) {
-                for (Partition partition : entry.getValue()) {
-                    boolean patternMatched =
-                            request.getPartitionNamePattern() == null
-                                    || matchNamePattern(
-                                            getPagedKey(partition),
-                                            request.getPartitionNamePattern());
-                    if (patternMatched
-                            && matchesPredicate(
-                                    predicate, partition.spec(), partitionType, defaultPartName)) {
-                        partitions.add(partition);
-                    }
-                }
+        for (Partition partition :
+                tablePartitionsStore.getOrDefault(
+                        tableIdentifier.getFullName(), Collections.emptyList())) {
+            boolean patternMatched =
+                    request.getPartitionNamePattern() == null
+                            || matchNamePattern(
+                                    getPagedKey(partition), request.getPartitionNamePattern());
+            if (patternMatched
+                    && matchesPredicate(
+                            predicate, partition.spec(), partitionType, defaultPartName)) {
+                partitions.add(partition);
             }
         }
         Map<String, String> pagingParameters = new HashMap<>();

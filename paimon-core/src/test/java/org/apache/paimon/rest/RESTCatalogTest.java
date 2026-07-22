@@ -373,6 +373,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> catalog.listPartitionsPaged(identifier, 100, null, null));
+        Predicate partitionFilter =
+                new PredicateBuilder(
+                                RowType.of(
+                                        new org.apache.paimon.types.DataType[] {DataTypes.INT()},
+                                        new String[] {"col1"}))
+                        .equal(0, 1);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.listPartitionsByFilterPaged(
+                                identifier, partitionFilter, 100, null, null));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.createBranch(identifier, "test_branch", null));
@@ -1891,19 +1902,30 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         singletonMap("dt", "20250102"),
                         singletonMap("dt", "20250103"),
                         singletonMap("dt", "20260101"));
-        catalog.dropDatabase(databaseName, true, true);
-        catalog.createDatabase(databaseName, true);
-        Identifier identifier = Identifier.create(databaseName, "table");
-        catalog.createTable(
-                identifier,
+        Schema schema =
                 Schema.newBuilder()
                         .option(METASTORE_PARTITIONED_TABLE.key(), "true")
                         .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
                         .column("col", DataTypes.INT())
                         .column("dt", DataTypes.STRING())
                         .partitionKeys("dt")
-                        .build(),
-                true);
+                        .build();
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}));
+        Predicate range =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, BinaryString.fromString("20250101")),
+                        builder.lessThan(0, BinaryString.fromString("20260101")));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%"));
+        catalog.createTable(identifier, schema, true);
         BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
@@ -1913,41 +1935,29 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             commit.commit(write.prepareCommit());
         }
 
+        String distractorDatabase = databaseName + "_other";
+        catalog.dropDatabase(distractorDatabase, true, true);
+        catalog.createDatabase(distractorDatabase, true);
+        Identifier distractor = Identifier.create(distractorDatabase, identifier.getObjectName());
+        catalog.createTable(distractor, schema, true);
+        catalog.createPartitions(distractor, singletonList(singletonMap("dt", "20250104")));
+
         // The predicate goes on the wire as its own JSON serialization; the server evaluates
         // the very same tree the scan would evaluate locally.
-        PredicateBuilder builder =
-                new PredicateBuilder(
-                        RowType.of(
-                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
-                                new String[] {"dt"}));
-        Predicate range =
-                PredicateBuilder.and(
-                        builder.greaterOrEqual(0, BinaryString.fromString("20250102")),
-                        builder.lessThan(0, BinaryString.fromString("20260101")));
-        assertThat(
-                        catalog.listPartitionsByFilterPaged(identifier, range, null, null, null)
-                                .getElements())
+        PagedList<Partition> firstPage =
+                catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%");
+        assertThat(firstPage.getElements())
                 .extracting(partition -> partition.spec().get("dt"))
-                .containsExactlyInAnyOrder("20250102", "20250103");
+                .containsExactly("20250103", "20250102");
+        assertThat(firstPage.getNextPageToken()).isEqualTo("dt=20250102");
 
-        Predicate in =
-                builder.in(
-                        0,
-                        Arrays.asList(
-                                BinaryString.fromString("20250101"),
-                                BinaryString.fromString("20260101")));
-        assertThat(
-                        catalog.listPartitionsByFilterPaged(identifier, in, null, null, null)
-                                .getElements())
-                .extracting(partition -> partition.spec().get("dt"))
-                .containsExactlyInAnyOrder("20250101", "20260101");
-
-        // A pattern combines with the predicate as a conjunction.
-        assertThat(
-                        catalog.listPartitionsByFilterPaged(identifier, in, null, null, "dt=2025%")
-                                .getElements())
+        PagedList<Partition> secondPage =
+                catalog.listPartitionsByFilterPaged(
+                        identifier, range, 2, firstPage.getNextPageToken(), "dt=2025%");
+        assertThat(secondPage.getElements())
                 .extracting(partition -> partition.spec().get("dt"))
                 .containsExactly("20250101");
+        assertThat(secondPage.getNextPageToken()).isNull();
 
         // A predicate the server cannot re-anchor (unknown column) counts as always-true: the
         // response is a superset of the matching partitions and the client keeps filtering
@@ -1965,7 +1975,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                         null,
                                         null)
                                 .getElements())
-                .hasSize(4);
+                .extracting(Partition::spec)
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
     }
 
     @Test

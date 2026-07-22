@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -40,6 +41,7 @@ import org.apache.paimon.utils.PartitionPathUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 import javax.annotation.Nullable;
 
@@ -74,11 +76,6 @@ class CatalogManagedPartitionScanTest {
     @Test
     void testLeadingPatternResidualFilterAndUnregisteredDirectory() throws Exception {
         Catalog catalog = mock(Catalog.class);
-        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), eq("year=2025/%")))
-                .thenReturn(
-                        new PagedList<>(
-                                Arrays.asList(partition("2025", "10"), partition("2025", "11")),
-                                null));
         // The residual predicate beyond the prefix goes to the filter endpoint; the filter is a
         // hint, so returning a superset here is legal and the plan still filters per partition.
         when(catalog.listPartitionsByFilterPaged(
@@ -109,13 +106,47 @@ class CatalogManagedPartitionScanTest {
         assertThat(plannedFiles).containsExactly(novemberFile);
         assertThat(plannedFiles).doesNotContain(octoberFile, unregisteredFile);
         assertThat(fileIO.listedPaths).containsExactly(new Path(tablePath, "year=2025/month=11"));
+        ArgumentCaptor<Predicate> pushedFilter = ArgumentCaptor.forClass(Predicate.class);
         verify(catalog)
                 .listPartitionsByFilterPaged(
                         eq(IDENTIFIER),
-                        any(Predicate.class),
+                        pushedFilter.capture(),
                         eq(1000),
                         isNull(),
                         eq("year=2025/%"));
+        assertThat(pushedFilter.getValue().test(GenericRow.of(2025, 11))).isTrue();
+        assertThat(pushedFilter.getValue().test(GenericRow.of(2025, 10))).isFalse();
+    }
+
+    @Test
+    void testPushesFilterWithoutLeadingPrefixAndAppliesResidualFilter() throws Exception {
+        TrackingLocalFileIO fileIO = new TrackingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path octoberFile = writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        Path novemberFile = writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table =
+                createTable(
+                        fileIO,
+                        tablePath,
+                        recordingCatalog(
+                                Arrays.asList(partition("2025", "10"), partition("2025", "11"))),
+                        false);
+        Predicate predicate = new PredicateBuilder(table.partitionType()).greaterThan(1, 10);
+        PartitionPredicate filter =
+                PartitionPredicate.fromPredicate(table.partitionType(), predicate);
+
+        List<Path> plannedFiles =
+                plannedFiles(new FormatTableScan(table, filter, null).plan().splits());
+
+        assertThat(plannedFiles).containsExactly(novemberFile);
+        assertThat(plannedFiles).doesNotContain(octoberFile);
+        assertThat(fileIO.listedPaths).containsExactly(new Path(tablePath, "year=2025/month=11"));
+        assertThat(requestedPrefixes).containsExactly(Collections.emptyMap());
+        assertThat(requestedFilters).hasSize(1);
+        Predicate pushedFilter = requestedFilters.get(0);
+        assertThat(pushedFilter).isNotNull();
+        assertThat(pushedFilter.test(GenericRow.of(2025, 11))).isTrue();
+        assertThat(pushedFilter.test(GenericRow.of(2025, 10))).isFalse();
     }
 
     @Test
@@ -325,6 +356,7 @@ class CatalogManagedPartitionScanTest {
     }
 
     private final List<Map<String, String>> requestedPrefixes = new ArrayList<>();
+    private final List<Predicate> requestedFilters = new ArrayList<>();
 
     private FormatTablePartitionManager partitionManager(Catalog catalog) {
         return FormatTablePartitionManager.create(
@@ -334,11 +366,13 @@ class CatalogManagedPartitionScanTest {
     /** Records the prefix the scan pushes down and answers from a fixed partition list. */
     private FormatTablePartitionManager recordingCatalog(List<Partition> partitions) {
         List<Map<String, String>> prefixes = requestedPrefixes;
+        List<Predicate> filters = requestedFilters;
         return new FormatTablePartitionManager() {
             @Override
             public List<Partition> listPartitions(
                     Map<String, String> prefix, @Nullable Predicate filter) {
                 prefixes.add(new LinkedHashMap<>(prefix));
+                filters.add(filter);
                 List<Partition> matching = new ArrayList<>();
                 for (Partition partition : partitions) {
                     boolean matches = true;

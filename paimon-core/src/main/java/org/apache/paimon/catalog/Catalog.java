@@ -439,7 +439,6 @@ public interface Catalog extends AutoCloseable {
      *     conjunctive with {@code predicate}
      * @return a page of candidate partitions
      * @throws TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if filtered partition listing is not supported
      */
     default PagedList<Partition> listPartitionsByFilterPaged(
             Identifier identifier,
@@ -448,8 +447,7 @@ public interface Catalog extends AutoCloseable {
             @Nullable String pageToken,
             @Nullable String partitionNamePattern)
             throws TableNotExistException {
-        throw new UnsupportedOperationException(
-                this.getClass().getName() + " does not support listing partitions by filter.");
+        return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
     }
 
     /**

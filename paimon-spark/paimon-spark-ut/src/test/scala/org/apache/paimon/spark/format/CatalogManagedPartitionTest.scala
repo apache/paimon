@@ -20,9 +20,10 @@ package org.apache.paimon.spark.format
 
 import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog}
 
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
 
-class CatalogManagedPartitionLoadTest extends PaimonSparkTestWithRestCatalogBase {
+class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
 
   test(
     "a Format Table with catalog-managed partitions loaded through SparkCatalog carries its partition manager") {
@@ -41,6 +42,29 @@ class CatalogManagedPartitionLoadTest extends PaimonSparkTestWithRestCatalogBase
         .asInstanceOf[PaimonFormatTable]
 
       assert(sparkTable.partitionManager != null)
+    }
+  }
+
+  test("catalog-managed Format Table sends partition predicate to REST filtered listing") {
+    val tableName = "catalog_partition_filter_pushdown"
+    withTable(tableName) {
+      sql(s"""CREATE TABLE $tableName (id INT, payload STRING, year INT, month INT)
+             |USING CSV
+             |PARTITIONED BY (year, month)
+             |TBLPROPERTIES (
+             |  'format-table.implementation' = 'paimon',
+             |  'metastore.partitioned-table' = 'true')
+             |""".stripMargin)
+      sql(s"""INSERT INTO $tableName VALUES
+             |(1, 'a', 2024, 12), (2, 'b', 2025, 9), (3, 'c', 2025, 11), (4, 'd', 2025, 12)
+             |""".stripMargin)
+
+      clearFilteredListingRequests()
+      checkAnswer(
+        sql(s"SELECT id FROM $tableName WHERE year = 2025 AND month > 10 ORDER BY id"),
+        Seq(Row(3), Row(4)))
+
+      assert(filteredListingWasRequested, "the filtered listing endpoint was not called")
     }
   }
 }

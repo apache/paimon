@@ -77,26 +77,15 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
         return execute(
                 catalog -> {
                     if (filter != null) {
-                        try {
-                            return collectAllPages(
-                                    prefix,
-                                    pageToken ->
-                                            catalog.listPartitionsByFilterPaged(
-                                                    identifier,
-                                                    filter,
-                                                    REQUEST_SIZE,
-                                                    pageToken,
-                                                    pattern));
-                        } catch (Exception e) {
-                            if (!indicatesNoFilterListing(e)) {
-                                throw e;
-                            }
-                            // The filtered listing endpoint is optional: retry as the plain
-                            // prefix listing, which returns a superset the caller filters
-                            // anyway. A genuinely missing table also lands here (the
-                            // endpoint's 404 cannot be told apart); the plain listing below
-                            // then reports it properly.
-                        }
+                        return collectAllPages(
+                                prefix,
+                                pageToken ->
+                                        catalog.listPartitionsByFilterPaged(
+                                                identifier,
+                                                filter,
+                                                REQUEST_SIZE,
+                                                pageToken,
+                                                pattern));
                     }
                     return collectAllPages(
                             prefix,
@@ -127,7 +116,11 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                                 identifier.getFullName()));
             }
             if (page.getElements() != null) {
-                partitions.addAll(page.getElements());
+                for (Partition partition : page.getElements()) {
+                    if (matchesPrefix(partition, prefix)) {
+                        partitions.add(partition);
+                    }
+                }
             }
             pageToken = page.getNextPageToken();
             if (StringUtils.isNotEmpty(pageToken) && !seenPageTokens.add(pageToken)) {
@@ -137,25 +130,12 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                                 pageToken, identifier.getFullName()));
             }
         } while (StringUtils.isNotEmpty(pageToken));
-        // A catalog may ignore the pattern, so the prefix is enforced here as well.
-        partitions.removeIf(partition -> !matchesPrefix(partition, prefix));
         return Collections.unmodifiableList(partitions);
     }
 
     /** A single page of a partition listing. */
     private interface PageSupplier {
         PagedList<Partition> page(@Nullable String pageToken) throws Exception;
-    }
-
-    /**
-     * Whether the failure means the catalog cannot serve a filtered partition listing. {@link
-     * Catalog.TableNotExistException} doubles as the endpoint-missing signal — a REST catalog
-     * cannot tell an endpoint 404 from a missing table — and the plain retry reports a genuinely
-     * missing table properly.
-     */
-    private static boolean indicatesNoFilterListing(Exception exception) {
-        return exception instanceof UnsupportedOperationException
-                || exception instanceof Catalog.TableNotExistException;
     }
 
     @Override

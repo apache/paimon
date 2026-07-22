@@ -28,6 +28,7 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -208,6 +209,33 @@ public class RESTApiJsonTest {
         assertEquals(
                 response.getPartitions().get(0).fileCount(),
                 parseData.getPartitions().get(0).fileCount());
+    }
+
+    @Test
+    public void listPartitionsByFilterRequestJsonShapeTest() throws Exception {
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest("filter-json", "dt=2026%", 2, "p2");
+        String json = RESTApi.toJson(request);
+
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("filter", "filter-json");
+        expected.put("partitionNamePattern", "dt=2026%");
+        expected.put("maxResults", 2);
+        expected.put("pageToken", "p2");
+        assertEquals(expected, RESTApi.fromJson(json, Map.class));
+        ListPartitionsByFilterRequest parsed =
+                RESTApi.fromJson(json, ListPartitionsByFilterRequest.class);
+        assertEquals(request.getFilter(), parsed.getFilter());
+        assertEquals(request.getPartitionNamePattern(), parsed.getPartitionNamePattern());
+        assertEquals(request.getMaxResults(), parsed.getMaxResults());
+        assertEquals(request.getPageToken(), parsed.getPageToken());
+
+        assertEquals(
+                Collections.singletonMap("filter", "filter-json"),
+                RESTApi.fromJson(
+                        RESTApi.toJson(
+                                new ListPartitionsByFilterRequest("filter-json", null, null, null)),
+                        Map.class));
     }
 
     @Test
