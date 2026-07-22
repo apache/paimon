@@ -61,24 +61,20 @@ def _parquet_col_range(metadata, col):
     return None if lo is None else (lo, hi)
 
 
-_UNCOERCIBLE = object()
-
-
-def _coerce_bound(value, key_type):
-    """Coerce a footer bound to the current join-key type so bounds from files written
-    under different schemas (e.g. DATE then TIMESTAMP) stay mutually comparable. Returns
-    ``_UNCOERCIBLE`` when the value can't be cast (the split then joins every range)."""
-    import pyarrow as pa
+def _footer_col_type(metadata, col):
+    """The arrow type ``col`` is stored as in this parquet file; None if unavailable."""
     try:
-        return pa.array([value]).cast(key_type)[0].as_py()
+        return metadata.schema.to_arrow_schema().field(col).type
     except Exception:
-        return _UNCOERCIBLE
+        return None
 
 
 def _split_key_range(split, col, key_type, file_io):
-    """Min/max of ``col`` over the split's files, read from their parquet footers and
-    coerced to ``key_type``; (None, None) when any file isn't parquet, lacks usable
-    stats, or has a bound that can't be coerced (the split then joins every range).
+    """Min/max of ``col`` over the split's files, read from their parquet footers;
+    (None, None) when any file isn't parquet, lacks usable stats, or stored the key in a
+    different type than the current one (the split then joins every range). A different
+    type means schema evolution, and its footer bounds order differently (e.g. INT '10'
+    < '2' as a string), so they can't be trusted -- only same-type stats are used.
     Manifest value stats are empty for pypaimon-written tables, so the footer is the
     source of truth."""
     import pyarrow.parquet as pq
@@ -89,19 +85,18 @@ def _split_key_range(split, col, key_type, file_io):
             return None, None
         stream = file_io.new_input_stream(path)
         try:
-            rng = _parquet_col_range(pq.read_metadata(stream), col)
+            metadata = pq.read_metadata(stream)
         except Exception:
             return None, None
         finally:
             stream.close()
+        if _footer_col_type(metadata, col) != key_type:
+            return None, None
+        rng = _parquet_col_range(metadata, col)
         if rng is None:
             return None, None
-        clo = _coerce_bound(rng[0], key_type)
-        chi = _coerce_bound(rng[1], key_type)
-        if clo is _UNCOERCIBLE or chi is _UNCOERCIBLE:
-            return None, None
-        lo = clo if lo is None else min(lo, clo)
-        hi = chi if hi is None else max(hi, chi)
+        lo = rng[0] if lo is None else min(lo, rng[0])
+        hi = rng[1] if hi is None else max(hi, rng[1])
     if lo is None:
         return None, None
     return lo, hi
@@ -190,22 +185,6 @@ def _restrict_to_range(arrow_table, col, lo, hi):
     if hi is not None:
         mask = pc.and_(mask, pc.less(arrow_table[col], hi))
     return arrow_table.filter(mask)
-
-
-def _range_predicate(table_id, catalog_options, projection, schema_id, col, lo, hi):
-    # Pushdown superset [lo, hi] for row-group pruning; exact filtering happens in-memory.
-    from pypaimon.common.predicate_builder import PredicateBuilder
-    from pypaimon.ray.join_common import read_builder
-    if lo is None and hi is None:
-        return None
-    pb = read_builder(
-        table_id, catalog_options, projection, schema_id, "range_join").new_predicate_builder()
-    preds = []
-    if lo is not None:
-        preds.append(pb.greater_or_equal(col, lo))
-    if hi is not None:
-        preds.append(pb.less_or_equal(col, hi))
-    return PredicateBuilder.and_predicates(preds)
 
 
 def range_join(
@@ -327,17 +306,16 @@ def range_join(
     ranges = _ranges_from_cuts(_cut_points((l_ranged, r_ranged), num_ranges))
 
     def _join_range(left_splits, right_splits, lo, hi):
+        # No predicate pushdown: the range key may be schema-evolved (e.g. a file stored
+        # as INT read as STRING), which the reader can't compare against a new-type bound.
+        # The in-memory clip below does the exact, evolution-safe filtering.
         lt = _restrict_to_range(
             read_splits(left, catalog_options, left_projection, left_splits,
-                        l_schema_id, "range_join",
-                        _range_predicate(left, catalog_options, left_projection,
-                                         l_schema_id, l_range_col, lo, hi)),
+                        l_schema_id, "range_join"),
             l_range_col, lo, hi)
         rt = _restrict_to_range(
             read_splits(right, catalog_options, right_projection, right_splits,
-                        r_schema_id, "range_join",
-                        _range_predicate(right, catalog_options, right_projection,
-                                         r_schema_id, r_range_col, lo, hi)),
+                        r_schema_id, "range_join"),
             r_range_col, lo, hi)
         return lt.join(rt, keys=lkeys, right_keys=rkeys, join_type=join_type)
 

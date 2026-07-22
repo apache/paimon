@@ -257,6 +257,43 @@ class RayRangeJoinTest(unittest.TestCase):
         self.assertEqual(got, [("2020-01-01 00:00:00", "jan1"),
                                ("2020-06-01 00:00:00", "jun1")])
 
+    def test_int_to_string_schema_evolution_no_dropped_rows(self):
+        # INT->STRING isn't order-preserving ('10' < '2'), so an old INT file's footer
+        # bounds are invalid under the new string order. Such files must be treated as
+        # unknown (join every range), not pruned, or rows are silently dropped.
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        a_int = pa.schema([("k", pa.int32())])
+        self.catalog.create_table(
+            "default.rj_is_a", Schema.from_pyarrow_schema(a_int), False)
+        t = self.catalog.get_table("default.rj_is_a")
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        # int order 5<42<100, but as strings '100'<'42'<'5'.
+        w.write_arrow(pa.Table.from_pydict({"k": [5, 42, 100]}, schema=a_int))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        self.catalog.alter_table(
+            "default.rj_is_a",
+            [SchemaChange.update_column_type("k", AtomicType("STRING"))], False)
+
+        b = pa.schema([("bk", pa.string()), ("val", pa.string())])
+        self.catalog.create_table("default.rj_is_b", Schema.from_pyarrow_schema(b), False)
+        t = self.catalog.get_table("default.rj_is_b")
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"bk": ["5", "42", "100"], "val": ["v5", "v42", "v100"]}, schema=b))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        for num_ranges in (1, 3):
+            ds = range_join("default.rj_is_a", "default.rj_is_b", self.catalog_options,
+                            left_on="k", right_on="bk", num_ranges=num_ranges)
+            got = sorted((r["k"], r["val"]) for r in ds.take_all())
+            self.assertEqual(got, [("100", "v100"), ("42", "v42"), ("5", "v5")])
+
     def test_range_budget_caps_ranges_when_stats_missing(self):
         Split = collections.namedtuple("Split", "files")
         File = collections.namedtuple("File", "row_count")
