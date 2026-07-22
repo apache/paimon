@@ -201,6 +201,9 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             relation.scan.asInstanceOf[PostponeMergeOnReadScan]
         }.get
         assert(postponeScan.filterAttributes().isEmpty)
+        assert(
+          intercept[UnsupportedOperationException](postponeScan.toBatch).getMessage
+            .contains("PostponeMergeOnReadExec"))
         checkAnswer(postponeOnly, Seq(Row(4, "only-postpone")))
         checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "newest-1"), Row(3, "new-3")))
         checkAnswer(sql("SELECT v FROM t ORDER BY v"), Seq(Row("new-3"), Row("newest-1")))
@@ -394,6 +397,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         checkAnswer(sql("SELECT * FROM aggregation_t"), Seq(Row(1, 13L)))
         checkAnswer(sql("SELECT v1 FROM partial_t"), Seq(Row("a")))
         checkAnswer(sql("SELECT total FROM aggregation_t"), Seq(Row(13L)))
+        checkAnswer(sql("SELECT * FROM partial_t WHERE v2 = 'b'"), Seq(Row(1, "a", "b")))
+        checkAnswer(sql("SELECT * FROM aggregation_t WHERE total = 13"), Seq(Row(1, 13L)))
       }
     }
   }

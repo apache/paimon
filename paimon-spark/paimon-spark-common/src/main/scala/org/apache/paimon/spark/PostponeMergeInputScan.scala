@@ -190,13 +190,23 @@ private[spark] object PostponeMergeInputScan {
     extends PartitionReader[InternalRow] {
 
     private val split = task.split()
-    private val ioManager: IOManager = SparkUtils.createIOManager()
     private val keySerializer = new InternalRowSerializer(keyType)
     private val valueSerializer = new InternalRowSerializer(mergeReadType)
     private val partitionBytes = SerializationUtils.serializeBinaryRow(split.partition())
     private val bucketComputer = bucketRouter.createComputer()
+    private val ioManager: IOManager = SparkUtils.createIOManager()
     private val reader =
-      readBuilder.newRead().withIOManager(ioManager).createPostponeFileReader(task)
+      try {
+        readBuilder.newRead().withIOManager(ioManager).createPostponeFileReader(task)
+      } catch {
+        case failure: Throwable =>
+          try {
+            ioManager.close()
+          } catch {
+            case closeFailure: Throwable => failure.addSuppressed(closeFailure)
+          }
+          throw failure
+      }
 
     private var batch: RecordReader.RecordIterator[KeyValue] = _
     private var current: InternalRow = _

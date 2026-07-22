@@ -26,7 +26,7 @@ import org.apache.paimon.table.source.{PostponeMergePlan, PostponeMergeReadBuild
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.expressions.NamedReference
-import org.apache.spark.sql.connector.read.Statistics
+import org.apache.spark.sql.connector.read.{Batch, Statistics}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -58,6 +58,11 @@ private[spark] case class PostponeMergeOnReadScan(
   // the callback can update it.
   override def filterAttributes(): Array[NamedReference] = Array.empty
 
+  override def toBatch: Batch = {
+    throw new UnsupportedOperationException(
+      "PostponeMergeOnReadScan must be executed by PostponeMergeOnReadExec.")
+  }
+
   override def estimateStatistics: Statistics = {
     val corePlan =
       planPostponeMerge(SparkSession.active.sparkContext.defaultParallelism).corePlan
@@ -82,6 +87,7 @@ private[spark] case class PostponeMergeOnReadScan(
         throw new UnsupportedOperationException(
           "Option 'postpone.merge-on-read' does not support vector, hybrid or full-text search.")
       }
+      ensureUnfilteredPostponeFullScanAllowed()
 
       mergeReadBuilder
         .withReadType(readTableRowType)
@@ -94,15 +100,16 @@ private[spark] case class PostponeMergeOnReadScan(
 
       val corePlan = mergeReadBuilder.plan()
       registerReadProtectionTagCleanup(mergeReadBuilder.readProtectionTagName())
-      ensurePostponeFullScanAllowed()
+      // Filters may still fail to prune any real files. That decision needs planning metrics and
+      // therefore cannot share the early, structurally unfiltered check above.
+      ensureNoFullScan()
       plannedMerge = MergePlan(mergeReadBuilder, corePlan, delegate.coreOptions.blobAsDescriptor())
     }
 
     plannedMerge
   }
 
-  private def ensurePostponeFullScanAllowed(): Unit = {
-    ensureNoFullScan()
+  private def ensureUnfilteredPostponeFullScanAllowed(): Unit = {
     if (
       !OptionUtils.readAllowFullScan() && !table.partitionKeys().isEmpty &&
       pushedPartitionFilters.isEmpty &&
