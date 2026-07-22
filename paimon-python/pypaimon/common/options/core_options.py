@@ -903,6 +903,16 @@ class CoreOptions:
         )
     )
 
+    READ_DEFER_BLOB_RESOLVE: ConfigOption[bool] = (
+        ConfigOptions.key("read.defer-blob-resolve")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether filtered data-evolution reads should apply row filters "
+            "before materializing projected BLOB payloads."
+        )
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -1525,6 +1535,9 @@ class CoreOptions:
 
     def local_cache_whitelist(self) -> str:
         return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
+
+    def read_defer_blob_resolve(self) -> bool:
+        return self.options.get(CoreOptions.READ_DEFER_BLOB_RESOLVE)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)

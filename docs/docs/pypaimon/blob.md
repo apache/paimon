@@ -136,6 +136,10 @@ Without `blob-as-descriptor=true`, blob values are materialized before
 `row.get_blob(...)` returns; `new_input_stream()` then reads from
 in-memory bytes, not from storage.
 
+For data-evolution filters that do not reference the projected BLOB column,
+PyPaimon applies the filter and limit before materializing its payloads. Set
+`read.defer-blob-resolve=false` to restore eager materialization.
+
 ## Lower-level: `Blob.from_bytes`
 
 When you already have raw or descriptor bytes (for example from a custom

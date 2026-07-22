@@ -43,6 +43,8 @@ from pypaimon.read.reader.concat_batch_reader import (
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+from pypaimon.read.reader.deferred_blob_resolve_reader import \
+    DeferredBlobResolveReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch, VectorBunch
@@ -283,7 +285,7 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
-            blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+            blob_as_descriptor = self._read_blob_as_descriptor(read_file_fields)
             blob_parallelism = self._blob_parallelism
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
@@ -418,6 +420,12 @@ class SplitRead(ABC):
             reader = ShardBatchReader(reader, shard_range[0], shard_range[1])
 
         return reader
+
+    def _read_blob_as_descriptor(self, field_names: List[str]) -> bool:
+        if CoreOptions.blob_as_descriptor(self.table.options):
+            return True
+        deferred_fields = getattr(self, '_deferred_blob_fields', set())
+        return any(field_name in deferred_fields for field_name in field_names)
 
     @staticmethod
     def _row_sidecar_file_name(file: DataFileMeta) -> Optional[str]:
@@ -1008,6 +1016,7 @@ class DataEvolutionSplitRead(SplitRead):
         )
         self.outer_extract_name_paths = outer_extract_name_paths
         self.outer_flat_read_type = outer_flat_read_type
+        self._deferred_blob_fields = self._deferred_blob_field_names()
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate
@@ -1027,7 +1036,37 @@ class DataEvolutionSplitRead(SplitRead):
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names),
                 blob_parallelism=blob_parallelism)
 
+        if self._deferred_blob_fields:
+            blob_names = [
+                field.name for field in self.read_fields
+                if field.name in self._deferred_blob_fields
+            ]
+            reader = DeferredBlobResolveReader(
+                reader,
+                self.table.file_io,
+                blob_names,
+                blob_parallelism=self._blob_parallelism,
+            )
+
         return reader
+
+    def _deferred_blob_field_names(self) -> set:
+        if (self.predicate_for_reader is None
+                or CoreOptions.blob_as_descriptor(self.table.options)
+                or not self.table.options.read_defer_blob_resolve()):
+            return set()
+
+        inline_fields = (
+            CoreOptions.blob_descriptor_fields(self.table.options)
+            | CoreOptions.blob_view_fields(self.table.options)
+        )
+        predicate_fields = predicate_field_names(self.predicate_for_reader)
+        return {
+            self.read_fields[index].name
+            for index in blob_field_indices(self.read_fields)
+            if self.read_fields[index].name not in inline_fields
+            and self.read_fields[index].name not in predicate_fields
+        }
 
     def _create_raw_reader(self) -> RecordReader:
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
@@ -1297,7 +1336,7 @@ class DataEvolutionSplitRead(SplitRead):
                             [read_fields[0]]
                         ).field(0).type,
                         self.row_ranges,
-                        CoreOptions.blob_as_descriptor(self.table.options),
+                        self._read_blob_as_descriptor([read_fields[0].name]),
                         deletion_vector=deletion_vector,
                         batch_size=batch_size,
                         blob_parallelism=self._blob_parallelism,
@@ -1352,7 +1391,7 @@ class DataEvolutionSplitRead(SplitRead):
             read_fields,
             self.read_fields,
             None,
-            CoreOptions.blob_as_descriptor(self.table.options),
+            self._read_blob_as_descriptor(read_fields),
             batch_size=self.table.options.read_batch_size(),
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
