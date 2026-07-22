@@ -55,6 +55,17 @@ public class FullHistoryCloneMarker {
             boolean cloneIfExists)
             throws IOException {
         String expected = content(clonePlan, mapping, targetDatabase, targetTable);
+        preflightRoot(
+                targetFileIO, clonePlan.targetRoot(), "Target table root", expected, cloneIfExists);
+        for (Path externalRoot : clonePlan.externalTargetRoots()) {
+            preflightRoot(
+                    targetFileIO,
+                    externalRoot,
+                    "The external target root",
+                    expected,
+                    cloneIfExists);
+        }
+
         boolean resumed =
                 prepareRoot(
                         targetFileIO,
@@ -157,6 +168,15 @@ public class FullHistoryCloneMarker {
         return builder.toString();
     }
 
+    private static void preflightRoot(
+            FileIO fileIO, Path root, String description, String expected, boolean cloneIfExists)
+            throws IOException {
+        if (!fileIO.exists(root) || fileIO.listStatus(root).length == 0) {
+            return;
+        }
+        validateOwnedRoot(fileIO, root, description, expected, cloneIfExists);
+    }
+
     private static boolean prepareRoot(
             FileIO fileIO, Path root, String description, String expected, boolean cloneIfExists)
             throws IOException {
@@ -166,6 +186,14 @@ public class FullHistoryCloneMarker {
             return false;
         }
 
+        validateOwnedRoot(fileIO, root, description, expected, cloneIfExists);
+        return true;
+    }
+
+    private static void validateOwnedRoot(
+            FileIO fileIO, Path root, String description, String expected, boolean cloneIfExists)
+            throws IOException {
+        Path marker = new Path(root, FILE_NAME);
         checkArgument(
                 cloneIfExists,
                 "%s already contains files: %s. Set clone_if_exists=true to resume.",
@@ -181,7 +209,6 @@ public class FullHistoryCloneMarker {
                 "%s %s belongs to a different full-history clone.",
                 description,
                 root);
-        return true;
     }
 
     private static void validateExternalMarkers(
