@@ -242,10 +242,10 @@ case class DataEvolutionTableDataWrite(
     }
 
     private def fillGapUntil(rowId: Long, fillerSourceRow: InternalRow = null): Unit = {
-      if (firstRowId + numWritten < rowId && fillerRow == null && fillerSourceRow != null) {
-        // Copy the first record this file writer met to minimize the influences on
-        // file stats, but keep raw blob fields as NULLs so filler rows do not trigger
-        // blob fallback.
+      if (fillerRow == null && fillerSourceRow != null) {
+        // Cache the first record eagerly because finish may need it to fill a trailing gap.
+        // Copy it to minimize the influences on file stats, but keep raw blob fields as
+        // NULLs so filler rows do not trigger blob fallback.
         fillerRow = createFillerRow(fillerSourceRow)
       }
 
