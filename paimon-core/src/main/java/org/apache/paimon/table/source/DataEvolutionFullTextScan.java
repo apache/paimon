@@ -56,10 +56,6 @@ public class DataEvolutionFullTextScan implements FullTextScan {
     private final PartitionPredicate partitionFilter;
     private final List<DataField> textColumns;
 
-    public DataEvolutionFullTextScan(FileStoreTable table, DataField textColumn) {
-        this(table, null, textColumn);
-    }
-
     public DataEvolutionFullTextScan(
             FileStoreTable table, PartitionPredicate partitionFilter, DataField textColumn) {
         this(table, partitionFilter, Collections.singletonList(textColumn));

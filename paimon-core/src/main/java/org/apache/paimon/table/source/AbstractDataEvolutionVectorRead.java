@@ -71,7 +71,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
-public abstract class AbstractVectorRead implements Serializable {
+public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -86,7 +86,7 @@ public abstract class AbstractVectorRead implements Serializable {
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
 
-    protected AbstractVectorRead(
+    protected AbstractDataEvolutionVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,

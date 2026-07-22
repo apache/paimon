@@ -60,14 +60,6 @@ public class PrimaryKeyVectorScan implements VectorScan {
             FileStoreTable table,
             int vectorFieldId,
             String indexType,
-            @Nullable PartitionPredicate partitionFilter) {
-        this(table, vectorFieldId, indexType, partitionFilter, null, null);
-    }
-
-    public PrimaryKeyVectorScan(
-            FileStoreTable table,
-            int vectorFieldId,
-            String indexType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
         this(table, vectorFieldId, indexType, partitionFilter, filter, null);

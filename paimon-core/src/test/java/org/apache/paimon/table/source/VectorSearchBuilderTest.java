@@ -1574,7 +1574,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
-    private static class RecordingBatchVectorRead extends BatchVectorReadImpl {
+    private static class RecordingBatchVectorRead extends DataEvolutionBatchVectorRead {
 
         private int rawReadCount;
         private List<Range> rawReadRanges;
