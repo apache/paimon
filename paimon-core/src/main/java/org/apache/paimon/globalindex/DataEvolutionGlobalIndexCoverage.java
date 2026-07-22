@@ -45,15 +45,15 @@ import java.util.Map;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Row ranges covered and not covered by global index files. */
-public class GlobalIndexCoverage {
+/** Row ranges covered and not covered by global index files on data-evolution tables. */
+public class DataEvolutionGlobalIndexCoverage {
 
     private final FileStoreTable table;
     @Nullable private final Snapshot snapshot;
     @Nullable private final PartitionPredicate partitionFilter;
     private final Map<Integer, List<Range>> coverageByField;
 
-    public GlobalIndexCoverage(
+    public DataEvolutionGlobalIndexCoverage(
             FileStoreTable table,
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
@@ -64,9 +64,6 @@ public class GlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            if (!GlobalIndexScanner.isReadableGlobalIndex(table, meta)) {
-                continue;
-            }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             addCoverage(meta.indexFieldId(), range);
             if (meta.extraFieldIds() != null) {
