@@ -34,6 +34,7 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
@@ -147,6 +148,139 @@ public class IcebergCompatibilityTest {
         commit.commit(3, write.prepareCommit(true, 3));
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testDeletedEntryRecordsTheDeletingSnapshot() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.of(1, 11));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        long currentSnapshotId = metadata.currentSnapshotId();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
+
+        List<IcebergManifestEntry> deleted = new ArrayList<>();
+        for (IcebergManifestFileMeta fileMeta :
+                manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())) {
+            for (IcebergManifestEntry entry : manifestFile.read(fileMeta.manifestPath())) {
+                if (entry.status() == IcebergManifestEntry.Status.DELETED) {
+                    deleted.add(entry);
+                }
+            }
+        }
+
+        assertThat(deleted).isNotEmpty();
+        assertThat(deleted)
+                .allSatisfy(entry -> assertThat(entry.snapshotId()).isEqualTo(currentSnapshotId));
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testCurrentDeletesSurviveManifestCompaction() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(IcebergOptions.COMPACT_MIN_FILE_NUM.key(), "2");
+        customOptions.put(IcebergOptions.COMPACT_MAX_FILE_NUM.key(), "2");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        1,
+                        customOptions);
+
+        Map<String, String> dynamic = new HashMap<>();
+        dynamic.put(IcebergOptions.COMPACT_MIN_FILE_NUM.key(), "2");
+        dynamic.put(IcebergOptions.COMPACT_MAX_FILE_NUM.key(), "2");
+        table = table.copy(dynamic);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        long id = 1;
+        for (int pt = 1; pt <= 10; pt++) {
+            write.write(GenericRow.of(pt, pt * 10, pt));
+            commit.commit(id, write.prepareCommit(false, id));
+            id++;
+        }
+
+        BinaryRow pt1 = new BinaryRow(1);
+        BinaryRowWriter ptWriter = new BinaryRowWriter(pt1);
+        ptWriter.writeInt(0, 1);
+        ptWriter.complete();
+
+        write.write(GenericRow.of(1, 10, 99));
+        write.compact(pt1, 0, true);
+        commit.commit(id, write.prepareCommit(true, id));
+
+        long latest = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + latest + ".metadata.json"));
+        long currentSnapshotId = metadata.currentSnapshotId();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
+
+        int manifests = 0;
+        int deleted = 0;
+        for (IcebergManifestFileMeta fileMeta :
+                manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())) {
+            manifests++;
+            for (IcebergManifestEntry entry : manifestFile.read(fileMeta.manifestPath())) {
+                if (entry.status() == IcebergManifestEntry.Status.DELETED) {
+                    deleted++;
+                }
+            }
+        }
+        assertThat(manifests).isGreaterThan(0);
+        assertThat(deleted).as("this commit's deletions must survive compaction").isGreaterThan(0);
 
         write.close();
         commit.close();

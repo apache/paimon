@@ -957,12 +957,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
                     for (IcebergManifestEntry entry : entries) {
                         if (entry.isLive()) {
+                            boolean removed = removedFiles.containsKey(entry.file().filePath());
                             newEntries.add(
                                     new IcebergManifestEntry(
-                                            removedFiles.containsKey(entry.file().filePath())
+                                            removed
                                                     ? IcebergManifestEntry.Status.DELETED
                                                     : IcebergManifestEntry.Status.EXISTING,
-                                            entry.snapshotId(),
+                                            // a deleted entry records the snapshot that
+                                            // deleted the file, not the one that added it
+                                            removed ? currentSnapshotId : entry.snapshotId(),
                                             entry.sequenceNumber(),
                                             entry.fileSequenceNumber(),
                                             entry.file()));
@@ -1018,7 +1021,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     for (IcebergManifestEntry entry :
                             IcebergManifestFile.create(table, pathFactory)
                                     .read(new Path(meta.manifestPath()).getName())) {
+                        // a deletion made by this commit is recorded against the current
+                        // snapshot but keeps the file sequence number of the older snapshot
+                        // that added the file, so it has to be recognised by snapshot id
                         if (entry.fileSequenceNumber() == currentSnapshotId
+                                || entry.snapshotId() == currentSnapshotId
                                 || entry.status() == IcebergManifestEntry.Status.EXISTING) {
                             entries.add(entry);
                         } else {
