@@ -109,7 +109,7 @@ public class OverwriteTableTest extends TableTestBase {
                             .map(message -> message.partition().copy())
                             .distinct()
                             .collect(Collectors.toList());
-            commit.withOverwrite(overwritePartitions).commit(1, messages);
+            commit.withOverwriteStaticPartitions(overwritePartitions).commit(1, messages);
             assertThat(read(table))
                     .extracting(rowToString)
                     .containsExactlyInAnyOrder(
@@ -124,7 +124,7 @@ public class OverwriteTableTest extends TableTestBase {
 
             write.write(overwriteRow(7, 2, "A", "list-again-2A"));
             messages = write.prepareCommit(true, 3);
-            commit.withOverwrite(overwritePartitions).commit(3, messages);
+            commit.withOverwriteStaticPartitions(overwritePartitions).commit(3, messages);
             assertThat(read(table))
                     .extracting(rowToString)
                     .containsExactly("7, 2, A, list-again-2A");

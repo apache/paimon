@@ -469,7 +469,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public int overwritePartition(
+    public int overwriteStaticPartitions(
             List<BinaryRow> staticPartitions, ManifestCommittable committable) {
         checkArgument(!staticPartitions.isEmpty(), "Partitions list cannot be empty.");
         if (LOG.isDebugEnabled()) {

@@ -92,7 +92,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final ThreadPoolExecutor fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartitionSpec = null;
-    @Nullable private List<BinaryRow> overwritePartitions = null;
+    @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -136,7 +136,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (overwritePartitionSpec != null || overwritePartitions != null) {
+        if (overwritePartitionSpec != null || overwriteStaticPartitions != null) {
             return true;
         }
         return tagAutoManager != null
@@ -145,16 +145,16 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
-        this.overwritePartitionSpec = overwritePartitions;
-        this.overwritePartitions = null;
+    public TableCommitImpl withOverwrite(@Nullable Map<String, String> spec) {
+        this.overwritePartitionSpec = spec;
+        this.overwriteStaticPartitions = null;
         return this;
     }
 
     @Override
-    public TableCommitImpl withOverwrite(List<BinaryRow> overwritePartitions) {
+    public TableCommitImpl withOverwriteStaticPartitions(List<BinaryRow> overwritePartitions) {
         this.overwritePartitionSpec = null;
-        this.overwritePartitions = overwritePartitions;
+        this.overwriteStaticPartitions = overwritePartitions;
         return this;
     }
 
@@ -276,7 +276,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        if (overwritePartitionSpec == null && overwritePartitions == null) {
+        if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
@@ -302,9 +302,10 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    overwritePartitions == null
+                    overwriteStaticPartitions == null
                             ? commit.overwritePartition(overwritePartitionSpec, committable)
-                            : commit.overwritePartition(overwritePartitions, committable);
+                            : commit.overwriteStaticPartitions(
+                                    overwriteStaticPartitions, committable);
             maintain(
                     committable.identifier(),
                     maintainExecutor,

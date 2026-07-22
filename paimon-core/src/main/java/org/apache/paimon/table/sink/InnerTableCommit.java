@@ -30,9 +30,13 @@ import java.util.Map;
 public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
-    InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition);
+    InnerTableCommit withOverwrite(@Nullable Map<String, String> spec);
 
-    InnerTableCommit withOverwrite(List<BinaryRow> staticPartitions);
+    /**
+     * Overwrite specified partitions. Unlike {@link InnerTableCommit#withOverwrite}, the given
+     * partitions must have all the partition keys.
+     */
+    InnerTableCommit withOverwriteStaticPartitions(List<BinaryRow> staticPartitions);
 
     /**
      * If this is set to true, when there is no new data, no snapshot will be generated. By default,

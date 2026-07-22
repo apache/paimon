@@ -65,7 +65,7 @@ public interface FileStoreCommit extends AutoCloseable {
     int overwritePartition(Map<String, String> partition, ManifestCommittable committable);
 
     /** Overwrite from manifest committable and specified partitions. */
-    int overwritePartition(List<BinaryRow> partitions, ManifestCommittable committable);
+    int overwriteStaticPartitions(List<BinaryRow> partitions, ManifestCommittable committable);
 
     /**
      * Drop multiple partitions. The {@link Snapshot.CommitKind} of generated snapshot is {@link
