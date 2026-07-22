@@ -186,6 +186,50 @@ class RayRangeJoinTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "same type"):
             range_join("default.rj_ty_in", "default.rj_ty_loc", self.catalog_options, on="k")
 
+    def test_partition_filter_and_partitioned_table(self):
+        # range_join works on partitioned tables (unlike bucket_join); left_partitions
+        # prunes to the requested partition before planning.
+        loc = pa.schema([("p", pa.string()), ("k", pa.int64())])
+        self.catalog.create_table(
+            "default.rj_pf_l",
+            Schema.from_pyarrow_schema(loc, partition_keys=["p"]), False)
+        t = self.catalog.get_table("default.rj_pf_l")
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"p": ["a", "a", "b", "b"], "k": [1, 2, 3, 4]}, schema=loc))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        self._table("default.rj_pf_r", pa.schema([("k2", pa.int64()), ("val", pa.string())]), [
+            pa.Table.from_pydict({"k2": [1, 2, 3, 4], "val": ["v1", "v2", "v3", "v4"]},
+                                 schema=pa.schema([("k2", pa.int64()), ("val", pa.string())]))])
+
+        ds = range_join("default.rj_pf_l", "default.rj_pf_r", self.catalog_options,
+                        left_on="k", right_on="k2", left_projection=["k"],
+                        right_projection=["k2", "val"], left_partitions={"p": "a"}, num_ranges=2)
+        self.assertEqual(sorted((r["k"], r["val"]) for r in ds.take_all()),
+                         [(1, "v1"), (2, "v2")])
+        # Whole partitioned table joins fine when unfiltered.
+        ds = range_join("default.rj_pf_l", "default.rj_pf_r", self.catalog_options,
+                        left_on="k", right_on="k2", left_projection=["k"],
+                        right_projection=["k2", "val"], num_ranges=2)
+        self.assertEqual(sorted(r["k"] for r in ds.take_all()), [1, 2, 3, 4])
+
+    def test_many_to_many_matches_global_join(self):
+        loc = pa.schema([("k", pa.int64()), ("rid", pa.int64())])
+        ins = pa.schema([("k", pa.int64())])
+        self._table("default.rj_mm_loc", loc, [
+            pa.Table.from_pydict({"k": [1, 1, 2], "rid": [10, 11, 20]}, schema=loc)])
+        self._table("default.rj_mm_in", ins, [
+            pa.Table.from_pydict({"k": [1, 1, 2]}, schema=ins)])
+        # key 1: 2 left x 2 right = 4 rows; key 2: 1 x 1 = 1 row.
+        for num_ranges in (1, 3):
+            ds = range_join("default.rj_mm_in", "default.rj_mm_loc", self.catalog_options,
+                            on="k", left_projection=["k"], right_projection=["k", "rid"],
+                            num_ranges=num_ranges)
+            got = sorted(r["rid"] for r in ds.take_all())
+            self.assertEqual(got, [10, 10, 11, 11, 20])
+
     def test_rejects_bad_on_spec(self):
         with self.assertRaisesRegex(ValueError, "exactly one of"):
             range_join("a", "b", self.catalog_options)  # neither on nor left_on/right_on

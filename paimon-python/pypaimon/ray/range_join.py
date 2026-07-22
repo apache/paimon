@@ -102,10 +102,14 @@ def _split_key_range(split, col, key_type, file_io):
     return lo, hi
 
 
-def _plan_ranged_splits(table_id, catalog_options, projection, range_col):
+def _plan_ranged_splits(table_id, catalog_options, projection, range_col, partitions=None):
     """Plan driver-side; returns ``(ranged_splits, schema_id)`` where ranged_splits is
-    a list of (split, lo, hi). Ranges come from each file's parquet footer; the splits
-    sent to workers carry no stats."""
+    a list of (split, lo, hi). Ranges come from each file's parquet footer (read in
+    parallel); the splits sent to workers carry no stats. ``partitions`` (a {column:
+    value} dict on partition columns) prunes to those partitions before planning."""
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    from pypaimon.common.predicate_builder import PredicateBuilder
     from pypaimon.schema.data_types import PyarrowFieldParser
     table = get_table(table_id, catalog_options, None, "range_join")
     schema_id = table.table_schema.id
@@ -115,12 +119,20 @@ def _plan_ranged_splits(table_id, catalog_options, projection, range_col):
     key_type = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields).field(range_col).type
     rb = table.new_read_builder()
-    scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
-    ranged = []
-    for s in scan.plan().splits():
-        lo, hi = _split_key_range(s, range_col, key_type, file_io)
-        ranged.append((s, lo, hi))
-    return ranged, schema_id
+    if partitions:
+        # Build the partition predicate before projection, so its field list still has
+        # the partition columns.
+        pb = rb.new_predicate_builder()
+        rb = rb.with_partition_filter(
+            PredicateBuilder.and_predicates([pb.equal(c, v) for c, v in partitions.items()]))
+    if projection is not None:
+        rb = rb.with_projection(projection)
+    splits = list(rb.new_scan().plan().splits())
+    workers = min(16, (os.cpu_count() or 4) * 4, len(splits) or 1)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        bounds = pool.map(
+            lambda s: _split_key_range(s, range_col, key_type, file_io), splits)
+    return [(s, lo, hi) for s, (lo, hi) in zip(splits, bounds)], schema_id
 
 
 def _cut_points(ranged_sides, num_ranges):
@@ -198,6 +210,8 @@ def range_join(
     num_ranges: Optional[int] = None,
     left_projection: Optional[List[str]] = None,
     right_projection: Optional[List[str]] = None,
+    left_partitions: Optional[Dict[str, Any]] = None,
+    right_partitions: Optional[Dict[str, Any]] = None,
     join_type: str = "inner",
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> "ray.data.Dataset":
@@ -205,8 +219,9 @@ def range_join(
 
     ``on`` when both sides use the same column names, or ``left_on``/``right_on``
     when they differ (positionally paired). The first pair is the range key used to
-    cut the key space. Sides must not share column names other than ``on`` keys.
-    Returns a ``ray.data.Dataset``.
+    cut the key space. ``left_partitions``/``right_partitions`` ({column: value} dicts
+    on partition columns) prune each side to those partitions first. Sides must not
+    share column names other than ``on`` keys. Returns a ``ray.data.Dataset``.
     """
     import ray
 
@@ -282,9 +297,9 @@ def range_join(
 
     l_range_col, r_range_col = lkeys[0], rkeys[0]
     l_ranged, l_schema_id = _plan_ranged_splits(
-        left, catalog_options, left_projection, l_range_col)
+        left, catalog_options, left_projection, l_range_col, left_partitions)
     r_ranged, r_schema_id = _plan_ranged_splits(
-        right, catalog_options, right_projection, r_range_col)
+        right, catalog_options, right_projection, r_range_col, right_partitions)
 
     def _empty():
         empty = read_splits(
