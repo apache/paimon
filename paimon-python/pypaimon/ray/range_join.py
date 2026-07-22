@@ -61,11 +61,26 @@ def _parquet_col_range(metadata, col):
     return None if lo is None else (lo, hi)
 
 
-def _split_key_range(split, col, file_io):
-    """Min/max of ``col`` over the split's files, read from their parquet footers;
-    (None, None) when any file isn't parquet or lacks usable stats (the split then
-    joins every range). Manifest value stats are empty for pypaimon-written tables,
-    so the footer is the source of truth."""
+_UNCOERCIBLE = object()
+
+
+def _coerce_bound(value, key_type):
+    """Coerce a footer bound to the current join-key type so bounds from files written
+    under different schemas (e.g. DATE then TIMESTAMP) stay mutually comparable. Returns
+    ``_UNCOERCIBLE`` when the value can't be cast (the split then joins every range)."""
+    import pyarrow as pa
+    try:
+        return pa.array([value]).cast(key_type)[0].as_py()
+    except Exception:
+        return _UNCOERCIBLE
+
+
+def _split_key_range(split, col, key_type, file_io):
+    """Min/max of ``col`` over the split's files, read from their parquet footers and
+    coerced to ``key_type``; (None, None) when any file isn't parquet, lacks usable
+    stats, or has a bound that can't be coerced (the split then joins every range).
+    Manifest value stats are empty for pypaimon-written tables, so the footer is the
+    source of truth."""
     import pyarrow.parquet as pq
     lo, hi = None, None
     for f in split.files:
@@ -81,8 +96,12 @@ def _split_key_range(split, col, file_io):
             stream.close()
         if rng is None:
             return None, None
-        lo = rng[0] if lo is None else min(lo, rng[0])
-        hi = rng[1] if hi is None else max(hi, rng[1])
+        clo = _coerce_bound(rng[0], key_type)
+        chi = _coerce_bound(rng[1], key_type)
+        if clo is _UNCOERCIBLE or chi is _UNCOERCIBLE:
+            return None, None
+        lo = clo if lo is None else min(lo, clo)
+        hi = chi if hi is None else max(hi, chi)
     if lo is None:
         return None, None
     return lo, hi
@@ -92,16 +111,19 @@ def _plan_ranged_splits(table_id, catalog_options, projection, range_col):
     """Plan driver-side; returns ``(ranged_splits, schema_id)`` where ranged_splits is
     a list of (split, lo, hi). Ranges come from each file's parquet footer; the splits
     sent to workers carry no stats."""
+    from pypaimon.schema.data_types import PyarrowFieldParser
     table = get_table(table_id, catalog_options, None, "range_join")
     schema_id = table.table_schema.id
     if pin_latest_snapshot(table) is None:
         return [], schema_id
     file_io = table.file_io
+    key_type = PyarrowFieldParser.from_paimon_schema(
+        table.table_schema.fields).field(range_col).type
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
     ranged = []
     for s in scan.plan().splits():
-        lo, hi = _split_key_range(s, range_col, file_io)
+        lo, hi = _split_key_range(s, range_col, key_type, file_io)
         ranged.append((s, lo, hi))
     return ranged, schema_id
 

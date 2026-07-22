@@ -16,6 +16,7 @@
 #  under the License.
 
 import collections
+import datetime
 import os
 import shutil
 import tempfile
@@ -211,6 +212,51 @@ class RayRangeJoinTest(unittest.TestCase):
             range_join("default.rj_xn_left", "default.rj_xn_right", self.catalog_options,
                        left_on="lid", right_on="rid")
 
+    def test_date_to_timestamp_schema_evolution(self):
+        # A DATE->TIMESTAMP evolved key yields date footers in old files and datetime in
+        # new ones; the planner must coerce both to the key type, not compare them raw.
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        a_date = pa.schema([("k", pa.date32())])
+        self.catalog.create_table(
+            "default.rj_ev_a", Schema.from_pyarrow_schema(a_date), False)
+        t = self.catalog.get_table("default.rj_ev_a")
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"k": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]}, schema=a_date))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        self.catalog.alter_table(
+            "default.rj_ev_a",
+            [SchemaChange.update_column_type("k", AtomicType("TIMESTAMP(6)"))], False)
+        t = self.catalog.get_table("default.rj_ev_a")
+        a_ts = pa.schema([("k", pa.timestamp("us"))])
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"k": [datetime.datetime(2020, 6, 1), datetime.datetime(2020, 6, 2)]}, schema=a_ts))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        b = pa.schema([("bk", pa.timestamp("us")), ("val", pa.string())])
+        self.catalog.create_table("default.rj_ev_b", Schema.from_pyarrow_schema(b), False)
+        t = self.catalog.get_table("default.rj_ev_b")
+        wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"bk": [datetime.datetime(2020, 1, 1), datetime.datetime(2020, 6, 1)],
+             "val": ["jan1", "jun1"]}, schema=b))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        ds = range_join("default.rj_ev_a", "default.rj_ev_b", self.catalog_options,
+                        left_on="k", right_on="bk", num_ranges=3)
+        got = sorted((str(r["k"]), r["val"]) for r in ds.take_all())
+        self.assertEqual(got, [("2020-01-01 00:00:00", "jan1"),
+                               ("2020-06-01 00:00:00", "jun1")])
+
     def test_range_budget_caps_ranges_when_stats_missing(self):
         Split = collections.namedtuple("Split", "files")
         File = collections.namedtuple("File", "row_count")
@@ -234,8 +280,10 @@ class RayRangeJoinTest(unittest.TestCase):
         self.assertEqual(min(los), 10)
         self.assertEqual(max(his), 20)
 
-    def test_no_stats_fallback_matches_global_join(self):
-        # metadata.stats-mode=none -> no per-file min/max -> every split joins every range.
+    def test_stats_mode_none_still_correct(self):
+        # metadata.stats-mode=none only drops manifest stats; the parquet footer still
+        # carries min/max (range_join's actual source), so ranges still work. The
+        # unknown-split fallback itself is covered by the planning-logic tests.
         no_stats = {"metadata.stats-mode": "none"}
         loc = pa.schema([("k", pa.int64()), ("row_id", pa.int64())])
         ins = pa.schema([("k", pa.int64())])
@@ -252,7 +300,6 @@ class RayRangeJoinTest(unittest.TestCase):
             "default.rj_ns_in", "default.rj_ns_loc", self.catalog_options,
             on="k", left_projection=["k"], right_projection=["k", "row_id"], num_ranges=4)
         got = sorted((r["k"], r["row_id"]) for r in ds.take_all())
-        # Exactly once, correct, despite the fallback reading every split in every range.
         self.assertEqual(got, [(i, i) for i in range(50, 150)])
 
     def test_null_keys_dropped_independent_of_num_ranges(self):
