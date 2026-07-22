@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.shredding.MapSelectedKeysMetadataUtils;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -183,6 +185,32 @@ public class FormatReaderMappingTest {
         Assertions.assertThat(readField.type()).isEqualTo(selectedKeysType);
         Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
                 .isTrue();
+    }
+
+    @Test
+    public void testMapSelectedKeysUsesDataValueTypeForSchemaEvolution() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+        DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
+
+        DataField readField =
+                invokeDataFields(
+                                Collections.singletonList(dataField),
+                                Collections.singletonList(expectedField))
+                        .get(0);
+        RowType readType = (RowType) readField.type();
+        Assertions.assertThat(readType.getTypeAt(0)).isEqualTo(DataTypes.INT());
+        Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
+                .isTrue();
+
+        IndexCastMapping mapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        Collections.singletonList(expectedField),
+                        Collections.singletonList(readField));
+        Assertions.assertThat(mapping.getCastMapping()).isNotNull();
+        InternalRow selectedKeys =
+                mapping.getCastMapping()[0].getFieldOrNull(GenericRow.of(GenericRow.of(10)));
+        Assertions.assertThat(selectedKeys.getLong(0)).isEqualTo(10L);
     }
 
     @Test
