@@ -20,7 +20,7 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
@@ -163,7 +163,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
-        raw_row_ranges = GlobalIndexCoverage(
+        raw_row_ranges = DataEvolutionGlobalIndexCoverage(
             self._table,
             snapshot,
             partition_filter,
@@ -177,7 +177,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
         if self._filter is not None:
             raw_row_ranges = Range.sort_and_merge_overlap(
                 raw_row_ranges
-                + GlobalIndexCoverage(
+                + DataEvolutionGlobalIndexCoverage(
                     self._table,
                     snapshot,
                     partition_filter,

@@ -26,7 +26,9 @@ from pypaimon.globalindex.vector_search_result import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta, GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import (
+    DataEvolutionGlobalIndexScanner,
+)
 from pypaimon.globalindex.key_serializer import KeySerializer
 from pypaimon.globalindex.memory_slice_input import MemorySliceInput
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
@@ -55,7 +57,7 @@ __all__ = [
     'GlobalIndexMeta',
     'GlobalIndexIOMeta',
     'GlobalIndexEvaluator',
-    'GlobalIndexScanner',
+    'DataEvolutionGlobalIndexScanner',
     'KeySerializer',
     'MemorySliceInput',
     'OffsetGlobalIndexReader',

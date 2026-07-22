@@ -931,7 +931,7 @@ class VectorSearchFilterTest(unittest.TestCase):
             return _FakeReader()
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner.GlobalIndexScanner.create",
+                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
                 return_value=scanner), \
              mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
@@ -1282,9 +1282,9 @@ class VectorSearchFilterTest(unittest.TestCase):
             )
 
     def test_scanner_threads_external_path_to_btree_reader(self):
-        """GlobalIndexScanner (backing _pre_filter) must thread external_path
+        """DataEvolutionGlobalIndexScanner (backing _pre_filter) must thread external_path
         onto the GlobalIndexIOMeta handed to the btree reader factory."""
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 
         scalar_file = self.entries[2].index_file
 
@@ -1301,7 +1301,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.LazyFilteredBTreeReader",
                 _FakeLazyReader):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=self.table.fields,
                 file_io=self.table.file_io,
                 index_path="/unused/index-path",
@@ -1488,7 +1488,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
     """Scalar pre-filter across multiple btree shards of the same field.
 
-    Exercises the real GlobalIndexScanner reader-construction path (with
+    Exercises the real DataEvolutionGlobalIndexScanner reader-construction path (with
     OffsetGlobalIndexReader + UnionGlobalIndexReader wrapping) so that:
       - Local row ids from each shard are rebased to the global row-id space
         before being unioned.
@@ -1500,8 +1500,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_hit_only_in_later_shard_returns_global_row_id(self):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         id_field = _field(0, "id")
@@ -1545,7 +1545,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=wide_meta):
-                scanner = GlobalIndexScanner(
+                scanner = DataEvolutionGlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
                     index_path="/unused",
@@ -1566,8 +1566,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_groups_are_padded_before_and(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a")
@@ -1606,9 +1606,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader(io_meta.file_name) for io_meta in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1629,8 +1629,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_groups_pad_missing_coverage_before_and(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a")
@@ -1675,9 +1675,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader(io_meta.file_name) for io_meta in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1697,8 +1697,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_padding_does_not_convert_none_to_hits(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a", "STRING")
@@ -1727,9 +1727,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader() for _ in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1746,12 +1746,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_native_fulltext_index_is_dispatched_by_scanner(self):
         """Non-btree scalar global indexes (full-text, etc.) must be
-        instantiated by GlobalIndexScanner — previously only 'btree' was
+        instantiated by DataEvolutionGlobalIndexScanner — previously only 'btree' was
         handled and everything else was silently dropped, making text-column
         pre-filter a no-op."""
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1785,7 +1785,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.globalindex.full_text.NativeFullTextGlobalIndexReader",
                 _StubFullTextReader):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path="/unused",
@@ -1814,8 +1814,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         the pre-filter is silently skipped and vector search returns rows
         that violate the predicate."""
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1847,7 +1847,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = GlobalIndexScanner(
+                scanner = DataEvolutionGlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
                     index_path="/unused",
@@ -1867,8 +1867,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
     def test_scanner_reports_unindexed_rows_for_full_mode(self):
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         class _Options:
@@ -1893,7 +1893,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         table.options = _Options()
         table.snapshot_manager = lambda: _Snapshots()
 
-        scanner = GlobalIndexScanner.create(table, index_files=[indexed])
+        scanner = DataEvolutionGlobalIndexScanner.create(table, index_files=[indexed])
         try:
             result = scanner.unindexed_rows(
                 Predicate(method="equal", index=0, field="id", literals=[7]))
@@ -1903,8 +1903,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], result.results().to_range_list())
 
     def test_scanner_create_selects_extra_field_indexes(self):
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1940,7 +1940,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = GlobalIndexScanner.create(
+                scanner = DataEvolutionGlobalIndexScanner.create(
                     table,
                     predicate=Predicate(method="equal", index=1, field="id",
                                         literals=[3]),
