@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
@@ -55,7 +56,6 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -91,7 +91,8 @@ public class TableCommitImpl implements InnerTableCommit {
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
 
-    @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private Map<String, String> overwritePartitionSpec = null;
+    @Nullable private List<BinaryRow> overwritePartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -135,7 +136,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (overwritePartition != null) {
+        if (overwritePartitionSpec != null || overwritePartitions != null) {
             return true;
         }
         return tagAutoManager != null
@@ -145,7 +146,15 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
-        this.overwritePartition = overwritePartitions;
+        this.overwritePartitionSpec = overwritePartitions;
+        this.overwritePartitions = null;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withOverwrite(List<BinaryRow> overwritePartitions) {
+        this.overwritePartitionSpec = null;
+        this.overwritePartitions = overwritePartitions;
         return this;
     }
 
@@ -267,7 +276,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        if (overwritePartition == null) {
+        if (overwritePartitionSpec == null && overwritePartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
@@ -293,8 +302,9 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    commit.overwritePartition(
-                            overwritePartition, committable, Collections.emptyMap());
+                    overwritePartitions == null
+                            ? commit.overwritePartition(overwritePartitionSpec, committable)
+                            : commit.overwritePartition(overwritePartitions, committable);
             maintain(
                     committable.identifier(),
                     maintainExecutor,

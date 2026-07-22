@@ -20,17 +20,20 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -40,6 +43,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
@@ -71,6 +76,59 @@ public class OverwriteTableTest extends TableTestBase {
             throws Exception {
         innerTestOverwrite(
                 true, dynamicPartitionOverwrite, overwriteData, overwritePartition, expected);
+    }
+
+    @Test
+    public void testOverwriteMultiplePartitions() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt0", DataTypes.INT())
+                        .column("pt1", DataTypes.STRING())
+                        .column("v", DataTypes.STRING())
+                        .partitionKeys("pt0", "pt1")
+                        .option(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        write(
+                table,
+                overwriteRow(1, 1, "A", "old-1A"),
+                overwriteRow(2, 1, "B", "old-1B"),
+                overwriteRow(3, 2, "A", "old-2A"));
+
+        Function<InternalRow, String> rowToString =
+                row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType());
+        try (StreamTableWrite write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            write.write(overwriteRow(4, 1, "A", "list-1A"));
+            write.write(overwriteRow(5, 2, "A", "list-2A"));
+            List<CommitMessage> messages = write.prepareCommit(true, 1);
+            List<BinaryRow> overwritePartitions =
+                    messages.stream()
+                            .map(message -> message.partition().copy())
+                            .distinct()
+                            .collect(Collectors.toList());
+            commit.withOverwrite(overwritePartitions).commit(1, messages);
+            assertThat(read(table))
+                    .extracting(rowToString)
+                    .containsExactlyInAnyOrder(
+                            "2, 1, B, old-1B", "4, 1, A, list-1A", "5, 2, A, list-2A");
+
+            write.write(overwriteRow(6, 1, "A", "map-1A"));
+            messages = write.prepareCommit(true, 2);
+            commit.withOverwrite(Collections.singletonMap("pt0", "1")).commit(2, messages);
+            assertThat(read(table))
+                    .extracting(rowToString)
+                    .containsExactlyInAnyOrder("5, 2, A, list-2A", "6, 1, A, map-1A");
+
+            write.write(overwriteRow(7, 2, "A", "list-again-2A"));
+            messages = write.prepareCommit(true, 3);
+            commit.withOverwrite(overwritePartitions).commit(3, messages);
+            assertThat(read(table))
+                    .extracting(rowToString)
+                    .containsExactly("7, 2, A, list-again-2A");
+        }
     }
 
     private void innerTestOverwrite(
