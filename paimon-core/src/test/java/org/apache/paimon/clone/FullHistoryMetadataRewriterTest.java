@@ -452,6 +452,88 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     @Test
+    public void testStreamingValidationRejectsCorruptedSharedManifestSize() throws Exception {
+        TaggedClone clone = createTaggedClone("corrupted-manifest-size");
+        Tag tag = clone.target.tagManager().tagObjects().get(0).getLeft();
+        ManifestList manifestList = clone.target.store().manifestListFactory().create();
+        List<ManifestFileMeta> metas =
+                manifestList.read(tag.deltaManifestList(), tag.deltaManifestListSize());
+        assertThat(metas).hasSize(1);
+        ManifestFileMeta meta = metas.get(0);
+        ManifestFileMeta corruptedMeta =
+                new ManifestFileMeta(
+                        meta.fileName(),
+                        1L,
+                        meta.numAddedFiles(),
+                        meta.numDeletedFiles(),
+                        meta.partitionStats(),
+                        meta.schemaId(),
+                        meta.minBucket(),
+                        meta.maxBucket(),
+                        meta.minLevel(),
+                        meta.maxLevel(),
+                        meta.minRowId(),
+                        meta.maxRowId());
+        Pair<String, Long> corruptedList =
+                manifestList.write(Collections.singletonList(corruptedMeta));
+        FileStoreTable corruptedTarget =
+                rewriteTagDeltaManifestList(clone.target, tag, corruptedList);
+
+        assertThatThrownBy(
+                        () ->
+                                corruptedTarget
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        CoreOptions.SCAN_TAG_NAME.key(), "tag1"))
+                                        .newScan()
+                                        .plan())
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                clone.source,
+                                                corruptedTarget,
+                                                clone.mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("manifest file")
+                .hasMessageContaining("metadata records 1");
+    }
+
+    @Test
+    public void testStreamingValidationRejectsCorruptedSharedManifestListSize() throws Exception {
+        TaggedClone clone = createTaggedClone("corrupted-manifest-list-size");
+        Tag tag = clone.target.tagManager().tagObjects().get(0).getLeft();
+        assertThat(tag.deltaManifestList())
+                .isEqualTo(clone.target.snapshotManager().latestSnapshot().deltaManifestList());
+        FileStoreTable corruptedTarget =
+                rewriteTagDeltaManifestList(
+                        clone.target, tag, Pair.of(tag.deltaManifestList(), 1L));
+
+        assertThatThrownBy(
+                        () ->
+                                corruptedTarget
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        CoreOptions.SCAN_TAG_NAME.key(), "tag1"))
+                                        .newScan()
+                                        .plan())
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                clone.source,
+                                                corruptedTarget,
+                                                clone.mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("manifest list")
+                .hasMessageContaining("metadata records 1");
+    }
+
+    @Test
     public void testStreamingValidationAllowsManifestRerollAfterPathRewrite() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("reroll-source/table").toString());
         Path targetRoot = new Path(tempDir.resolve("reroll-target/table").toString());
@@ -1133,6 +1215,53 @@ public class FullHistoryMetadataRewriterTest {
                                 .collect(Collectors.toList()));
         assertThat(new FullHistoryFileCollector(target).collect().allFiles())
                 .allMatch(this::exists);
+    }
+
+    private TaggedClone createTaggedClone(String prefix) throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve(prefix + "-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve(prefix + "-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve(prefix + "-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve(prefix + "-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        writeRows(source, 0, "A", 1);
+        source.createTag("tag1", 1);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+        return new TaggedClone(source, FileStoreTableFactory.create(fileIO, targetRoot), mapping);
+    }
+
+    private FileStoreTable rewriteTagDeltaManifestList(
+            FileStoreTable target, Tag tag, Pair<String, Long> deltaManifestList) throws Exception {
+        Snapshot corruptedSnapshot = copyWithDeltaManifestList(tag, deltaManifestList);
+        Tag corruptedTag =
+                Tag.fromSnapshotAndTagTtl(
+                        corruptedSnapshot, tag.getTagTimeRetained(), tag.getTagCreateTime());
+        fileIO.overwriteFileUtf8(target.tagManager().tagPath("tag1"), corruptedTag.toJson());
+        return FileStoreTableFactory.create(fileIO, target.location());
+    }
+
+    private static class TaggedClone {
+
+        private final FileStoreTable source;
+        private final FileStoreTable target;
+        private final PathMapping mapping;
+
+        private TaggedClone(FileStoreTable source, FileStoreTable target, PathMapping mapping) {
+            this.source = source;
+            this.target = target;
+            this.mapping = mapping;
+        }
     }
 
     private FileStoreTable createTable(Path tableRoot, String externalRoot) throws Exception {

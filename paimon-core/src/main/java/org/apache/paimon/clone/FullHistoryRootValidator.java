@@ -126,7 +126,7 @@ class FullHistoryRootValidator {
                 new IndexManifestEntrySerializer();
         private final MessageDigest entryHasher = newSha256();
         private final Cache<String, ManifestDigest> manifestDigests = newDigestCache();
-        private final Cache<String, EntryMultisetDigest> manifestListDigests = newDigestCache();
+        private final Cache<String, ManifestListDigest> manifestListDigests = newDigestCache();
         private final Cache<String, EntryMultisetDigest> indexManifestDigests = newDigestCache();
 
         private RootDigestContext(
@@ -163,14 +163,25 @@ class FullHistoryRootValidator {
                 digest.addString(snapshot.deltaManifestList());
                 digest.addNullableLong(snapshot.deltaManifestListSize());
             } else {
-                digest.addBytes(manifestListDigest(snapshot.baseManifestList()).toBytes());
-                digest.addBytes(manifestListDigest(snapshot.deltaManifestList()).toBytes());
+                digest.addBytes(
+                        manifestListDigest(
+                                        snapshot.baseManifestList(),
+                                        snapshot.baseManifestListSize())
+                                .toBytes());
+                digest.addBytes(
+                        manifestListDigest(
+                                        snapshot.deltaManifestList(),
+                                        snapshot.deltaManifestListSize())
+                                .toBytes());
             }
 
             digest.addNullableBytes(
                     snapshot.changelogManifestList() == null
                             ? null
-                            : manifestListDigest(snapshot.changelogManifestList()).toBytes());
+                            : manifestListDigest(
+                                            snapshot.changelogManifestList(),
+                                            snapshot.changelogManifestListSize())
+                                    .toBytes());
             if (longLivedChangelog) {
                 // Index and statistics metadata are retained verbatim by changelog expiration.
                 digest.addString(snapshot.indexManifest());
@@ -196,28 +207,50 @@ class FullHistoryRootValidator {
             return digest.finish();
         }
 
-        private EntryMultisetDigest manifestListDigest(String fileName) throws IOException {
-            EntryMultisetDigest cached = manifestListDigests.getIfPresent(fileName);
+        private EntryMultisetDigest manifestListDigest(
+                String fileName, @Nullable Long declaredFileSize) throws IOException {
+            ManifestListDigest cached = manifestListDigests.getIfPresent(fileName);
             if (cached != null) {
-                return cached;
+                validateFileSize("manifest list", fileName, declaredFileSize, cached.fileSize);
+                return cached.entries;
             }
+            Long actualFileSize = rewritePaths ? null : manifestList.fileSize(fileName);
+            validateFileSize("manifest list", fileName, declaredFileSize, actualFileSize);
             // Rewritten paths can change serialized sizes and roll one source manifest into
             // multiple target manifests. Compare entries at root level and validate each target
             // manifest's pruning metadata against its own entries in manifestDigest.
             EntryMultisetDigest digest = new EntryMultisetDigest();
-            for (ManifestFileMeta meta : manifestList.readWithIOException(fileName)) {
+            for (ManifestFileMeta meta :
+                    manifestList.readWithIOException(fileName, declaredFileSize)) {
                 digest.merge(manifestDigest(meta));
             }
-            manifestListDigests.put(fileName, digest);
+            manifestListDigests.put(fileName, new ManifestListDigest(digest, actualFileSize));
             return digest;
+        }
+
+        private void validateFileSize(
+                String fileType,
+                String fileName,
+                @Nullable Long declaredFileSize,
+                @Nullable Long actualFileSize) {
+            if (!rewritePaths && declaredFileSize != null) {
+                checkState(
+                        actualFileSize != null && actualFileSize.longValue() == declaredFileSize,
+                        "Target %s %s has size %s but metadata records %s.",
+                        fileType,
+                        fileName,
+                        actualFileSize,
+                        declaredFileSize);
+            }
         }
 
         private EntryMultisetDigest manifestDigest(ManifestFileMeta meta) throws IOException {
             ManifestDigest cached = manifestDigests.getIfPresent(meta.fileName());
             if (cached != null) {
-                validateManifestMetadata(meta, cached.metadata);
+                validateManifest(meta, cached);
                 return cached.entries;
             }
+            Long actualFileSize = rewritePaths ? null : manifestFile.fileSize(meta.fileName());
             EntryMultisetDigest digest = new EntryMultisetDigest();
             List<ManifestEntry> entries =
                     manifestFile.readWithIOException(meta.fileName(), meta.fileSize());
@@ -225,16 +258,18 @@ class FullHistoryRootValidator {
                 digest.add(entryHasher, manifestEntrySerializer.serializeToBytes(canonical(entry)));
             }
             ManifestMetadata metadata = ManifestMetadata.from(entries, partitionType);
-            validateManifestMetadata(meta, metadata);
-            manifestDigests.put(meta.fileName(), new ManifestDigest(digest, metadata));
+            ManifestDigest manifestDigest = new ManifestDigest(digest, metadata, actualFileSize);
+            validateManifest(meta, manifestDigest);
+            manifestDigests.put(meta.fileName(), manifestDigest);
             return digest;
         }
 
-        private void validateManifestMetadata(
-                ManifestFileMeta manifest, ManifestMetadata expected) {
+        private void validateManifest(ManifestFileMeta manifest, ManifestDigest expected) {
+            validateFileSize(
+                    "manifest file", manifest.fileName(), manifest.fileSize(), expected.fileSize);
             if (!rewritePaths) {
                 checkState(
-                        expected.matches(manifest),
+                        expected.metadata.matches(manifest),
                         "Target manifest metadata %s does not match its entries.",
                         manifest.fileName());
             }
@@ -293,10 +328,24 @@ class FullHistoryRootValidator {
 
         private final EntryMultisetDigest entries;
         private final ManifestMetadata metadata;
+        private final @Nullable Long fileSize;
 
-        private ManifestDigest(EntryMultisetDigest entries, ManifestMetadata metadata) {
+        private ManifestDigest(
+                EntryMultisetDigest entries, ManifestMetadata metadata, @Nullable Long fileSize) {
             this.entries = entries;
             this.metadata = metadata;
+            this.fileSize = fileSize;
+        }
+    }
+
+    private static class ManifestListDigest {
+
+        private final EntryMultisetDigest entries;
+        private final @Nullable Long fileSize;
+
+        private ManifestListDigest(EntryMultisetDigest entries, @Nullable Long fileSize) {
+            this.entries = entries;
+            this.fileSize = fileSize;
         }
     }
 
