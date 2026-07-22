@@ -106,7 +106,10 @@ private[spark] object PostponeMergeInputScan {
         .groupBy(bucketKey)
         .map {
           case (key, splits) =>
-            RealBucketInputPartition(key.partition.toArray, key.bucket, splits.map(serializeSplit))
+            RealBucketInputPartition(
+              key.partition.toArray,
+              key.bucket,
+              splits.iterator.map(serializeSplit).toList)
         }
       val postponePartitions =
         corePlan.postponeFileTasks().asScala.map(PostponeInputPartition)
