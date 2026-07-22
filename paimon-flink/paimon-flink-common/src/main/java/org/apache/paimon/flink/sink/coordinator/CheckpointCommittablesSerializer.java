@@ -41,7 +41,9 @@ public class CheckpointCommittablesSerializer
 
     @Override
     public int getVersion() {
-        return 1;
+        // v1: checkpointId + watermark + committables
+        // v2: v1 + idle bit (appended before the committable list to keep the ordering explicit)
+        return 2;
     }
 
     @Override
@@ -49,6 +51,7 @@ public class CheckpointCommittablesSerializer
         DataOutputSerializer out = new DataOutputSerializer(256);
         out.writeLong(value.checkpointId());
         out.writeLong(value.watermark());
+        out.writeBoolean(value.idle());
         // Nested serializer version comes before the list so the reader can pick the right decoder
         // before touching any list bytes — mirrors ManifestCommittableSerializer's layout.
         out.writeInt(committableSerializer.getVersion());
@@ -64,12 +67,15 @@ public class CheckpointCommittablesSerializer
 
     @Override
     public CheckpointCommittables deserialize(int version, byte[] serialized) throws IOException {
-        if (version != getVersion()) {
+        if (version != 1 && version != 2) {
             throw new IOException("Unknown version " + version);
         }
         DataInputDeserializer in = new DataInputDeserializer(serialized);
         long checkpointId = in.readLong();
         long watermark = in.readLong();
+        // v1 payloads pre-date idle tracking; default to ACTIVE (idle=false), which reproduces
+        // the pre-idle-aware behaviour: every subtask contributes to the min unconditionally.
+        boolean idle = version >= 2 && in.readBoolean();
         int committableVersion = in.readInt();
         int count = in.readInt();
         List<Committable> committables = new ArrayList<>(count);
@@ -79,6 +85,6 @@ public class CheckpointCommittablesSerializer
             in.readFully(bytes);
             committables.add(committableSerializer.deserialize(committableVersion, bytes));
         }
-        return new CheckpointCommittables(checkpointId, committables, watermark);
+        return new CheckpointCommittables(checkpointId, committables, watermark, idle);
     }
 }

@@ -36,6 +36,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -60,18 +63,21 @@ import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOr
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Scanner for shard-based global indexes. */
-public class GlobalIndexScanner implements Closeable {
+/** Scanner for shard-based global indexes on data-evolution tables. */
+public class DataEvolutionGlobalIndexScanner implements Closeable {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(DataEvolutionGlobalIndexScanner.class);
 
     private final Options options;
     private final RowType rowType;
     private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
-    private final GlobalIndexCoverage coverage;
+    private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
 
-    private GlobalIndexScanner(
+    private DataEvolutionGlobalIndexScanner(
             FileStoreTable table,
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
@@ -86,7 +92,8 @@ public class GlobalIndexScanner implements Closeable {
         this.executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
-        this.coverage = new GlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
+        this.coverage =
+                new DataEvolutionGlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
@@ -181,21 +188,21 @@ public class GlobalIndexScanner implements Closeable {
         }
     }
 
-    public static Optional<GlobalIndexScanner> create(
+    public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
         return create(table, null, indexFiles);
     }
 
-    public static Optional<GlobalIndexScanner> create(
+    public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        List<IndexFileMeta> ordinaryIndexFiles = ordinaryGlobalIndexFiles(indexFiles);
-        if (ordinaryIndexFiles.isEmpty()) {
+        List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
+        if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
-                new GlobalIndexScanner(
+                new DataEvolutionGlobalIndexScanner(
                         table,
                         tryTravelOrLatest(table),
                         partitionFilter,
@@ -203,10 +210,10 @@ public class GlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        ordinaryIndexFiles));
+                        globalIndexFiles));
     }
 
-    public static Optional<GlobalIndexScanner> create(
+    public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
@@ -220,7 +227,7 @@ public class GlobalIndexScanner implements Closeable {
             return Optional.empty();
         }
         return Optional.of(
-                new GlobalIndexScanner(
+                new DataEvolutionGlobalIndexScanner(
                         table,
                         snapshot,
                         partitionFilter,
@@ -245,7 +252,7 @@ public class GlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
+                    if (globalIndex == null) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
@@ -265,14 +272,9 @@ public class GlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
-    private static List<IndexFileMeta> ordinaryGlobalIndexFiles(
-            Collection<IndexFileMeta> indexFiles) {
+    private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
-                .filter(
-                        indexFile -> {
-                            GlobalIndexMeta meta = indexFile.globalIndexMeta();
-                            return meta != null && meta.sourceMeta() == null;
-                        })
+                .filter(indexFile -> indexFile.globalIndexMeta() != null)
                 .collect(Collectors.toList());
     }
 
@@ -325,7 +327,19 @@ public class GlobalIndexScanner implements Closeable {
             for (CompletableFuture<GlobalIndexReader> future : futures) {
                 unionReader.add(future.join());
             }
-            readers.add(new UnionGlobalIndexReader(unionReader));
+            readers.add(
+                    new UnionGlobalIndexReader(
+                            unionReader,
+                            duration ->
+                                    LOG.info(
+                                            "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                            table.name(),
+                                            indexType,
+                                            group.fieldIds.stream()
+                                                    .map(rowType::getField)
+                                                    .map(DataField::name)
+                                                    .collect(Collectors.toList()),
+                                            duration / 1_000_000)));
         }
 
         return readers;

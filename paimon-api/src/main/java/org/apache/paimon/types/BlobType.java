@@ -118,6 +118,9 @@ public final class BlobType extends DataType {
         if (type.getTypeRoot() == DataTypeRoot.ARRAY) {
             return ((ArrayType) type).getElementType().getTypeRoot() == DataTypeRoot.BLOB;
         }
+        if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            return ((MapType) type).getValueType().getTypeRoot() == DataTypeRoot.BLOB;
+        }
         return false;
     }
 }

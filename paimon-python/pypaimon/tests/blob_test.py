@@ -35,7 +35,7 @@ from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
-from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
 from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
@@ -129,6 +129,36 @@ class BlobTest(unittest.TestCase):
             os.rmdir(self.temp_dir)
         except OSError:
             pass  # Ignore cleanup errors
+
+    def test_blob_copy_buffer_size_validation(self):
+        """blob.copy-buffer-size must be positive and fit Java's int-sized array."""
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.common.options.core_options import CoreOptions
+
+        # The internal writer already receives an int-sized value and only rejects non-positive
+        # buffers.
+        for bad in [0, -1]:
+            with self.assertRaises(ValueError):
+                BlobFormatWriter(io.BytesIO(), copy_buffer_size=bad)
+        BlobFormatWriter(io.BytesIO(), copy_buffer_size=8).close()
+
+        # CoreOptions defaults to 4 KiB, accepts values above the old 256 MiB ceiling,
+        # and retains only the Java int technical limit for cross-language consistency.
+        self.assertEqual(CoreOptions(Options({})).blob_copy_buffer_size(), 4096)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '256 kb'})).blob_copy_buffer_size(),
+            256 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({'blob.copy-buffer-size': '512 mb'})).blob_copy_buffer_size(),
+            512 * 1024 * 1024)
+        self.assertEqual(
+            CoreOptions(Options({
+                'blob.copy-buffer-size': f'{(1 << 31) - 1} bytes'
+            })).blob_copy_buffer_size(),
+            (1 << 31) - 1)
+        for bad in ['0 bytes', '2 gb', '3 gb']:
+            with self.assertRaises(ValueError):
+                CoreOptions(Options({'blob.copy-buffer-size': bad})).blob_copy_buffer_size()
 
     def test_from_data(self):
         """Test Blob.from_data() method."""
@@ -718,6 +748,125 @@ class BlobTest(unittest.TestCase):
                     [b"old-2a", b"old-2b"],
                 ],
                 batch.column(field.name).to_pylist(),
+            )
+            self.assertIsNone(reader.read_arrow_batch())
+        finally:
+            reader.close()
+
+        self.assertEqual(1, len(file_io.calls))
+        descriptors, parallelism = file_io.calls[0]
+        self.assertEqual(4, parallelism)
+        self.assertEqual(5, len(descriptors))
+        self.assertEqual(
+            [old_path, new_path, new_path, old_path, old_path],
+            [descriptor.uri for descriptor in descriptors],
+        )
+
+    def test_blob_fallback_batch_reader_materializes_selected_map_values_in_parallel(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        class RecordingFileIO(LocalFileIO):
+            def __init__(self, path, options):
+                super().__init__(path, options)
+                self.calls = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                self.calls.append((
+                    [blob.to_descriptor() for blob in blobs],
+                    parallelism,
+                ))
+                return super().read_blobs_concurrent(blobs, parallelism)
+
+        field = DataField(
+            0,
+            "pictures",
+            MapType(True, AtomicType("STRING", False), AtomicType("BLOB")),
+        )
+        file_io = RecordingFileIO(self.temp_dir, Options({}))
+
+        def write_blob_file(name, values):
+            path = os.path.join(self.temp_dir, name)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                for value in values:
+                    writer.add_element(
+                        GenericRow([value], [field], RowKind.INSERT)
+                    )
+                writer.close()
+            return path
+
+        old_path = write_blob_file(
+            "old-map.blob",
+            [
+                {"a": BlobData(b"old-0"), "null": None},
+                {"a": BlobData(b"old-1")},
+                {"a": BlobData(b"old-2a"), "b": BlobData(b"old-2b")},
+            ],
+        )
+        new_path = write_blob_file(
+            "new-map.blob",
+            [
+                Blob.MAP_PLACE_HOLDER,
+                {"a": BlobData(b"new-1a"), "b": None, "c": BlobData(b"new-1c")},
+                Blob.MAP_PLACE_HOLDER,
+            ],
+        )
+
+        def data_file(path, max_sequence_number):
+            return DataFileMeta(
+                file_name=os.path.basename(path),
+                file_size=os.path.getsize(path),
+                row_count=3,
+                min_key=None,
+                max_key=None,
+                key_stats=None,
+                value_stats=None,
+                min_sequence_number=max_sequence_number,
+                max_sequence_number=max_sequence_number,
+                schema_id=0,
+                level=0,
+                extra_files=[],
+                first_row_id=0,
+                file_path=path,
+            )
+
+        def supplier(path):
+            return lambda: FormatBlobReader(
+                file_io=file_io,
+                file_path=path,
+                read_fields=[field.name],
+                full_fields=[field],
+                push_down_predicate=None,
+                blob_as_descriptor=False,
+                blob_parallelism=4,
+            )
+
+        reader = BlobFallbackBatchReader(
+            [
+                (data_file(old_path, 1), supplier(old_path)),
+                (data_file(new_path, 2), supplier(new_path)),
+            ],
+            field.name,
+            pa.map_(pa.string(), pa.large_binary()),
+            batch_size=3,
+            blob_parallelism=4,
+        )
+        self.assertEqual(
+            [("value", b"body"), ("null", None)],
+            reader._map_value_for_arrow({
+                "value": BlobData(b"body"),
+                "null": None,
+            }),
+        )
+        try:
+            batch = reader.read_arrow_batch()
+            self.assertEqual(
+                [
+                    {"a": b"old-0", "null": None},
+                    {"a": b"new-1a", "b": None, "c": b"new-1c"},
+                    {"a": b"old-2a", "b": b"old-2b"},
+                ],
+                [dict(value) for value in batch.column(field.name).to_pylist()],
             )
             self.assertIsNone(reader.read_arrow_batch())
         finally:
@@ -2425,6 +2574,709 @@ class BlobEndToEndTest(unittest.TestCase):
             + struct.pack('<I', index_length)
         )
 
+    def test_map_blob_golden_bytes(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        blob_file_path = os.path.join(self.temp_dir, "map_golden.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+        entries = [
+            (None, None),
+            ("", BlobData(b"")),
+            ("inline", BlobData(b"data")),
+            ("descriptor", BlobData(b"descriptor")),
+        ]
+
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow([{}], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([entries], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([Blob.MAP_PLACE_HOLDER], fields, RowKind.INSERT))
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            self.assertEqual(
+                blob_file.read().hex(),
+                "cf114e584243424d010000000000000000000000002100000000000000"
+                "8360591ecf114e584243424d0104000000696e6c696e65646573637269"
+                "70746f726461746164657363726970746f7201020c080102080c040000"
+                "000400000047000000000000006c9f5981424c8f01010500000001",
+            )
+
+    def test_read_java_map_blob_golden_bytes(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "java_map_golden.blob")
+        java_golden_bytes = bytes.fromhex(
+            "cf114e584243424d010000000000000000000000002100000000000000"
+            "8360591ecf114e584243424d0104000000696e6c696e65646573637269"
+            "70746f726461746164657363726970746f7201020c080102080c040000"
+            "000400000047000000000000006c9f5981424c8f01010500000001"
+        )
+        with open(blob_file_path, 'wb') as blob_file:
+            blob_file.write(java_golden_bytes)
+
+        field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=[field.name],
+            full_fields=[field],
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        try:
+            self.assertEqual(reader.blob_lengths, [33, 71, -1, -2])
+            iterator = BlobRecordIterator(
+                file_io,
+                blob_file_path,
+                reader.blob_lengths,
+                reader.blob_offsets,
+                field,
+                input_stream=reader._input_stream,
+            )
+
+            self.assertEqual(next(iterator).values[0], {})
+            blob_map = next(iterator).values[0]
+            self.assertEqual(list(blob_map), [None, "", "inline", "descriptor"])
+            self.assertIsNone(blob_map[None])
+            self.assertEqual(blob_map[""].to_data(), b"")
+            self.assertEqual(blob_map["inline"].to_data(), b"data")
+            self.assertEqual(blob_map["descriptor"].to_data(), b"descriptor")
+            self.assertIsNone(next(iterator).values[0])
+            self.assertIs(next(iterator).values[0], Blob.MAP_PLACE_HOLDER)
+            with self.assertRaises(StopIteration):
+                next(iterator)
+        finally:
+            reader.close()
+
+    def test_map_blob_write_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "map_blob.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.write_value(
+            {"alpha": b"a", "null": None, "empty": b""},
+            fields,
+        )
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([{}], fields, RowKind.INSERT))
+        writer.add_element(GenericRow(
+            [{"omega": BlobData(b"last")}],
+            fields,
+            RowKind.INSERT,
+        ))
+        writer.close()
+
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        self.assertEqual(
+            [("value", b"body"), ("null", None)],
+            reader._map_value_for_arrow(
+                {"value": BlobData(b"body"), "null": None},
+                "blob_map",
+                0,
+                [],
+            ),
+        )
+        values = reader.read_arrow_batch().column(0).to_pylist()
+        self.assertEqual(dict(values[0]), {"alpha": b"a", "null": None, "empty": b""})
+        self.assertIsNone(values[1])
+        self.assertEqual(values[2], [])
+        self.assertEqual(dict(values[3]), {"omega": b"last"})
+        reader.close()
+
+        selected_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            row_indices=[3, 0],
+        )
+        selected = selected_reader.read_arrow_batch().column(0).to_pylist()
+        self.assertEqual(dict(selected[0]), {"omega": b"last"})
+        self.assertEqual(
+            dict(selected[1]),
+            {"alpha": b"a", "null": None, "empty": b""},
+        )
+        selected_reader.close()
+
+    def test_map_blob_descriptor_and_parallel_reads(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "map_blob_descriptor.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow(
+            [[("a", BlobData(b"x")), ("b", BlobData(b"yz")), ("n", None)]],
+            fields,
+            RowKind.INSERT,
+        ))
+        writer.close()
+
+        descriptor_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=True,
+        )
+        descriptors = dict(descriptor_reader.read_arrow_batch().column(0)[0].as_py())
+        descriptor_a = BlobDescriptor.deserialize(descriptors["a"])
+        descriptor_b = BlobDescriptor.deserialize(descriptors["b"])
+        self.assertEqual((descriptor_a.offset, descriptor_a.length), (16, 1))
+        self.assertEqual((descriptor_b.offset, descriptor_b.length), (17, 2))
+        self.assertIsNone(descriptors["n"])
+        descriptor_reader.close()
+
+        calls = []
+        original_read = file_io.read_blobs_concurrent
+
+        def read_blobs_concurrent(blobs, parallelism):
+            calls.append((list(blobs), parallelism))
+            return original_read(blobs, parallelism)
+
+        file_io.read_blobs_concurrent = read_blobs_concurrent
+        parallel_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            blob_parallelism=4,
+        )
+        blobs_to_resolve = []
+        self.assertEqual(
+            [("a", None), ("n", None), ("b", None)],
+            parallel_reader._map_value_for_arrow(
+                {
+                    "a": BlobData(b"x"),
+                    "n": None,
+                    "b": BlobData(b"yz"),
+                },
+                "blob_map",
+                0,
+                blobs_to_resolve,
+            ),
+        )
+        self.assertEqual([0, 2], [target[3] for target in blobs_to_resolve])
+        values = dict(parallel_reader.read_arrow_batch().column(0)[0].as_py())
+        self.assertEqual(values, {"a": b"x", "b": b"yz", "n": None})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0][0]), 2)
+        self.assertEqual(calls[0][1], 4)
+        parallel_reader.close()
+
+    def test_map_blob_consumer_descriptors_and_flush(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        class TrackingOutput:
+            def __init__(self, path):
+                self.output = open(path, 'wb')
+                self.flush_count = 0
+
+            def write(self, data):
+                return self.output.write(data)
+
+            def flush(self):
+                self.flush_count += 1
+                return self.output.flush()
+
+            def close(self):
+                return self.output.close()
+
+        blob_file_path = os.path.join(self.temp_dir, "map_blob_consumer.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+        descriptors = []
+
+        def consumer(field_name, descriptor):
+            descriptors.append((field_name, descriptor))
+            return descriptor.length == 2
+
+        output = TrackingOutput(blob_file_path)
+        writer = BlobFormatWriter(output, consumer, blob_file_path)
+        writer.add_element(GenericRow(
+            [[("a", BlobData(b"x")), ("b", BlobData(b"yz")), (None, None)]],
+            fields,
+            RowKind.INSERT,
+        ))
+
+        self.assertEqual(output.flush_count, 1)
+        self.assertEqual(len(descriptors), 2)
+        self.assertEqual([item[0] for item in descriptors], ["blob_map", "blob_map"])
+        self.assertEqual(
+            [(item[1].offset, item[1].length) for item in descriptors],
+            [(15, 1), (16, 2)],
+        )
+        writer.close()
+
+    def test_map_blob_write_value_from_serialized_descriptor(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        source_uri = "custom://bucket/source.bin"
+        source_data = b"prefix-selected-suffix"
+        selected_data = b"selected"
+        source_descriptor = BlobDescriptor(
+            source_uri,
+            len(b"prefix-"),
+            len(selected_data),
+        )
+
+        class TrackingStream(io.BytesIO):
+
+            def __init__(self, data):
+                super().__init__(data)
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+                super().close()
+
+        class TrackingUriReader:
+
+            def __init__(self):
+                self.opened_uris = []
+                self.streams = []
+
+            def new_input_stream(self, uri):
+                self.opened_uris.append(uri)
+                stream = TrackingStream(source_data)
+                self.streams.append(stream)
+                return stream
+
+        class TrackingUriReaderFactory:
+
+            def __init__(self, uri_reader):
+                self.uri_reader = uri_reader
+                self.created_uris = []
+
+            def create(self, uri):
+                self.created_uris.append(uri)
+                return self.uri_reader
+
+        output_path = os.path.join(self.temp_dir, "map_descriptor_input.blob")
+        field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )
+        consumed_descriptors = []
+
+        def consumer(field_name, descriptor):
+            consumed_descriptors.append((field_name, descriptor))
+            return False
+
+        uri_reader = TrackingUriReader()
+        uri_reader_factory = TrackingUriReaderFactory(uri_reader)
+        writer = BlobFormatWriter(
+            open(output_path, 'wb'),
+            blob_consumer=consumer,
+            file_path=output_path,
+        )
+        writer.write_value(
+            {"slice": source_descriptor.serialize()},
+            [field],
+            uri_reader_factory=uri_reader_factory,
+        )
+        writer.close()
+
+        self.assertEqual(uri_reader_factory.created_uris, [source_uri])
+        self.assertEqual(uri_reader.opened_uris, [source_uri])
+        self.assertEqual(len(uri_reader.streams), 1)
+        self.assertTrue(uri_reader.streams[0].closed)
+        self.assertEqual(uri_reader.streams[0].close_count, 1)
+        self.assertEqual(len(consumed_descriptors), 1)
+        output_descriptor = consumed_descriptors[0][1]
+        self.assertEqual(consumed_descriptors[0][0], field.name)
+        self.assertEqual(output_descriptor.uri, output_path)
+        self.assertEqual(output_descriptor.offset, 18)
+        self.assertEqual(output_descriptor.length, len(selected_data))
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=output_path,
+            read_fields=[field.name],
+            full_fields=[field],
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        try:
+            value = dict(reader.read_arrow_batch().column(0)[0].as_py())
+            self.assertEqual(value, {"slice": selected_data})
+        finally:
+            reader.close()
+
+    def test_map_blob_placeholder_and_null_key(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "map_blob_null_key.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow(
+            [[(None, BlobData(b"null-key"))]],
+            fields,
+            RowKind.INSERT,
+        ))
+        writer.add_element(GenericRow(
+            [Blob.MAP_PLACE_HOLDER],
+            fields,
+            RowKind.INSERT,
+        ))
+        lengths = list(writer.lengths)
+        writer.close()
+
+        iterator = BlobRecordIterator(
+            file_io,
+            blob_file_path,
+            lengths,
+            [0, lengths[0]],
+            fields[0],
+        )
+        result = next(iterator).values[0]
+        self.assertEqual(result[None].to_data(), b"null-key")
+        self.assertIs(next(iterator).values[0], Blob.MAP_PLACE_HOLDER)
+
+        null_key_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            row_indices=[0],
+        )
+        with self.assertRaisesRegex(ValueError, "null keys cannot be converted"):
+            null_key_reader.read_arrow_batch()
+        null_key_reader.close()
+
+        placeholder_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=["blob_map"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            row_indices=[1],
+        )
+        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+            placeholder_reader.read_arrow_batch()
+        placeholder_reader.close()
+
+    def test_duplicate_map_blob_key_last_wins(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "map_blob_duplicate.blob")
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow(
+            [[
+                ("duplicate", BlobData(b"first")),
+                ("duplicate", BlobData(b"second")),
+                ("tail", BlobData(b"third")),
+            ]],
+            fields,
+            RowKind.INSERT,
+        ))
+        record_length = writer.lengths[0]
+        writer.close()
+
+        for blob_as_descriptor in (False, True):
+            iterator = BlobRecordIterator(
+                file_io,
+                blob_file_path,
+                [record_length],
+                [0],
+                fields[0],
+                blob_as_descriptor=blob_as_descriptor,
+            )
+            result = next(iterator).values[0]
+            self.assertEqual(list(result), ["duplicate", "tail"])
+            self.assertEqual(result["duplicate"].to_data(), b"second")
+            self.assertEqual(result["tail"].to_data(), b"third")
+
+    def test_map_blob_key_types_and_rejections(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        cases = [
+            (AtomicType("TINYINT"), -128),
+            (AtomicType("SMALLINT"), -32768),
+            (AtomicType("INT"), -2147483648),
+            (AtomicType("INTEGER"), 0x01020304),
+            (AtomicType("BIGINT"), -9223372036854775808),
+            (AtomicType("STRING"), "string"),
+            (AtomicType("CHAR(3)"), "abc"),
+            (AtomicType("VARCHAR(10)"), "varchar"),
+        ]
+        for index, (key_type, key) in enumerate(cases):
+            with self.subTest(key_type=key_type):
+                blob_file_path = os.path.join(self.temp_dir, f"map_key_{index}.blob")
+                fields = [DataField(
+                    0,
+                    "blob_map",
+                    MapType(True, key_type, AtomicType("BLOB")),
+                )]
+                writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+                writer.add_element(GenericRow(
+                    [[(key, BlobData(b"value"))]],
+                    fields,
+                    RowKind.INSERT,
+                ))
+                record_length = writer.lengths[0]
+                writer.close()
+                iterator = BlobRecordIterator(
+                    file_io,
+                    blob_file_path,
+                    [record_length],
+                    [0],
+                    fields[0],
+                )
+                result = next(iterator).values[0]
+                self.assertEqual(result[key].to_data(), b"value")
+
+                if key_type.type == "INTEGER":
+                    with open(blob_file_path, 'rb') as blob_file:
+                        blob_file.seek(BlobRecordIterator.MAGIC_NUMBER_SIZE
+                                       + BlobRecordIterator.MAP_HEADER_SIZE)
+                        self.assertEqual(blob_file.read(4), b"\x04\x03\x02\x01")
+                    reader = FormatBlobReader(
+                        file_io=file_io,
+                        file_path=blob_file_path,
+                        read_fields=["blob_map"],
+                        full_fields=fields,
+                        push_down_predicate=None,
+                        blob_as_descriptor=False,
+                    )
+                    try:
+                        value = dict(reader.read_arrow_batch().column(0)[0].as_py())
+                        self.assertEqual(value, {key: b"value"})
+                    finally:
+                        reader.close()
+
+        output = io.BytesIO()
+        unsupported_key_writer = BlobFormatWriter(output)
+        unsupported_key_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("BOOLEAN"), AtomicType("BLOB")),
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported key type"):
+            unsupported_key_writer.add_element(GenericRow(
+                [{True: BlobData(b"value")}],
+                [unsupported_key_field],
+                RowKind.INSERT,
+            ))
+
+        invalid_value_writer = BlobFormatWriter(io.BytesIO())
+        invalid_value_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("STRING")),
+        )
+        with self.assertRaisesRegex(ValueError, "value type must be BLOB"):
+            invalid_value_writer.add_element(GenericRow(
+                [{"key": "value"}],
+                [invalid_value_field],
+                RowKind.INSERT,
+            ))
+
+        invalid_key_writer = BlobFormatWriter(io.BytesIO())
+        int_key_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("INT"), AtomicType("BLOB")),
+        )
+        with self.assertRaisesRegex(ValueError, "key must be an integer"):
+            invalid_key_writer.add_element(GenericRow(
+                [{"not-an-int": BlobData(b"value")}],
+                [int_key_field],
+                RowKind.INSERT,
+            ))
+
+    def test_reject_malformed_map_blob_payloads(self):
+        string_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )
+        int_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("INT"), AtomicType("BLOB")),
+        )
+        cases = [
+            (
+                self._map_blob_payload(b"", b"", [], [], magic=0),
+                string_field,
+                "Invalid MAP<X, BLOB> payload magic number",
+            ),
+            (
+                self._map_blob_payload(b"", b"", [], [], version=0),
+                string_field,
+                "Unsupported MAP<X, BLOB> payload version",
+            ),
+            (
+                self._map_blob_payload(b"", b"", [], [], entry_count=0x80000000),
+                string_field,
+                "Invalid MAP<X, BLOB> entry count",
+            ),
+            (
+                self._map_blob_payload(b"", b"", [], [], key_index_length=100),
+                string_field,
+                "Invalid MAP<X, BLOB> key index length",
+            ),
+            (
+                self._map_blob_payload(b"", b"", [], [], value_index_length=100),
+                string_field,
+                "Invalid MAP<X, BLOB> value index length",
+            ),
+            (
+                self._map_blob_payload(
+                    b"", b"", [], [], key_index=b"\x80", value_index=b""
+                ),
+                string_field,
+                "Invalid MAP<X, BLOB> key index",
+            ),
+            (
+                self._map_blob_payload(
+                    b"", b"", [], [], key_index=b"", value_index=b"\x80"
+                ),
+                string_field,
+                "Invalid MAP<X, BLOB> value index",
+            ),
+            (
+                self._map_blob_payload(b"", b"", [-2], [-1]),
+                string_field,
+                "Invalid MAP<X, BLOB> key length",
+            ),
+            (
+                self._map_blob_payload(b"abc", b"", [3], [-1]),
+                int_field,
+                "Invalid MAP<X, BLOB> fixed-width key length",
+            ),
+            (
+                self._map_blob_payload(b"a", b"", [2], [-1]),
+                string_field,
+                "key lengths exceed the payload data length",
+            ),
+            (
+                self._map_blob_payload(b"a", b"", [1], [-2]),
+                string_field,
+                "Invalid MAP<X, BLOB> value length",
+            ),
+            (
+                self._map_blob_payload(b"a", b"b", [1], [2]),
+                string_field,
+                "value lengths exceed the payload data length",
+            ),
+            (
+                self._map_blob_payload(b"a", b"b", [1], [0]),
+                string_field,
+                "key/value lengths do not match the payload data length",
+            ),
+            (
+                self._map_blob_payload(
+                    b"", b"", [], [],
+                    entry_count=2,
+                    key_index=DeltaVarintCompressor.compress([128]),
+                    value_index=DeltaVarintCompressor.compress([128]),
+                ),
+                string_field,
+                "entry count does not match key index length",
+            ),
+        ]
+
+        for payload, field, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                iterator = BlobRecordIterator(
+                    None,
+                    "unused",
+                    [],
+                    [],
+                    field,
+                    input_stream=io.BytesIO(payload),
+                )
+                with self.assertRaisesRegex(ValueError, expected_message):
+                    iterator._read_blob_map(0, len(payload))
+
+    @staticmethod
+    def _map_blob_payload(
+        key_data,
+        value_data,
+        key_lengths,
+        value_lengths,
+        magic=BlobRecordIterator.MAP_MAGIC_NUMBER,
+        version=BlobRecordIterator.MAP_VERSION,
+        entry_count=None,
+        key_index=None,
+        value_index=None,
+        key_index_length=None,
+        value_index_length=None,
+    ):
+        if key_index is None:
+            key_index = DeltaVarintCompressor.compress(key_lengths)
+        if value_index is None:
+            value_index = DeltaVarintCompressor.compress(value_lengths)
+        if entry_count is None:
+            entry_count = len(key_lengths)
+        if key_index_length is None:
+            key_index_length = len(key_index)
+        if value_index_length is None:
+            value_index_length = len(value_index)
+        return (
+            struct.pack('<IBI', magic, version, entry_count)
+            + key_data
+            + value_data
+            + key_index
+            + value_index
+            + struct.pack('<II', key_index_length, value_index_length)
+        )
+
 
 class BlobParallelismTest(unittest.TestCase):
 
@@ -2592,12 +3444,81 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
                       (path, 100, -1), (path, None, None)]
             got = fio.read_ranges_coalesced(ranges, parallelism=4)
+            self.assertIsInstance(got[0], bytes)
+            self.assertIsInstance(got[1], bytes)
             self.assertEqual(got[0], data[0:10])
             self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
             self.assertIsNone(got[2])
             self.assertEqual(got[3], data[500:520])
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
+
+    def test_read_ranges_coalesced_views(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            ranges = [(path, 0, 10), (path, 10, 10), None,
+                      (path, 500, 20), (path, 100, -1)]
+            got = file_io.read_ranges_coalesced_views(
+                ranges, parallelism=4, max_gap=100)
+
+            self.assertIsInstance(got[0], memoryview)
+            self.assertIsInstance(got[1], memoryview)
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[10:20])
+            self.assertIs(got[0].obj, got[1].obj)
+            self.assertIsNone(got[2])
+            self.assertEqual(bytes(got[3]), data[500:520])
+            self.assertIsNot(got[0].obj, got[3].obj)
+            self.assertEqual(bytes(got[4]), data[100:])
+
+            array = pa.array(got, type=pa.binary())
+            self.assertEqual(array.to_pylist(), [
+                data[0:10], data[10:20], None, data[500:520], data[100:],
+            ])
+
+    def test_sparse_views_preserve_coalesced_read(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            reads = []
+            original_read = file_io.read_file_range
+
+            def read_file_range(file_path, offset, length):
+                reads.append((file_path, offset, length))
+                return original_read(file_path, offset, length)
+
+            file_io.read_file_range = read_file_range
+            got = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+            )
+
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertEqual(bytes(got[0]), data[0:10])
+            self.assertEqual(bytes(got[1]), data[1000:1010])
+            self.assertIsNot(got[0].obj, got[1].obj)
+
+            reads.clear()
+            shared = file_io.read_ranges_coalesced_views(
+                [(path, 0, 10), (path, 1000, 10)],
+                parallelism=4,
+                max_gap=1000,
+                max_span=1 << 20,
+                max_retained_amplification=0,
+            )
+            self.assertEqual(reads, [(path, 0, 1010)])
+            self.assertIs(shared[0].obj, shared[1].obj)
 
 
 class ReadFileRangeTest(unittest.TestCase):

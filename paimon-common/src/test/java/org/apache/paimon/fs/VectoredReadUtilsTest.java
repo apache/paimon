@@ -117,6 +117,27 @@ class VectoredReadUtilsTest {
     }
 
     @Test
+    public void testReadIntoProvidedBuffers() throws Exception {
+        byte[] first = new byte[60];
+        byte[] second = new byte[90];
+        byte[] third = new byte[200];
+        List<FileRange> ranges =
+                Arrays.asList(
+                        FileRange.createFileRange(0, first),
+                        FileRange.createFileRange(100, second),
+                        FileRange.createFileRange(300, third));
+
+        VectoredReadUtils.readVectored(readable, ranges);
+
+        assertThat(ranges.get(0).getData().get()).isSameAs(first);
+        assertThat(ranges.get(1).getData().get()).isSameAs(second);
+        assertThat(ranges.get(2).getData().get()).isSameAs(third);
+        assertThat(first).isEqualTo(Arrays.copyOfRange(bytes, 0, 60));
+        assertThat(second).isEqualTo(Arrays.copyOfRange(bytes, 100, 190));
+        assertThat(third).isEqualTo(Arrays.copyOfRange(bytes, 300, 500));
+    }
+
+    @Test
     public void testRandom() throws Exception {
         List<FileRange> ranges = new ArrayList<>();
         ThreadLocalRandom random = ThreadLocalRandom.current();

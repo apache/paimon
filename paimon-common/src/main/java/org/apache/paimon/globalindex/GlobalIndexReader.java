@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.BatchVectorSearch;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -33,6 +34,23 @@ import java.util.concurrent.CompletableFuture;
 /** Index reader for global index, return {@link GlobalIndexResult}. */
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
 
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitAnd(

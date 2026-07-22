@@ -51,7 +51,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -173,6 +172,12 @@ public class TypeUtils {
                 DataType elementType = arrayType.getElementType();
                 try {
                     JsonNode arrayNode = OBJECT_MAPPER.readTree(s);
+                    if (!arrayNode.isArray()) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Expected a JSON array for type %s, but got %s",
+                                        type, arrayNode.getNodeType()));
+                    }
                     List<Object> resultList = new ArrayList<>();
                     for (JsonNode elementNode : arrayNode) {
                         if (!elementNode.isNull()) {
@@ -236,6 +241,12 @@ public class TypeUtils {
                 DataType valueType = mapType.getValueType();
                 try {
                     JsonNode mapNode = OBJECT_MAPPER.readTree(s);
+                    if (!mapNode.isObject()) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Expected a JSON object for type %s, but got %s",
+                                        type, mapNode.getNodeType()));
+                    }
                     Map<Object, Object> resultMap = new HashMap<>();
                     mapNode.fields()
                             .forEachRemaining(
@@ -262,11 +273,6 @@ public class TypeUtils {
                                         resultMap.put(key, value);
                                     });
                     return new GenericMap(resultMap);
-                } catch (JsonProcessingException e) {
-                    LOG.info(
-                            String.format("Failed to parse MAP for type %s with value %s", type, s),
-                            e);
-                    return new GenericMap(Collections.emptyMap());
                 } catch (Exception e) {
                     throw new RuntimeException(
                             String.format("Failed to parse Json String %s", s), e);
@@ -275,6 +281,12 @@ public class TypeUtils {
                 RowType rowType = (RowType) type;
                 try {
                     JsonNode rowNode = OBJECT_MAPPER.readTree(s);
+                    if (!rowNode.isObject()) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Expected a JSON object for type %s, but got %s",
+                                        type, rowNode.getNodeType()));
+                    }
                     GenericRow genericRow =
                             new GenericRow(
                                     rowType.getFields()
@@ -297,12 +309,6 @@ public class TypeUtils {
                         }
                     }
                     return genericRow;
-                } catch (JsonProcessingException e) {
-                    LOG.info(
-                            String.format(
-                                    "Failed to parse ROW for type  %s  with value  %s", type, s),
-                            e);
-                    return new GenericRow(0);
                 } catch (Exception e) {
                     throw new RuntimeException(
                             String.format("Failed to parse Json String %s", s), e);

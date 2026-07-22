@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.elasticsearch.eslib.adapter.PaimonHnswVectorsFormat;
+import org.elasticsearch.eslib.adapter.PaimonInt8HnswVectorsFormat;
 import org.elasticsearch.eslib.adapter.lucene9.PaimonLucene9Codec;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.ScalarFieldType;
@@ -106,6 +107,25 @@ class ESIndexOptionsTest {
 
         assertThat(format).isInstanceOf(PaimonHnswVectorsFormat.class);
         assertThat(format.toString()).contains("maxConn=30").contains("beamWidth=360");
+    }
+
+    @Test
+    void int8HnswConstructionParametersReachLuceneCodec() {
+        Map<String, String> m = new HashMap<>();
+        m.put("global-index.es-index.fields.embedding.algorithm", "int8_hnsw");
+        m.put("global-index.es-index.fields.embedding.dimension", "128");
+        m.put("global-index.es-index.fields.embedding.m", "24");
+        m.put("global-index.es-index.fields.embedding.ef_construction", "160");
+
+        ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
+        FieldIndexConfig config = options.getConfig("embedding");
+        PaimonLucene9Codec codec = new PaimonLucene9Codec(options.getFieldConfigs());
+        PerFieldKnnVectorsFormat perField = (PerFieldKnnVectorsFormat) codec.knnVectorsFormat();
+        KnnVectorsFormat format = perField.getKnnVectorsFormatForField("embedding");
+
+        assertThat(config.algorithm()).isEqualTo(VectorAlgorithm.INT8_HNSW);
+        assertThat(format).isInstanceOf(PaimonInt8HnswVectorsFormat.class);
+        assertThat(format.toString()).contains("maxConn=24").contains("beamWidth=160");
     }
 
     @Test

@@ -66,6 +66,9 @@ def apply_global_index_update_action(
 ) -> list:
     if snapshot is None or not updated_cols or not written_partitions:
         return []
+    action = table.options.global_index_column_update_action()
+    if action == GlobalIndexColumnUpdateAction.IGNORE:
+        return []
     entries = scan_global_index_entries(table, snapshot)
     if not entries:
         return []
@@ -84,7 +87,6 @@ def apply_global_index_update_action(
             conflicted.update(matched)
     if not affected:
         return []
-    action = table.options.global_index_column_update_action()
     if action is None:
         action = GlobalIndexColumnUpdateAction.THROW_ERROR
     if action == GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX:

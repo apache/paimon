@@ -34,3 +34,5 @@ datafusion>=52; python_version >= "3.10"
 lumina-data>=0.1.0
 # paimon-vindex vector search (optional, for vindex index tests)
 paimon-vindex==0.1.0; python_version >= "3.9"
+# paimon-ftindex full-text search (optional, for full-text index tests)
+paimon-ftindex==0.1.0; python_version >= "3.8"

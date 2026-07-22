@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>compaction.bucket-distribution-strategy</h5></td>
+            <td style="word-wrap: break-word;">linear</td>
+            <td><p>Enum</p></td>
+            <td>Defines how dedicated bucket compaction jobs distribute compact buckets to writers. 'linear' uses the existing stable partition-plus-bucket mapping. 'size-aware-batch' assigns bounded full-compaction bucket splits by total data file size and forwards them to writers to reduce compaction long tail.<br /><br />Possible values:<ul><li>"linear": Distribute compact buckets by the existing stable partition-plus-bucket channel mapping.</li><li>"size-aware-batch": For bounded full compaction, assign compact bucket splits by total data file size and forward them to writers to reduce long-tail compaction tasks.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>changelog.precommit-compact.thread-num</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

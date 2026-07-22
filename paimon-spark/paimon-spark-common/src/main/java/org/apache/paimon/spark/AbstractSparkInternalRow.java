@@ -194,7 +194,7 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
 
     @Override
     public MapData getMap(int ordinal) {
-        return fromPaimon(row.getMap(ordinal), rowType.getTypeAt(ordinal));
+        return fromPaimon(row.getMap(ordinal), rowType.getTypeAt(ordinal), blobAsDescriptor);
     }
 
     @Override

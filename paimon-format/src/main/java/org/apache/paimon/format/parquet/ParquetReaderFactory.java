@@ -33,6 +33,7 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -45,7 +46,9 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
@@ -85,7 +88,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final RowType readType;
     private final int batchSize;
     private final boolean caseSensitive;
-    @Nullable private final FilterCompat.Filter filter;
+    @Nullable private final List<Predicate> predicates;
 
     /**
      * Cache: fileSchema -> requestedSchema.
@@ -101,12 +104,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             new ConcurrentHashMap<>();
 
     public ParquetReaderFactory(
-            Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
+            Options conf, RowType readType, int batchSize, @Nullable List<Predicate> predicates) {
         this.conf = conf;
         this.readType = readType;
         this.batchSize = batchSize;
         this.caseSensitive = conf.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
-        this.filter = filter;
+        this.predicates = predicates;
     }
 
     @VisibleForTesting
@@ -117,18 +120,33 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        ParquetReadOptions.Builder builder =
-                ParquetUtil.getParquetReadOptionsBuilder(conf)
-                        .withRecordFilter(filter)
-                        .withRange(0, context.fileSize());
+        ParquetInputFile inputFile =
+                ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
+        ParquetReadOptions.Builder readOptionsBuilder =
+                ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
+        ParquetInputStream inputStream = inputFile.newStream();
+        ParquetMetadata footer =
+                ParquetFileReader.readFooter(
+                        inputFile, readOptionsBuilder.build(), inputStream, true);
 
-        ParquetFileReader reader =
-                new ParquetFileReader(
-                        ParquetInputFile.fromPath(
-                                context.fileIO(), context.filePath(), context.fileSize()),
-                        builder.build(),
-                        context.selection());
-        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        MessageType fileSchema = footer.getFileMetaData().getSchema();
+        ParquetFileReader reader;
+        try {
+            FilterCompat.Filter filter =
+                    ParquetFilters.convert(predicates, fileSchema, caseSensitive);
+            ParquetReadOptions readOptions = readOptionsBuilder.withRecordFilter(filter).build();
+            reader =
+                    new ParquetFileReader(
+                            inputFile, footer, readOptions, inputStream, context.selection());
+        } catch (Throwable t) {
+            try {
+                inputStream.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            throw t;
+        }
+
         ShreddingReadPlan readPlan =
                 ShreddingReadPlanFactories.createReadPlan(
                         readType,

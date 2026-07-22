@@ -48,6 +48,7 @@ import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.junit.jupiter.api.Test;
@@ -349,6 +350,95 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         assertThat(entries.get(0).checkpointId()).isEqualTo(1L);
         assertThat(entries.get(0).committables()).isEmpty();
         assertThat(entries.get(0).watermark()).isEqualTo(Long.MIN_VALUE);
+
+        secondHarness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testWatermarkStatusFrozenAtBarrierAcrossCheckpoints() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(committableSerializer);
+        harness.open();
+
+        // cp1: writer is IDLE at barrier time.
+        harness.processWatermark(new Watermark(100L));
+        harness.processWatermarkStatus(WatermarkStatus.IDLE);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+
+        // cp2: back to ACTIVE with a new watermark. Idle status must not linger on cp2 just
+        // because cp1 was idle.
+        harness.processWatermarkStatus(WatermarkStatus.ACTIVE);
+        harness.processWatermark(new Watermark(500L));
+        harness.prepareSnapshotPreBarrier(2);
+        harness.snapshot(2, 20);
+
+        assertThat(events).hasSize(2);
+        CheckpointCommittables cp1 =
+                ((CommittableEvent) events.get(0)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp1.checkpointId()).isEqualTo(1L);
+        assertThat(cp1.watermark()).isEqualTo(100L);
+        assertThat(cp1.idle()).isTrue();
+
+        CheckpointCommittables cp2 =
+                ((CommittableEvent) events.get(1)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp2.checkpointId()).isEqualTo(2L);
+        assertThat(cp2.watermark()).isEqualTo(500L);
+        assertThat(cp2.idle()).isFalse();
+
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testIdleFlagResetsToActiveOnRestore() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+
+        // session 1: end the session while IDLE so the restore path is exercised on a snapshot
+        // taken from an idle writer.
+        List<OperatorEvent> firstEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> firstHarness =
+                createHarness(table, commitUser, firstEvents::add);
+        firstHarness.setup(committableSerializer);
+        firstHarness.open();
+
+        firstHarness.processWatermark(new Watermark(100L));
+        firstHarness.processWatermarkStatus(WatermarkStatus.IDLE);
+        firstHarness.prepareSnapshotPreBarrier(1);
+        OperatorSubtaskState snapshot = firstHarness.snapshot(1, 10);
+        firstHarness.close();
+
+        // session 2: restore. Flink runtime does not replay the last WatermarkStatus, and the
+        // aligner treats channels as ACTIVE + Long.MIN_VALUE on rebuild, so the writer must also
+        // default to ACTIVE. The next barrier — before any WatermarkStatus event — must emit
+        // idle=false, matching Flink's own valve-rebuild contract.
+        List<OperatorEvent> restoredEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
+                createHarness(table, commitUser, restoredEvents::add);
+        secondHarness.setup(committableSerializer);
+        restoreWithCheckpointId(secondHarness, snapshot, 1L);
+        secondHarness.open();
+
+        secondHarness.prepareSnapshotPreBarrier(2);
+        secondHarness.snapshot(2, 20);
+
+        // First event is the restore replay; the second is the freshly frozen cp2.
+        assertThat(restoredEvents).hasSize(2);
+        CommittableEvent cp2Event = (CommittableEvent) restoredEvents.get(1);
+        CheckpointCommittables cp2 = cp2Event.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp2.checkpointId()).isEqualTo(2L);
+        assertThat(cp2.idle()).isFalse();
 
         secondHarness.close();
     }

@@ -41,13 +41,14 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
 /** Implementation for {@link BatchVectorRead}. */
-public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVectorRead {
+public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRead
+        implements BatchVectorRead {
 
     private static final long serialVersionUID = 1L;
 
     protected final float[][] vectors;
 
-    public BatchVectorReadImpl(
+    public DataEvolutionBatchVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,

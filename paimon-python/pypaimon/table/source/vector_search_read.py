@@ -128,8 +128,8 @@ class AbstractVectorSearchReadImpl:
         if not scalar_files:
             return RoaringBitmap64()
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-        scanner = GlobalIndexScanner.create(
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        scanner = DataEvolutionGlobalIndexScanner.create(
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,
@@ -175,8 +175,8 @@ class AbstractVectorSearchReadImpl:
         if not scalar_files:
             return None
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-        scanner = GlobalIndexScanner.create(
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        scanner = DataEvolutionGlobalIndexScanner.create(
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,

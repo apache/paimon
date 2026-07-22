@@ -100,6 +100,9 @@ public class CoreOptions implements Serializable {
     public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
             "map.shared-shredding.max-columns";
 
+    public static final String MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY =
+            "map.shared-shredding.column-placement-policy";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -294,6 +297,22 @@ public class CoreOptions implements Serializable {
                             "Partition keys that participate in chain logic. Must be a contiguous "
                                     + "suffix of the table's partition keys. Comma-separated. "
                                     + "If not set, all partition keys participate in chain.");
+
+    public static final ConfigOption<Boolean> CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT =
+            key("chain-table.streaming.merge-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, the starting phase of chain table streaming read performs "
+                                    + "anchor-based chain merging: for each group it merges the "
+                                    + "latest snapshot partition with delta partitions whose chain "
+                                    + "key is strictly greater than the snapshot chain key. This "
+                                    + "allows streaming readers to see cross-branch deletions and "
+                                    + "updates at the cost of a heavier startup scan. When false "
+                                    + "(default), the starting phase only reads the latest snapshot "
+                                    + "partition per group and later delta partitions as separate "
+                                    + "splits, which is lightweight but may not reflect cross-branch "
+                                    + "deletes.");
 
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
@@ -829,6 +848,14 @@ public class CoreOptions implements Serializable {
                                     .text(
                                             "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
+
+    // Keep this default in sync with BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE (= 4 * 1024).
+    public static final ConfigOption<MemorySize> BLOB_COPY_BUFFER_SIZE =
+            key("blob.copy-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription(
+                            "Buffer size used when copying BLOB payloads into BLOB files.");
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
@@ -1823,7 +1850,11 @@ public class CoreOptions implements Serializable {
                             "Whether to create this table as a partitioned table in metastore.\n"
                                     + "For example, if you want to list all partitions of a Paimon table in Hive, "
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
-                                    + "This config option does not affect the default filesystem metastore.");
+                                    + "This config option does not affect the default filesystem metastore.\n"
+                                    + "For an internal format table in a REST catalog, it also makes the "
+                                    + "catalog own the table's partitions: a scan reads the partitions "
+                                    + "registered there and a write registers the ones it wrote, instead of "
+                                    + "listing the table directory.");
 
     public static final ConfigOption<String> METASTORE_TAG_TO_PARTITION =
             key("metastore.tag-to-partition")
@@ -2493,7 +2524,8 @@ public class CoreOptions implements Serializable {
                             .enumType(GlobalIndexColumnUpdateAction.class)
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
-                                    "Defines the action to take when an update modifies columns that are covered by a global index.");
+                                    "Defines the action to take when an update modifies columns that are covered by a global index. "
+                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
 
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
@@ -2578,6 +2610,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
+
+    public static final ConfigOption<String> BLOB_DESCRIPTOR_SOURCE_TABLE =
+            key(BLOB_DESCRIPTOR_PREFIX + "source-table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The source table whose FileIO is used to read descriptor-backed BLOB "
+                                    + "content and copy it into the target table's managed BLOB "
+                                    + "storage. The table must belong to the current catalog and can "
+                                    + "include a branch suffix, for example db.table$branch_rt. This "
+                                    + "option is not supported for target tables without a catalog "
+                                    + "loader, including external tables in REST catalogs. When set, "
+                                    + "other blob-descriptor.* FileIO options are ignored.");
 
     public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
             key("blob-write-null-on-missing-file")
@@ -3312,6 +3357,21 @@ public class CoreOptions implements Serializable {
         return options.getOptional(BLOB_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public int blobCopyBufferSize() {
+        return checkedBlobCopyBufferSize(options.get(BLOB_COPY_BUFFER_SIZE).getBytes());
+    }
+
+    /** Validates {@link #BLOB_COPY_BUFFER_SIZE} bytes and narrows to a positive int. */
+    public static int checkedBlobCopyBufferSize(long bytes) {
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                BLOB_COPY_BUFFER_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public boolean blobSplitByFileSize() {
@@ -4211,6 +4271,10 @@ public class CoreOptions implements Serializable {
             return null;
         }
         return Arrays.stream(value.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public boolean chainTableStreamingMergeSnapshot() {
+        return options.get(CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT);
     }
 
     public boolean formatTableImplementationIsPaimon() {
@@ -5284,6 +5348,18 @@ public class CoreOptions implements Serializable {
         return maxColumns;
     }
 
+    public MapSharedShreddingColumnPlacementPolicy mapSharedShreddingColumnPlacementPolicy(
+            String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX
+                                + "."
+                                + fieldName
+                                + "."
+                                + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY)
+                        .enumType(MapSharedShreddingColumnPlacementPolicy.class)
+                        .defaultValue(MapSharedShreddingColumnPlacementPolicy.LRU));
+    }
+
     /** MAP storage layout. */
     public enum MapStorageLayout implements DescribedEnum {
         DEFAULT(
@@ -5316,6 +5392,40 @@ public class CoreOptions implements Serializable {
         }
     }
 
+    /** Physical column placement policy for shared-shredding MAP fields. */
+    public enum MapSharedShreddingColumnPlacementPolicy implements DescribedEnum {
+        PLAIN(
+                "plain",
+                "Keep each MAP row's input key order and place the first K keys into physical "
+                        + "columns."),
+        SEQUENTIAL(
+                "sequential",
+                "Order keys by their field dictionary IDs and place the first K keys into physical "
+                        + "columns."),
+        LRU(
+                "lru",
+                "Reuse physical columns for recently seen keys and evict the least recently used "
+                        + "column when necessary.");
+
+        private final String value;
+        private final String description;
+
+        MapSharedShreddingColumnPlacementPolicy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
     /**
      * Action to take when an UPDATE (e.g. via MERGE INTO) modifies columns that are covered by a
      * global index.
@@ -5325,7 +5435,10 @@ public class CoreOptions implements Serializable {
         THROW_ERROR,
 
         /** Drop all global index entries for the whole partitions affected by the update. */
-        DROP_PARTITION_INDEX
+        DROP_PARTITION_INDEX,
+
+        /** Leave existing global index entries unchanged when indexed columns are updated. */
+        IGNORE
     }
 
     /** Search mode for global index queries. */

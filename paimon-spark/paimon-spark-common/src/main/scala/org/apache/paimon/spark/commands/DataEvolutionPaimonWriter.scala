@@ -48,6 +48,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       columnNames: Seq[String],
       rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
+    val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
     assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
     val writeType = table.rowType().project(columnNames.asJava)
@@ -110,7 +111,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
               writeBuilder,
               writeType,
               firstRowIdToPartitionMapBroadcast.value,
-              catalogContextForBlobDescriptor,
+              uriReaderFactory,
               rawBlobPlaceholderMarkerIndexes)
             try {
               iter.foreach(row => write.write(row))

@@ -462,8 +462,14 @@ Output:
 ```
 
 **Note:** The table must have a full-text index built on the target column. PyPaimon uses
-the tokenizer settings stored in the index metadata and requires the `paimon-ftindex`
-package from `paimon-full-text` for full-text reads. See
+the tokenizer settings stored in the index metadata and requires the full-text extra for
+full-text reads:
+
+```shell
+pip install 'pypaimon[full-text]'
+```
+
+See
 [Global Index](../multimodal-table/global-index) for how to create full-text indexes.
 
 ### Table Drop

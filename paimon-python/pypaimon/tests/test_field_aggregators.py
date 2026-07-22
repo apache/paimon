@@ -28,8 +28,10 @@ import datetime
 import unittest
 from decimal import Decimal
 from functools import reduce
+from typing import List
 
 from pypaimon.common.options import CoreOptions, Options
+from pypaimon.data import Timestamp
 from pypaimon.read.reader.aggregate import create_field_aggregator
 from pypaimon.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
@@ -43,8 +45,13 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldPrimaryKeyAgg,
     FieldSumAgg,
     FieldListaggAgg,
+    FieldNestedUpdateAgg,
+    FieldCollectAgg,
+    FieldMergeMapWithKeyTimeAgg,
 )
-from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.internal_row import InternalRow
 
 
 def _make(identifier, sql_type, options: CoreOptions = None):
@@ -543,6 +550,1374 @@ class FieldListaggAggTest(unittest.TestCase):
             acc,
             "first line",
         )
+
+
+class FieldCollectAggTest(unittest.TestCase):
+
+    def _make(self, distinct, element_type=None):
+        if element_type is None:
+            element_type = AtomicType("INT")
+
+        options = CoreOptions(Options({"fields.field0.distinct": distinct}))
+
+        return create_field_aggregator(
+            ArrayType(True, element_type),
+            "field0",
+            "collect",
+            options=options,
+        )
+
+    def row(self, *values, fields: List[DataField]):
+        return GenericRow(list(values), fields)
+
+    def test_field_collect_agg_with_distinct(self):
+        agg = self._make(distinct=True)
+        self.assertIsInstance(agg, FieldCollectAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        result = agg.agg(None, [1, 1, 2])
+        self.assertEqual(result, [1, 2])
+
+        result = agg.agg([1, 1, 2], [2, 3])
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_field_collect_agg_without_distinct(self):
+        agg = self._make(distinct=False)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        result = agg.agg(None, [1, 1, 2])
+        self.assertEqual(result, [1, 1, 2])
+
+        result = agg.agg([1, 1, 2], [2, 3])
+        self.assertEqual(result, [1, 1, 2, 2, 3])
+
+    def test_field_collect_agg_retract(self):
+        agg = self._make(distinct=True)
+
+        result = agg.retract([1, 2, 3], [1])
+        self.assertEqual(result, [2, 3])
+        self.assertIsNone(agg.retract(None, [1]))
+        self.assertEqual(agg.retract([1, 2], None), [1, 2])
+
+    def test_field_collect_agg_retract_duplicate_elements(self):
+        # primitive type
+        agg = self._make(distinct=True)
+
+        self.assertEqual(
+            agg.retract([1, 1, 2, 2, 3], [1, 2, 3]),
+            [1, 2],
+        )
+
+        # row type
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [
+                    self.row(1, "A", fields=fields),
+                    self.row(1, "A", fields=fields),
+                    self.row(1, "B", fields=fields),
+                    self.row(2, "B", fields=fields),
+                ],
+                [
+                    self.row(1, "A", fields=fields),
+                    self.row(2, "B", fields=fields),
+                ],
+            ),
+            [
+                self.row(1, "A", fields=fields),
+                self.row(1, "B", fields=fields),
+            ],
+        )
+
+        # array type
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [[1, 1], [1, 1], [1, 2], [2, 1]],
+                [[1, 1], [1, 2]],
+            ),
+            [[1, 1], [2, 1]],
+        )
+
+        # map type
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(True, AtomicType("INT"), AtomicType("STRING")),
+        )
+
+        self.assertEqual(
+            agg.retract(
+                [{1: "A"}, {1: "A"}, {1: "A", 2: "B"}, {1: "C"}],
+                [{1: "A"}, {2: "B", 1: "A"}],
+            ),
+            [{1: "A"}, {1: "C"}],
+        )
+
+    def test_field_collect_agg_with_row_type(self):
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields),
+        )
+
+        input1 = [
+            self.row(1, "A", fields=fields),
+            self.row(1, "B", fields=fields),
+        ]
+
+        result = agg.agg(None, input1)
+        self.assertEqual(result, input1)
+
+        input2 = [
+            self.row(1, "A", fields=fields),
+            self.row(2, "A", fields=fields),
+        ]
+
+        result = agg.agg(input1, input2)
+        self.assertEqual(result, [
+            self.row(1, "A", fields=fields),
+            self.row(1, "B", fields=fields),
+            self.row(2, "A", fields=fields),
+        ])
+
+        # retract
+        result = agg.retract(
+            [
+                self.row(1, "A", fields=fields),
+                self.row(1, "B", fields=fields),
+                self.row(2, "B", fields=fields),
+            ],
+            [
+                self.row(1, "A", fields=fields),
+                self.row(2, "B", fields=fields),
+            ],
+        )
+        self.assertEqual(result, [self.row(1, "B", fields=fields)])
+
+    def test_field_collect_agg_with_array_type(self):
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+
+        input1 = [[1, 1], [1, 2]]
+        acc = agg.agg(None, input1)
+        self.assertEqual(acc, input1)
+
+        input2 = [[1, 1], [1, 2], [2, 1]]
+        acc = agg.agg(acc, input2)
+        self.assertEqual(acc, [[1, 1], [1, 2], [2, 1]])
+
+        # retract
+        acc = agg.retract(
+            [[1, 1], [1, 2], [2, 1]],
+            [[1, 1], [1, 2]],
+        )
+        self.assertEqual(acc, [[2, 1]])
+
+    def test_field_collect_agg_with_map_type(self):
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(
+                True,
+                AtomicType("INT"),
+                AtomicType("STRING"),
+            ),
+        )
+
+        input1 = [{1: "A"}, {1: "A", 2: "B"}]
+        acc = agg.agg(None, input1)
+        self.assertEqual(acc, input1)
+
+        input2 = [{1: "A"}, {2: "B", 1: "A"}, {1: "C"}]
+        acc = agg.agg(acc, input2)
+        self.assertEqual(acc, [{1: "A"}, {1: "A", 2: "B"}, {1: "C"}])
+
+        # retract
+        acc = agg.retract(
+            [{1: "A"}, {1: "A", 2: "B"}, {1: "C"}],
+            [{1: "A"}, {2: "B", 1: "A"}],
+        )
+        self.assertEqual(acc, [{1: "C"}])
+
+
+class FieldNestedUpdateAggTest(unittest.TestCase):
+    IDENTIFIER = "nested_update"
+
+    DEFAULT_FIELDS = [
+        DataField(0, "k0", AtomicType("INT")),
+        DataField(1, "k1", AtomicType("INT")),
+        DataField(2, "v", AtomicType("STRING")),
+    ]
+
+    SEQUENCE_FIELDS = [
+        DataField(0, "k0", AtomicType("INT")),
+        DataField(1, "k1", AtomicType("INT")),
+        DataField(2, "v", AtomicType("STRING")),
+        DataField(3, "seq", AtomicType("INT")),
+    ]
+
+    def _make_data_type(self, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return ArrayType(
+            True,
+            RowType(True, fields)
+        )
+
+    def _make(self, data_type, options: CoreOptions = None):
+        """Build an aggregator through the public registry path so we also
+        exercise the registered factory (including its type validation).
+        """
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        return create_field_aggregator(
+            data_type, "field0", self.IDENTIFIER, options=options
+        )
+
+    def row(self, *values, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return GenericRow(list(values), fields)
+
+    def test_field_nested_update(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(Options(
+                {
+                    'fields.field0.nested-key': 'k0,k1'
+                }
+            ))
+        )
+        self.assertIsInstance(agg, FieldNestedUpdateAgg)
+
+        accumulator = None
+
+        current: InternalRow = self.row(0, 0, "A")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A")])
+
+        current = self.row(0, 1, "B")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 0, "A"),
+            self.row(0, 1, "B"),
+        ])
+
+        current = self.row(0, 1, "b")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 0, "A"),
+            self.row(0, 1, "b"),
+        ])
+
+        accumulator = agg.retract(accumulator, [self.row(0, 1, "b")])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A")])
+
+    def test_field_nested_append(self):
+        agg = self._make(self._make_data_type())
+
+        accumulator = None
+
+        current = self.row(0, 1, "B")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B")])
+
+        current = self.row(0, 1, "b")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(0, 1, "b"),
+        ])
+
+        accumulator = agg.retract(accumulator, [self.row(0, 1, "b")])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B")])
+
+    def test_field_nested_update_with_sequence_field_prerequisite(self):
+        # nested-sequence-field without nested-key should fail
+        with self.assertRaisesRegex(
+                ValueError,
+                "Option 'fields.<field-name>.nested-sequence-field' requires "
+                "'fields.<field-name>.nested-key' to be configured.",
+        ):
+            self._make(
+                self._make_data_type(fields=self.SEQUENCE_FIELDS),
+                CoreOptions(
+                    Options(
+                        {
+                            "fields.field0.nested-sequence-field": "seq"
+                        }
+                    )
+                )
+            )
+
+        seq_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                    }
+                )
+            )
+        )
+
+        self.assertIsInstance(seq_agg, FieldNestedUpdateAgg)
+
+        accumulator = None
+
+        accumulator = seq_agg.agg(accumulator, [self.row(0, 1, "A", 1)])
+        accumulator = seq_agg.agg(accumulator, [self.row(0, 1, "B", 2)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B", 2)])
+
+        # older sequence value should be ignored
+        accumulator = seq_agg.agg(accumulator, [self.row(0, 1, "b_Late", 1)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B", 2)])
+
+    def test_field_nested_update_with_nested_key_null_strategy_prerequisite(self):
+        # nested-key-null-strategy requires nested-key
+        with self.assertRaisesRegex(
+                ValueError,
+                "Option 'fields.<field-name>.nested-key-null-strategy' requires "
+                "'fields.<field-name>.nested-key' to be configured.",
+        ):
+            self._make(
+                self._make_data_type(fields=self.SEQUENCE_FIELDS),
+                CoreOptions(
+                    Options(
+                        {
+                            "fields.field0.nested-key-null-strategy": "merge"
+                        }
+                    )
+                )
+            )
+
+        # merge strategy
+        merge_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "merge",
+                    }
+                )
+            )
+        )
+
+        merge_accumulator = None
+
+        merge_accumulator = merge_agg.agg(merge_accumulator, [self.row(0, None, "A", 1)])
+        self.assertCountEqual(merge_accumulator, [self.row(0, None, "A", 1)])
+
+        # ignore strategy
+        ignore_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "ignore",
+                    }
+                )
+            )
+        )
+
+        ignore_accumulator = None
+
+        ignore_accumulator = ignore_agg.agg(ignore_accumulator, [self.row(0, 1, "A", 1)])
+        ignore_accumulator = ignore_agg.agg(ignore_accumulator, [self.row(0, None, "B", 2)])
+        self.assertCountEqual(ignore_accumulator, [self.row(0, 1, "A", 1)])
+
+        # error strategy
+        error_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "error",
+                    }
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            error_agg.agg(None, [self.row(0, None, "B", 2)])
+
+    def test_field_nested_append_with_count_limit(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.count-limit": "2"
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B")])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B")])
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "b")])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(0, 1, "b"),
+        ])
+
+        # count limit = 2
+        # third element should be dropped
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "C")])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(0, 1, "b"),
+        ])
+
+    def test_field_nested_append_with_count_limit_on_first_input_array(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.count-limit": "2"
+                    }
+                )
+            )
+        )
+
+        accumulator = agg.agg(
+            None,
+            [
+                self.row(0, 1, "B"),
+                None,
+                self.row(0, 1, "b"),
+                self.row(0, 1, "C"),
+            ],
+        )
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(0, 1, "b"),
+        ])
+
+    def test_field_nested_update_with_count_limit_updates_existing_key_at_limit_without_sequence(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.count-limit": "2"
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B")])
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "C")])
+
+        # update existing key when count limit reached
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated")])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated"),
+            self.row(1, 2, "C"),
+        ])
+
+        # new key exceeds limit, should be ignored
+        accumulator = agg.agg(accumulator, [self.row(2, 3, "D")])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated"),
+            self.row(1, 2, "C"),
+        ])
+
+    def test_field_nested_update_with_count_limit_on_first_input_array_without_sequence(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            )
+        )
+
+        accumulator = agg.agg(
+            None,
+            [
+                self.row(0, 1, "B"),
+                self.row(1, 2, "C"),
+                self.row(2, 3, "D"),
+                self.row(0, 1, "B_updated"),
+            ],
+        )
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated"),
+            self.row(1, 2, "C"),
+        ])
+
+    def test_field_nested_update_with_sequence_field(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        current = self.row(0, 0, "A", 1)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        current = self.row(0, 1, "B", 2)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 0, "A", 1),
+            self.row(0, 1, "B", 2),
+        ])
+
+        current = self.row(0, 1, "b", 3)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 0, "A", 1),
+            self.row(0, 1, "b", 3),
+        ])
+
+        # lower sequence should be ignored
+        current = self.row(0, 1, "B_late", 2)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 0, "A", 1),
+            self.row(0, 1, "b", 3),
+        ])
+
+        accumulator = agg.retract(accumulator, [self.row(0, 1, "b", 3)])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A", 1), ])
+
+    def test_field_nested_update_with_multiple_sequence_fields(self):
+        fields = self.DEFAULT_FIELDS + [
+            DataField(3, "seq", AtomicType("INT")),
+            DataField(4, "ts", AtomicType("TIMESTAMP(3)"))
+        ]
+        agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq,ts",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        ts1 = Timestamp.from_epoch_millis(1000)
+        ts2 = Timestamp.from_epoch_millis(2000)
+        ts3 = Timestamp.from_epoch_millis(3000)
+
+        accumulator = agg.agg(accumulator, [self.row(1, 0, "A", 1, ts2)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 2, ts1)])
+        self.assertCountEqual(accumulator, [
+            self.row(1, 0, "A", 1, ts2),
+            self.row(0, 1, "B", 2, ts1),
+        ])
+
+        accumulator = agg.agg(accumulator, [self.row(1, 1, "C", 1, ts2)])
+        self.assertCountEqual(accumulator, [
+            self.row(1, 0, "A", 1, ts2),
+            self.row(0, 1, "B", 2, ts1),
+            self.row(1, 1, "C", 1, ts2),
+        ])
+
+        # smaller second sequence should be ignored
+        accumulator = agg.agg(accumulator, [self.row(1, 0, "A_late_updated_by_ts", 1, ts1)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A", 1, ts2),
+                self.row(0, 1, "B", 2, ts1),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+        # same seq, larger ts should update
+        accumulator = agg.agg(accumulator, [self.row(1, 0, "A_updated_by_ts", 1, ts3)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A_updated_by_ts", 1, ts3),
+                self.row(0, 1, "B", 2, ts1),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+        # smaller first sequence ignored even with larger ts
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "b_ignored", 1, ts3)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A_updated_by_ts", 1, ts3),
+                self.row(0, 1, "B", 2, ts1),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+        # same seq, larger ts
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated_by_ts", 2, ts2)])
+
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A_updated_by_ts", 1, ts3),
+                self.row(0, 1, "B_updated_by_ts", 2, ts2),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+        # larger first sequence wins
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated_by_seq", 3, ts1)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A_updated_by_ts", 1, ts3),
+                self.row(0, 1, "B_updated_by_seq", 3, ts1),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+        accumulator = agg.retract(accumulator, [self.row(0, 1, "B_updated_by_seq", 3, ts1)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(1, 0, "A_updated_by_ts", 1, ts3),
+                self.row(1, 1, "C", 1, ts2),
+            ]
+        )
+
+    def test_field_nested_update_with_count_limit_with_sequence_field_without_nested_key(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                "Option 'fields.<field-name>.nested-sequence-field' requires "
+                "'fields.<field-name>.nested-key' to be configured.",
+        ):
+            self._make(
+                self._make_data_type(fields=self.SEQUENCE_FIELDS),
+                CoreOptions(
+                    Options(
+                        {
+                            "fields.field0.nested-sequence-field": "seq",
+                            "fields.field0.count-limit": "2",
+                        }
+                    )
+                )
+            )
+
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "A", 1)])
+        accumulator = agg.agg(accumulator, [self.row(0, 2, "B", 2)])
+        accumulator = agg.agg(accumulator, [self.row(0, 3, "C", 3)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "A_Update", 4)])
+        accumulator = agg.agg(accumulator, [self.row(0, 2, "B_Late", 1)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "A_Update", 4),
+            self.row(0, 2, "B", 2),
+        ])
+
+    def test_field_nested_update_with_count_limit_with_sequence_field(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        current = self.row(0, 1, "B", 1)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B", 1)])
+
+        current = self.row(0, 1, "B_updated", 2)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B_updated", 2)])
+
+        current = self.row(1, 2, "C", 3)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 2),
+            self.row(1, 2, "C", 3),
+        ])
+
+        current = self.row(0, 3, "D", 4)
+        accumulator = agg.agg(accumulator, [current])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 2),
+            self.row(1, 2, "C", 3),
+        ])
+
+    def test_field_nested_update_with_count_limit_updates_existing_key_at_limit(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 1)])
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "C", 3)])
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated", 4)])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+        ])
+
+        accumulator = agg.agg(accumulator, [self.row(2, 3, "D", 5)])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+        ])
+
+    def test_field_nested_update_with_count_limit_on_first_input_array_with_sequence(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            )
+        )
+
+        accumulator = agg.agg(
+            None,
+            [
+                self.row(0, 1, "B", 1),
+                self.row(1, 2, "C", 3),
+                self.row(2, 3, "D", 5),
+                self.row(0, 1, "B_updated", 4),
+            ],
+        )
+
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 1, "B_updated", 4),
+                self.row(1, 2, "C", 3),
+            ],
+        )
+
+    def test_field_nested_update_when_nested_key_null_use_merge_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "merge",
+                    }
+                )
+            )
+        )
+
+        current = self.row(0, None, "C", 3)
+        accumulator = agg.agg(None, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        current = self.row(None, None, "D", 4)
+        accumulator = agg.agg(None, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        accumulator = agg.agg(None, [self.row(0, 0, "A", 1)])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A", 1)])
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 2)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+            ],
+        )
+
+        accumulator = agg.agg(accumulator, [self.row(0, None, "C", 3)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+                self.row(0, None, "C", 3),
+            ],
+        )
+
+        accumulator = agg.agg(accumulator, [self.row(None, None, "D", 4)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+                self.row(0, None, "C", 3),
+                self.row(None, None, "D", 4),
+            ],
+        )
+
+    def test_field_nested_update_when_nested_key_null_use_ignore_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "ignore",
+                    }
+                )
+            )
+        )
+
+        accumulator = agg.agg(None, [self.row(0, None, "C", 3)])
+        self.assertCountEqual(accumulator, [])
+
+        accumulator = agg.agg(None, [self.row(None, None, "D", 4)])
+        self.assertCountEqual(accumulator, [])
+
+        accumulator = agg.agg(None, [self.row(0, 0, "A", 1)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 2)])
+
+        accumulator = agg.agg(accumulator, [self.row(0, None, "C", 3)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+            ],
+        )
+
+        accumulator = agg.agg(accumulator, [self.row(None, None, "D", 4)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+            ],
+        )
+
+    def test_field_nested_update_when_nested_key_null_use_throw_error_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "error",
+                    }
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(None, [self.row(0, None, "C", 3)])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(None, [self.row(None, None, "D", 4)])
+
+        accumulator = agg.agg(None, [self.row(0, 0, "A", 1)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 2)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+            ],
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(accumulator, [self.row(0, None, "C", 3)])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(accumulator, [self.row(None, None, "D", 4)])
+
+    def test_field_nested_update_with_count_limit_when_nested_key_null_use_merge_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-key-null-strategy": "merge",
+                        "fields.field0.count-limit": "3",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 1)])
+        accumulator = agg.agg(accumulator, [self.row(None, 2, "NULL_2", 2)])
+        accumulator = agg.agg(accumulator, [self.row(None, None, "NULL_NULL", 3)])
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "C", 5)])
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated", 4)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(None, 2, "NULL_2", 2),
+            self.row(None, None, "NULL_NULL", 3),
+        ])
+
+    def test_field_nested_update_with_count_limit_when_nested_key_null_use_ignore_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-key-null-strategy": "ignore",
+                        "fields.field0.count-limit": "3",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 1)])
+        accumulator = agg.agg(accumulator, [self.row(None, 2, "NULL_2", 2)])
+        accumulator = agg.agg(accumulator, [self.row(None, None, "NULL_NULL", 3)])
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "C", 3)])
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated", 4)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+        ])
+
+        accumulator = agg.agg(accumulator, [self.row(2, 3, "D", 5)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+            self.row(2, 3, "D", 5),
+        ])
+
+    def test_field_nested_update_with_count_limit_when_nested_key_null_use_throw_error_strategy(self):
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-key-null-strategy": "error",
+                        "fields.field0.count-limit": "3",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B", 1)])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(accumulator, [self.row(None, 2, "NULL_2", 2)])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(accumulator, [self.row(None, None, "NULL_NULL", 3)])
+
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "C", 3)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "B_updated", 4)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+        ])
+
+        accumulator = agg.agg(accumulator, [self.row(2, 3, "D", 5)])
+
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B_updated", 4),
+            self.row(1, 2, "C", 3),
+            self.row(2, 3, "D", 5),
+        ])
+
+    def test_field_nested_update_retract_applies_nested_key_null_strategy_to_accumulator(self):
+        merge_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+        accumulator = merge_agg.agg(accumulator, [self.row(0, None, "A")])
+        accumulator = merge_agg.agg(accumulator, [self.row(1, 0, "B")])
+        accumulator = merge_agg.agg(accumulator, [self.row(1, 1, "C")])
+
+        ignore_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "IGNORE",
+                    }
+                )
+            )
+        )
+
+        result = ignore_agg.retract(accumulator, [self.row(1, 0, "B")])
+        self.assertCountEqual(result, [self.row(1, 1, "C")])
+
+        error_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "ERROR",
+                    }
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            error_agg.retract(accumulator, [self.row(1, 0, "B")])
+
+    def test_field_nested_update_retract_applies_nested_key_null_strategy_to_retract_input(self):
+        merge_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                    }
+                )
+            )
+        )
+
+        accumulator = None
+        accumulator = merge_agg.agg(accumulator, [self.row(0, 0, "A")])
+        accumulator = merge_agg.agg(accumulator, [self.row(1, 1, "B")])
+
+        ignore_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "IGNORE",
+                    }
+                )
+            )
+        )
+
+        result = ignore_agg.retract(accumulator, [self.row(0, None, "X")])
+
+        self.assertCountEqual(result, [
+            self.row(0, 0, "A"),
+            self.row(1, 1, "B"),
+        ])
+
+        error_agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-key-null-strategy": "ERROR",
+                    }
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            error_agg.retract(accumulator, [self.row(0, None, "X")])
+
+    def test_field_nested_update_with_non_sequential_field_ids(self):
+        agg = self._make(
+            self._make_data_type(fields=[
+                DataField(10, "k0", AtomicType("INT")),
+                DataField(11, "k1", AtomicType("INT")),
+                DataField(12, "v", AtomicType("STRING")),
+                DataField(23, "seq", AtomicType("INT")),
+            ]),
+            CoreOptions(Options(
+                {
+                    'fields.field0.nested-key': 'k0,k1',
+                    "fields.field0.nested-sequence-field": "seq",
+                }
+            ))
+        )
+
+        accumulator = None
+
+        accumulator = agg.agg(
+            accumulator,
+            [
+                self.row(0, 0, "A", 1),
+                self.row(0, 1, "B", 2),
+                self.row(0, 1, "b", 3),
+                self.row(0, 1, "B_late", 2)
+            ]
+        )
+        accumulator = agg.retract(accumulator, [self.row(0, 1, "b", 3)])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A", 1), ])
+
+
+class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
+
+    DEFAULT_FIELDS = [
+        DataField(0, "actual_value", AtomicType("STRING")),
+        DataField(1, "dbsync_ts", AtomicType("STRING")),
+    ]
+
+    def _make(self, row_type: RowType = None, options: CoreOptions = None):
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        if not row_type:
+            row_type = RowType(True, self.DEFAULT_FIELDS)
+
+        return create_field_aggregator(
+            MapType(True, AtomicType("STRING"), row_type),
+            "field0",
+            "merge_map_with_keytime",
+            options=options,
+        )
+
+    def row(self, *values, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return GenericRow(list(values), fields)
+
+    def test_field_merge_map_with_key_time_dict_row_default_ts(self):
+        agg = self._make()
+
+        result = agg.agg(
+            None,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        self.assertEqual(
+            result,
+            {"key1": {"actual_value": "A", "dbsync_ts": "100"}},
+        )
+
+        result = agg.agg(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "key1": {"actual_value": "A+", "dbsync_ts": "110"},
+                "key2": {"actual_value": "B", "dbsync_ts": "100"}
+            },
+        )
+
+    def test_field_merge_map_with_key_time_agg_using_default_ts(self):
+        agg = self._make()
+        self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        acc = agg.agg(
+            None,
+            {
+                "key1": self.row("A", "17682882903686900100"),
+                "key2": self.row("B", "17682882903686900100"),
+            },
+        )
+        self.assertEqual(
+            acc,
+            {
+                "key1": self.row("A", "17682882903686900100"),
+                "key2": self.row("B", "17682882903686900100"),
+            },
+        )
+
+        # newer timestamp replaces old value
+        acc = agg.agg(
+            acc,
+            {
+                "key1": self.row("A1", "17682882903686900200"),
+                "key3": self.row("C", "17682882903686900200"),
+            },
+        )
+        self.assertEqual(
+            acc,
+            {
+                "key1": self.row("A1", "17682882903686900200"),
+                "key2": self.row("B", "17682882903686900100"),
+                "key3": self.row("C", "17682882903686900200"),
+            },
+        )
+
+        # older timestamp keeps existing value
+        acc = agg.agg(
+            acc,
+            {
+                "key2": self.row("B2", "17682882903686900050"),
+            },
+        )
+        self.assertEqual(
+            acc["key2"],
+            self.row("B", "17682882903686900100"),
+        )
+
+    def test_field_merge_map_with_key_time_agg_using_event_time(self):
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "other_field", AtomicType("STRING")),
+            DataField(2, "event_time", AtomicType("STRING")),
+            DataField(3, "dbsync_ts", AtomicType("STRING")),
+        ]
+        agg = self._make(
+            row_type=RowType(True, fields),
+            options=CoreOptions(Options(
+                {"fields.field0.ts-field": "event_time"}
+            ))
+        )
+
+        acc = agg.agg(None, {
+            "key1": self.row("A", "other_a", "2026-07-19 10:00:00", "2026-07-19 12:00:00")
+        })
+
+        acc = agg.agg(acc, {
+            "key1": self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00")
+        })
+        self.assertEqual(
+            acc["key1"],
+            self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
+        )
+
+        acc = agg.agg(acc, {
+            "key1": self.row("A2", "other_a2", "2026-07-19 09:00:00", "2026-07-19 13:00:00")
+        })
+        self.assertEqual(
+            acc["key1"],
+            self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
+        )
+
+    def test_field_merge_map_with_key_time_agg_retract(self):
+        agg = self._make()
+
+        with self.assertRaises(NotImplementedError):
+            agg.retract(
+                {
+                    "key1": self.row("A", "17682882903686900100"),
+                    "key2": self.row("B", "17682882903686900100"),
+                },
+                {
+                    "key1": self.row("A", "17682882903686900100"),
+                },
+            )
 
 
 class RegistrationTest(unittest.TestCase):

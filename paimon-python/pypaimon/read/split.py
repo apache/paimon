@@ -78,13 +78,16 @@ class DataSplit(Split):
         partition: GenericRow,
         bucket: int,
         raw_convertible: bool = False,
-        data_deletion_files: Optional[List[DeletionFile]] = None
+        data_deletion_files: Optional[List[DeletionFile]] = None,
+        snapshot_id: Optional[int] = None
     ):
         self._files = files
         self._partition = partition
         self._bucket = bucket
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
+        # Scanned snapshot; None unless populated (e.g. by the native planner).
+        self.snapshot_id = snapshot_id
 
     @property
     def files(self) -> List[DataFileMeta]:
@@ -121,7 +124,8 @@ class DataSplit(Split):
             partition=self._partition,
             bucket=self._bucket,
             raw_convertible=self.raw_convertible,
-            data_deletion_files=filtered_data_deletion_files
+            data_deletion_files=filtered_data_deletion_files,
+            snapshot_id=self.snapshot_id
         )
 
     @property

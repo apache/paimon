@@ -65,25 +65,26 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
-        lt7 = _pyarrow_lt_7()
         oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
             OssOptions.OSS_IMPL.key(): 'legacy',
         }))
+        # PyArrow <16 bakes the bucket into endpoint_override, so keys omit it.
+        bucket_stripped = oss_io._oss_bucket_in_endpoint
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
-        if lt7:
+        self.assertEqual(got, "path/to/file.txt" if bucket_stripped else "test-bucket/path/to/file.txt")
+        if bucket_stripped:
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx/data.parquet"),
                              "db-xxx.db/tbl-xxx/data.parquet")
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx"), "db-xxx.db/tbl-xxx")
             manifest_uri = "oss://test-bucket/warehouse/db.db/table/manifest/manifest-list-abc-0"
             manifest_key = oss_io.to_filesystem_path(manifest_uri)
             self.assertEqual(manifest_key, "warehouse/db.db/table/manifest/manifest-list-abc-0",
-                             "OSS+PyArrow6 must pass key only to PyArrow so manifest is written to correct bucket")
+                             "OSS+PyArrow<16 must pass key only so manifest lands in the right bucket")
             self.assertFalse(manifest_key.startswith("test-bucket/"),
-                             "path must not start with bucket name or PyArrow 6 writes to wrong bucket")
+                             "path must not start with bucket or PyArrow <16 writes to wrong bucket")
         nf = MagicMock(type=pafs.FileType.NotFound)
         get_file_info_calls = []
 
@@ -92,24 +93,24 @@ class FileIOTest(unittest.TestCase):
             return [MagicMock(type=pafs.FileType.NotFound) for _ in paths]
 
         mock_fs = MagicMock()
-        mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
+        mock_fs.get_file_info.side_effect = record_get_file_info if bucket_stripped else [[nf], [nf]]
         mock_fs.create_dir = MagicMock()
         mock_fs.open_output_stream.return_value = MagicMock()
         oss_io.filesystem = mock_fs
         oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
         mock_fs.create_dir.assert_called_once()
         path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        if lt7:
+        if bucket_stripped:
             expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
         else:
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
         self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
-        if lt7:
+        if bucket_stripped:
             for call_paths in get_file_info_calls:
                 for p in call_paths:
                     self.assertFalse(
                         p.startswith("test-bucket/"),
-                        "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                        "OSS+PyArrow<16 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
                     )
 
     def test_exists(self):

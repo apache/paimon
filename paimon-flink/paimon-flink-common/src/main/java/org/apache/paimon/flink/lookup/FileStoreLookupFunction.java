@@ -28,8 +28,11 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.ChainGroupReadTable;
@@ -103,6 +106,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient File path;
     private transient String tmpDirectory;
     private transient LookupTable lookupTable;
+    @Nullable private transient MetricRegistry metricRegistry;
+    @Nullable private transient PartialLookupMetrics partialLookupMetrics;
 
     // partition refresh
     @Nullable private transient PartitionRefresher partitionRefresher;
@@ -179,6 +184,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public void open(FunctionContext context) throws Exception {
         this.functionContext = context;
+        this.metricRegistry = new FlinkMetricRegistry(context.getMetricGroup());
         this.tmpDirectory = getTmpDirectory(context);
         open(tmpDirectory);
     }
@@ -225,7 +231,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 try {
                     this.lookupTable =
                             PrimaryKeyPartialLookupTable.createLocalTable(
-                                    table, projection, path, joinKeys, getRequireCachedBucketIds());
+                                    table,
+                                    projection,
+                                    path,
+                                    joinKeys,
+                                    getRequireCachedBucketIds(),
+                                    this::partialLookupMetrics);
                     LOG.info(
                             "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
                 } catch (UnsupportedOperationException e) {
@@ -275,6 +286,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
         lookupTable.open();
+    }
+
+    @Nullable
+    private PartialLookupMetrics partialLookupMetrics() {
+        if (metricRegistry == null) {
+            return null;
+        }
+        if (partialLookupMetrics == null) {
+            partialLookupMetrics = new PartialLookupMetrics(metricRegistry, table.name());
+        }
+        return partialLookupMetrics;
     }
 
     @Nullable

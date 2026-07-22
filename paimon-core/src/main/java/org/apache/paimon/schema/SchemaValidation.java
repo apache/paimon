@@ -677,40 +677,46 @@ public class SchemaValidation {
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);
+            options.mapSharedShreddingColumnPlacementPolicy(fieldName);
         }
 
         if (hasSharedShredding) {
             validateMapSharedShreddingFileFormats(options);
             validateMapSharedShreddingCompressions(options);
-            validateUnsupportedTypesWithMapSharedShredding(schema);
-            if (!schema.primaryKeys().isEmpty()) {
+            validateUnsupportedTypesWithMapSharedShredding(schema, options);
+            if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
                 throw new IllegalArgumentException(
-                        "MAP shared-shredding currently only supports append-only tables.");
-            }
-            if (options.bucket() != -1 && !options.writeOnly()) {
-                throw new IllegalArgumentException(
-                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+                        "MAP shared-shredding currently does not support postpone bucket mode.");
             }
         }
     }
 
-    private static void validateUnsupportedTypesWithMapSharedShredding(TableSchema schema) {
+    private static void validateUnsupportedTypesWithMapSharedShredding(
+            TableSchema schema, CoreOptions options) {
         RowType rowType = new RowType(schema.fields());
         if (containsType(rowType, type -> type instanceof VariantType)) {
             throw new IllegalArgumentException(
                     "MAP shared-shredding currently cannot be used with Variant fields.");
         }
-        if (containsType(rowType, type -> type.is(DataTypeRoot.BLOB))) {
-            throw new IllegalArgumentException(
-                    "MAP shared-shredding currently cannot be used with BLOB fields.");
-        }
         if (containsType(rowType, type -> type instanceof MultisetType)) {
             throw new IllegalArgumentException(
                     "MAP shared-shredding currently cannot be used with MULTISET fields.");
         }
-        if (containsType(rowType, type -> type instanceof VectorType)) {
-            throw new IllegalArgumentException(
-                    "MAP shared-shredding currently cannot be used with VECTOR fields.");
+
+        for (DataField field : schema.fields()) {
+            if (options.mapStorageLayout(field.name()) != MapStorageLayout.SHARED_SHREDDING) {
+                continue;
+            }
+
+            DataType valueType = ((MapType) field.type()).getValueType();
+            if (containsType(valueType, type -> type.is(DataTypeRoot.BLOB))) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently cannot contain BLOB fields.");
+            }
+            if (containsType(valueType, type -> type instanceof VectorType)) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently cannot contain VECTOR fields.");
+            }
         }
     }
 
@@ -748,8 +754,6 @@ public class SchemaValidation {
         }
         validateMapSharedShreddingFileFormat(
                 CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
-        validateMapSharedShreddingFileFormat(
-                CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
     }
 
     private static void validateMapSharedShreddingCompressions(CoreOptions options) {
@@ -1259,14 +1263,14 @@ public class SchemaValidation {
             if (!primaryKeyManagedBlob) {
                 checkArgument(
                         options.dataEvolutionEnabled(),
-                        "Data evolution config must enabled for table with BLOB or ARRAY<BLOB> type column.");
+                        "Data evolution config must enabled for table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column.");
             }
             checkArgument(
                     fields.size() > blobNames.size(),
-                    "Table with BLOB or ARRAY<BLOB> type column must have other normal columns.");
+                    "Table with BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
-                    "The BLOB or ARRAY<BLOB> type column can not be part of partition keys.");
+                    "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be part of partition keys.");
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
@@ -1288,6 +1292,7 @@ public class SchemaValidation {
     }
 
     private static void validateBlobFields(RowType rowType, CoreOptions options) {
+        validateBlobNesting(rowType.getFields(), options);
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
                         .filter(field -> isBlobFileField(field.type()))
@@ -1299,9 +1304,26 @@ public class SchemaValidation {
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field or ARRAY<BLOB> field in table schema.",
+                    "Field '%s' in '%s' must be a BLOB, ARRAY<BLOB> or MAP<X, BLOB> field in table schema.",
                     field,
                     CoreOptions.BLOB_FIELD.key());
+        }
+    }
+
+    private static void validateBlobNesting(List<DataField> fields, CoreOptions options) {
+        for (DataField field : fields) {
+            // Preserve the more specific shared-shredding validation errors below.
+            if (options.mapStorageLayout(field.name()) == MapStorageLayout.SHARED_SHREDDING) {
+                continue;
+            }
+            DataType type = field.type();
+            checkArgument(
+                    isBlobFileField(type)
+                            || !containsType(type, nested -> nested.is(DataTypeRoot.BLOB)),
+                    "Field '%s' has unsupported nested BLOB type %s. BLOB is only supported as a "
+                            + "top-level BLOB, ARRAY<BLOB>, or MAP<X, BLOB> field.",
+                    field.name(),
+                    type);
         }
     }
 
@@ -1316,7 +1338,7 @@ public class SchemaValidation {
             checkArgument(
                     blobFieldNames.contains(field),
                     "Field '%s' in '%s' must be a BLOB field in table schema. "
-                            + "ARRAY<BLOB> is only supported by '%s'.",
+                            + "ARRAY<BLOB> and MAP<X, BLOB> are only supported by '%s'.",
                     field,
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
                     CoreOptions.BLOB_FIELD.key());
@@ -1336,7 +1358,7 @@ public class SchemaValidation {
             checkArgument(
                     blobFieldNames.contains(field),
                     "Field '%s' in '%s' must be a BLOB field in table schema. "
-                            + "ARRAY<BLOB> is only supported by '%s'.",
+                            + "ARRAY<BLOB> and MAP<X, BLOB> are only supported by '%s'.",
                     field,
                     CoreOptions.BLOB_VIEW_FIELD.key(),
                     CoreOptions.BLOB_FIELD.key());

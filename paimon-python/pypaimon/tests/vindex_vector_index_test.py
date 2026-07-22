@@ -100,6 +100,14 @@ class VindexVectorIndexTest(unittest.TestCase):
         top1 = DictBasedScoredIndexResult(id_to_scores).top_k(1)
         self.assertEqual([10], top1.results().to_list())
 
+    def test_top_k_breaks_boundary_ties_by_row_id(self):
+        scores = {1: 0.5, 2: 0.5, 3: 0.5, 4: 0.9}
+
+        self.assertEqual(
+            [1, 4],
+            DictBasedScoredIndexResult(scores).top_k(2).results().to_list(),
+        )
+
     def test_batch_search_uses_native_batch_api(self):
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(

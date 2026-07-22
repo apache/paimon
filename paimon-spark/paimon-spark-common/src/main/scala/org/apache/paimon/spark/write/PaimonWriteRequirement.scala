@@ -18,10 +18,11 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy
 import org.apache.paimon.spark.commands.BucketExpression.quote
+import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.table.BucketMode._
-import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortOrder}
@@ -39,7 +40,7 @@ object PaimonWriteRequirement {
 
   def apply(table: FileStoreTable): PaimonWriteRequirement = {
     val bucketSpec = table.bucketSpec()
-    val bucketTransforms = bucketSpec.getBucketMode match {
+    val bucketTransforms: Seq[Expression] = bucketSpec.getBucketMode match {
       case HASH_FIXED =>
         Seq(
           Expressions.bucket(
@@ -52,15 +53,30 @@ object PaimonWriteRequirement {
           s"Unsupported bucket mode ${bucketSpec.getBucketMode}")
     }
 
+    create(
+      table.schema().partitionKeys().asScala.toSeq,
+      bucketTransforms,
+      table.coreOptions().partitionSinkStrategy())
+  }
+
+  def apply(table: FormatTable): PaimonWriteRequirement = {
+    create(
+      table.partitionKeys().asScala.toSeq,
+      Seq.empty,
+      CoreOptions.fromMap(table.options()).partitionSinkStrategy())
+  }
+
+  private def create(
+      partitionKeys: Seq[String],
+      bucketTransforms: Seq[Expression],
+      partitionSinkStrategy: PartitionSinkStrategy): PaimonWriteRequirement = {
     val partitionTransforms =
-      table.schema().partitionKeys().asScala.map(key => Expressions.identity(quote(key)))
+      partitionKeys.map(key => Expressions.identity(quote(key)))
     val clusteringExpressions =
       (partitionTransforms ++ bucketTransforms).map(identity[Expression]).toArray
 
     if (
-      clusteringExpressions.isEmpty || (bucketTransforms.isEmpty && table
-        .coreOptions()
-        .partitionSinkStrategy()
+      clusteringExpressions.isEmpty || (bucketTransforms.isEmpty && partitionSinkStrategy
         .equals(PartitionSinkStrategy.NONE))
     ) {
       EMPTY

@@ -503,7 +503,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 if (BlobType.isBlobFileField(targetField.type())
                         && !updatableBlobFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update raw-data BLOB or ARRAY<BLOB> column '"
+                            "Should not append/update raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column '"
                                     + flinkColumn.getName()
                                     + "' through MERGE INTO. "
                                     + "Only descriptor-based BLOB columns (configured via '"

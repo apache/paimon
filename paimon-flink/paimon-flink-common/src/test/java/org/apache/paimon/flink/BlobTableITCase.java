@@ -42,7 +42,9 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -62,6 +64,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
                 "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pic1,pic2')",
                 "CREATE TABLE IF NOT EXISTS array_blob_table (id INT, data STRING, pictures ARRAY<BYTES>) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pictures')",
+                "CREATE TABLE IF NOT EXISTS map_blob_table (id INT, data STRING, pictures MAP<STRING, BYTES>) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pictures')",
                 "CREATE TABLE IF NOT EXISTS mixed_blob_table"
                         + " (id INT, data STRING, raw_pic BYTES, desc_pic BYTES)"
                         + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
@@ -148,6 +151,54 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMapBlobField() throws Exception {
+        org.apache.paimon.types.MapType mapType =
+                (org.apache.paimon.types.MapType)
+                        paimonTable("map_blob_table").rowType().getTypeAt(2);
+        assertThat(mapType.getKeyType().getTypeRoot()).isEqualTo(DataTypeRoot.VARCHAR);
+        assertThat(mapType.getValueType().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+
+        Map<String, byte[]> firstMap = new LinkedHashMap<>();
+        firstMap.put("first", new byte[] {72, 101, 108, 108, 111});
+        firstMap.put("null", null);
+        firstMap.put("second", new byte[] {89, 69});
+        Map<String, byte[]> emptyMap = new LinkedHashMap<>();
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, "paimon", firstMap),
+                                Row.of(2, "empty", emptyMap),
+                                Row.of(3, "null-map", null)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE map_blob_source "
+                                        + "(id INT, data STRING, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+        batchSql("INSERT INTO map_blob_table SELECT * FROM map_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures['first'], "
+                                        + "pictures['null'], pictures['second'] "
+                                        + "FROM map_blob_table ORDER BY id"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}),
+                        Row.of(2, 0, null, null, null),
+                        Row.of(3, null, null, null, null));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) > 0 FROM `map_blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(true));
+    }
+
+    @Test
     public void testPrimaryKeyArrayBlobField() throws Exception {
         batchSql(
                 "CREATE TABLE pk_array_blob_table ("
@@ -185,6 +236,61 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                 new byte[] {72, 101, 108, 108, 111},
                                 null,
                                 new byte[] {89, 69}));
+    }
+
+    @Test
+    public void testPrimaryKeyMapBlobField() throws Exception {
+        batchSql(
+                "CREATE TABLE pk_map_blob_table ("
+                        + "id INT, pictures MAP<STRING, BYTES>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED) "
+                        + "WITH ('bucket'='1', 'blob-field'='pictures')");
+        Map<String, byte[]> pictures = new LinkedHashMap<>();
+        pictures.put("first", new byte[] {72, 101, 108, 108, 111});
+        pictures.put("null", null);
+        pictures.put("second", new byte[] {89, 69});
+        String dataId = TestValuesTableFactory.registerData(Arrays.asList(Row.of(1, pictures)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_map_blob_source "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+
+        batchSql("INSERT INTO pk_map_blob_table SELECT * FROM pk_map_blob_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures['first'], "
+                                        + "pictures['null'], pictures['second'] "
+                                        + "FROM pk_map_blob_table"))
+                .containsExactly(
+                        Row.of(
+                                1,
+                                3,
+                                new byte[] {72, 101, 108, 108, 111},
+                                null,
+                                new byte[] {89, 69}));
+
+        Map<String, byte[]> updated = new LinkedHashMap<>();
+        updated.put("first", new byte[] {78, 69, 87});
+        String updateDataId =
+                TestValuesTableFactory.registerData(Arrays.asList(Row.of(1, updated)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE pk_map_blob_update_source "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                updateDataId))
+                .await();
+        batchSql("INSERT INTO pk_map_blob_table SELECT * FROM pk_map_blob_update_source");
+
+        assertThat(
+                        batchSql(
+                                "SELECT id, CARDINALITY(pictures), pictures['first'] "
+                                        + "FROM pk_map_blob_table"))
+                .containsExactly(Row.of(1, 1, new byte[] {78, 69, 87}));
     }
 
     @Test
@@ -237,6 +343,72 @@ public class BlobTableITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT pictures[1], pictures[2] "
                                         + "FROM array_blob_descriptor_table"))
+                .containsExactly(Row.of(blobData, new byte[] {89, 69}));
+    }
+
+    @Test
+    public void testMapBlobFieldWithDescriptorValues() throws Exception {
+        byte[] blobData = new byte[1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/external_map_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                        "CREATE TABLE map_blob_descriptor_table "
+                                + "(id INT, data STRING, pictures MAP<STRING, BYTES>) "
+                                + "WITH ('row-tracking.enabled'='true', "
+                                + "'data-evolution.enabled'='true', "
+                                + "'blob-field'='pictures', "
+                                + "'blob-as-descriptor'='true')")
+                .await();
+        Map<String, byte[]> pictures = new LinkedHashMap<>();
+        pictures.put("external", new BlobDescriptor(uri, 0, blobData.length).serialize());
+        pictures.put("inline", new byte[] {89, 69});
+        String dataId =
+                TestValuesTableFactory.registerData(Arrays.asList(Row.of(1, "paimon", pictures)));
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE map_blob_descriptor_source "
+                                        + "(id INT, data STRING, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                dataId))
+                .await();
+        batchSql("INSERT INTO map_blob_descriptor_table SELECT * FROM map_blob_descriptor_source");
+
+        Row descriptorRow =
+                batchSql(
+                                "SELECT pictures['external'], pictures['inline'] "
+                                        + "FROM map_blob_descriptor_table")
+                        .get(0);
+        BlobDescriptor firstDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(0));
+        BlobDescriptor secondDescriptor =
+                BlobDescriptor.deserialize((byte[]) descriptorRow.getField(1));
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(CatalogContext.create(options));
+        assertThat(
+                        Blob.fromDescriptor(
+                                        uriReaderFactory.create(firstDescriptor.uri()),
+                                        firstDescriptor)
+                                .toData())
+                .isEqualTo(blobData);
+        assertThat(
+                        Blob.fromDescriptor(
+                                        uriReaderFactory.create(secondDescriptor.uri()),
+                                        secondDescriptor)
+                                .toData())
+                .isEqualTo(new byte[] {89, 69});
+
+        batchSql("ALTER TABLE map_blob_descriptor_table SET ('blob-as-descriptor'='false')");
+        assertThat(
+                        batchSql(
+                                "SELECT pictures['external'], pictures['inline'] "
+                                        + "FROM map_blob_descriptor_table"))
                 .containsExactly(Row.of(blobData, new byte[] {89, 69}));
     }
 
@@ -384,6 +556,36 @@ public class BlobTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
+    @Test
+    public void testMaterializeDescriptorWithSourceTableFileIO() {
+        tEnv.executeSql(
+                "CREATE TABLE blob_descriptor_source (id INT, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql("INSERT INTO blob_descriptor_source VALUES" + " (1, X'48656C6C6F'), (2, X'5945')");
+        batchSql("ALTER TABLE blob_descriptor_source SET ('blob-as-descriptor'='true')");
+
+        String sourceTable = tEnv.getCurrentDatabase() + ".blob_descriptor_source";
+        tEnv.executeSql(
+                "CREATE TABLE blob_descriptor_target ("
+                        + "id INT, picture BYTES, PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='2',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-descriptor.source-table'='"
+                        + sourceTable
+                        + "')");
+        batchSql(
+                "INSERT INTO blob_descriptor_target "
+                        + "/*+ OPTIONS('sink.parallelism' = '2') */ "
+                        + "SELECT * FROM blob_descriptor_source");
+
+        assertThat(batchSql("SELECT * FROM blob_descriptor_target ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, new byte[] {72, 101, 108, 108, 111}),
+                        Row.of(2, new byte[] {89, 69}));
     }
 
     @Test
@@ -570,6 +772,39 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'");
         assertArrayBlobInlineFieldRejected(
                 "array_blob_view_reject", "'blob-view-field'='pictures'");
+    }
+
+    @Test
+    public void testMapBlobValidation() throws Exception {
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE map_blob_descriptor_reject "
+                                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                                        + "WITH ('row-tracking.enabled'='true', "
+                                                        + "'data-evolution.enabled'='true', "
+                                                        + "'blob-descriptor-field'='pictures')")
+                                        .await())
+                .hasRootCauseMessage("MAP<X, BLOB> is only supported by 'blob-field'.");
+
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE map_blob_view_reject "
+                                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                                        + "WITH ('row-tracking.enabled'='true', "
+                                                        + "'data-evolution.enabled'='true', "
+                                                        + "'blob-view-field'='pictures')")
+                                        .await())
+                .hasRootCauseMessage("MAP<X, BLOB> is only supported by 'blob-field'.");
+
+        tEnv.executeSql(
+                        "CREATE TABLE map_blob_boolean_key "
+                                + "(id INT, pictures MAP<BOOLEAN, BYTES>) "
+                                + "WITH ('row-tracking.enabled'='true', "
+                                + "'data-evolution.enabled'='true', "
+                                + "'blob-field'='pictures')")
+                .await();
     }
 
     private void assertArrayBlobInlineFieldRejected(String tableName, String blobOptions) {

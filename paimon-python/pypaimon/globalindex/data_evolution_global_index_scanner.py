@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Scanner for shard-based global indexes."""
+"""Scanner for shard-based global indexes on data-evolution tables."""
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Collection, Optional
@@ -27,13 +27,13 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.schema.data_types import DataField
 from pypaimon.utils.range import Range
 
 
-class GlobalIndexScanner:
+class DataEvolutionGlobalIndexScanner:
     """Scanner for shard-based global indexes."""
 
     def __init__(
@@ -54,7 +54,7 @@ class GlobalIndexScanner:
         )
         self._fields = fields
         self._coverage = (
-            GlobalIndexCoverage(table, snapshot, partition_filter, index_files)
+            DataEvolutionGlobalIndexCoverage(table, snapshot, partition_filter, index_files)
             if table is not None
             else None
         )
@@ -132,8 +132,8 @@ class GlobalIndexScanner:
 
     @staticmethod
     def create(table, index_files=None, partition_filter=None, predicate=None,
-               snapshot=None) -> Optional['GlobalIndexScanner']:
-        """Create a GlobalIndexScanner.
+               snapshot=None) -> Optional['DataEvolutionGlobalIndexScanner']:
+        """Create a DataEvolutionGlobalIndexScanner.
 
         Can be called in two ways:
         1. create(table, index_files) - with explicit index files
@@ -148,7 +148,7 @@ class GlobalIndexScanner:
             if len(index_files) == 0:
                 return None
             core_options = _core_options(table)
-            return GlobalIndexScanner(
+            return DataEvolutionGlobalIndexScanner(
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
@@ -193,7 +193,7 @@ class GlobalIndexScanner:
         if len(scanned_index_files) == 0:
             return None
         core_options = _core_options(table)
-        return GlobalIndexScanner(
+        return DataEvolutionGlobalIndexScanner(
             fields=table.fields,
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),
@@ -221,7 +221,7 @@ class GlobalIndexScanner:
         self._evaluator.close()
         self._executor.shutdown(wait=False)
 
-    def __enter__(self) -> 'GlobalIndexScanner':
+    def __enter__(self) -> 'DataEvolutionGlobalIndexScanner':
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

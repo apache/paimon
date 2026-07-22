@@ -90,12 +90,20 @@ class StartupMode(str, Enum):
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+    IGNORE = "IGNORE"
 
 
 class GlobalIndexSearchMode(str, Enum):
     FAST = "fast"
     FULL = "full"
     DETAIL = "detail"
+
+
+class NestedKeyNullStrategy(str, Enum):
+    """Strategy for handling rows whose nested-key contains null values."""
+    MERGE = "merge"
+    IGNORE = "ignore"
+    ERROR = "error"
 
 
 class CoreOptions:
@@ -142,6 +150,11 @@ class CoreOptions:
     FIELDS_PREFIX = "fields"
     DISTINCT = "distinct"
     LIST_AGG_DELIMITER = "list-agg-delimiter"
+    NESTED_KEY = "nested-key"
+    NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
+    NESTED_SEQUENCE_FIELD = "nested-sequence-field"
+    COUNT_LIMIT = "count-limit"
+    MERGE_MAP_TS_FIELD = "ts-field"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -384,6 +397,13 @@ class CoreOptions:
         .with_description("The target file size for blob files.")
     )
 
+    BLOB_COPY_BUFFER_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("blob.copy-buffer-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(4))
+        .with_description("Buffer size used when copying BLOB payloads into BLOB files.")
+    )
+
     VECTOR_FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("vector.file.format")
         .string_type()
@@ -520,6 +540,15 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
+    )
+
+    SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("scan.native-plan.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Plan splits via the native (pypaimon_rust) planner "
+                          "instead of the Python manifest scanner; the pypaimon "
+                          "reader still reads the files.")
     )
 
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
@@ -759,7 +788,8 @@ class CoreOptions:
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
         .with_description(
             "Defines the action to take when an update modifies columns that "
-            "are covered by a global index."
+            "are covered by a global index. IGNORE leaves existing index files "
+            "unchanged and may make the index stale."
         )
     )
 
@@ -1100,6 +1130,16 @@ class CoreOptions:
         else:
             return self.target_file_size(has_primary_key=False)
 
+    def blob_copy_buffer_size(self):
+        size = self.options.get(CoreOptions.BLOB_COPY_BUFFER_SIZE, None).get_bytes()
+        # Java BlobFormatWriter stores the byte-array size in an int.
+        max_size = (1 << 31) - 1
+        if not 1 <= size <= max_size:
+            raise ValueError(
+                f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be between 1 byte and "
+                f"{max_size} bytes, but was {size} bytes.")
+        return size
+
     def vector_file_format(self, default=None):
         return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
 
@@ -1213,6 +1253,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def native_plan_enabled(self, default=None):
+        return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
@@ -1511,6 +1554,59 @@ class CoreOptions:
             )
             .boolean_type()
             .default_value(False)
+        )
+
+    def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_sequence_field(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_SEQUENCE_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_key_null_strategy(self, field_name: str) -> NestedKeyNullStrategy:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY_NULL_STRATEGY}'
+            )
+            .enum_type(NestedKeyNullStrategy)
+            .default_value(NestedKeyNullStrategy.MERGE)
+        )
+
+    def field_nested_update_agg_count_limit(self, field_name: str) -> int:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.COUNT_LIMIT}'
+            )
+            .int_type()
+            .default_value(2147483647)  # Integer.MAX_VALUE
+        )
+
+    def field_merge_map_ts_field(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_TS_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
         )
 
     @property

@@ -64,14 +64,19 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -91,6 +96,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
@@ -106,6 +112,7 @@ import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
@@ -366,6 +373,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> catalog.listPartitionsPaged(identifier, 100, null, null));
+        Predicate partitionFilter =
+                new PredicateBuilder(
+                                RowType.of(
+                                        new org.apache.paimon.types.DataType[] {DataTypes.INT()},
+                                        new String[] {"col1"}))
+                        .equal(0, 1);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.listPartitionsByFilterPaged(
+                                identifier, partitionFilter, 100, null, null));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.createBranch(identifier, "test_branch", null));
@@ -1530,6 +1548,176 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testCreatePartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier = Identifier.create("format_partition_db", "catalog_partition_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        CreatePartitionsResponse response =
+                restCatalog.api().createPartitions(identifier, partitionSpecs);
+
+        assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
+        assertThat(response.getExisted()).isEmpty();
+
+        catalog.createPartitions(identifier, partitionSpecs);
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        List<Map<String, String>> conflictingSpecs =
+                Arrays.asList(partitionSpecs.get(0), singletonMap("dt", "20260716"));
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .createPartitions(identifier, conflictingSpecs, false))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("dt=20260714");
+
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
+    }
+
+    @Test
+    void testDropPartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_drop_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        DropPartitionsResponse response =
+                restCatalog
+                        .api()
+                        .dropPartitions(
+                                identifier,
+                                Arrays.asList(
+                                        singletonMap("dt", "20260714"),
+                                        singletonMap("dt", "20260799")),
+                                true);
+        assertThat(response.getDropped()).containsExactly(singletonMap("dt", "20260714"));
+        assertThat(response.getMissing()).containsExactly(singletonMap("dt", "20260799"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactly(singletonMap("dt", "20260715"));
+
+        // Catalog contract: dropPartitions ignores non-existent partitions and unregisters
+        // metadata only (no data deletion on the server).
+        catalog.dropPartitions(
+                identifier,
+                Arrays.asList(singletonMap("dt", "20260715"), singletonMap("dt", "20260799")));
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .dropPartitions(
+                                                identifier,
+                                                singletonList(singletonMap("dt", "20260799")),
+                                                false))
+                .isInstanceOf(NoSuchResourceException.class)
+                .hasMessageContaining("dt=20260799");
+    }
+
+    @Test
+    void testDropPartitionsLoadsNonManagedTableOnce() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "drop_partition_table");
+        createTable(identifier, emptyMap(), singletonList("col1"));
+        RESTCatalog catalogSpy = Mockito.spy(restCatalog);
+
+        catalogSpy.dropPartitions(identifier, singletonList(singletonMap("col1", "20260717")));
+
+        Mockito.verify(catalogSpy, Mockito.times(1)).getTable(identifier);
+    }
+
+    @Test
+    void testCatalogManagedPartitionCommitAndScanMatchesFileSystemMode() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_scan_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "csv")
+                        .column("id", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .build(),
+                false);
+
+        FormatTable managedTable = (FormatTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = managedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 2024, 10));
+            write.write(GenericRow.of(2, 2025, 10));
+            write.write(GenericRow.of(3, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Map<String, String>> registeredPartitions =
+                Arrays.asList(
+                        ImmutableMap.of("year", "2024", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "11"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(registeredPartitions);
+        // The table carries the catalog partition metadata its scan reads from.
+        assertThat(managedTable.partitionManager()).isNotNull();
+
+        Map<String, String> fileSystemOptions = new HashMap<>(managedTable.options());
+        fileSystemOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        FormatTable fileSystemTable =
+                FormatTable.builder()
+                        .fileIO(managedTable.fileIO())
+                        .identifier(Identifier.create("format_partition_db", "filesystem_scan"))
+                        .rowType(managedTable.rowType())
+                        .partitionKeys(managedTable.partitionKeys())
+                        .location(managedTable.location())
+                        .format(managedTable.format())
+                        .options(fileSystemOptions)
+                        .catalogContext(managedTable.catalogContext())
+                        .build();
+
+        Map<String, String> partitionFilter = singletonMap("year", "2025");
+        List<InternalRow> readFromCatalog = read(managedTable, null, null, partitionFilter, null);
+        // Assert the rows themselves first: comparing the two reads alone would also pass if
+        // both stopped returning anything.
+        assertThat(readFromCatalog)
+                .extracting(row -> row.getInt(0) + "," + row.getInt(1) + "," + row.getInt(2))
+                .containsExactlyInAnyOrder("2,2025,10", "3,2025,11");
+        assertThat(readFromCatalog)
+                .containsExactlyInAnyOrderElementsOf(
+                        read(fileSystemTable, null, null, partitionFilter, null));
+    }
+
+    @Test
     void testListPartitions() throws Exception {
         innerTestListPartitions(true);
     }
@@ -1699,6 +1887,96 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 BadRequestException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=01%01"));
+    }
+
+    @Test
+    public void testListPartitionsByFilterPaged() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_filter_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20250103"),
+                        singletonMap("dt", "20260101"));
+        Schema schema =
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}));
+        Predicate range =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, BinaryString.fromString("20250101")),
+                        builder.lessThan(0, BinaryString.fromString("20260101")));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%"));
+        catalog.createTable(identifier, schema, true);
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        String distractorDatabase = databaseName + "_other";
+        catalog.dropDatabase(distractorDatabase, true, true);
+        catalog.createDatabase(distractorDatabase, true);
+        Identifier distractor = Identifier.create(distractorDatabase, identifier.getObjectName());
+        catalog.createTable(distractor, schema, true);
+        catalog.createPartitions(distractor, singletonList(singletonMap("dt", "20250104")));
+
+        // The predicate goes on the wire as its own JSON serialization; the server evaluates
+        // the very same tree the scan would evaluate locally.
+        PagedList<Partition> firstPage =
+                catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%");
+        assertThat(firstPage.getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactly("20250103", "20250102");
+        assertThat(firstPage.getNextPageToken()).isEqualTo("dt=20250102");
+
+        PagedList<Partition> secondPage =
+                catalog.listPartitionsByFilterPaged(
+                        identifier, range, 2, firstPage.getNextPageToken(), "dt=2025%");
+        assertThat(secondPage.getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactly("20250101");
+        assertThat(secondPage.getNextPageToken()).isNull();
+
+        // A predicate the server cannot re-anchor (unknown column) counts as always-true: the
+        // response is a superset of the matching partitions and the client keeps filtering
+        // locally.
+        PredicateBuilder unknownColumn =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"nope"}));
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(
+                                        identifier,
+                                        unknownColumn.equal(0, BinaryString.fromString("x")),
+                                        null,
+                                        null,
+                                        null)
+                                .getElements())
+                .extracting(Partition::spec)
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
     }
 
     @Test

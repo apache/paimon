@@ -130,7 +130,14 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
             )
             stream = self._file_io.new_input_stream(file_path)
             try:
-                from paimon_ftindex import FullTextIndexReader
+                try:
+                    from paimon_ftindex import FullTextIndexReader
+                except ImportError as e:
+                    raise ImportError(
+                        "paimon-ftindex is required to read full-text indexes. "
+                        "Install paimon-ftindex==0.1.0 or "
+                        "pypaimon[full-text]."
+                    ) from e
 
                 self._native_reader = FullTextIndexReader(PaimonFullTextInput(stream))
                 self._searcher = self._native_reader

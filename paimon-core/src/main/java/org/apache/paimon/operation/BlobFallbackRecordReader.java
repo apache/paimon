@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -226,9 +227,17 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     }
 
     private static Object blobPlaceholder(RowType rowType, int blobIndex) {
-        return rowType.getTypeAt(blobIndex).getTypeRoot() == DataTypeRoot.ARRAY
-                ? BlobArrayPlaceholder.INSTANCE
-                : BlobPlaceholder.INSTANCE;
+        DataTypeRoot typeRoot = rowType.getTypeAt(blobIndex).getTypeRoot();
+        switch (typeRoot) {
+            case ARRAY:
+                return BlobArrayPlaceholder.INSTANCE;
+            case MAP:
+                return BlobMapPlaceholder.INSTANCE;
+            case BLOB:
+                return BlobPlaceholder.INSTANCE;
+            default:
+                throw new UnsupportedOperationException("Unsupported Blob Type: " + typeRoot);
+        }
     }
 
     @Override

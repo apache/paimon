@@ -455,7 +455,10 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 
     @Test
@@ -468,7 +471,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 100L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -484,7 +488,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 200L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 200L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -501,7 +506,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 4L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 4L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 4L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -516,7 +522,10 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 2L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 4L)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 4L, Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 
     @Test
@@ -531,7 +540,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 4L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 4L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 4L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -547,7 +557,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 3L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 3L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 3L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -563,7 +574,8 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 2L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries, 2L);
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 2L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -582,7 +594,10 @@ class ConflictDetectionTest {
         // newly appended file (firstRowId=100 >= nextRowId=100), should be skipped
         deltaEntries.add(createFileEntryWithRowId("new1", ADD, 100L, 50L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 
     @Test
@@ -594,7 +609,10 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntry("f1", ADD));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 
     @Test
@@ -606,7 +624,10 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 
     @Test
@@ -617,7 +638,83 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, null)).isEmpty();
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, null, Snapshot.CommitKind.APPEND))
+                .isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceCompactAllowsAdjacentNormalRanges() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Arrays.asList(
+                        createFileEntryWithRowId("f1", ADD, 0L, 2L),
+                        createFileEntryWithRowId("f2", ADD, 2L, 2L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("compacted", ADD, 0L, 4L));
+
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 4L, Snapshot.CommitKind.COMPACT))
+                .isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceCompactAllowsBlobAcrossAdjacentNormalRanges() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Arrays.asList(
+                        createFileEntryWithRowId("f1", ADD, 0L, 2L),
+                        createFileEntryWithRowId("f2", ADD, 2L, 2L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("compacted.blob", ADD, 0L, 4L));
+
+        assertThat(
+                        detection.checkRowIdExistence(
+                                baseEntries, deltaEntries, 4L, Snapshot.CommitKind.COMPACT))
+                .isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceCompactRejectsStaleRangeAfterReassign() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Arrays.asList(
+                        createFileEntryWithRowId("f1", ADD, 10L, 2L),
+                        createFileEntryWithRowId("f2", ADD, 12L, 2L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("compacted", ADD, 0L, 4L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 14L, Snapshot.CommitKind.COMPACT);
+        assertThat(result).isPresent();
+        assertThat(result.get()).hasMessageContaining("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceCompactDoesNotMergeAcrossPartitions() {
+        ConflictDetection detection = createConflictDetection();
+        BinaryRow partition0 = BinaryRow.singleColumn(0);
+        BinaryRow partition1 = BinaryRow.singleColumn(1);
+
+        List<SimpleFileEntry> baseEntries =
+                Arrays.asList(
+                        createFileEntryWithRowId("f1", ADD, partition0, 0, 0L, 2L),
+                        createFileEntryWithRowId("f2", ADD, partition1, 0, 2L, 2L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(
+                        createFileEntryWithRowId("compacted", ADD, partition0, 0, 0L, 4L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(
+                        baseEntries, deltaEntries, 4L, Snapshot.CommitKind.COMPACT);
+        assertThat(result).isPresent();
+        assertThat(result.get()).hasMessageContaining("Row ID existence conflict");
     }
 
     @Test

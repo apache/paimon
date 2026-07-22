@@ -160,7 +160,11 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalMap getMap(int pos) {
-        return ((MapColumnVector) data).getMap(offset + pos);
+        InternalMap map = ((MapColumnVector) data).getMap(offset + pos);
+        if (map instanceof ColumnarMap) {
+            ((ColumnarMap) map).setFileIO(fileIO);
+        }
+        return map;
     }
 
     @Override

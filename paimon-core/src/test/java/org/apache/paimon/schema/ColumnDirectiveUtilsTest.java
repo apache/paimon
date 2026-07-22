@@ -24,6 +24,7 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 
@@ -180,6 +181,25 @@ public class ColumnDirectiveUtilsTest {
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "images");
     }
 
+    @Test
+    public void testBlobDirectiveWithMapSourceType() {
+        Map<String, String> opts = new HashMap<>();
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        new MapType(
+                                false, DataTypes.INT().copy(false), DataTypes.BYTES().copy(false)),
+                        opts);
+
+        assertThat(result).isNotNull();
+        MapType mapType = (MapType) result.type();
+        assertThat(mapType.isNullable()).isFalse();
+        assertThat(mapType.getKeyType()).isEqualTo(DataTypes.INT().copy(false));
+        assertThat(mapType.getValueType()).isEqualTo(DataTypes.BLOB().copy(false));
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "images");
+    }
+
     // -- applyAddColumnDirective error cases --
 
     @Test
@@ -213,6 +233,29 @@ public class ColumnDirectiveUtilsTest {
                                         new HashMap<>()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ARRAY<BLOB> is only supported by 'blob-field'");
+    }
+
+    @Test
+    public void testMapBlobDirectiveValidation() {
+        assertThatThrownBy(
+                        () ->
+                                ColumnDirectiveUtils.applyAddColumnDirective(
+                                        "__BLOB_DESCRIPTOR_FIELD",
+                                        "images",
+                                        DataTypes.MAP(DataTypes.INT(), DataTypes.BYTES()),
+                                        new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("MAP<X, BLOB> is only supported by 'blob-field'");
+
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BYTES()),
+                        new HashMap<>());
+        MapType mapType = (MapType) result.type();
+        assertThat(mapType.getKeyType()).isEqualTo(DataTypes.BOOLEAN());
+        assertThat(mapType.getValueType()).isEqualTo(DataTypes.BLOB());
     }
 
     @Test
@@ -376,6 +419,17 @@ public class ColumnDirectiveUtilsTest {
 
         ColumnDirectiveUtils.removeDroppedDirectiveOptions(
                 "images", DataTypes.ARRAY(DataTypes.BLOB()), opts);
+
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "other");
+    }
+
+    @Test
+    public void testRemoveDroppedMapBlobOptions() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "images,other");
+
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                "images", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()), opts);
 
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "other");
     }

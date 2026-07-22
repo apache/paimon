@@ -75,6 +75,12 @@ under the License.
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
+            <td><h5>blob-descriptor.source-table</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The source table whose FileIO is used to read descriptor-backed BLOB content and copy it into the target table's managed BLOB storage. The table must belong to the current catalog and can include a branch suffix, for example db.table$branch_rt. This option is not supported for target tables without a catalog loader, including external tables in REST catalogs. When set, other blob-descriptor.* FileIO options are ignored.</td>
+        </tr>
+        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -103,6 +109,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.copy-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Buffer size used when copying BLOB payloads into BLOB files.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>
@@ -157,6 +169,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.streaming.merge-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the starting phase of chain table streaming read performs anchor-based chain merging: for each group it merges the latest snapshot partition with delta partitions whose chain key is strictly greater than the snapshot chain key. This allows streaming readers to see cross-branch deletions and updates at the cost of a heavier startup scan. When false (default), the starting phase only reads the latest snapshot partition per group and later delta partitions as separate splits, which is lightweight but may not reflect cross-branch deletes.</td>
         </tr>
         <tr>
             <td><h5>changelog-file.compression</h5></td>
@@ -750,7 +768,7 @@ under the License.
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
-            <td>Defines the action to take when an update modifies columns that are covered by a global index.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li></ul></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.enabled</h5></td>
@@ -1029,7 +1047,8 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Boolean</td>
             <td>Whether to create this table as a partitioned table in metastore.
 For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
-This config option does not affect the default filesystem metastore.</td>
+This config option does not affect the default filesystem metastore.
+For an internal format table in a REST catalog, it also makes the catalog own the table's partitions: a scan reads the partitions registered there and a write registers the ones it wrote, instead of listing the table directory.</td>
         </tr>
         <tr>
             <td><h5>metastore.tag-to-partition</h5></td>

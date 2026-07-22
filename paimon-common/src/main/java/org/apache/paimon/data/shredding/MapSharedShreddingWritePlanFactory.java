@@ -19,6 +19,7 @@
 package org.apache.paimon.data.shredding;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
@@ -38,6 +39,7 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
 
     private final RowType logicalRowType;
     private final Map<String, Integer> fieldToMaxColumns;
+    private final Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy;
     private final Map<String, Integer> fieldToPosition;
 
     public MapSharedShreddingWritePlanFactory(RowType logicalRowType, Options options) {
@@ -47,8 +49,11 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
                 MapSharedShreddingUtils.detectShreddingColumns(logicalRowType, coreOptions);
         this.fieldToMaxColumns =
                 MapSharedShreddingUtils.buildColumnToNumColumns(shreddingFields, coreOptions);
+        this.fieldToColumnPlacementPolicy = new LinkedHashMap<>();
         this.fieldToPosition = new LinkedHashMap<>();
         for (String field : shreddingFields) {
+            fieldToColumnPlacementPolicy.put(
+                    field, coreOptions.mapSharedShreddingColumnPlacementPolicy(field));
             fieldToPosition.put(field, logicalRowType.getFieldIndex(field));
         }
     }
@@ -97,6 +102,7 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
         }
 
         // TODO: Infer the column count from recent file metadata instead of current-file samples.
-        return new MapSharedShreddingWritePlan(logicalRowType, fieldToNumColumns);
+        return new MapSharedShreddingWritePlan(
+                logicalRowType, fieldToNumColumns, fieldToColumnPlacementPolicy);
     }
 }

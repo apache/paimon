@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
@@ -35,9 +36,13 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
     @Nullable private Map<String, Map<String, String>> fieldMetadata;
 
     public MapSharedShreddingWritePlan(
-            RowType logicalRowType, Map<String, Integer> fieldToNumColumns) {
+            RowType logicalRowType,
+            Map<String, Integer> fieldToNumColumns,
+            Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy) {
         this.logicalRowType = logicalRowType;
-        this.converter = new MapSharedShreddingRowConverter(logicalRowType, fieldToNumColumns);
+        this.converter =
+                new MapSharedShreddingRowConverter(
+                        logicalRowType, fieldToNumColumns, fieldToColumnPlacementPolicy);
     }
 
     @Override

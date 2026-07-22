@@ -20,7 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.globalindex.GlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -56,10 +56,6 @@ public class DataEvolutionFullTextScan implements FullTextScan {
     private final PartitionPredicate partitionFilter;
     private final List<DataField> textColumns;
 
-    public DataEvolutionFullTextScan(FileStoreTable table, DataField textColumn) {
-        this(table, null, textColumn);
-    }
-
     public DataEvolutionFullTextScan(
             FileStoreTable table, PartitionPredicate partitionFilter, DataField textColumn) {
         this(table, partitionFilter, Collections.singletonList(textColumn));
@@ -94,7 +90,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
+                    if (globalIndex == null) {
                         return false;
                     }
                     return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
@@ -120,7 +116,8 @@ public class DataEvolutionFullTextScan implements FullTextScan {
 
         if (!allIndexFiles.isEmpty()) {
             List<Range> rawRowRanges =
-                    new GlobalIndexCoverage(table, snapshot, partitionFilter, allIndexFiles)
+                    new DataEvolutionGlobalIndexCoverage(
+                                    table, snapshot, partitionFilter, allIndexFiles)
                             .unindexedRanges(textColumnIds);
             if (!rawRowRanges.isEmpty()) {
                 splits.add(new RawFullTextSearchSplit(rawRowRanges));

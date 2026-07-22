@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.format.blob.BlobFormatWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -473,7 +474,7 @@ public class BlobUpdateTest extends TableTestBase {
             throws IOException {
         try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
             FormatWriter writer =
-                    new BlobFileFormat()
+                    new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
                             .createWriterFactory(RowType.of(DataTypes.BLOB()))
                             .create(out, "none");
             for (Blob blob : blobs) {

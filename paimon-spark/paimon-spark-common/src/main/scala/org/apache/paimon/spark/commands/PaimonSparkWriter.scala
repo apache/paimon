@@ -41,7 +41,7 @@ import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
-import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
@@ -107,6 +107,7 @@ case class PaimonSparkWriter(
 
   def write(data: DataFrame): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
+    val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
 
     val withInitBucketCol = bucketMode match {
@@ -138,7 +139,7 @@ case class PaimonSparkWriter(
       writeRowTracking,
       fullCompactionDeltaCommits,
       batchId,
-      catalogContextForBlobDescriptor,
+      uriReaderFactory,
       postponePartitionBucketComputer
     )
 
@@ -210,7 +211,11 @@ case class PaimonSparkWriter(
           .map(_.toInt)
           .getOrElse(sparkParallelism)
         val bootstrapped =
-          bootstrapAndRepartitionByKeyHash(withInitBucketCol, assignerParallelism, rowKindColIdx)
+          bootstrapAndRepartitionByKeyHash(
+            withInitBucketCol,
+            assignerParallelism,
+            rowKindColIdx,
+            uriReaderFactory)
 
         val globalDynamicBucketProcessor =
           GlobalDynamicBucketProcessor(
@@ -245,7 +250,8 @@ case class PaimonSparkWriter(
             sparkSession,
             withInitBucketCol,
             assignerParallelism,
-            numAssigners)
+            numAssigners,
+            uriReaderFactory)
         }
 
         if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
@@ -264,7 +270,7 @@ case class PaimonSparkWriter(
                 )
               row => {
                 val sparkRow =
-                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
+                  SparkRow.fromUriReaderFactory(writeType, row, RowKind.INSERT, uriReaderFactory)
                 assigner.assign(
                   extractor.partition(sparkRow),
                   extractor.trimmedPrimaryKey(sparkRow).hashCode)
@@ -453,7 +459,8 @@ case class PaimonSparkWriter(
   private def bootstrapAndRepartitionByKeyHash(
       data: DataFrame,
       parallelism: Int,
-      rowKindColIdx: Int): RDD[(KeyPartOrRow, Array[Byte])] = {
+      rowKindColIdx: Int,
+      uriReaderFactory: UriReaderFactory): RDD[(KeyPartOrRow, Array[Byte])] = {
     val numSparkPartitions = data.rdd.getNumPartitions
     val primaryKeys = table.schema().primaryKeys()
     val bootstrapType = IndexBootstrap.bootstrapType(table.schema())
@@ -472,7 +479,7 @@ case class PaimonSparkWriter(
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
             val toPaimonRow =
-              SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, catalogContextForBlobDescriptor)
+              SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, uriReaderFactory)
 
             bootstrapIterator.asScala
               .map(
@@ -498,7 +505,8 @@ case class PaimonSparkWriter(
       sparkSession: SparkSession,
       data: DataFrame,
       parallelism: Int,
-      numAssigners: Int): DataFrame = {
+      numAssigners: Int,
+      uriReaderFactory: UriReaderFactory): DataFrame = {
     sparkSession.createDataFrame(
       data.rdd
         .mapPartitions(
@@ -507,7 +515,7 @@ case class PaimonSparkWriter(
             iterator.map(
               row => {
                 val sparkRow =
-                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
+                  SparkRow.fromUriReaderFactory(writeType, row, RowKind.INSERT, uriReaderFactory)
                 val partitionHash = rowPartitionKeyExtractor.partition(sparkRow).hashCode
                 val keyHash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode
                 (

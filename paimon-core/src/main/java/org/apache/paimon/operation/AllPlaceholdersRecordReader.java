@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -60,14 +61,24 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.fieldCount = readRowType.getFieldCount();
         this.blobIndex = blobIndex;
-        this.blobPlaceholder =
-                readRowType.getTypeAt(blobIndex).getTypeRoot() == DataTypeRoot.ARRAY
-                        ? BlobArrayPlaceholder.INSTANCE
-                        : BlobPlaceholder.INSTANCE;
+        this.blobPlaceholder = blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot());
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
         this.sequenceNumber = sequenceNumber;
         this.selectedRanges = selectedRanges(firstRowId, rowCount, rowRanges);
+    }
+
+    private static Object blobPlaceholder(DataTypeRoot typeRoot) {
+        switch (typeRoot) {
+            case ARRAY:
+                return BlobArrayPlaceholder.INSTANCE;
+            case MAP:
+                return BlobMapPlaceholder.INSTANCE;
+            case BLOB:
+                return BlobPlaceholder.INSTANCE;
+            default:
+                throw new UnsupportedOperationException("Unsupported BlobType: " + typeRoot);
+        }
     }
 
     @Nullable

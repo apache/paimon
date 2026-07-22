@@ -112,8 +112,10 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
     }
 
     @Override
-    protected List<ManifestEntry> readFromSegments(
-            ManifestEntrySegments manifestSegments, Filters<ManifestEntry> filters)
+    protected <R> List<R> readFromSegments(
+            ManifestEntrySegments manifestSegments,
+            Filters<ManifestEntry> filters,
+            Function<ManifestEntry, R> convertor)
             throws IOException {
         PartitionPredicate partitionFilter = null;
         BucketFilter bucketFilter = null;
@@ -160,12 +162,16 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         }
 
         // read manifest entries from segments with per record filter
-        List<ManifestEntry> result = new ArrayList<>();
+        List<R> result = new ArrayList<>();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         for (Segments subSegments : segmentsList) {
             result.addAll(
                     SimpleObjectsCache.readFromSegments(
-                            formatSerializer, projectedSerializer, subSegments, filters));
+                            formatSerializer,
+                            projectedSerializer,
+                            subSegments,
+                            filters,
+                            convertor));
         }
         return result;
     }

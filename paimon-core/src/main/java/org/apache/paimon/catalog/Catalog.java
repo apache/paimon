@@ -27,6 +27,7 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -422,6 +423,32 @@ public interface Catalog extends AutoCloseable {
             @Nullable String pageToken,
             @Nullable String partitionNamePattern)
             throws TableNotExistException;
+
+    /**
+     * Get a page of partitions using {@code predicate} as a best-effort filter.
+     *
+     * <p>The result may be a superset — an implementation must never exclude a partition it cannot
+     * prove non-matching — so callers must evaluate {@code predicate} again. Continue pagination
+     * while {@link PagedList#getNextPageToken()} is non-empty, even if a page has no elements.
+     *
+     * @param identifier path of the table
+     * @param predicate partition predicate
+     * @param maxResults maximum page size, or {@code null}/0 to use the catalog default
+     * @param pageToken token returned by the previous page, or {@code null} for the first page
+     * @param partitionNamePattern optional SQL LIKE prefix pattern (%) for partition names,
+     *     conjunctive with {@code predicate}
+     * @return a page of candidate partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    default PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
 
     /**
      * Get Partition list by partition names of the table.
@@ -1033,6 +1060,27 @@ public interface Catalog extends AutoCloseable {
      */
     default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {}
+
+    /**
+     * Create partitions of the specify table with explicit existence semantics.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        if (!ignoreIfExists) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Catalog %s does not support createPartitions without ignoreIfExists.",
+                            getClass().getName()));
+        }
+        createPartitions(identifier, partitions);
+    }
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.

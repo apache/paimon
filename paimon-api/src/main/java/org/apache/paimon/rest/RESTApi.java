@@ -42,10 +42,13 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
@@ -58,6 +61,8 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -855,6 +860,37 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** Create partitions for table, ignoring partitions which already exist. */
+    public CreatePartitionsResponse createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions) {
+        return createPartitions(identifier, partitions, true);
+    }
+
+    /** Create partitions for table. */
+    public CreatePartitionsResponse createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists) {
+        CreatePartitionsRequest request = new CreatePartitionsRequest(partitions, ignoreIfExists);
+        return client.post(
+                resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                CreatePartitionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Drop (unregister) partitions for table; the server never deletes data files. */
+    public DropPartitionsResponse dropPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfNotExists) {
+        DropPartitionsRequest request = new DropPartitionsRequest(partitions, ignoreIfNotExists);
+        return client.post(
+                resourcePaths.dropPartitions(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                DropPartitionsResponse.class,
+                restAuthFunction);
+    }
+
     /**
      * List partitions for table.
      *
@@ -946,6 +982,48 @@ public class RESTApi {
             return emptyList();
         }
         return partitions;
+    }
+
+    /**
+     * List a page of partitions using a serialized partition predicate.
+     *
+     * <p>{@code filterJson} is the JSON serialization of a Paimon {@code Predicate}. The result may
+     * be a superset, so callers must re-evaluate the predicate. A non-empty next page token must be
+     * followed even when the current page is empty.
+     *
+     * @param identifier database name and table name
+     * @param filterJson JSON serialization of the partition predicate
+     * @param maxResults maximum page size, or {@code null}/0 to use the server default
+     * @param pageToken token returned by the previous page, or {@code null} for the first page
+     * @param partitionNamePattern optional SQL LIKE prefix pattern (%) for partition names,
+     *     conjunctive with the predicate
+     * @return {@link PagedList}: elements and nextPageToken
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists, or
+     *     the server does not provide this endpoint
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            String filterJson,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern) {
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest(
+                        filterJson, partitionNamePattern, maxResults, pageToken);
+        ListPartitionsResponse response =
+                client.post(
+                        resourcePaths.listPartitionsByFilter(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        ListPartitionsResponse.class,
+                        restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return new PagedList<>(emptyList(), response.getNextPageToken());
+        }
+        return new PagedList<>(partitions, response.getNextPageToken());
     }
 
     /**

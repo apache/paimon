@@ -391,6 +391,7 @@ These table options affect global index build and read behavior:
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.search-mode` | `fast` | Search mode for global-index queries. `fast` searches indexed data only. `full` checks snapshot `nextRowId` against global index row-id coverage and scans raw data only if a gap exists. `detail` scans data file metadata to find exact unindexed rows and can handle index invalidation caused by updates or rewrites. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `global-index.column-update-action` | `THROW_ERROR` | Action for updates to indexed columns. `THROW_ERROR` rejects the update, `DROP_PARTITION_INDEX` drops affected partition indexes, and `IGNORE` keeps existing index files unchanged. Use `IGNORE` only when a stale index is acceptable; for example, a vector updated from `NULL` to a value remains invisible until the index is rebuilt. |
 | `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
