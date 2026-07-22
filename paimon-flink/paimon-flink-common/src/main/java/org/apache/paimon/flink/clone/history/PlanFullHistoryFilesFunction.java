@@ -26,7 +26,6 @@ import org.apache.paimon.clone.FullHistoryPayloadFileVisitor;
 import org.apache.paimon.clone.FullHistorySourceFingerprint;
 import org.apache.paimon.clone.PathMapping;
 import org.apache.paimon.flink.FlinkCatalogFactory;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -36,7 +35,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -94,28 +92,17 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
             ProcessFunction<Integer, FullHistoryCopyPlan.FileCopy>.Context context,
             Collector<FullHistoryCopyPlan.FileCopy> collector)
             throws Exception {
-        FileIO sourceFileIO = sourceTable.fileIO();
         FullHistorySourceFingerprint.verify(sourceTable, expectedFingerprint);
         new FullHistoryPayloadFileVisitor(sourceTable)
                 .visit(
                         (source, kind, expectedSize, mappingAnchor) ->
                                 collector.collect(
-                                        createCopy(
-                                                sourceFileIO,
-                                                source,
-                                                kind,
-                                                expectedSize,
-                                                mappingAnchor)));
+                                        createCopy(source, kind, expectedSize, mappingAnchor)));
         FullHistorySourceFingerprint.verify(sourceTable, expectedFingerprint);
     }
 
     private FullHistoryCopyPlan.FileCopy createCopy(
-            FileIO sourceFileIO,
-            Path source,
-            FullHistoryCopyPlan.FileKind kind,
-            long expectedSize,
-            Path mappingAnchor)
-            throws IOException {
+            Path source, FullHistoryCopyPlan.FileKind kind, long expectedSize, Path mappingAnchor) {
         Path target =
                 new Path(
                         mappingAnchor == null
@@ -127,8 +114,7 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
                 "Source and target file paths must be different: %s",
                 source);
         clonePlan.validatePayloadTarget(target);
-        long size = expectedSize < 0 ? sourceFileIO.getFileSize(source) : expectedSize;
-        return new FullHistoryCopyPlan.FileCopy(source, target, kind, size);
+        return new FullHistoryCopyPlan.FileCopy(source, target, kind, expectedSize);
     }
 
     @Override
