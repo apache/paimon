@@ -28,8 +28,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -61,6 +63,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -109,8 +112,11 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
@@ -147,12 +153,15 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -193,6 +202,13 @@ public class RESTCatalogServer {
 
     private final Map<String, Database> databaseStore = new HashMap<>();
     private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+
+    private final List<ListPartitionsByFilterRequest> receivedListPartitionsByFilterRequests =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private final Queue<ListPartitionsResponse> scriptedListPartitionsByFilterResponses =
+            new ConcurrentLinkedQueue<>();
+
     private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     private final Map<String, View> viewStore = new HashMap<>();
     private final Map<String, TableSnapshot> tableLatestSnapshotStore = new HashMap<>();
@@ -277,6 +293,25 @@ public class RESTCatalogServer {
 
     public void setPartitionListingSupported(boolean partitionListingSupported) {
         this.partitionListingSupported = partitionListingSupported;
+    }
+
+    public void clearReceivedListPartitionsByFilterRequests() {
+        receivedListPartitionsByFilterRequests.clear();
+    }
+
+    public List<ListPartitionsByFilterRequest> getReceivedListPartitionsByFilterRequests() {
+        return Collections.unmodifiableList(
+                new ArrayList<>(receivedListPartitionsByFilterRequests));
+    }
+
+    public boolean hasReceivedListPartitionsByFilterRequest() {
+        return !receivedListPartitionsByFilterRequests.isEmpty();
+    }
+
+    public void enqueueListPartitionsByFilterResponse(
+            @Nullable List<Partition> partitions, @Nullable String nextPageToken) {
+        scriptedListPartitionsByFilterResponses.add(
+                new ListPartitionsResponse(partitions, nextPageToken));
     }
 
     public void addNoPermissionDatabase(String database) {
@@ -459,6 +494,11 @@ public class RESTCatalogServer {
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "partitions".equals(resources[3])
                                         && "list-by-names".equals(resources[4]);
+                        boolean isListPartitionsByFilter =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "list-by-filter".equals(resources[4]);
                         boolean isDropPartitions =
                                 resources.length == 5
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -511,7 +551,8 @@ public class RESTCatalogServer {
                             return new MockResponse().setResponseCode(200);
                         } else if (!partitionListingSupported
                                 && ((isPartitions && "GET".equals(restAuthParameter.method()))
-                                        || isListPartitionsByNames)) {
+                                        || isListPartitionsByNames
+                                        || isListPartitionsByFilter)) {
                             return mockResponse(new ErrorResponse(null, null, "", 501), 501);
                         } else if (isDropPartitions) {
                             return dropPartitionsHandle(restAuthParameter.data(), identifier);
@@ -521,6 +562,11 @@ public class RESTCatalogServer {
                                     restAuthParameter.data(),
                                     parameters,
                                     identifier);
+                        } else if (isListPartitionsByFilter) {
+                            ListPartitionsByFilterRequest listPartitionsByFilterRequest =
+                                    RESTApi.fromJson(data, ListPartitionsByFilterRequest.class);
+                            return listPartitionsByFilter(
+                                    identifier, listPartitionsByFilterRequest);
                         } else if (isListPartitionsByNames) {
                             ListPartitionsByNamesRequest listPartitionsByNamesRequest =
                                     RESTApi.fromJson(data, ListPartitionsByNamesRequest.class);
@@ -1941,6 +1987,81 @@ public class RESTCatalogServer {
                     return false;
                 });
         return mockResponse(new DropPartitionsResponse(dropped, missing), 200);
+    }
+
+    private MockResponse listPartitionsByFilter(
+            Identifier tableIdentifier, ListPartitionsByFilterRequest request) {
+        receivedListPartitionsByFilterRequests.add(request);
+        ListPartitionsResponse scriptedResponse = scriptedListPartitionsByFilterResponses.poll();
+        if (scriptedResponse != null) {
+            return mockResponse(scriptedResponse, 200);
+        }
+        if (request.getFilter() == null || request.getFilter().isEmpty()) {
+            return mockResponse(new ErrorResponse(null, null, "filter is required", 400), 400);
+        }
+        TableMetadata metadata = tableMetadataStore.get(tableIdentifier.getFullName());
+        RowType partitionType = metadata == null ? null : metadata.schema().logicalPartitionType();
+        String defaultPartName =
+                metadata == null
+                        ? CoreOptions.PARTITION_DEFAULT_NAME.defaultValue()
+                        : new CoreOptions(metadata.schema().options()).partitionDefaultName();
+        // Best-effort contract: a predicate the server cannot restore (version skew) or
+        // re-anchor (unknown column) counts as always-true, so the response stays a superset
+        // of the matching partitions and never misses one.
+        Predicate predicate;
+        try {
+            predicate =
+                    TableQueryAuthResult.remapPredicate(
+                            JsonSerdeUtil.fromJson(request.getFilter(), Predicate.class),
+                            partitionType);
+        } catch (Exception e) {
+            predicate = null;
+        }
+        List<Partition> partitions = new ArrayList<>();
+        for (Partition partition :
+                tablePartitionsStore.getOrDefault(
+                        tableIdentifier.getFullName(), Collections.emptyList())) {
+            boolean patternMatched =
+                    request.getPartitionNamePattern() == null
+                            || matchNamePattern(
+                                    getPagedKey(partition), request.getPartitionNamePattern());
+            if (patternMatched
+                    && matchesPredicate(
+                            predicate, partition.spec(), partitionType, defaultPartName)) {
+                partitions.add(partition);
+            }
+        }
+        Map<String, String> pagingParameters = new HashMap<>();
+        if (request.getMaxResults() != null) {
+            pagingParameters.put(RESTApi.MAX_RESULTS, request.getMaxResults().toString());
+        }
+        if (request.getPageToken() != null) {
+            pagingParameters.put(RESTApi.PAGE_TOKEN, request.getPageToken());
+        }
+        return generateFinalListPartitionsResponse(pagingParameters, partitions);
+    }
+
+    /** Evaluates the restored predicate against a spec; anything it cannot handle matches. */
+    private static boolean matchesPredicate(
+            @Nullable Predicate predicate,
+            Map<String, String> spec,
+            @Nullable RowType partitionType,
+            String defaultPartName) {
+        if (predicate == null || partitionType == null) {
+            return true;
+        }
+        try {
+            LinkedHashMap<String, String> ordered = new LinkedHashMap<>();
+            for (DataField field : partitionType.getFields()) {
+                ordered.put(field.name(), spec.get(field.name()));
+            }
+            GenericRow row =
+                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                            ordered, partitionType, defaultPartName);
+            return predicate.test(row);
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     private MockResponse listPartitionsByNames(

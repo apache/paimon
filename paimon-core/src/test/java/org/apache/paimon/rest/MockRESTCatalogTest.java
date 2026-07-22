@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -63,6 +64,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -258,19 +260,19 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         FormatTable table = (FormatTable) restCatalog.getTable(identifier);
         FormatTablePartitionManager partitionManager = table.partitionManager();
         assertThat(partitionManager).isNotNull();
-        assertThat(partitionManager.listPartitions(Collections.emptyMap())).isEmpty();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
         Map<String, String> partition = Collections.singletonMap("dt", "20260717");
 
         restCatalog.createPartitions(identifier, Collections.singletonList(partition));
 
         // Listings are not cached, so a mutation through the catalog is visible to the next read.
-        assertThat(partitionManager.listPartitions(Collections.emptyMap()))
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .extracting(org.apache.paimon.partition.Partition::spec)
                 .containsExactly(partition);
 
         restCatalog.dropPartitions(identifier, Collections.singletonList(partition));
 
-        assertThat(partitionManager.listPartitions(Collections.emptyMap())).isEmpty();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
     }
 
     @Test
@@ -284,9 +286,43 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         FormatTablePartitionManager roundTripped =
                 InstantiationUtil.clone(table.partitionManager());
 
-        assertThat(roundTripped.listPartitions(Collections.emptyMap()))
+        assertThat(roundTripped.listPartitions(Collections.emptyMap(), null))
                 .extracting(org.apache.paimon.partition.Partition::spec)
                 .containsExactly(partition);
+    }
+
+    @Test
+    void testFilteredListingPreservesNextTokenAcrossSparsePage() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Predicate predicate = partitionFilter("20260717");
+        Partition partition =
+                new Partition(Collections.singletonMap("dt", "20260717"), 0, 0, 0, 0, -1, false);
+        restCatalogServer.enqueueListPartitionsByFilterResponse(null, "p2");
+        restCatalogServer.enqueueListPartitionsByFilterResponse(
+                Collections.singletonList(partition), null);
+
+        PagedList<Partition> firstPage =
+                restCatalog.listPartitionsByFilterPaged(identifier, predicate, 1, null, "dt=2026%");
+        assertThat(firstPage.getElements()).isEmpty();
+        assertThat(firstPage.getNextPageToken()).isEqualTo("p2");
+
+        PagedList<Partition> secondPage =
+                restCatalog.listPartitionsByFilterPaged(
+                        identifier, predicate, 1, firstPage.getNextPageToken(), "dt=2026%");
+        assertThat(secondPage.getElements()).containsExactly(partition);
+        assertThat(secondPage.getNextPageToken()).isNull();
+
+        assertThat(restCatalogServer.getReceivedListPartitionsByFilterRequests())
+                .extracting(
+                        request ->
+                                Arrays.asList(
+                                        request.getFilter(),
+                                        request.getMaxResults(),
+                                        request.getPageToken(),
+                                        request.getPartitionNamePattern()))
+                .containsExactly(
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, null, "dt=2026%"),
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, "p2", "dt=2026%"));
     }
 
     @Test
@@ -349,6 +385,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         .build(),
                 false);
         return identifier;
+    }
+
+    private static Predicate partitionFilter(String value) {
+        return new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}))
+                .equal(0, value);
     }
 
     @Test

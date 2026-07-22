@@ -23,6 +23,7 @@ import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
 import org.apache.paimon.partition.Partition
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
 import org.apache.paimon.spark.format.PaimonFormatTable
@@ -375,7 +376,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         throw new AssertionError("Complete specs must resolve through list-by-names")
     }
 
@@ -429,7 +432,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions.asScala.map(_.asScala.toMap).filter(_ == registeredSpec).toSeq: _*)
       }
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         throw new AssertionError("Complete specs must resolve through list-by-names")
     }
 
@@ -495,7 +500,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         registeredPartitions(partitions.asScala.map(_.asScala.toMap).filter(registered).toSeq: _*)
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         throw new AssertionError("Exact specs must resolve through list-by-names")
     }
     var refreshCalls = 0
@@ -562,7 +569,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         registeredPartitions(partitions.asScala.map(_.asScala.toMap).filter(registered).toSeq: _*)
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         throw new AssertionError("Exact specs must resolve through list-by-names")
     }
     val firstFileIO = LocalFileIO.create
@@ -616,7 +625,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] = {
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] = {
         listedPrefixes :+= prefix.asScala.toMap
         registeredPartitions(matching)
       }
@@ -656,7 +667,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] = {
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] = {
         listedPrefixes :+= prefix.asScala.toMap
         registeredPartitions(first, unrelated, second, third)
       }
@@ -708,7 +721,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         registeredPartitions(Map("dt" -> "20260715"))
     }
     val table = new PaimonFormatTable(rawFormatTable(withCatalogManagedPartitions = true, gateway))
@@ -912,7 +927,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       registeredPartitions(partitions.asScala.map(_.asScala.toMap).toSeq: _*)
     }
 
-    override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+    override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
       Collections.emptyList()
   }
 
@@ -944,8 +959,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     override def listPartitionsByNames(partitions: JList[JMap[String, String]]): JList[Partition] =
       throw new AssertionError("ADD must not perform a client-side existence lookup")
 
-    override def listPartitions(prefix: JMap[String, String]): JList[Partition] = synchronized {
-      registeredPartitions(partitions.toSeq: _*)
-    }
+    override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
+      synchronized {
+        registeredPartitions(partitions.toSeq: _*)
+      }
   }
 }

@@ -22,6 +22,9 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.List;
@@ -46,8 +49,13 @@ public interface FormatTablePartitionManager extends Serializable {
      * List every partition whose leading partition values match {@code prefix}, or all partitions
      * when it is empty. The prefix must be a contiguous leading subset of the table's partition
      * keys.
+     *
+     * <p>The optional {@code filter} is a pushdown hint combined with the prefix as a conjunction:
+     * an implementation may apply it partially or not at all, so the result is a superset of the
+     * matching partitions and never misses one. Callers keep applying their full predicate on the
+     * returned partitions.
      */
-    List<Partition> listPartitions(Map<String, String> prefix);
+    List<Partition> listPartitions(Map<String, String> prefix, @Nullable Predicate filter);
 
     /** Return those of the given complete partition specs that are registered. */
     List<Partition> listPartitionsByNames(List<Map<String, String>> partitions);

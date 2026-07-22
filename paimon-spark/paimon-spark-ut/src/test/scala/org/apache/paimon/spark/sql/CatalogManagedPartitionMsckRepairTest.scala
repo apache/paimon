@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.partition.Partition
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog}
 import org.apache.paimon.spark.execution.PaimonRepairFormatTablePartitionsExec
 import org.apache.paimon.spark.format.PaimonFormatTable
@@ -579,7 +580,7 @@ private[sql] class StatefulFaultCatalog(initial: Set[Map[String, String]] = Set.
     MsckTestFixtures.toPartitions(
       partitions.asScala.map(_.asScala.toMap).filter(state.contains).toSeq)
 
-  override def listPartitions(prefix: JMap[String, String]): JList[Partition] = {
+  override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] = {
     if (failList) {
       throw new IllegalStateException(MsckFaultInjection.LIST_FAILURE)
     }
@@ -659,11 +660,11 @@ private[sql] class FaultInjectingFormatTablePartitionManager(delegate: FormatTab
   override def listPartitionsByNames(partitions: JList[JMap[String, String]]): JList[Partition] =
     delegate.listPartitionsByNames(partitions)
 
-  override def listPartitions(prefix: JMap[String, String]): JList[Partition] = {
+  override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] = {
     MsckFaultInjection.listCalls += 1
     if (MsckFaultInjection.failList) {
       throw new IllegalStateException(MsckFaultInjection.LIST_FAILURE)
     }
-    delegate.listPartitions(prefix)
+    delegate.listPartitions(prefix, filter)
   }
 }

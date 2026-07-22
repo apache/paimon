@@ -109,7 +109,8 @@ public class FormatTablePartitionRepair {
             boolean addPartitions,
             boolean dropPartitions) {
         Set<Map<String, String>> registeredPartitions = new HashSet<>();
-        for (Partition partition : partitionManager.listPartitions(Collections.emptyMap())) {
+        for (Partition partition :
+                partitionManager.listPartitions(Collections.<String, String>emptyMap(), null)) {
             registeredPartitions.add(partition.spec());
         }
 

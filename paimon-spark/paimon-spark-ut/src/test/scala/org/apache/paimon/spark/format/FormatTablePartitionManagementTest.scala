@@ -23,6 +23,7 @@ import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
 import org.apache.paimon.partition.Partition
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatTablePartitionManager
 import org.apache.paimon.types.DataTypes
@@ -61,7 +62,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
     val sparkTable =
@@ -113,7 +116,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
 
@@ -144,7 +149,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
 
@@ -174,7 +181,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
 
@@ -245,7 +254,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
 
@@ -293,7 +304,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] = {
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] = {
         listedPrefixes :+= prefix.asScala.toMap
         registeredPartitions(first, second)
       }
@@ -407,7 +420,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         registeredPartitions(matching)
     }
 
@@ -446,7 +461,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         throw new TestPartitionListException
     }
 
@@ -500,7 +517,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         registeredPartitions(registered.toSeq: _*)
     }
 
@@ -600,7 +619,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]]): JList[Partition] =
         Collections.emptyList()
 
-      override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
         Collections.emptyList()
     }
 
@@ -639,7 +660,7 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions.asScala.map(_.asScala.toMap).filter(storedPartitions.contains).toSeq: _*)
       }
 
-    override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+    override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
       throw new AssertionError("ADD must not enumerate catalog or filesystem partitions")
   }
 
@@ -662,7 +683,7 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     override def listPartitionsByNames(partitions: JList[JMap[String, String]]): JList[Partition] =
       Collections.emptyList()
 
-    override def listPartitions(prefix: JMap[String, String]): JList[Partition] =
+    override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
       Collections.emptyList()
   }
 
