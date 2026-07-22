@@ -58,6 +58,21 @@ public class PostgresTypeUtilsTest {
                 .isEqualTo(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18));
     }
 
+    /**
+     * Even with in-range precision, a scale outside {@code [0, precision]} (both legal in Postgres
+     * 15+, e.g. {@code numeric(10, 20)} or {@code numeric(10, -2)}) would throw from the {@link
+     * DecimalType} constructor, so it must fall back to {@code STRING} rather than crash.
+     */
+    @Test
+    public void testNumericOutOfRangeScaleMapsToString() {
+        assertThat(PostgresTypeUtils.toDataType("numeric", 10, 20, EMPTY))
+                .isEqualTo(DataTypes.STRING());
+        assertThat(PostgresTypeUtils.toDataType("numeric", 10, -2, EMPTY))
+                .isEqualTo(DataTypes.STRING());
+        assertThat(PostgresTypeUtils.toDataType("_numeric", 10, 20, EMPTY))
+                .isEqualTo(DataTypes.ARRAY(DataTypes.STRING()));
+    }
+
     /** The {@code _numeric} array type mirrors the scalar behaviour element-wise. */
     @Test
     public void testNumericArrayMirrorsScalarMapping() {
