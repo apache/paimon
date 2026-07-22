@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
@@ -52,7 +51,6 @@ import org.apache.paimon.utils.Range;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -70,7 +68,6 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Mixed language E2E test for Java native full-text index building and Python reading.
@@ -78,19 +75,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>Java writes data and builds a native full-text index, then Python reads and searches it.
  */
 public class JavaPyNativeFullTextE2ETest {
-
-    @BeforeAll
-    public static void checkNativeLibrary() {
-        assumeTrue(isNativeAvailable(), "Native full-text library not available, skipping tests");
-    }
-
-    private static boolean isNativeAvailable() {
-        try (FullTextIndexWriter ignored = FullTextIndexWriter.create(Collections.emptyMap())) {
-            return true;
-        } catch (LinkageError e) {
-            return false;
-        }
-    }
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
 

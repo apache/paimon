@@ -570,28 +570,6 @@ run_multi_vector_dedicated_file_py_write_test() {
     fi
 }
 
-ensure_paimon_ftindex() {
-    if python -c "import paimon_ftindex" >/dev/null 2>&1; then
-        return 0
-    fi
-
-    echo "Installing Python paimon-ftindex dependency..."
-    if python -m pip install 'paimon-ftindex==0.1.0'; then
-        return 0
-    fi
-
-    echo -e "${YELLOW}Direct pip install failed; installing paimon-ftindex into a temporary target directory...${NC}"
-    local target_dir="${TMPDIR:-/tmp}/paimon-ftindex-site"
-    rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-ftindex==0.1.0'; then
-        export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
-        return 0
-    fi
-
-    echo -e "${RED}✗ Failed to install paimon-ftindex${NC}"
-    return 1
-}
-
 # Function to run native full-text index test (Java write index, Python read and search)
 run_native_fulltext_test() {
     echo -e "${YELLOW}=== Step 8: Running Native Full-Text Index Test (Java Write, Python Read) ===${NC}"
@@ -608,7 +586,9 @@ run_native_fulltext_test() {
         fi
     fi
     cd "$PAIMON_PYTHON_DIR"
-    if ! ensure_paimon_ftindex; then
+    echo "Checking paimon-ftindex Python dependency for native full-text index reads..."
+    if ! python -c "import paimon_ftindex"; then
+        echo -e "${RED}✗ paimon-ftindex is not installed or its native FFI library is unavailable${NC}"
         return 1
     fi
     echo "Running Python test for JavaPyReadWriteTest.test_read_native_full_text_index..."

@@ -147,10 +147,6 @@ jobs:
           fi
           df -h
 
-      - name: Install paimon-full-text Python dependency
-        if: matrix.python-version != '3.6.15' && matrix.python-version != '3.7'
-        run: python -m pip install 'paimon-ftindex==0.1.0'
-
       - name: Run lint-python.sh
         shell: bash
         run: |

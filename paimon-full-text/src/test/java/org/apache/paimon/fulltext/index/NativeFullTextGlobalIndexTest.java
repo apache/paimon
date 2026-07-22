@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -51,18 +50,9 @@ import java.util.UUID;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test for {@link NativeFullTextGlobalIndexWriter} and {@link NativeFullTextGlobalIndexReader}. */
 public class NativeFullTextGlobalIndexTest {
-
-    private static boolean isNativeAvailable() {
-        try (FullTextIndexWriter ignored = FullTextIndexWriter.create(Collections.emptyMap())) {
-            return true;
-        } catch (LinkageError e) {
-            return false;
-        }
-    }
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -71,7 +61,6 @@ public class NativeFullTextGlobalIndexTest {
 
     @BeforeEach
     public void setup() {
-        assumeTrue(isNativeAvailable(), "Native full-text library not available, skipping tests");
         fileIO = new LocalFileIO();
         indexPath = new Path(tempDir.toString());
     }
