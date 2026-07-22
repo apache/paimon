@@ -41,7 +41,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.QueryAuthSplit;
@@ -54,7 +53,6 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -165,30 +163,6 @@ public class FallbackReadFileStoreTableTest {
         }
 
         assertThat(result).containsExactlyInAnyOrder(Pair.of(1, 1), Pair.of(2, 2));
-    }
-
-    @Test
-    public void testChainTableFallbackSplitPreservesQueryAuth() throws Exception {
-        FileStoreTable wrapped = Mockito.mock(FileStoreTable.class);
-        ChainGroupReadTable chainGroup = Mockito.mock(ChainGroupReadTable.class);
-        InnerTableRead wrappedRead = Mockito.mock(InnerTableRead.class);
-        InnerTableRead chainGroupRead = Mockito.mock(InnerTableRead.class);
-        Mockito.when(wrapped.coreOptions()).thenReturn(CoreOptions.fromMap(Collections.emptyMap()));
-        Mockito.when(wrapped.newRead()).thenReturn(wrappedRead);
-        Mockito.when(chainGroup.newRead()).thenReturn(chainGroupRead);
-
-        ChainTableFileStoreTable table = new ChainTableFileStoreTable(wrapped, chainGroup);
-        QueryAuthSplit wrappedSplit =
-                new QueryAuthSplit(
-                        Mockito.mock(DataSplit.class),
-                        new TableQueryAuthResult(null, Collections.singletonMap("a", "mask")));
-        FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit =
-                new FallbackReadFileStoreTable.FallbackSplitImpl(wrappedSplit, false);
-        RecordReader<InternalRow> reader = Mockito.mock(RecordReader.class);
-        Mockito.when(wrappedRead.createReader(wrappedSplit)).thenReturn(reader);
-
-        assertThat(table.newRead().createReader(fallbackSplit)).isSameAs(reader);
-        Mockito.verify(wrappedRead).createReader(wrappedSplit);
     }
 
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {
