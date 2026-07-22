@@ -1267,7 +1267,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitVectorIndexWithFields(
                 table, vectors, new Range(0, 3), Arrays.asList(vectorField, idField));
         // The dedicated scalar index covers only the head. The vector index's scalar extra field
-        // must still serve the tail; otherwise GlobalIndexScanner's primary-field preference drops
+        // must still serve the tail; otherwise DataEvolutionGlobalIndexScanner's primary-field
+        // preference drops
         // rows [2, 3] even though coverage planning treats them as indexed.
         buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
 

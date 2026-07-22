@@ -23,9 +23,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
@@ -181,7 +181,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         .setLayout(PatternLayout.newBuilder().withPattern("%level %msg%n").build())
                         .build();
         Logger scanLogger = (Logger) LogManager.getLogger(DataEvolutionBatchScan.class);
-        Logger scannerLogger = (Logger) LogManager.getLogger(GlobalIndexScanner.class);
+        Logger scannerLogger = (Logger) LogManager.getLogger(DataEvolutionGlobalIndexScanner.class);
         Level previousScanLevel = scanLogger.getLevel();
         Level previousScannerLevel = scannerLogger.getLevel();
 
@@ -259,7 +259,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testGlobalIndexScannerKeepsUnindexedRowsSeparate() throws Exception {
+    public void testDataEvolutionGlobalIndexScannerKeepsUnindexedRowsSeparate() throws Exception {
         write(500L);
         createIndex("f1");
         appendRows(500, 1000);
@@ -274,8 +274,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         BinaryString.fromString("a100"),
                                         BinaryString.fromString("a700")));
 
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
             assertThat(scanner.scan(predicate).get().results().toRangeList())
                     .containsExactly(new Range(100L, 100L));
             assertThat(scanner.unindexedRows(predicate).results().toRangeList())
@@ -284,10 +286,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testSourceBackedIndexIsExcludedFromGlobalRowIdScan() throws Exception {
+    public void testDataEvolutionSourceBackedIndexParticipatesInGlobalRowIdScan() throws Exception {
         write(10L);
         FileStoreTable table =
                 tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
         IndexFileMeta sourceBacked =
                 new IndexFileMeta(
                         "btree",
@@ -297,44 +300,48 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
                         null);
 
-        assertThat(GlobalIndexScanner.create(table, Collections.singletonList(sourceBacked)))
-                .isEmpty();
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.create(
+                                table, Collections.singletonList(sourceBacked)))
+                .isPresent();
 
-        GlobalIndexCoverage coverage =
-                new GlobalIndexCoverage(
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
                         table,
-                        table.snapshotManager().latestSnapshot(),
+                        snapshot,
                         PartitionPredicate.ALWAYS_TRUE,
                         Collections.singletonList(sourceBacked));
-        assertThat(coverage.unindexedRanges(1)).containsExactly(new Range(0, 9));
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
-    public void testOrdinaryAndSourceBackedBTreeIndexesCanCoexist() throws Exception {
+    public void testOrdinaryAndSourceBackedBTreeIndexCoverageCanCoexist() throws Exception {
         write(10L);
-        createIndex("f1");
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        List<IndexFileMeta> mixedIndexes =
-                table.store().newIndexFileHandler().scan(snapshot, "btree").stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .collect(Collectors.toCollection(ArrayList::new));
+        List<IndexFileMeta> mixedIndexes = new ArrayList<>();
+        mixedIndexes.add(
+                new IndexFileMeta(
+                        "btree",
+                        "ordinary-index",
+                        0,
+                        5,
+                        new GlobalIndexMeta(0, 4, 1, null, null),
+                        null));
         mixedIndexes.add(
                 new IndexFileMeta(
                         "btree",
                         "source-backed-index",
                         0,
-                        10,
-                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                        5,
+                        new GlobalIndexMeta(5, 9, 1, null, null, new byte[] {1}),
                         null));
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
 
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, mixedIndexes).orElseThrow(AssertionError::new)) {
-            assertThat(scanner.scan(predicate).get().results().toRangeList())
-                    .containsExactly(new Range(7, 7));
-        }
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
+                        table, snapshot, PartitionPredicate.ALWAYS_TRUE, mixedIndexes);
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
@@ -577,8 +584,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
             return scanner.scan(predicate).get().results();
         }
     }

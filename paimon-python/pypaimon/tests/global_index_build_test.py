@@ -43,7 +43,7 @@ from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
     native_options,
 )
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -211,7 +211,7 @@ class GlobalIndexBuildTest(
 
         read_builder = table.new_read_builder()
         predicate = read_builder.new_predicate_builder().equal('id', 2)
-        with GlobalIndexScanner.create(
+        with DataEvolutionGlobalIndexScanner.create(
                 table,
                 predicate=predicate,
                 snapshot=snapshot) as scanner:
@@ -372,7 +372,7 @@ class GlobalIndexBuildTest(
              [Range(0, 1), Range(3, 3)]),
         ]
         for predicate, expected in cases:
-            with GlobalIndexScanner.create(
+            with DataEvolutionGlobalIndexScanner.create(
                     table,
                     predicate=predicate,
                     snapshot=snapshot) as scanner:

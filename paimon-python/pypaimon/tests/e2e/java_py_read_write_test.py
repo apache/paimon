@@ -26,7 +26,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
@@ -758,7 +758,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         predicate = predicate_factory(read_builder.new_predicate_builder())
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -786,7 +786,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                      .new_predicate_builder()
                      .greater_or_equal('k', 'key-295'))
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -804,7 +804,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
         disabled_table = table.copy({budget_key: '0 b'})
-        disabled_scanner = GlobalIndexScanner.create(disabled_table, predicate=predicate)
+        disabled_scanner = DataEvolutionGlobalIndexScanner.create(disabled_table, predicate=predicate)
         self.assertIsNotNone(disabled_scanner)
         with disabled_scanner:
             disabled_result = disabled_scanner.scan(predicate)
