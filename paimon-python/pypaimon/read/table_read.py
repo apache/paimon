@@ -33,7 +33,7 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead)
+                                      SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -111,6 +111,15 @@ class TableRead:
         self._predicate_extra_fields = self._predicate_fields_outside_read_type()
         self._scan_read_type = self.read_type + self._predicate_extra_fields
         self._output_column_names = [f.name for f in self.read_type]
+        self._deferred_blob_fields = (
+            deferred_blob_field_names(
+                self.table,
+                self._scan_read_type,
+                self.predicate,
+                limit,
+            )
+            if self.table.options.data_evolution_enabled() else set()
+        )
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
         self.limit = limit
@@ -230,7 +239,8 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self.__create_reader_for_split(split, blob_parallelism)
+            reader = self.__create_reader_for_split(
+                split, blob_parallelism, limit=remaining)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -331,7 +341,9 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
-        return effective >= 2 and len(splits) >= 2
+        return (effective >= 2 and len(splits) >= 2
+                and not (self.limit is not None
+                         and self._deferred_blob_fields))
 
     def _to_arrow_parallel(
         self,
@@ -650,12 +662,15 @@ class TableRead:
             dataset = TorchDataset(self, splits)
             return dataset
 
-    def _create_split_read(self, split: Split, blob_parallelism: int = 1, read_type=None) -> SplitRead:
-        sr = self._build_split_read(split, read_type)
+    def _create_split_read(self, split: Split, blob_parallelism: int = 1,
+                           read_type=None, limit: Optional[int] = None) -> SplitRead:
+        sr = self._build_split_read(split, read_type, limit)
         sr._blob_parallelism = blob_parallelism
         return sr
 
-    def _build_split_read(self, split: Split, read_type=None) -> SplitRead:
+    def _build_split_read(self, split: Split, read_type=None,
+                          limit: Optional[int] = None) -> SplitRead:
+        effective_limit = self.limit if limit is None else limit
         effective_read_type = read_type if read_type is not None else self.read_type
         scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
         if self.table.is_primary_key_table and not split.raw_convertible:
@@ -705,7 +720,7 @@ class TableRead:
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     effective_read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                limit=effective_limit,
             )
         elif self.table.options.data_evolution_enabled():
             if self.nested_name_paths and any(
@@ -726,7 +741,7 @@ class TableRead:
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     self.read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                limit=effective_limit,
             )
         else:
             inner_read_type = scan_read_type
@@ -752,7 +767,7 @@ class TableRead:
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     effective_read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                limit=effective_limit,
             )
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
@@ -812,18 +827,27 @@ class TableRead:
             widened.append(field)
         return widened
 
-    def __create_reader_for_split(self, split, blob_parallelism=1):
+    def __create_reader_for_split(self, split, blob_parallelism=1,
+                                  limit: Optional[int] = None):
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
             split = split.split
 
         if auth_result is not None:
-            return self.__authed_reader(split, auth_result, blob_parallelism)
-        else:
-            return self._create_split_read(split, blob_parallelism=blob_parallelism).create_reader()
+            return self.__authed_reader(
+                split, auth_result, blob_parallelism, limit)
+        if limit is None:
+            return self._create_split_read(
+                split, blob_parallelism=blob_parallelism).create_reader()
+        return self._create_split_read(
+            split,
+            blob_parallelism=blob_parallelism,
+            limit=limit,
+        ).create_reader()
 
-    def __authed_reader(self, split, auth_result, blob_parallelism=1):
+    def __authed_reader(self, split, auth_result, blob_parallelism=1,
+                        limit: Optional[int] = None):
         table_fields = self.table.fields
         read_fields = self.read_type
 
@@ -832,9 +856,20 @@ class TableRead:
         if extra_fields:
             effective_read_type = read_fields + extra_fields
 
-        reader = self._create_split_read(
-            split, blob_parallelism=blob_parallelism,
-            read_type=effective_read_type).create_reader()
+        if limit is None:
+            split_read = self._create_split_read(
+                split,
+                blob_parallelism=blob_parallelism,
+                read_type=effective_read_type,
+            )
+        else:
+            split_read = self._create_split_read(
+                split,
+                blob_parallelism=blob_parallelism,
+                read_type=effective_read_type,
+                limit=limit,
+            )
+        reader = split_read.create_reader()
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):

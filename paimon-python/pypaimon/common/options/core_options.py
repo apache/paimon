@@ -908,8 +908,8 @@ class CoreOptions:
         .boolean_type()
         .default_value(True)
         .with_description(
-            "Whether filtered data-evolution reads should apply row filters "
-            "before materializing projected BLOB payloads."
+            "Whether filtered or limited data-evolution reads should apply "
+            "row selection before materializing projected scalar BLOB payloads."
         )
     )
 

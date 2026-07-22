@@ -65,13 +65,18 @@ class DeferredBlobResolveTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create_table(self, name, extra_options=None):
+    def _create_table(self, name, extra_options=None, payloads=None,
+                      partition_keys=None):
         options = dict(_TABLE_OPTIONS)
         options.update(extra_options or {})
         identifier = "default.%s" % name
         self.catalog.create_table(
             identifier,
-            Schema.from_pyarrow_schema(self.schema, options=options),
+            Schema.from_pyarrow_schema(
+                self.schema,
+                partition_keys=partition_keys,
+                options=options,
+            ),
             False,
         )
         table = self.catalog.get_table(identifier)
@@ -80,7 +85,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         commit = write_builder.new_commit()
         writer.write_arrow(pa.table({
             "sample_id": ["sample_%d" % index for index in range(_ROW_COUNT)],
-            "payload": [bytes([index]) * 1024 for index in range(_ROW_COUNT)],
+            "payload": (
+                payloads if payloads is not None else
+                [bytes([index]) * 1024 for index in range(_ROW_COUNT)]
+            ),
             "score": list(range(_ROW_COUNT)),
         }, schema=self.schema))
         commit.commit(writer.prepare_commit())
@@ -91,7 +99,9 @@ class DeferredBlobResolveTest(unittest.TestCase):
     def _read(self, table, predicate, limit=None, blob_parallelism=None):
         counting_file_io = _BlobCountingFileIO(table.file_io)
         table.file_io = counting_file_io
-        read_builder = table.new_read_builder().with_filter(predicate)
+        read_builder = table.new_read_builder()
+        if predicate is not None:
+            read_builder = read_builder.with_filter(predicate)
         read_builder = read_builder.with_projection(
             ["sample_id", "payload", "score"])
         if limit is not None:
@@ -129,6 +139,46 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         self.assertEqual(2, result.num_rows)
         self.assertEqual(2, counting_file_io.blobs_fetched)
+
+    def test_limit_without_predicate_defers_payloads(self):
+        table = self._create_table("defer_limit_only")
+
+        result, counting_file_io = self._read(table, None, limit=2)
+
+        self.assertEqual(2, result.num_rows)
+        self.assertEqual(2, counting_file_io.blobs_fetched)
+
+    def test_limit_does_not_prefetch_payloads_across_splits(self):
+        table = self._create_table(
+            "defer_limit_splits",
+            extra_options={"source.split.target-size": "1b"},
+            partition_keys=["sample_id"],
+        )
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        splits = table.new_read_builder().new_scan().plan().splits()
+        read_builder = table.new_read_builder().with_limit(1)
+
+        result = read_builder.new_read().to_arrow(splits)
+
+        self.assertGreater(len(splits), 1)
+        self.assertEqual(1, result.num_rows)
+        self.assertEqual(1, counting_file_io.blobs_fetched)
+
+    def test_preserves_null_payloads_after_filtering(self):
+        payloads = [
+            None if index == 1 else bytes([index]) * 1024
+            for index in range(_ROW_COUNT)
+        ]
+        table = self._create_table("defer_null", payloads=payloads)
+        predicate = table.new_read_builder().new_predicate_builder().less_than(
+            "score", 4)
+
+        result, counting_file_io = self._read(table, predicate)
+
+        self.assertEqual(4, result.num_rows)
+        self.assertEqual(3, counting_file_io.blobs_fetched)
+        self.assertEqual(payloads[:4], result.column("payload").to_pylist())
 
     def test_can_disable_deferred_resolution(self):
         table = self._create_table(

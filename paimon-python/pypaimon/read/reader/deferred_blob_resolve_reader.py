@@ -25,7 +25,11 @@ from pypaimon.table.row.blob import Blob
 
 
 class DeferredBlobResolveReader(RecordBatchReader):
-    """Materialize projected BLOB payloads after row filtering."""
+    """Materialize projected BLOB payloads after row filtering.
+
+    This must remain the outermost BLOB materialization layer because adopted
+    metadata still identifies the materialized columns as logical BLOB fields.
+    """
 
     def __init__(self, inner: RecordBatchReader, file_io,
                  blob_field_names: List[str], blob_parallelism: int = 1):
@@ -40,6 +44,9 @@ class DeferredBlobResolveReader(RecordBatchReader):
         if batch is None:
             return None
 
+        columns = list(batch.columns)
+        fields = list(batch.schema)
+        changed = False
         for field_name in self._blob_field_names:
             column_index = batch.schema.get_field_index(field_name)
             if column_index < 0:
@@ -49,14 +56,20 @@ class DeferredBlobResolveReader(RecordBatchReader):
             payloads = self._file_io.read_blobs_concurrent(
                 blobs, self._blob_parallelism)
             source_field = batch.schema.field(column_index)
-            batch = batch.set_column(
-                column_index,
-                pa.field(field_name, pa.large_binary(),
-                         nullable=source_field.nullable,
-                         metadata=source_field.metadata),
-                pa.array(payloads, type=pa.large_binary()),
+            columns[column_index] = pa.array(payloads, type=pa.large_binary())
+            fields[column_index] = pa.field(
+                field_name,
+                pa.large_binary(),
+                nullable=source_field.nullable,
+                metadata=source_field.metadata,
             )
-        return batch
+            changed = True
+        if not changed:
+            return batch
+        return pa.RecordBatch.from_arrays(
+            columns,
+            schema=pa.schema(fields, metadata=batch.schema.metadata),
+        )
 
     def close(self) -> None:
         self._inner.close()

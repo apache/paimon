@@ -83,6 +83,31 @@ from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
 NULL_FIELD_INDEX = -1
+
+
+def deferred_blob_field_names(table, read_fields: List[DataField],
+                              predicate: Optional[Predicate],
+                              limit: Optional[int]) -> set:
+    if ((predicate is None and limit is None)
+            or CoreOptions.blob_as_descriptor(table.options)
+            or not table.options.read_defer_blob_resolve()):
+        return set()
+
+    inline_fields = (
+        CoreOptions.blob_descriptor_fields(table.options)
+        | CoreOptions.blob_view_fields(table.options)
+    )
+    predicate_fields = (
+        predicate_field_names(predicate) if predicate is not None else set()
+    )
+    return {
+        read_fields[index].name
+        for index in blob_field_indices(read_fields)
+        if read_fields[index].name not in inline_fields
+        and read_fields[index].name not in predicate_fields
+    }
+
+
 ROW_SIDECAR_FORMAT = CoreOptions.FILE_FORMAT_ROW
 
 _COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
@@ -1051,22 +1076,12 @@ class DataEvolutionSplitRead(SplitRead):
         return reader
 
     def _deferred_blob_field_names(self) -> set:
-        if (self.predicate_for_reader is None
-                or CoreOptions.blob_as_descriptor(self.table.options)
-                or not self.table.options.read_defer_blob_resolve()):
-            return set()
-
-        inline_fields = (
-            CoreOptions.blob_descriptor_fields(self.table.options)
-            | CoreOptions.blob_view_fields(self.table.options)
+        return deferred_blob_field_names(
+            self.table,
+            self.read_fields,
+            self.predicate_for_reader,
+            self.limit,
         )
-        predicate_fields = predicate_field_names(self.predicate_for_reader)
-        return {
-            self.read_fields[index].name
-            for index in blob_field_indices(self.read_fields)
-            if self.read_fields[index].name not in inline_fields
-            and self.read_fields[index].name not in predicate_fields
-        }
 
     def _create_raw_reader(self) -> RecordReader:
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
