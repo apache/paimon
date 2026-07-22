@@ -83,20 +83,19 @@ class RoaringBitmap64:
         if self.is_empty():
             return []
 
-        # Use pyroaring's efficient iteration
         ranges = []
-        sorted_values = list(self._data)
-        start = sorted_values[0]
+        iterator = iter(self._data)
+        start = next(iterator)
         end = start
 
-        for i in range(1, len(sorted_values)):
-            if sorted_values[i] == end + 1:
+        for value in iterator:
+            if value == end + 1:
                 # Consecutive, extend the range
-                end = sorted_values[i]
+                end = value
             else:
                 # Gap, close current range and start new one
                 ranges.append(Range(start, end))
-                start = sorted_values[i]
+                start = value
                 end = start
 
         # Add the last range
