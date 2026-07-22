@@ -20,6 +20,7 @@ package org.apache.paimon.clone;
 
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -30,9 +31,15 @@ import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
+import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
 
 import javax.annotation.Nullable;
 
@@ -44,6 +51,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -51,6 +59,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validates that each cloned history root resolves to the same canonical metadata content. */
 class FullHistoryRootValidator {
+
+    private static final long MAX_CACHED_METADATA_DIGESTS = 10_000;
 
     static void validate(
             FileStoreTable source, FileStoreTable target, PathMapping pathMapping, String branch)
@@ -106,6 +116,7 @@ class FullHistoryRootValidator {
 
         private final PathMapping pathMapping;
         private final boolean rewritePaths;
+        private final RowType partitionType;
         private final ManifestList manifestList;
         private final ManifestFile manifestFile;
         private final IndexFileHandler indexFileHandler;
@@ -114,14 +125,15 @@ class FullHistoryRootValidator {
         private final IndexManifestEntrySerializer indexEntrySerializer =
                 new IndexManifestEntrySerializer();
         private final MessageDigest entryHasher = newSha256();
-        private final Map<String, EntryMultisetDigest> manifestDigests = new HashMap<>();
-        private final Map<String, EntryMultisetDigest> manifestListDigests = new HashMap<>();
-        private final Map<String, EntryMultisetDigest> indexManifestDigests = new HashMap<>();
+        private final Cache<String, ManifestDigest> manifestDigests = newDigestCache();
+        private final Cache<String, EntryMultisetDigest> manifestListDigests = newDigestCache();
+        private final Cache<String, EntryMultisetDigest> indexManifestDigests = newDigestCache();
 
         private RootDigestContext(
                 FileStoreTable table, PathMapping pathMapping, boolean rewritePaths) {
             this.pathMapping = pathMapping;
             this.rewritePaths = rewritePaths;
+            this.partitionType = table.schema().logicalPartitionType();
             this.manifestList = table.store().manifestListFactory().create();
             this.manifestFile = table.store().manifestFileFactory().create();
             this.indexFileHandler = table.store().newIndexFileHandler();
@@ -185,10 +197,13 @@ class FullHistoryRootValidator {
         }
 
         private EntryMultisetDigest manifestListDigest(String fileName) throws IOException {
-            EntryMultisetDigest cached = manifestListDigests.get(fileName);
+            EntryMultisetDigest cached = manifestListDigests.getIfPresent(fileName);
             if (cached != null) {
                 return cached;
             }
+            // Rewritten paths can change serialized sizes and roll one source manifest into
+            // multiple target manifests. Compare entries at root level and validate each target
+            // manifest's pruning metadata against its own entries in manifestDigest.
             EntryMultisetDigest digest = new EntryMultisetDigest();
             for (ManifestFileMeta meta : manifestList.readWithIOException(fileName)) {
                 digest.merge(manifestDigest(meta));
@@ -198,9 +213,10 @@ class FullHistoryRootValidator {
         }
 
         private EntryMultisetDigest manifestDigest(ManifestFileMeta meta) throws IOException {
-            EntryMultisetDigest cached = manifestDigests.get(meta.fileName());
+            ManifestDigest cached = manifestDigests.getIfPresent(meta.fileName());
             if (cached != null) {
-                return cached;
+                validateManifestMetadata(meta, cached.metadata);
+                return cached.entries;
             }
             EntryMultisetDigest digest = new EntryMultisetDigest();
             List<ManifestEntry> entries =
@@ -208,8 +224,20 @@ class FullHistoryRootValidator {
             for (ManifestEntry entry : entries) {
                 digest.add(entryHasher, manifestEntrySerializer.serializeToBytes(canonical(entry)));
             }
-            manifestDigests.put(meta.fileName(), digest);
+            ManifestMetadata metadata = ManifestMetadata.from(entries, partitionType);
+            validateManifestMetadata(meta, metadata);
+            manifestDigests.put(meta.fileName(), new ManifestDigest(digest, metadata));
             return digest;
+        }
+
+        private void validateManifestMetadata(
+                ManifestFileMeta manifest, ManifestMetadata expected) {
+            if (!rewritePaths) {
+                checkState(
+                        expected.matches(manifest),
+                        "Target manifest metadata %s does not match its entries.",
+                        manifest.fileName());
+            }
         }
 
         private ManifestEntry canonical(ManifestEntry entry) {
@@ -229,7 +257,7 @@ class FullHistoryRootValidator {
         }
 
         private EntryMultisetDigest indexManifestDigest(String fileName) throws IOException {
-            EntryMultisetDigest cached = indexManifestDigests.get(fileName);
+            EntryMultisetDigest cached = indexManifestDigests.getIfPresent(fileName);
             if (cached != null) {
                 return cached;
             }
@@ -258,6 +286,124 @@ class FullHistoryRootValidator {
                             sourceFile.globalIndexMeta());
             return new IndexManifestEntry(
                     entry.kind(), entry.partition(), entry.bucket(), targetFile);
+        }
+    }
+
+    private static class ManifestDigest {
+
+        private final EntryMultisetDigest entries;
+        private final ManifestMetadata metadata;
+
+        private ManifestDigest(EntryMultisetDigest entries, ManifestMetadata metadata) {
+            this.entries = entries;
+            this.metadata = metadata;
+        }
+    }
+
+    private static class ManifestMetadata {
+
+        private final long numAddedFiles;
+        private final long numDeletedFiles;
+        private final SimpleStats partitionStats;
+        private final long schemaId;
+        private final Integer minBucket;
+        private final Integer maxBucket;
+        private final Integer minLevel;
+        private final Integer maxLevel;
+        private final Long minRowId;
+        private final Long maxRowId;
+
+        private ManifestMetadata(
+                long numAddedFiles,
+                long numDeletedFiles,
+                SimpleStats partitionStats,
+                long schemaId,
+                Integer minBucket,
+                Integer maxBucket,
+                Integer minLevel,
+                Integer maxLevel,
+                Long minRowId,
+                Long maxRowId) {
+            this.numAddedFiles = numAddedFiles;
+            this.numDeletedFiles = numDeletedFiles;
+            this.partitionStats = partitionStats;
+            this.schemaId = schemaId;
+            this.minBucket = minBucket;
+            this.maxBucket = maxBucket;
+            this.minLevel = minLevel;
+            this.maxLevel = maxLevel;
+            this.minRowId = minRowId;
+            this.maxRowId = maxRowId;
+        }
+
+        private static ManifestMetadata from(List<ManifestEntry> entries, RowType partitionType) {
+            long numAddedFiles = 0;
+            long numDeletedFiles = 0;
+            long schemaId = Long.MIN_VALUE;
+            int minBucket = Integer.MAX_VALUE;
+            int maxBucket = Integer.MIN_VALUE;
+            int minLevel = Integer.MAX_VALUE;
+            int maxLevel = Integer.MIN_VALUE;
+            long minRowId = Long.MAX_VALUE;
+            long maxRowId = Long.MIN_VALUE;
+            boolean hasRowIds = true;
+            SimpleStatsCollector partitionStatsCollector = new SimpleStatsCollector(partitionType);
+
+            for (ManifestEntry entry : entries) {
+                switch (entry.kind()) {
+                    case ADD:
+                        numAddedFiles++;
+                        break;
+                    case DELETE:
+                        numDeletedFiles++;
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown entry kind: " + entry.kind());
+                }
+                schemaId = Math.max(schemaId, entry.file().schemaId());
+                minBucket = Math.min(minBucket, entry.bucket());
+                maxBucket = Math.max(maxBucket, entry.bucket());
+                minLevel = Math.min(minLevel, entry.level());
+                maxLevel = Math.max(maxLevel, entry.level());
+                Long firstRowId = entry.file().firstRowId();
+                if (firstRowId == null) {
+                    hasRowIds = false;
+                } else if (hasRowIds) {
+                    minRowId = Math.min(minRowId, firstRowId);
+                    maxRowId = Math.max(maxRowId, firstRowId + entry.file().rowCount() - 1);
+                }
+                partitionStatsCollector.collect(entry.partition());
+            }
+
+            checkState(!entries.isEmpty(), "Manifest file must contain at least one entry.");
+            SimpleStats partitionStats =
+                    new SimpleStatsConverter(partitionType)
+                            .toBinaryAllMode(partitionStatsCollector.extract());
+            return new ManifestMetadata(
+                    numAddedFiles,
+                    numDeletedFiles,
+                    partitionStats,
+                    schemaId,
+                    minBucket,
+                    maxBucket,
+                    minLevel,
+                    maxLevel,
+                    hasRowIds ? minRowId : null,
+                    hasRowIds ? maxRowId : null);
+        }
+
+        private boolean matches(ManifestFileMeta meta) {
+            return numAddedFiles == meta.numAddedFiles()
+                    && numDeletedFiles == meta.numDeletedFiles()
+                    && Objects.equals(partitionStats, meta.partitionStats())
+                    && schemaId == meta.schemaId()
+                    && Objects.equals(minBucket, meta.minBucket())
+                    && Objects.equals(maxBucket, meta.maxBucket())
+                    && Objects.equals(minLevel, meta.minLevel())
+                    && Objects.equals(maxLevel, meta.maxLevel())
+                    && Objects.equals(minRowId, meta.minRowId())
+                    && Objects.equals(maxRowId, meta.maxRowId());
         }
     }
 
@@ -354,6 +500,10 @@ class FullHistoryRootValidator {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available.", e);
         }
+    }
+
+    private static <T> Cache<String, T> newDigestCache() {
+        return CacheBuilder.newBuilder().maximumSize(MAX_CACHED_METADATA_DIGESTS).build();
     }
 
     private static void writeLong(byte[] target, int offset, long value) {
