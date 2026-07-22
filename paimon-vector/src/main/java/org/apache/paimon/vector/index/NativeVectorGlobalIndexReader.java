@@ -419,7 +419,7 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
                 throws IOException {
             List<FileRange> ranges = new ArrayList<>(positions.length);
             for (int i = 0; i < positions.length; i++) {
-                ranges.add(FileRange.createFileRange(positions[i], buffers[i].length));
+                ranges.add(FileRange.createFileRange(positions[i], buffers[i]));
             }
 
             VectoredReadUtils.ReadOptions options =
@@ -430,9 +430,8 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
                             .withSequentialReadFallback(false);
             VectoredReadUtils.readVectored(readable, ranges, options);
 
-            for (int i = 0; i < ranges.size(); i++) {
-                byte[] bytes = ranges.get(i).getData().join();
-                System.arraycopy(bytes, 0, buffers[i], 0, bytes.length);
+            for (FileRange range : ranges) {
+                range.getData().join();
             }
         }
 
