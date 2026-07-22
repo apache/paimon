@@ -22,9 +22,11 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -37,8 +39,11 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PostponeFileReadTask;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -46,6 +51,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.IteratorRecordReader;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -219,6 +225,149 @@ public class MergeFileSplitReadTest {
         }
     }
 
+    @Test
+    public void testPostponeMergeReaderWithValueProjection() throws Exception {
+        RowType keyType =
+                RowType.of(
+                        new DataField(
+                                SpecialFields.KEY_FIELD_ID_START,
+                                SpecialFields.KEY_FIELD_PREFIX + "k",
+                                new IntType(false)));
+        RowType valueType =
+                RowType.of(
+                        new DataField(0, "k", new IntType(false)),
+                        new DataField(1, "v", new VarCharType()));
+        TestFileStore store =
+                createStore(
+                        RowType.of(),
+                        keyType,
+                        valueType,
+                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory());
+
+        List<KeyValue> realRecords =
+                Arrays.asList(
+                        keyValue(1, 0, RowKind.INSERT, "base-1", false),
+                        keyValue(2, 1, RowKind.INSERT, "base-2", false));
+        store.commitData(realRecords, ignored -> BinaryRow.EMPTY_ROW, ignored -> 0);
+
+        long snapshotId = store.snapshotManager().latestSnapshotId();
+        List<DataSplit> realSplits =
+                Collections.singletonList(
+                        DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(BinaryRow.EMPTY_ROW)
+                                .withBucket(0)
+                                .withDataFiles(
+                                        store.newScan().withSnapshot(snapshotId).plan().files()
+                                                .stream()
+                                                .map(ManifestEntry::file)
+                                                .collect(Collectors.toList()))
+                                .withBucketPath("not used")
+                                .build());
+        List<KeyValue> postponeRecords =
+                Arrays.asList(
+                        // The execution engine may deliver shuffled records out of source order.
+                        // Their relative sequence numbers must restore the original order in Core.
+                        keyValue(1, 2, RowKind.INSERT, "newest-1", true),
+                        keyValue(1, 0, RowKind.INSERT, "new-1", true),
+                        keyValue(2, 0, RowKind.DELETE, null, true),
+                        keyValue(3, 0, RowKind.INSERT, "new-3", true));
+
+        RowType projectedValueType = valueType.project("v");
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("io").toString());
+                RecordReaderIterator<KeyValue> reader =
+                        new RecordReaderIterator<>(
+                                store.newRead()
+                                        .withReadType(projectedValueType)
+                                        .withIOManager(ioManager)
+                                        .createPostponeMergeReader(
+                                                realSplits,
+                                                new IteratorRecordReader<>(
+                                                        postponeRecords.iterator())))) {
+            Map<Integer, String> actual = new HashMap<>();
+            while (reader.hasNext()) {
+                KeyValue keyValue = reader.next();
+                assertThat(keyValue.value().getFieldCount()).isEqualTo(1);
+                actual.put(keyValue.key().getInt(0), keyValue.value().getString(0).toString());
+            }
+            Map<Integer, String> expected = new HashMap<>();
+            expected.put(1, "newest-1");
+            expected.put(3, "new-3");
+            assertThat(actual).containsExactlyInAnyOrderEntriesOf(expected);
+        }
+    }
+
+    @Test
+    public void testPostponeReader() throws Exception {
+        RowType keyType =
+                RowType.of(
+                        new DataField(
+                                SpecialFields.KEY_FIELD_ID_START,
+                                SpecialFields.KEY_FIELD_PREFIX + "k",
+                                new IntType(false)));
+        RowType valueType =
+                RowType.of(
+                        new DataField(0, "k", new IntType(false)),
+                        new DataField(1, "v", new VarCharType()));
+        TestFileStore store =
+                createStore(
+                        BucketMode.POSTPONE_BUCKET,
+                        RowType.of(),
+                        keyType,
+                        valueType,
+                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory());
+
+        store.commitData(
+                Arrays.asList(
+                        keyValue(1, 100, RowKind.INSERT, "one", false),
+                        keyValue(2, 200, RowKind.INSERT, "two", false)),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> BucketMode.POSTPONE_BUCKET);
+
+        long snapshotId = store.snapshotManager().latestSnapshotId();
+        List<ManifestEntry> files =
+                store.newScan()
+                        .withSnapshot(snapshotId)
+                        .withBucket(BucketMode.POSTPONE_BUCKET)
+                        .plan()
+                        .files();
+        assertThat(files).hasSize(1);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(BucketMode.POSTPONE_BUCKET)
+                        .withDataFiles(Collections.singletonList(files.get(0).file()))
+                        .withBucketPath("not used")
+                        .build();
+
+        Map<Integer, Long> sequences = new HashMap<>();
+        try (RecordReaderIterator<KeyValue> reader =
+                new RecordReaderIterator<>(
+                        store.newRead()
+                                .createPostponeReader(new PostponeFileReadTask(split, 7L)))) {
+            while (reader.hasNext()) {
+                KeyValue record = reader.next();
+                sequences.put(record.key().getInt(0), record.sequenceNumber());
+            }
+        }
+        Map<Integer, Long> expected = new HashMap<>();
+        expected.put(1, 7L);
+        expected.put(2, 8L);
+        assertThat(sequences).containsExactlyInAnyOrderEntriesOf(expected);
+    }
+
+    private static KeyValue keyValue(
+            int key, long sequenceNumber, RowKind kind, String value, boolean projected) {
+        InternalRow row =
+                projected
+                        ? GenericRow.of(value == null ? null : BinaryString.fromString(value))
+                        : GenericRow.of(key, value == null ? null : BinaryString.fromString(value));
+        return new KeyValue().replace(GenericRow.of(key), sequenceNumber, kind, row);
+    }
+
     private List<KeyValue> writeThenRead(
             List<KeyValue> data,
             RowType readKeyType,
@@ -274,6 +423,17 @@ public class MergeFileSplitReadTest {
             KeyValueFieldsExtractor extractor,
             MergeFunctionFactory<KeyValue> mfFactory)
             throws Exception {
+        return createStore(1, partitionType, keyType, valueType, extractor, mfFactory);
+    }
+
+    private TestFileStore createStore(
+            int numBuckets,
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            KeyValueFieldsExtractor extractor,
+            MergeFunctionFactory<KeyValue> mfFactory)
+            throws Exception {
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
         boolean valueCountMode = mfFactory.create() instanceof TestValueCountMergeFunction;
@@ -299,7 +459,7 @@ public class MergeFileSplitReadTest {
         return new TestFileStore.Builder(
                         "avro",
                         tempDir.toString(),
-                        1,
+                        numBuckets,
                         partitionType,
                         keyType,
                         valueType,

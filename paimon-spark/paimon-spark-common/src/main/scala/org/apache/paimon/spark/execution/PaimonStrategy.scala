@@ -24,7 +24,7 @@ import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlo
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.{PaimonRecordReaderIterator, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.{PaimonRecordReaderIterator, PostponeMergeInputScan, PostponeMergeOnReadScan, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
@@ -42,12 +42,13 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAsSelect, DescribeRelation, DropPartitions, LogicalPlan, RepairTable, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.execution.{FilterExec, PaimonDescribeTableExec, ProjectExec, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
@@ -63,6 +64,24 @@ case class PaimonStrategy(spark: SparkSession)
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+
+    case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
+      relation.scan match {
+        case scan: PostponeMergeOnReadScan =>
+          val mergePlan = scan.planPostponeMerge(spark.sparkContext.defaultParallelism)
+          val inputScan = PostponeMergeInputScan(mergePlan)
+          val inputOutput = org.apache.spark.sql.PaimonUtils.toAttributes(inputScan.readSchema())
+          val inputRelation =
+            SparkShimLoader.shim.createDataSourceV2ScanRelation(relation, inputScan, inputOutput)
+          val merge = PostponeMergeOnReadExec(
+            relation.output,
+            mergePlan,
+            spark.sessionState.conf.numShufflePartitions,
+            planLater(inputRelation))
+          val filtered = filters.reduceLeftOption(And).map(FilterExec(_, merge)).getOrElse(merge)
+          ProjectExec(projects, filtered) :: Nil
+        case _ => Nil
+      }
 
     case ctas: CreateTableAsSelect =>
       PaimonCreateTableAsSelectStrategy(spark)(ctas)

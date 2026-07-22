@@ -42,7 +42,7 @@ abstract class PaimonBaseScan(table: InnerTable)
   with PaimonSupportsRuntimeFiltering
   with SQLConfHelper {
 
-  private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
+  protected lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   protected def getInputSplits: Array[Split] = {
     val scan = readBuilder
@@ -52,15 +52,17 @@ abstract class PaimonBaseScan(table: InnerTable)
       .withMetricRegistry(paimonMetricsRegistry)
 
     val plan = scan.plan()
+    registerReadProtectionTagCleanup(scan.readProtectionTagName)
+    plan.splits().asScala.toArray
+  }
 
-    Option(scan.readProtectionTagName).foreach {
+  final protected def registerReadProtectionTagCleanup(tagName: String): Unit = {
+    Option(tagName).foreach {
       name =>
         BatchReadTagCleanupListener
           .getOrCreate(SparkSession.active)
           .registerCleanup(name, table)
     }
-
-    plan.splits().asScala.toArray
   }
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
@@ -134,6 +136,10 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
+    if (PaimonScanBuilder.postponeMergeOnReadEnabled(table)) {
+      throw new UnsupportedOperationException(
+        "Option 'postpone.merge-on-read' is only supported for batch reads.")
+    }
     new PaimonMicroBatchStream(table.asInstanceOf[DataTable], readBuilder, checkpointLocation)
   }
 
@@ -151,7 +157,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     paimonMetricsRegistry.buildSparkScanMetrics()
   }
 
-  private def ensureNoFullScan(): Unit = {
+  final protected def ensureNoFullScan(): Unit = {
     if (OptionUtils.readAllowFullScan()) {
       return
     }

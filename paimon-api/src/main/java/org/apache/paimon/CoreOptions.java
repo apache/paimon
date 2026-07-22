@@ -2637,6 +2637,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
 
+    public static final ConfigOption<Boolean> POSTPONE_MERGE_ON_READ =
+            key("postpone.merge-on-read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to merge records in the postpone bucket with records in real buckets during batch reads. "
+                                    + "This requires an execution engine capable of routing and shuffling postpone records to their target real buckets.");
+
     public static final ConfigOption<Integer> POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM =
             key("postpone.batch-write-fixed-bucket.max-parallelism")
                     .intType()
@@ -4270,6 +4278,10 @@ public class CoreOptions implements Serializable {
 
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
+    }
+
+    public boolean postponeMergeOnRead() {
+        return options.get(POSTPONE_MERGE_ON_READ);
     }
 
     public int postponeBatchWriteFixedBucketMaxParallelism() {

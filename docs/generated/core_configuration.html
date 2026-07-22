@@ -1267,6 +1267,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
         </tr>
         <tr>
+            <td><h5>postpone.merge-on-read</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to merge records in the postpone bucket with records in real buckets during batch reads. This requires an execution engine capable of routing and shuffling postpone records to their target real buckets.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>

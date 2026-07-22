@@ -155,6 +155,20 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
       assert(spark.sql("SELECT bucket FROM `T$buckets`").collect().exists(_.getInt(0) == -2))
       assert(spark.sql("SELECT file_path FROM `T$files` WHERE level = 0").collect().nonEmpty)
 
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        val error = intercept[Exception] {
+          spark
+            .sql("""
+                   |SELECT __paimon_search_score
+                   |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                   |""".stripMargin)
+            .collect()
+        }
+        assert(
+          error.getMessage.contains("does not support vector, hybrid or full-text search"),
+          error.getMessage)
+      }
+
       spark.sql("CALL sys.compact(table => 'T')")
 
       assert(
