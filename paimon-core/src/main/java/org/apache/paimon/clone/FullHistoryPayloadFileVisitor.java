@@ -119,8 +119,6 @@ public class FullHistoryPayloadFileVisitor {
 
             if (snapshot.changelogManifestList() != null) {
                 visitChangelogManifest(snapshot.changelogManifestList());
-            } else if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                visitAppendDeltaFiles(snapshot.deltaManifestList());
             }
             visitIndexManifest(snapshot.indexManifest());
         }

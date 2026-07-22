@@ -336,6 +336,31 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     @Test
+    public void testRewriteRejectsEscapingStatisticsPath() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("escaping-statistics-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("escaping-statistics-target/table").toString());
+        FileStoreTable source = createUnpartitionedTable(sourceRoot, null);
+        writeRows(source, 0, 1);
+        Snapshot snapshot = source.snapshotManager().latestSnapshot();
+        fileIO.overwriteFileUtf8(
+                source.snapshotManager().snapshotPath(snapshot.id()),
+                copyWithStatistics(snapshot, "../../escaped-statistics").toJson());
+        source = FileStoreTableFactory.create(fileIO, sourceRoot);
+        PathMapping mapping =
+                PathMapping.parse(Collections.singletonList(sourceRoot + "=" + targetRoot));
+        FileStoreTable corruptedSource = source;
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryMetadataRewriter(
+                                                corruptedSource, fileIO, targetRoot, mapping)
+                                        .rewrite())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Statistics reference must be a file name")
+                .hasMessageContaining("../../escaped-statistics");
+    }
+
+    @Test
     public void testStreamingValidationRejectsSwappedSnapshotRoots() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("swapped-roots-source/table").toString());
         Path targetRoot = new Path(tempDir.resolve("swapped-roots-target/table").toString());
@@ -890,7 +915,7 @@ public class FullHistoryMetadataRewriterTest {
                                                 PathMapping.parse(
                                                         Collections.singletonList(
                                                                 sourceRoot + "=" + targetRoot)))
-                                        .plan())
+                                        .planStructure())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.BLOB_DESCRIPTOR_FIELD.key())
                 .hasMessageContaining("inside data files");
@@ -1338,6 +1363,32 @@ public class FullHistoryMetadataRewriterTest {
                 snapshot.changelogRecordCount(),
                 snapshot.watermark(),
                 snapshot.statistics(),
+                snapshot.properties(),
+                snapshot.nextRowId(),
+                snapshot.operation());
+    }
+
+    private static Snapshot copyWithStatistics(Snapshot snapshot, String statistics) {
+        return new Snapshot(
+                snapshot.version(),
+                snapshot.id(),
+                snapshot.schemaId(),
+                snapshot.baseManifestList(),
+                snapshot.baseManifestListSize(),
+                snapshot.deltaManifestList(),
+                snapshot.deltaManifestListSize(),
+                snapshot.changelogManifestList(),
+                snapshot.changelogManifestListSize(),
+                snapshot.indexManifest(),
+                snapshot.commitUser(),
+                snapshot.commitIdentifier(),
+                snapshot.commitKind(),
+                snapshot.timeMillis(),
+                snapshot.totalRecordCount(),
+                snapshot.deltaRecordCount(),
+                snapshot.changelogRecordCount(),
+                snapshot.watermark(),
+                statistics,
                 snapshot.properties(),
                 snapshot.nextRowId(),
                 snapshot.operation());

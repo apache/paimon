@@ -18,6 +18,7 @@
 
 package org.apache.paimon.clone;
 
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
@@ -28,14 +29,16 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FullHistoryCopyPlan}. */
 public class FullHistoryCopyPlanTest {
 
     @Test
-    public void testBuildCopyPlanWithPathMapping() {
+    public void testBuildPayloadCopyPlanWithPathMapping() throws Exception {
         FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
-        builder.addMetadataFile(new Path("dfs://old/warehouse/db/t/schema/schema-0"));
         builder.addDataFile(new Path("dfs://old/external/db/t/pt=A/bucket-0/data.orc"));
         builder.addIndexFile(new Path("dfs://old/warehouse/db/t/index/index-1"));
         FullHistoryFileSet files = builder.build();
@@ -45,44 +48,45 @@ public class FullHistoryCopyPlanTest {
                                 "dfs://old/warehouse=dfs://new/warehouse",
                                 "dfs://old/external=dfs://new/external"));
 
-        FullHistoryCopyPlan plan = FullHistoryCopyPlan.build(files, mapping);
+        FileIO fileIO = mock(FileIO.class);
+        when(fileIO.getFileSize(any(Path.class))).thenReturn(1L);
+        FullHistoryCopyPlan plan = FullHistoryCopyPlan.buildPayload(files, mapping, fileIO);
 
-        assertThat(plan.files()).hasSize(3);
+        assertThat(plan.files()).hasSize(2);
         assertThat(plan.files())
                 .extracting(file -> file.source().toString())
                 .containsExactly(
-                        "dfs://old/warehouse/db/t/schema/schema-0",
                         "dfs://old/external/db/t/pt=A/bucket-0/data.orc",
                         "dfs://old/warehouse/db/t/index/index-1");
         assertThat(plan.files())
                 .extracting(file -> file.target().toString())
                 .containsExactly(
-                        "dfs://new/warehouse/db/t/schema/schema-0",
                         "dfs://new/external/db/t/pt=A/bucket-0/data.orc",
                         "dfs://new/warehouse/db/t/index/index-1");
         assertThat(plan.files())
                 .extracting(FullHistoryCopyPlan.FileCopy::kind)
                 .containsExactly(
-                        FullHistoryCopyPlan.FileKind.METADATA,
-                        FullHistoryCopyPlan.FileKind.DATA,
-                        FullHistoryCopyPlan.FileKind.INDEX);
+                        FullHistoryCopyPlan.FileKind.DATA, FullHistoryCopyPlan.FileKind.INDEX);
     }
 
     @Test
-    public void testInternalPayloadUsesMappingAnchor() {
+    public void testInternalPayloadUsesMappingAnchor() throws Exception {
         Path tableRoot = new Path("dfs://old/warehouse/db/t");
         FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
         builder.addDataFile(
                 new Path("dfs://old/warehouse/db/t/data/bucket-0/internal.orc"), tableRoot);
         builder.addDataFile(new Path("dfs://old/warehouse/db/t/data/bucket-0/external.orc"));
 
+        FileIO fileIO = mock(FileIO.class);
+        when(fileIO.getFileSize(any(Path.class))).thenReturn(1L);
         FullHistoryCopyPlan plan =
-                FullHistoryCopyPlan.build(
+                FullHistoryCopyPlan.buildPayload(
                         builder.build(),
                         PathMapping.parse(
                                 Arrays.asList(
                                         "dfs://old/warehouse/db/t=dfs://new/warehouse/db/t",
-                                        "dfs://old/warehouse/db/t/data=dfs://new/external")));
+                                        "dfs://old/warehouse/db/t/data=dfs://new/external")),
+                        fileIO);
 
         assertThat(plan.files())
                 .extracting(file -> file.target().toString())
@@ -126,14 +130,14 @@ public class FullHistoryCopyPlanTest {
     @Test
     public void testUnmatchedPathFails() {
         FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
-        builder.addMetadataFile(new Path("dfs://old/warehouse/db/t/schema/schema-0"));
         builder.addDataFile(new Path("dfs://unknown/db/t/pt=A/bucket-0/data.orc"));
         FullHistoryFileSet files = builder.build();
         PathMapping mapping =
                 PathMapping.parse(
                         Collections.singletonList("dfs://old/warehouse=dfs://new/warehouse"));
 
-        assertThatThrownBy(() -> FullHistoryCopyPlan.build(files, mapping))
+        assertThatThrownBy(
+                        () -> FullHistoryCopyPlan.buildPayload(files, mapping, mock(FileIO.class)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No path mapping");
     }
@@ -152,15 +156,7 @@ public class FullHistoryCopyPlanTest {
 
     @Test
     public void testFilesAreImmutable() {
-        FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
-        builder.addMetadataFile(new Path("dfs://old/warehouse/db/t/schema/schema-0"));
-        FullHistoryFileSet files = builder.build();
-        FullHistoryCopyPlan plan =
-                FullHistoryCopyPlan.build(
-                        files,
-                        PathMapping.parse(
-                                Collections.singletonList(
-                                        "dfs://old/warehouse=dfs://new/warehouse")));
+        FullHistoryCopyPlan plan = FullHistoryCopyPlan.empty();
 
         List<FullHistoryCopyPlan.FileCopy> fileCopies = plan.files();
         assertThatThrownBy(

@@ -55,6 +55,11 @@ public class FullHistoryCloneValidator {
     private final FullHistoryCopyPlan payloadPlan;
 
     public FullHistoryCloneValidator(
+            FileStoreTable sourceTable, FileStoreTable targetTable, PathMapping pathMapping) {
+        this(sourceTable, targetTable, pathMapping, FullHistoryCopyPlan.empty());
+    }
+
+    public FullHistoryCloneValidator(
             FileStoreTable sourceTable,
             FileStoreTable targetTable,
             PathMapping pathMapping,

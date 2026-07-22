@@ -110,7 +110,8 @@ public class ClonePaimonFullHistoryTableUtils {
                                         sourceDatabase,
                                         sourceTableName,
                                         pathMappings,
-                                        clonePlan.sourceFingerprint()))
+                                        clonePlan.sourceFingerprint(),
+                                        clonePlan))
                         .returns(copyType)
                         .name("Discover Full-History Clone Files")
                         .setParallelism(1)

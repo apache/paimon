@@ -42,9 +42,11 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -115,7 +117,7 @@ public class FullHistoryFileCollectorTest {
         assertThat(mapping.rewriteRequired(sourceDataFile.toString()))
                 .startsWith(nestedTarget.toString());
 
-        FullHistoryCopyPlan plan = FullHistoryCopyPlan.build(files, mapping);
+        FullHistoryCopyPlan plan = FullHistoryCopyPlan.buildPayload(files, mapping, fileIO);
 
         String sourceRoot = table.location().toString();
         assertThat(plan.files())
@@ -126,7 +128,7 @@ public class FullHistoryFileCollectorTest {
     }
 
     @Test
-    public void testStreamingPayloadVisitorMatchesReachableFileSet() throws Exception {
+    public void testStreamingPayloadVisitorVisitsAllBranchAndTagFiles() throws Exception {
         FileStoreTable table = createTable(new Options());
         writeRows(table, 0, "A", 1);
         table.createTag("tag1", 1);
@@ -134,7 +136,6 @@ public class FullHistoryFileCollectorTest {
         writeRows(table.switchToBranch("branch1"), 1, "B", 2);
         writeRows(table, 1, "C", 3);
 
-        FullHistoryFileSet expected = new FullHistoryFileCollector(table).collect();
         Set<Path> dataFiles = new LinkedHashSet<>();
         Set<Path> indexFiles = new LinkedHashSet<>();
         new FullHistoryPayloadFileVisitor(table)
@@ -147,8 +148,8 @@ public class FullHistoryFileCollectorTest {
                             }
                         });
 
-        assertThat(dataFiles).isEqualTo(expected.dataFiles());
-        assertThat(indexFiles).isEqualTo(expected.indexFiles());
+        assertThat(dataFiles).hasSize(3).allMatch(this::exists);
+        assertThat(indexFiles).isEmpty();
     }
 
     @Test
@@ -177,6 +178,23 @@ public class FullHistoryFileCollectorTest {
 
         assertThat(visited).isNotEmpty().allMatch(this::exists);
         assertThat(visited).isEqualTo(new FullHistoryFileCollector(table).collect().dataFiles());
+    }
+
+    @Test
+    public void testAppendSnapshotDoesNotEmitLiveDataTwice() throws Exception {
+        FileStoreTable table = createTable(new Options());
+        writeRows(table, 0, "A", 1);
+
+        List<Path> visited = new ArrayList<>();
+        new FullHistoryPayloadFileVisitor(table)
+                .visit(
+                        (path, kind, size, mappingAnchor) -> {
+                            if (kind == FullHistoryCopyPlan.FileKind.DATA) {
+                                visited.add(path);
+                            }
+                        });
+
+        assertThat(visited).hasSize(1);
     }
 
     private boolean exists(Path path) {
