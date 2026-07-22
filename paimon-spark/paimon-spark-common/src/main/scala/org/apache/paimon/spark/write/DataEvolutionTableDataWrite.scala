@@ -60,7 +60,6 @@ case class DataEvolutionTableDataWrite(
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, uriReaderFactory)
   }
-  private lazy val rowSerializer = InternalSerializers.create(writeType)
   private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray
   private val rawBlobFallbackFieldIndexes = rawBlobFallbackFields.map(_._1)
   private val rawBlobFallbackMappings = {
@@ -72,6 +71,7 @@ case class DataEvolutionTableDataWrite(
     mappings
   }
   private val rawBlobFallbackMarkerIndexes = rawBlobFallbackFields.map(_._2)
+  private val rawBlobFallbackFieldIndexSet = rawBlobFallbackFieldIndexes.toSet
   private val rawBlobFallbackPlaceholders: Array[AnyRef] = rawBlobFallbackFields.map {
     case (fieldIndex, _) =>
       if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.ARRAY) {
@@ -84,6 +84,25 @@ case class DataEvolutionTableDataWrite(
   }
   private val rawBlobFallbackRow = new GenericRow(rawBlobFallbackMarkerIndexes.length)
   private val rawBlobFallbackMappingRow = new FallbackMappingRow(rawBlobFallbackMappings)
+  private val fillerFieldCopiers = writeType.getFields.asScala.zipWithIndex.collect {
+    case (field, index) if !rawBlobFallbackFieldIndexSet.contains(index) =>
+      (
+        index,
+        InternalRow.createFieldGetter(field.`type`(), index),
+        InternalSerializers.create[AnyRef](field.`type`()))
+  }.toArray
+
+  private def createFillerRow(source: InternalRow): GenericRow = {
+    val filler = new GenericRow(writeType.getFieldCount)
+    filler.setRowKind(source.getRowKind)
+    // only copy non-blob fields
+    fillerFieldCopiers.foreach {
+      case (index, getter, serializer) =>
+        val value = getter.getFieldOrNull(source)
+        filler.setField(index, if (value == null) null else serializer.copy(value))
+    }
+    filler
+  }
 
   def write(row: Row): Unit = {
     val firstRowId = row.getLong(firstRowIdIndex)
@@ -223,15 +242,11 @@ case class DataEvolutionTableDataWrite(
     }
 
     private def fillGapUntil(rowId: Long, fillerSourceRow: InternalRow = null): Unit = {
-      if (fillerRow == null && fillerSourceRow != null) {
+      if (firstRowId + numWritten < rowId && fillerRow == null && fillerSourceRow != null) {
         // Copy the first record this file writer met to minimize the influences on
         // file stats, but keep raw blob fields as NULLs so filler rows do not trigger
         // blob fallback.
-        val copied = rowSerializer
-          .copyRowData(fillerSourceRow, new GenericRow(writeType.getFieldCount))
-          .asInstanceOf[GenericRow]
-        rawBlobFallbackFieldIndexes.foreach(copied.setField(_, null))
-        fillerRow = copied
+        fillerRow = createFillerRow(fillerSourceRow)
       }
 
       assert(

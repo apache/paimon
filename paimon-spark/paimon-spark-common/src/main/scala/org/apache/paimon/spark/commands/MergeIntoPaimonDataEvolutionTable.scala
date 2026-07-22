@@ -39,7 +39,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.{BlobType, DataTypeRoot, RowType}
+import org.apache.paimon.types.{BlobType, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
@@ -430,15 +430,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobFieldNames = rawBlobFields
       .map(_.name())
       .toSet
-    val rawNestedBlobFieldNames = rawBlobFields
-      .filter(
-        field => {
-          val root = field.`type`().getTypeRoot
-          root == DataTypeRoot.ARRAY || root == DataTypeRoot.MAP
-        })
-      .map(_.name())
-      .toSet
-
     def isRawBlobUpdateColumn(attr: AttributeReference): Boolean = {
       rawBlobFieldNames.exists(rawBlobFieldName => resolver(rawBlobFieldName, attr.name))
     }
@@ -457,17 +448,6 @@ case class MergeIntoPaimonDataEvolutionTable(
             None
           }
       }.toSet
-    }
-
-    val modifiedRawNestedBlobColumnNames = matchedActions
-      .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
-      .flatten
-      .filter(name => rawNestedBlobFieldNames.exists(blobName => resolver(blobName, name)))
-      .toSet
-    if (modifiedRawNestedBlobColumnNames.nonEmpty) {
-      throw new UnsupportedOperationException(
-        "Should not append/update raw-data ARRAY<BLOB> or MAP<X, BLOB> column through MERGE INTO: " +
-          modifiedRawNestedBlobColumnNames.toSeq.sorted.mkString(", "))
     }
 
     val rawBlobMarkerNames =
