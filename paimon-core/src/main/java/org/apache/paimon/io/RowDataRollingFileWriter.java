@@ -52,6 +52,42 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             boolean statsDenseStore,
             @Nullable List<String> writeCols,
             @Nullable FileFormat rowSidecarFormat) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                rowSidecarFormat,
+                Long.MAX_VALUE);
+    }
+
+    public RowDataRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat,
+            long targetFileNumRows) {
         super(
                 () -> {
                     Path dataPath = pathFactory.newPath();
@@ -76,6 +112,7 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                             rowSidecarFormat,
                             rowSidecarPath);
                 },
-                targetFileSize);
+                targetFileSize,
+                targetFileNumRows);
     }
 }

@@ -341,6 +341,7 @@ public class KeyValueFileReadWriteTest {
                         10,
                         10,
                         10,
+                        Long.MAX_VALUE,
                         schema,
                         null,
                         0,

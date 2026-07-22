@@ -1682,6 +1682,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
+            <td><h5>target-file-num-rows</h5></td>
+            <td style="word-wrap: break-word;">9223372036854775807</td>
+            <td>Long</td>
+            <td>Target number of rows per data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Bounds per-file rows for wide columns to avoid data-evolution OOM. Disabled by default.</td>
+        </tr>
+        <tr>
             <td><h5>target-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>

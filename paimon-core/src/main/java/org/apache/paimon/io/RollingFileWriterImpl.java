@@ -41,17 +41,31 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
+    private final long targetFileNumRows;
     private final List<FileWriterAbortExecutor> closedWriters;
     protected final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
     private long recordCount = 0;
+    private long currentFileRecordCount = 0;
     private boolean closed = false;
 
     public RollingFileWriterImpl(
             Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
+        this(writerFactory, targetFileSize, Long.MAX_VALUE);
+    }
+
+    public RollingFileWriterImpl(
+            Supplier<? extends SingleFileWriter<T, R>> writerFactory,
+            long targetFileSize,
+            long targetFileNumRows) {
+        Preconditions.checkArgument(
+                targetFileNumRows > 0,
+                "targetFileNumRows must be positive, but is %s",
+                targetFileNumRows);
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
+        this.targetFileNumRows = targetFileNumRows;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
     }
@@ -62,8 +76,9 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+        return currentFileRecordCount >= targetFileNumRows
+                || currentWriter.reachTargetSize(
+                        forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
@@ -76,6 +91,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.write(row);
             recordCount += 1;
+            currentFileRecordCount += 1;
 
             if (rollingFile(false)) {
                 closeCurrentWriter();
@@ -101,6 +117,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.writeBundle(bundle);
             recordCount += bundle.rowCount();
+            currentFileRecordCount += bundle.rowCount();
 
             if (rollingFile(true)) {
                 closeCurrentWriter();
@@ -132,6 +149,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         currentWriter.abortExecutor().ifPresent(closedWriters::add);
         results.add(currentWriter.result());
         currentWriter = null;
+        currentFileRecordCount = 0;
     }
 
     @Override

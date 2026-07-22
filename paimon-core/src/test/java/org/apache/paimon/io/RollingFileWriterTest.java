@@ -72,6 +72,14 @@ public class RollingFileWriterTest {
     }
 
     public void initialize(String identifier, boolean statsDenseStore) {
+        initialize(identifier, statsDenseStore, TARGET_FILE_SIZE, Long.MAX_VALUE);
+    }
+
+    public void initialize(
+            String identifier,
+            boolean statsDenseStore,
+            long targetFileSize,
+            long targetFileNumRows) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriterImpl<>(
@@ -106,7 +114,8 @@ public class RollingFileWriterTest {
                                         statsDenseStore,
                                         false,
                                         null),
-                        TARGET_FILE_SIZE);
+                        targetFileSize,
+                        targetFileNumRows);
     }
 
     @ParameterizedTest
@@ -127,6 +136,45 @@ public class RollingFileWriterTest {
                 assertFileNum(3);
             }
         }
+    }
+
+    @Test
+    public void testRollingByRows() throws IOException {
+        // Huge byte target so only the row-count limit triggers rolling.
+        initialize("avro", false, 1024L * 1024 * 1024, 100L);
+        for (int i = 0; i < 350; i++) {
+            rollingFileWriter.write(GenericRow.of(i));
+        }
+        rollingFileWriter.close();
+        List<DataFileMeta> files = rollingFileWriter.result();
+        assertThat(files).hasSize(4);
+        assertThat(files.get(0).rowCount()).isEqualTo(100);
+        assertThat(files.get(1).rowCount()).isEqualTo(100);
+        assertThat(files.get(2).rowCount()).isEqualTo(100);
+        assertThat(files.get(3).rowCount()).isEqualTo(50);
+    }
+
+    @Test
+    public void testRollingByRowsWithBundle() throws IOException {
+        // Bundle-granular cap: a file may overshoot by up to one bundle.
+        initialize("avro", false, 1024L * 1024 * 1024, 100L);
+        rollingFileWriter.writeBundle(bundle(150));
+        rollingFileWriter.writeBundle(bundle(120));
+        rollingFileWriter.writeBundle(bundle(30));
+        rollingFileWriter.close();
+        List<DataFileMeta> files = rollingFileWriter.result();
+        assertThat(files).hasSize(3);
+        assertThat(files.get(0).rowCount()).isEqualTo(150);
+        assertThat(files.get(1).rowCount()).isEqualTo(120);
+        assertThat(files.get(2).rowCount()).isEqualTo(30);
+    }
+
+    private static BundleRecords bundle(int rowCount) {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(GenericRow.of(i));
+        }
+        return new SingleUseBundleRecords(rows);
     }
 
     @Test

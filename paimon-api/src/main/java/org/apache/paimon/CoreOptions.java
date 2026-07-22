@@ -818,6 +818,17 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    public static final ConfigOption<Long> TARGET_FILE_NUM_ROWS =
+            key("target-file-num-rows")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription(
+                            "Target number of rows per data file; a file rolls when this or "
+                                    + "target-file-size is reached, whichever comes first. Enforced at "
+                                    + "bundle granularity, so a bundled write may exceed it by up to one "
+                                    + "bundle. Bounds per-file rows for wide columns to avoid "
+                                    + "data-evolution OOM. Disabled by default.");
+
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
                     .doubleType()
@@ -3323,6 +3334,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(TARGET_FILE_SIZE)
                 .orElse(hasPrimaryKey ? VALUE_128_MB : VALUE_256_MB)
                 .getBytes();
+    }
+
+    public long targetFileNumRows() {
+        return options.get(TARGET_FILE_NUM_ROWS);
     }
 
     public long blobTargetFileSize() {

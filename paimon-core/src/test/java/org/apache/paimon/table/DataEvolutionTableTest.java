@@ -1127,6 +1127,90 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testDataEvolutionReadWithRolledColumns() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.TARGET_FILE_NUM_ROWS.key(), "100"));
+        int count = 350;
+        RowType wt0 = table.schema().logicalRowType().project(Arrays.asList("f0", "f1"));
+        BatchWriteBuilder b0 = table.newBatchWriteBuilder();
+        try (BatchTableWrite w0 = b0.newWrite().withWriteType(wt0)) {
+            for (int i = 0; i < count; i++) {
+                w0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            b0.newCommit().commit(w0.prepareCommit());
+        }
+        long firstRowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+
+        RowType wt1 = table.schema().logicalRowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder b1 = table.newBatchWriteBuilder();
+        try (BatchTableWrite w1 = b1.newWrite().withWriteType(wt1)) {
+            for (int i = 0; i < count; i++) {
+                w1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            List<CommitMessage> msgs = w1.prepareCommit();
+            assignCumulativeFirstRowId(msgs, firstRowId);
+            b1.newCommit().commit(msgs);
+        }
+
+        ReadBuilder rb = table.newReadBuilder();
+        RecordReader<InternalRow> reader = rb.newRead().createReader(rb.newScan().plan());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(
+                r -> {
+                    int i = r.getInt(0);
+                    assertThat(r.getString(1).toString()).isEqualTo("a" + i);
+                    assertThat(r.getString(2).toString()).isEqualTo("b" + i);
+                    cnt.incrementAndGet();
+                });
+        assertThat(cnt.get()).isEqualTo(count);
+    }
+
+    private void assignCumulativeFirstRowId(List<CommitMessage> msgs, long firstRowId) {
+        long cur = firstRowId;
+        for (CommitMessage c : msgs) {
+            CommitMessageImpl m = (CommitMessageImpl) c;
+            List<DataFileMeta> files = new ArrayList<>(m.newFilesIncrement().newFiles());
+            m.newFilesIncrement().newFiles().clear();
+            List<DataFileMeta> assigned = new ArrayList<>();
+            for (DataFileMeta f : files) {
+                assigned.add(f.assignFirstRowId(cur));
+                cur += f.rowCount();
+            }
+            m.newFilesIncrement().newFiles().addAll(assigned);
+        }
+    }
+
+    @Test
+    public void testDataEvolutionWriteRollsByRows() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.TARGET_FILE_NUM_ROWS.key(), "100"));
+        RowType writeType = table.schema().logicalRowType().project(Arrays.asList("f0", "f1"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+            for (int i = 0; i < 350; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        List<Long> rowCounts = new ArrayList<>();
+        Iterator<ManifestEntry> files = table.newSnapshotReader().readFileIterator();
+        while (files.hasNext()) {
+            rowCounts.add(files.next().file().rowCount());
+        }
+        assertThat(rowCounts.stream().mapToLong(Long::longValue).sum()).isEqualTo(350L);
+        assertThat(Collections.max(rowCounts)).isLessThanOrEqualTo(100L);
+    }
+
+    @Test
     public void testCompact() throws Exception {
         for (int i = 0; i < 5; i++) {
             write(100000L);

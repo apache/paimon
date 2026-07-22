@@ -142,7 +142,8 @@ public class KeyValueFileWriterFactory {
                     return createDataFileWriter(
                             pathFactory.newPath(), key, fileSource, pathFactory.isExternalPath());
                 },
-                suggestedFileSize);
+                suggestedFileSize,
+                options.targetFileNumRows());
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
@@ -156,7 +157,8 @@ public class KeyValueFileWriterFactory {
                             FileSource.APPEND,
                             pathFactory.isExternalPath());
                 },
-                suggestedFileSize);
+                suggestedFileSize,
+                options.targetFileNumRows());
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingClusteringFileWriter() {

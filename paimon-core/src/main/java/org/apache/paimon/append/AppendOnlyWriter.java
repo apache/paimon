@@ -77,6 +77,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final long targetFileSize;
     private final long blobTargetFileSize;
     private final long vectorTargetFileSize;
+    private final long targetFileNumRows;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -103,6 +104,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private SinkWriter<InternalRow> sinkWriter;
     private MemorySegmentPool memorySegmentPool;
 
+    /** Overload without a row limit, kept for backward compatibility. */
     public AppendOnlyWriter(
             FileIO fileIO,
             @Nullable IOManager ioManager,
@@ -132,6 +134,68 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean dataEvolutionEnabled,
             @Nullable FileFormat rowSidecarFileFormat,
             @Nullable BlobFileContext blobContext) {
+        this(
+                fileIO,
+                ioManager,
+                schemaId,
+                fileFormat,
+                vectorFileFormat,
+                targetFileSize,
+                blobTargetFileSize,
+                vectorTargetFileSize,
+                Long.MAX_VALUE,
+                writeSchema,
+                writeCols,
+                maxSequenceNumber,
+                compactManager,
+                dataFileRead,
+                forceCompact,
+                pathFactory,
+                increment,
+                useWriteBuffer,
+                spillable,
+                fileCompression,
+                spillCompression,
+                statsCollectorFactories,
+                maxDiskSize,
+                fileIndexOptions,
+                asyncFileWrite,
+                statsDenseStore,
+                dataEvolutionEnabled,
+                rowSidecarFileFormat,
+                blobContext);
+    }
+
+    public AppendOnlyWriter(
+            FileIO fileIO,
+            @Nullable IOManager ioManager,
+            long schemaId,
+            FileFormat fileFormat,
+            @Nullable FileFormat vectorFileFormat,
+            long targetFileSize,
+            long blobTargetFileSize,
+            long vectorTargetFileSize,
+            long targetFileNumRows,
+            RowType writeSchema,
+            @Nullable List<String> writeCols,
+            long maxSequenceNumber,
+            CompactManager compactManager,
+            IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead,
+            boolean forceCompact,
+            DataFilePathFactory pathFactory,
+            @Nullable CommitIncrement increment,
+            boolean useWriteBuffer,
+            boolean spillable,
+            String fileCompression,
+            CompressOptions spillCompression,
+            StatsCollectorFactories statsCollectorFactories,
+            MemorySize maxDiskSize,
+            FileIndexOptions fileIndexOptions,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            boolean dataEvolutionEnabled,
+            @Nullable FileFormat rowSidecarFileFormat,
+            @Nullable BlobFileContext blobContext) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -139,6 +203,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
         this.vectorTargetFileSize = vectorTargetFileSize;
+        this.targetFileNumRows = targetFileNumRows;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -325,6 +390,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     targetFileSize,
                     blobTargetFileSize,
                     vectorTargetFileSize,
+                    targetFileNumRows,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
@@ -350,7 +416,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 asyncFileWrite,
                 statsDenseStore,
                 writeCols,
-                rowSidecarFileFormat);
+                rowSidecarFileFormat,
+                targetFileNumRows);
     }
 
     private void trySyncLatestCompaction(boolean blocking)
