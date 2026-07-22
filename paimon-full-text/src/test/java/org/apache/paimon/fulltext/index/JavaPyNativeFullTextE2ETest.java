@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
@@ -56,7 +57,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
-import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -85,8 +85,11 @@ public class JavaPyNativeFullTextE2ETest {
     }
 
     private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
+        try (FullTextIndexWriter ignored = FullTextIndexWriter.create(Collections.emptyMap())) {
+            return true;
+        } catch (LinkageError e) {
+            return false;
+        }
     }
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();

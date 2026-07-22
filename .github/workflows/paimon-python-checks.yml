@@ -24,13 +24,11 @@ on:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -87,20 +85,10 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
-        if: matrix.python-version != '3.7'
+        if: matrix.python-version == '3.11'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Install paimon-full-text dependency
-        shell: bash
-        run: |
-          # 3.7 runs no native full-text tests; the Java artifact is enough.
-          if [[ "${{ matrix.python-version }}" == "3.7" ]]; then
-            bash .github/workflows/install-paimon-full-text.sh java
-          else
-            bash .github/workflows/install-paimon-full-text.sh native
-          fi
 
       - name: Verify Python version
         run: python --version
@@ -161,10 +149,7 @@ jobs:
 
       - name: Install paimon-full-text Python dependency
         if: matrix.python-version != '3.6.15' && matrix.python-version != '3.7'
-        shell: bash
-        run: |
-          python -m pip install "${PAIMON_FULL_TEXT_DIR}/python"
-
+        run: python -m pip install 'paimon-ftindex==0.1.0'
 
       - name: Run lint-python.sh
         shell: bash

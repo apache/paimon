@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.index.pkfulltext.PrimaryKeyFullTextBucketSearch;
@@ -55,7 +56,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -261,7 +261,10 @@ class NativePrimaryKeyFullTextIndexTest {
     }
 
     private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
+        try (FullTextIndexWriter ignored = FullTextIndexWriter.create(Collections.emptyMap())) {
+            return true;
+        } catch (LinkageError e) {
+            return false;
+        }
     }
 }

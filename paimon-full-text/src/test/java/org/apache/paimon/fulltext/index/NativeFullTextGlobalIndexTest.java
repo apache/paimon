@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -40,7 +41,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -57,8 +57,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 public class NativeFullTextGlobalIndexTest {
 
     private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
+        try (FullTextIndexWriter ignored = FullTextIndexWriter.create(Collections.emptyMap())) {
+            return true;
+        } catch (LinkageError e) {
+            return false;
+        }
     }
 
     @TempDir java.nio.file.Path tempDir;
