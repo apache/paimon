@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark.read;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -30,6 +33,14 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.IndexVectorSearchSplit;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
 import org.apache.paimon.table.source.VectorScan;
@@ -42,6 +53,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
@@ -50,6 +62,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -58,6 +72,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SparkDataEvolutionVectorRead}. */
 public class SparkDataEvolutionVectorReadTest {
+
+    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testRawSearchUsesSparkPath() {
@@ -101,6 +117,36 @@ public class SparkDataEvolutionVectorReadTest {
         assertThat(read.rawSearchCandidateRows).containsExactly(0L, 2L);
         assertThat(result.results().getLongCardinality()).isEqualTo(1);
         assertThat(result.results().contains(0L)).isTrue();
+    }
+
+    @Test
+    public void testDistributedIndexMaterializesManySplitsInSingleTask() throws Exception {
+        int splitCount = 5000;
+        SingleTaskSparkVectorRead read = new SingleTaskSparkVectorRead(createTable());
+
+        ScoredGlobalIndexResult result =
+                read.readIndexSplitsInSpark(
+                        indexSplits("test-vector-ann", splitCount), new L2Indexer());
+
+        assertThat(read.sparkParallelism).isEqualTo(1);
+        assertThat(read.scoreCalls).hasValue(splitCount);
+        assertThat(result.results().getLongCardinality()).isEqualTo(1);
+        assertThat(result.results()).contains(splitCount - 1L);
+    }
+
+    private FileStoreTable createTable() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("vec", new ArrayType(DataTypes.FLOAT()))
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     private static List<IndexVectorSearchSplit> indexSplits(String indexType, int count) {
@@ -225,6 +271,59 @@ public class SparkDataEvolutionVectorReadTest {
             RoaringNavigableMap64 rows = new RoaringNavigableMap64();
             rows.add(rowId);
             return ScoredGlobalIndexResult.create(rows, candidate -> score);
+        }
+    }
+
+    private static class SingleTaskSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private final AtomicInteger scoreCalls = new AtomicInteger();
+        private int sparkParallelism;
+
+        private SingleTaskSparkVectorRead(FileStoreTable table) {
+            super(
+                    table,
+                    null,
+                    null,
+                    1,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[] {0.0f},
+                    null);
+        }
+
+        @Override
+        protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        protected <I, O> List<O> mapInSpark(
+                List<I> data, SerializableFunction<I, O> func, int parallelism) {
+            sparkParallelism = parallelism;
+            assertThat(data).hasSize(1);
+            return data.stream().map(func::apply).collect(Collectors.toList());
+        }
+
+        @Override
+        protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+                GlobalIndexer globalIndexer,
+                IndexPathFactory indexPathFactory,
+                long rowRangeStart,
+                long rowRangeEnd,
+                List<IndexFileMeta> vectorIndexFiles,
+                float[] vector,
+                int searchLimit,
+                @Nullable RoaringNavigableMap64 includeRowIds,
+                ExecutorService executor) {
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            rows.add(rowRangeStart);
+            return CompletableFuture.completedFuture(
+                    Optional.of(
+                            ScoredGlobalIndexResult.create(
+                                    rows,
+                                    rowId -> {
+                                        scoreCalls.incrementAndGet();
+                                        return rowId;
+                                    })));
         }
     }
 
