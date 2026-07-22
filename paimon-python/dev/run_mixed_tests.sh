@@ -136,7 +136,7 @@ run_batched_java_write_tests() {
         fi
     fi
 
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         if ! run_maven_test_batch \
             "paimon-full-text Java write tests" \
             "paimon-full-text" \
@@ -1287,13 +1287,13 @@ main() {
 
     echo ""
 
-    # Run native full-text index test (requires Python >= 3.10)
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
+    # Run native full-text index test (requires Python >= 3.8)
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         if ! run_native_fulltext_test; then
             native_fulltext_result=1
         fi
     else
-        echo -e "${YELLOW}⏭ Skipping Native Full-Text Index Test (requires Python >= 3.10, current: $PYTHON_VERSION)${NC}"
+        echo -e "${YELLOW}⏭ Skipping Native Full-Text Index Test (requires Python >= 3.8, current: $PYTHON_VERSION)${NC}"
         native_fulltext_result=0
     fi
 
