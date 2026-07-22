@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -47,6 +48,7 @@ public class CatalogEnvironment implements Serializable {
     private static final long serialVersionUID = 2L;
 
     @Nullable private final Identifier identifier;
+    @Nullable private final ReadAuthorizationContext readContext;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final CatalogLockFactory lockFactory;
@@ -64,7 +66,30 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification,
+                ReadAuthorizationContext.direct());
+    }
+
+    public CatalogEnvironment(
+            @Nullable Identifier identifier,
+            @Nullable String uuid,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification,
+            ReadAuthorizationContext readContext) {
         this.identifier = identifier;
+        this.readContext = readContext;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
@@ -81,6 +106,27 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public Identifier identifier() {
         return identifier;
+    }
+
+    /** Authorization context used only by read operations. */
+    public ReadAuthorizationContext readContext() {
+        return readContext == null ? ReadAuthorizationContext.direct() : readContext;
+    }
+
+    /**
+     * Context for tables discovered while reading this table.
+     *
+     * <p>A directly loaded table becomes the authorization root for its runtime dependencies. A
+     * table already reached through another root preserves that outermost context. A new table-root
+     * context is created for every read so principal-bound grants are never retained in cached
+     * table objects.
+     */
+    public ReadAuthorizationContext dependencyReadContext() {
+        ReadAuthorizationContext current = readContext();
+        if (!current.isDirect() || identifier == null) {
+            return current;
+        }
+        return ReadAuthorizationContext.forTable(identifier);
     }
 
     @Nullable
@@ -173,7 +219,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader == null) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, identifier, readContext());
     }
 
     @Nullable
@@ -205,7 +251,8 @@ public class CatalogEnvironment implements Serializable {
                 lockContext,
                 catalogContext,
                 supportsVersionManagement,
-                supportsPartitionModification);
+                supportsPartitionModification,
+                readContext());
     }
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
@@ -214,7 +261,7 @@ public class CatalogEnvironment implements Serializable {
         }
         return select -> {
             try (Catalog catalog = catalogLoader.load()) {
-                return catalog.authTableQuery(identifier, select);
+                return catalog.authTableQuery(identifier, select, readContext());
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

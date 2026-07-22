@@ -25,6 +25,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.RESTException;
+import org.apache.paimon.rest.exceptions.ReadGrantExpiredException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -56,6 +57,9 @@ public class DefaultErrorHandler extends ErrorHandler {
             case 401:
                 throw new NotAuthorizedException("Not authorized: %s", message);
             case 403:
+                if (ErrorResponse.RESOURCE_TYPE_READ_GRANT.equals(error.getResourceType())) {
+                    throw new ReadGrantExpiredException("Read grant expired: %s", message);
+                }
                 throw new ForbiddenException("Forbidden: %s", message);
             case 404:
                 throw new NoSuchResourceException(

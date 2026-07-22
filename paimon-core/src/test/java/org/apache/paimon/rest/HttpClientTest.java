@@ -23,7 +23,9 @@ import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.RESTException;
+import org.apache.paimon.rest.exceptions.ReadGrantExpiredException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -175,6 +177,20 @@ public class HttpClientTest {
                         RESTException.class,
                         () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
         assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testForbiddenErrorCompatibility() {
+        server.enqueueResponse("{\"message\":\"legacy forbidden\",\"code\":403}", 403);
+        assertThrows(
+                ForbiddenException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+
+        server.enqueueResponse(
+                "{\"message\":\"expired\",\"resourceType\":\"READ_GRANT\",\"code\":403}", 403);
+        assertThrows(
+                ReadGrantExpiredException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
     }
 
     @Test

@@ -270,7 +270,7 @@ public class MockRESTMessage {
 
     public static GetTableTokenResponse getTableCredentialsResponse() {
         return new GetTableTokenResponse(
-                ImmutableMap.of("key", "value"), System.currentTimeMillis());
+                ImmutableMap.of("key", "value"), System.currentTimeMillis() + 1_000L);
     }
 
     public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {

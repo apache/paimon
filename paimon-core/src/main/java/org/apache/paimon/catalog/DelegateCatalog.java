@@ -211,9 +211,23 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Optional<TableSnapshot> loadSnapshot(
+            Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.loadSnapshot(identifier, readContext);
+    }
+
+    @Override
     public Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
             throws TableNotExistException {
         return wrapped.loadSnapshot(identifier, version);
+    }
+
+    @Override
+    public Optional<Snapshot> loadSnapshot(
+            Identifier identifier, String version, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.loadSnapshot(identifier, version, readContext);
     }
 
     @Override
@@ -384,8 +398,20 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Table getTable(Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.getTable(identifier, readContext);
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         return wrapped.getView(identifier);
+    }
+
+    @Override
+    public View getView(Identifier identifier, ReadAuthorizationContext readContext)
+            throws ViewNotExistException {
+        return wrapped.getView(identifier, readContext);
     }
 
     @Override
@@ -447,6 +473,13 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Partition> listPartitions(
+            Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.listPartitions(identifier, readContext);
+    }
+
+    @Override
     public PagedList<Partition> listPartitionsPaged(
             Identifier identifier,
             Integer maxResults,
@@ -454,6 +487,18 @@ public abstract class DelegateCatalog implements Catalog {
             String partitionNamePattern)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.listPartitionsPaged(
+                identifier, maxResults, pageToken, partitionNamePattern, readContext);
     }
 
     @Override
@@ -476,9 +521,27 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByNames(identifier, partitions, readContext);
+    }
+
+    @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         return wrapped.authTableQuery(identifier, select);
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(
+            Identifier identifier,
+            @Nullable List<String> select,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return wrapped.authTableQuery(identifier, select, readContext);
     }
 
     @Override

@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -57,6 +58,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 public class RESTTokenFileIO implements FileIO {
 
     private static final long serialVersionUID = 2L;
+    private static final long READ_TOKEN_REFRESH_SAFETY_MILLIS = 5_000L;
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")
@@ -81,6 +83,7 @@ public class RESTTokenFileIO implements FileIO {
 
     private final CatalogContext catalogContext;
     private final Identifier identifier;
+    private final ReadAuthorizationContext readContext;
     private final Path path;
 
     // Api instance before serialization, it will become null after serialization, then we should
@@ -93,9 +96,19 @@ public class RESTTokenFileIO implements FileIO {
 
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
+        this(catalogContext, apiInstance, identifier, ReadAuthorizationContext.direct(), path);
+    }
+
+    public RESTTokenFileIO(
+            CatalogContext catalogContext,
+            RESTApi apiInstance,
+            Identifier identifier,
+            ReadAuthorizationContext readContext,
+            Path path) {
         this.catalogContext = catalogContext;
         this.apiInstance = apiInstance;
         this.identifier = identifier;
+        this.readContext = readContext;
         this.path = path;
     }
 
@@ -203,6 +216,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private boolean shouldRefresh() {
+        if (!readContext().isDirect()) {
+            return token == null
+                    || token.expireAtMillis() - System.currentTimeMillis()
+                            < READ_TOKEN_REFRESH_SAFETY_MILLIS;
+        }
         return token == null
                 || token.expireAtMillis() - System.currentTimeMillis()
                         < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
@@ -221,7 +239,16 @@ public class RESTTokenFileIO implements FileIO {
                             identifier.getTableName(),
                             identifier.getBranchName());
         }
-        GetTableTokenResponse response = apiInstance.loadTableToken(tableIdentifier);
+        ReadAuthorizationContext authorizationContext = readContext();
+        GetTableTokenResponse response =
+                authorizationContext.isDirect()
+                        ? apiInstance.loadTableToken(tableIdentifier)
+                        : apiInstance.loadTableToken(tableIdentifier, authorizationContext);
+        if (!authorizationContext.isDirect()) {
+            if (response.getExpiresAtMillis() > authorizationContext.expiresAtMillis()) {
+                throw new SecurityException("Data token outlives the view read grant");
+            }
+        }
         LOG.info(
                 "end refresh data token for identifier [{}] expiresAtMillis [{}]",
                 identifier,
@@ -231,6 +258,11 @@ public class RESTTokenFileIO implements FileIO {
                 new RESTToken(
                         mergeTokenWithCatalogOptions(response.getToken()),
                         response.getExpiresAtMillis());
+    }
+
+    private ReadAuthorizationContext readContext() {
+        // The field is null when deserializing instances written before read contexts existed.
+        return readContext == null ? ReadAuthorizationContext.direct() : readContext;
     }
 
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {

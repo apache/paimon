@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -30,6 +31,13 @@ public class RESTAuthFunction implements Function<RESTAuthParameter, Map<String,
     public RESTAuthFunction(Map<String, String> initHeader, AuthProvider authProvider) {
         this.initHeader = initHeader;
         this.authProvider = authProvider;
+    }
+
+    /** Return an auth function with additional headers included in request signing. */
+    public RESTAuthFunction withHeaders(Map<String, String> headers) {
+        Map<String, String> merged = new HashMap<>(initHeader);
+        merged.putAll(headers);
+        return new RESTAuthFunction(merged, authProvider);
     }
 
     @Override

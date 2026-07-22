@@ -421,7 +421,8 @@ public class PartitionsTable implements ReadonlyTable {
                 } else {
                     identifier = baseIdentifier;
                 }
-                return catalog.listPartitions(identifier);
+                return catalog.listPartitions(
+                        identifier, fileStoreTable.catalogEnvironment().readContext());
             } catch (Exception e) {
                 return listPartitionEntries();
             }

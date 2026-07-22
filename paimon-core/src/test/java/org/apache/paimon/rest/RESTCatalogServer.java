@@ -59,6 +59,7 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
+import org.apache.paimon.rest.requests.CreateReadGrantRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -80,6 +81,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetReadGrantResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -226,6 +228,8 @@ public class RESTCatalogServer {
     private final ResourcePaths resourcePaths;
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
+    private final Queue<CreateReadGrantRequest> receivedReadGrantRequests =
+            new ConcurrentLinkedQueue<>();
 
     private volatile boolean partitionListingSupported = true;
 
@@ -380,6 +384,9 @@ public class RESTCatalogServer {
                                     .queryParameter(WAREHOUSE.key())
                                     .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
+                    } else if ("POST".equals(request.getMethod())
+                            && resourcePaths.readGrant().equals(resourcePath)) {
+                        return readGrantHandle(data);
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
@@ -534,7 +541,10 @@ public class RESTCatalogServer {
                             }
                         }
                         // validate partition
-                        if (isPartitions || isMarkDonePartitions || isDropPartitions) {
+                        if (isPartitions
+                                || isMarkDonePartitions
+                                || isDropPartitions
+                                || isListPartitionsByNames) {
                             String tableName = RESTUtil.decodeString(resources[2]);
                             Optional<MockResponse> error =
                                     checkTablePartitioned(
@@ -854,6 +864,18 @@ public class RESTCatalogServer {
         return new MockResponse()
                 .setResponseCode(200)
                 .setBody(RESTApi.toJson(getTableTokenResponse));
+    }
+
+    private MockResponse readGrantHandle(String data) throws Exception {
+        // Protocol-only mock: production servers must validate root permission and dependency
+        // reachability before issuing a grant.
+        CreateReadGrantRequest request = RESTApi.fromJson(data, CreateReadGrantRequest.class);
+        receivedReadGrantRequests.add(request);
+        GetReadGrantResponse response =
+                new GetReadGrantResponse(
+                        "mock-read-grant-" + UUID.randomUUID(),
+                        System.currentTimeMillis() + Duration.ofMinutes(5).toMillis());
+        return mockResponse(response, 200);
     }
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
@@ -2387,7 +2409,8 @@ public class RESTCatalogServer {
                                 schema.query(),
                                 schema.dialects(),
                                 schema.comment(),
-                                schema.options());
+                                schema.options(),
+                                schema.dependencies());
                 if (viewStore.containsKey(identifier.getFullName())) {
                     throw new Catalog.ViewAlreadyExistException(identifier);
                 }
@@ -2483,7 +2506,8 @@ public class RESTCatalogServer {
                                             view.query(),
                                             view.dialects(),
                                             view.comment().orElse(null),
-                                            view.options());
+                                            view.options(),
+                                            view.dependencies());
                             return new GetViewResponse(
                                     "id",
                                     identifier.getTableName(),
@@ -2590,7 +2614,8 @@ public class RESTCatalogServer {
                                         view.query(),
                                         view.dialects(),
                                         view.comment().orElse(null),
-                                        view.options());
+                                        view.options(),
+                                        view.dependencies());
                         response =
                                 new GetViewResponse(
                                         "id",
@@ -2614,6 +2639,7 @@ public class RESTCatalogServer {
                         ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
                         HashMap<String, String> newDialects = new HashMap<>(view.dialects());
                         Map<String, String> newOptions = new HashMap<>(view.options());
+                        List<Identifier> newDependencies = view.dependencies();
                         String newComment = view.comment().orElse(null);
                         for (ViewChange viewChange : request.viewChanges()) {
                             if (viewChange instanceof ViewChange.SetViewOption) {
@@ -2657,6 +2683,9 @@ public class RESTCatalogServer {
                                     throw new Catalog.DialectNotExistException(
                                             identifier, dropDialect.dialect());
                                 }
+                            } else if (viewChange instanceof ViewChange.UpdateDependencies) {
+                                newDependencies =
+                                        ((ViewChange.UpdateDependencies) viewChange).dependencies();
                             }
                         }
                         view =
@@ -2666,7 +2695,8 @@ public class RESTCatalogServer {
                                         view.query(),
                                         newDialects,
                                         newComment,
-                                        newOptions);
+                                        newOptions,
+                                        newDependencies);
                         viewStore.put(identifier.getFullName(), view);
                         return new MockResponse().setResponseCode(200);
                     } else {
@@ -3104,5 +3134,13 @@ public class RESTCatalogServer {
 
     public void clearReceivedHeaders() {
         receivedHeaders.clear();
+    }
+
+    public List<CreateReadGrantRequest> getReceivedReadGrantRequests() {
+        return new ArrayList<>(receivedReadGrantRequests);
+    }
+
+    public void clearReceivedReadGrantRequests() {
+        receivedReadGrantRequests.clear();
     }
 }

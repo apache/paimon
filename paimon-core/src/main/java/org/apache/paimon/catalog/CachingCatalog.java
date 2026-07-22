@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
@@ -44,6 +45,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_DV_MAX_NUM;
@@ -270,6 +272,38 @@ public class CachingCatalog extends DelegateCatalog {
         }
     }
 
+    @Override
+    public Table getTable(Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return getTable(identifier);
+        }
+        // Grant-backed tables are deliberately not cached. Grants are renewable mutable leases,
+        // and caching every random grant nonce would retain an unbounded number of table objects.
+        if (identifier.isSystemTable()) {
+            Identifier originIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName(),
+                            null);
+            Table originTable = getTable(originIdentifier, readContext);
+            Table table =
+                    SystemTableLoader.load(
+                            checkNotNull(identifier.getSystemTableName()),
+                            (FileStoreTable) originTable);
+            if (table == null) {
+                throw new TableNotExistException(identifier);
+            }
+            return table;
+        }
+
+        Table table = wrapped.getTable(identifier, readContext);
+        configureTableCache(table);
+        return table;
+    }
+
     private Table loadTable(Identifier identifier) {
         Table table;
         try {
@@ -278,6 +312,11 @@ public class CachingCatalog extends DelegateCatalog {
             throw new TableLoadingException(e);
         }
 
+        configureTableCache(table);
+        return table;
+    }
+
+    private void configureTableCache(Table table) {
         if (table instanceof FileStoreTable) {
             FileStoreTable storeTable = (FileStoreTable) table;
             storeTable.setSnapshotCache(
@@ -303,8 +342,6 @@ public class CachingCatalog extends DelegateCatalog {
                 storeTable.setDVMetaCache(dvMetaCache);
             }
         }
-
-        return table;
     }
 
     private static class TableLoadingException extends RuntimeException {
@@ -333,6 +370,39 @@ public class CachingCatalog extends DelegateCatalog {
             partitionCache.put(identifier, result);
         }
         return result;
+    }
+
+    @Override
+    public List<Partition> listPartitions(
+            Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        Objects.requireNonNull(readContext, "readContext");
+        return readContext.isDirect()
+                ? listPartitions(identifier)
+                : wrapped.listPartitions(identifier, readContext);
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        Objects.requireNonNull(readContext, "readContext");
+        return wrapped.listPartitionsPaged(
+                identifier, maxResults, pageToken, partitionNamePattern, readContext);
+    }
+
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        Objects.requireNonNull(readContext, "readContext");
+        return wrapped.listPartitionsByNames(identifier, partitions, readContext);
     }
 
     @Override

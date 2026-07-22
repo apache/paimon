@@ -19,6 +19,7 @@
 package org.apache.paimon.view;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.Identifier;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -29,6 +30,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /** Dialect change to view. */
@@ -55,7 +59,10 @@ import java.util.Objects;
             name = ViewChange.Actions.UPDATE_DIALECT_ACTION),
     @JsonSubTypes.Type(
             value = ViewChange.DropDialect.class,
-            name = ViewChange.Actions.DROP_DIALECT_ACTION)
+            name = ViewChange.Actions.DROP_DIALECT_ACTION),
+    @JsonSubTypes.Type(
+            value = ViewChange.UpdateDependencies.class,
+            name = ViewChange.Actions.UPDATE_DEPENDENCIES_ACTION)
 })
 public interface ViewChange extends Serializable {
 
@@ -81,6 +88,55 @@ public interface ViewChange extends Serializable {
 
     static ViewChange dropDialect(String dialect) {
         return new DropDialect(dialect);
+    }
+
+    /** Replace direct dependencies resolved from the view query. */
+    static ViewChange updateDependencies(List<Identifier> dependencies) {
+        return new UpdateDependencies(dependencies);
+    }
+
+    /**
+     * Replace direct dependencies resolved from the view query.
+     *
+     * <p>REST servers must independently validate this client-provided change before using it for
+     * authorization.
+     */
+    final class UpdateDependencies implements ViewChange {
+
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_DEPENDENCIES = "dependencies";
+
+        @JsonProperty(FIELD_DEPENDENCIES)
+        private final List<Identifier> dependencies;
+
+        @JsonCreator
+        public UpdateDependencies(@JsonProperty(FIELD_DEPENDENCIES) List<Identifier> dependencies) {
+            this.dependencies =
+                    Collections.unmodifiableList(
+                            new ArrayList<>(Objects.requireNonNull(dependencies, "dependencies")));
+        }
+
+        @JsonGetter(FIELD_DEPENDENCIES)
+        public List<Identifier> dependencies() {
+            return dependencies;
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            UpdateDependencies that = (UpdateDependencies) object;
+            return Objects.equals(dependencies, that.dependencies);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(dependencies);
+        }
     }
 
     /** set a view option for view change. */
@@ -348,6 +404,7 @@ public interface ViewChange extends Serializable {
         public static final String SET_OPTION_ACTION = "setOption";
         public static final String REMOVE_OPTION_ACTION = "removeOption";
         public static final String UPDATE_COMMENT_ACTION = "updateComment";
+        public static final String UPDATE_DEPENDENCIES_ACTION = "updateDependencies";
 
         private Actions() {}
     }

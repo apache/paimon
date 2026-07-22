@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -84,6 +85,10 @@ class CachingCatalogTest extends CatalogTestBase {
 
     private static final Duration EXPIRATION_TTL = Duration.ofMinutes(5);
     private static final Duration HALF_OF_EXPIRATION = EXPIRATION_TTL.dividedBy(2);
+
+    private static ReadAuthorizationResource resource(Identifier table) {
+        return ReadAuthorizationResource.table(table);
+    }
 
     private FakeTicker ticker;
 
@@ -217,6 +222,46 @@ class CachingCatalogTest extends CatalogTestBase {
             releaseLoad.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void testReadContextTablesAreNotCached() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        CachingCatalog catalog = new CachingCatalog(wrapped, new Options());
+        Identifier tableIdentifier = Identifier.create("db", "tbl");
+        ReadAuthorizationContext firstContext =
+                ReadAuthorizationContext.granted(
+                        ReadAuthorizationRootType.VIEW,
+                        Identifier.create("db", "view1"),
+                        Collections.singletonList(resource(tableIdentifier)),
+                        "grant-1",
+                        Long.MAX_VALUE);
+        ReadAuthorizationContext secondContext =
+                ReadAuthorizationContext.granted(
+                        ReadAuthorizationRootType.VIEW,
+                        Identifier.create("db", "view2"),
+                        Collections.singletonList(resource(tableIdentifier)),
+                        "grant-2",
+                        Long.MAX_VALUE);
+        Table directTable = Mockito.mock(Table.class);
+        Table firstContextTable = Mockito.mock(Table.class);
+        Table secondFirstContextTable = Mockito.mock(Table.class);
+        Table secondContextTable = Mockito.mock(Table.class);
+
+        when(wrapped.getTable(tableIdentifier)).thenReturn(directTable);
+        when(wrapped.getTable(tableIdentifier, firstContext))
+                .thenReturn(firstContextTable, secondFirstContextTable);
+        when(wrapped.getTable(tableIdentifier, secondContext)).thenReturn(secondContextTable);
+
+        assertThat(catalog.getTable(tableIdentifier)).isSameAs(directTable);
+        assertThat(catalog.getTable(tableIdentifier, firstContext)).isSameAs(firstContextTable);
+        assertThat(catalog.getTable(tableIdentifier, firstContext))
+                .isSameAs(secondFirstContextTable);
+        assertThat(catalog.getTable(tableIdentifier, secondContext)).isSameAs(secondContextTable);
+        Mockito.verify(wrapped).getTable(tableIdentifier);
+        Mockito.verify(wrapped, Mockito.times(2)).getTable(tableIdentifier, firstContext);
+        Mockito.verify(wrapped).getTable(tableIdentifier, secondContext);
+        assertThat(catalog.estimatedCacheSizes().tableCacheSize()).isEqualTo(1L);
     }
 
     @Test
@@ -366,6 +411,56 @@ class CachingCatalogTest extends CatalogTestBase {
         catalog.createPartitions(identifier, singletonList(spec), false);
 
         assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testReadContextPartitionsAreNotCached() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        Options options = new Options();
+        options.set(CACHE_PARTITION_MAX_NUM, 10L);
+        CachingCatalog catalog = new CachingCatalog(wrapped, options);
+        Identifier tableIdentifier = Identifier.create("db", "tbl");
+        ReadAuthorizationContext readContext =
+                ReadAuthorizationContext.granted(
+                        ReadAuthorizationRootType.VIEW,
+                        Identifier.create("db", "view"),
+                        Collections.singletonList(resource(tableIdentifier)),
+                        "grant",
+                        Long.MAX_VALUE);
+        Partition directPartition = Mockito.mock(Partition.class);
+        Partition firstContextPartition = Mockito.mock(Partition.class);
+        Partition secondContextPartition = Mockito.mock(Partition.class);
+        List<Map<String, String>> partitionSpecs =
+                singletonList(Collections.singletonMap("f0", "value"));
+        PagedList<Partition> paged = new PagedList<>(singletonList(firstContextPartition), null);
+
+        when(wrapped.listPartitions(tableIdentifier)).thenReturn(singletonList(directPartition));
+        when(wrapped.listPartitions(tableIdentifier, readContext))
+                .thenReturn(
+                        singletonList(firstContextPartition),
+                        singletonList(secondContextPartition));
+        when(wrapped.listPartitionsPaged(tableIdentifier, 10, null, null, readContext))
+                .thenReturn(paged);
+        when(wrapped.listPartitionsByNames(tableIdentifier, partitionSpecs, readContext))
+                .thenReturn(singletonList(firstContextPartition));
+
+        assertThat(catalog.listPartitions(tableIdentifier)).containsExactly(directPartition);
+        assertThat(catalog.listPartitions(tableIdentifier)).containsExactly(directPartition);
+        assertThat(catalog.listPartitions(tableIdentifier, readContext))
+                .containsExactly(firstContextPartition);
+        assertThat(catalog.listPartitions(tableIdentifier, readContext))
+                .containsExactly(secondContextPartition);
+        assertThat(catalog.listPartitionsPaged(tableIdentifier, 10, null, null, readContext))
+                .isSameAs(paged);
+        assertThat(catalog.listPartitionsByNames(tableIdentifier, partitionSpecs, readContext))
+                .containsExactly(firstContextPartition);
+
+        Mockito.verify(wrapped).listPartitions(tableIdentifier);
+        Mockito.verify(wrapped, Mockito.times(2)).listPartitions(tableIdentifier, readContext);
+        Mockito.verify(wrapped).listPartitionsPaged(tableIdentifier, 10, null, null, readContext);
+        Mockito.verify(wrapped).listPartitionsByNames(tableIdentifier, partitionSpecs, readContext);
+        assertThat(catalog.partitionCache.asMap())
+                .containsEntry(tableIdentifier, singletonList(directPartition));
     }
 
     @Test

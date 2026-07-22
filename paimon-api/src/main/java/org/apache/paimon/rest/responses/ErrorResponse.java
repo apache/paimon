@@ -47,6 +47,8 @@ public class ErrorResponse implements RESTResponse {
 
     public static final String RESOURCE_TYPE_VIEW = "VIEW";
 
+    public static final String RESOURCE_TYPE_READ_GRANT = "READ_GRANT";
+
     public static final String RESOURCE_TYPE_DIALECT = "DIALECT";
 
     public static final String RESOURCE_TYPE_FUNCTION = "FUNCTION";

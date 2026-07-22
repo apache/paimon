@@ -159,6 +159,23 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} with an authorization context which is preserved for all subsequent
+     * read operations.
+     *
+     * <p>The context only authorizes reads. Implementations must not use it for writes or metadata
+     * mutations.
+     *
+     * @param identifier Path of the target table
+     * @param readContext authorization context for this read
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    default Table getTable(Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return getTable(identifier);
+    }
+
+    /**
      * Return a {@link Table} identified by the given tableId.
      *
      * @param tableId Id of the table
@@ -399,6 +416,13 @@ public interface Catalog extends AutoCloseable {
      */
     List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
 
+    /** List partitions with the authorization context of the originating read. */
+    default List<Partition> listPartitions(
+            Identifier identifier, ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return listPartitions(identifier);
+    }
+
     /**
      * Get paged partition list of the table, the partition list will be returned in descending
      * order.
@@ -423,6 +447,17 @@ public interface Catalog extends AutoCloseable {
             @Nullable String pageToken,
             @Nullable String partitionNamePattern)
             throws TableNotExistException;
+
+    /** List paged partitions with the authorization context of the originating read. */
+    default PagedList<Partition> listPartitionsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
 
     /**
      * Get a page of partitions using {@code predicate} as a best-effort filter.
@@ -463,6 +498,15 @@ public interface Catalog extends AutoCloseable {
             Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException;
 
+    /** List named partitions with the authorization context of the originating read. */
+    default List<Partition> listPartitionsByNames(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return listPartitionsByNames(identifier, partitions);
+    }
+
     // ======================= view methods ===============================
 
     /**
@@ -474,6 +518,18 @@ public interface Catalog extends AutoCloseable {
      */
     default View getView(Identifier identifier) throws ViewNotExistException {
         throw new ViewNotExistException(identifier);
+    }
+
+    /**
+     * Return a dependency view with the authorization context of the originating read.
+     *
+     * <p>After this succeeds, callers resolving dependencies inside the returned view must pass a
+     * context derived with {@link ReadAuthorizationContext#forDependenciesOf} so each traversal
+     * branch keeps an independent grant snapshot while the outermost root remains unchanged.
+     */
+    default View getView(Identifier identifier, ReadAuthorizationContext readContext)
+            throws ViewNotExistException {
+        return getView(identifier);
     }
 
     /**
@@ -750,6 +806,13 @@ public interface Catalog extends AutoCloseable {
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
 
+    /** Return the latest snapshot with the authorization context of the originating read. */
+    default Optional<TableSnapshot> loadSnapshot(
+            Identifier identifier, ReadAuthorizationContext readContext)
+            throws Catalog.TableNotExistException {
+        return loadSnapshot(identifier);
+    }
+
     /**
      * Return the snapshot of table for given version. Version parsing order is:
      *
@@ -769,6 +832,13 @@ public interface Catalog extends AutoCloseable {
      */
     Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
             throws Catalog.TableNotExistException;
+
+    /** Return a versioned snapshot with the authorization context of the originating read. */
+    default Optional<Snapshot> loadSnapshot(
+            Identifier identifier, String version, ReadAuthorizationContext readContext)
+            throws Catalog.TableNotExistException {
+        return loadSnapshot(identifier, version);
+    }
 
     /**
      * Get paged snapshot list of the table, the snapshot list will be returned in descending order.
@@ -1261,6 +1331,23 @@ public interface Catalog extends AutoCloseable {
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
+
+    /**
+     * Authorize a table query with the authorization context of the originating read.
+     *
+     * @param identifier path of the target table
+     * @param select selected fields, null if select all
+     * @param readContext authorization context for this read
+     * @return additional filter for row level access control and column masking rules
+     * @throws TableNotExistException if the table does not exist
+     */
+    default TableQueryAuthResult authTableQuery(
+            Identifier identifier,
+            @Nullable List<String> select,
+            ReadAuthorizationContext readContext)
+            throws TableNotExistException {
+        return authTableQuery(identifier, select);
+    }
 
     // ==================== Catalog Information ==========================
 

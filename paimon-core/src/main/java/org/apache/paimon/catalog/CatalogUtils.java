@@ -329,15 +329,47 @@ public class CatalogUtils {
             @Nullable CatalogContext catalogContext,
             boolean isRestCatalog)
             throws Catalog.TableNotExistException {
-        if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
-            return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
-        }
+        return loadTable(
+                catalog,
+                identifier,
+                internalFileIO,
+                externalFileIO,
+                metadataLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                ReadAuthorizationContext.direct(),
+                isRestCatalog);
+    }
 
+    public static Table loadTable(
+            Catalog catalog,
+            Identifier identifier,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
+            TableMetadata.Loader metadataLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            ReadAuthorizationContext readContext,
+            boolean isRestCatalog)
+            throws Catalog.TableNotExistException {
+        Objects.requireNonNull(readContext, "readContext");
+        if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
+            if (readContext.isDirect()) {
+                return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
+            }
+            // System tables are constructed locally and may expose metadata beyond one exact data
+            // table, so there is no safe target REST request on which a server can validate the
+            // grant. A grant for one dependency must never authorize these broader local reads.
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
         TableMetadata metadata = metadataLoader.load(identifier);
         TableSchema schema = metadata.schema();
         CoreOptions options = CoreOptions.fromMap(schema.options());
 
-        Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
+        Function<Path, FileIO> dataFileIO =
+                readContext.isDirect() && metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
             FormatTablePartitionManager partitionManager = null;
@@ -378,6 +410,12 @@ public class CatalogUtils {
                             identifier.getBranchName());
         }
 
+        ReadAuthorizationContext resourceReadContext =
+                readContext.isDirect()
+                        ? readContext
+                        : readContext.forDependenciesOf(
+                                ReadAuthorizationRootType.TABLE, tableIdentifier);
+
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
                         tableIdentifier,
@@ -387,7 +425,8 @@ public class CatalogUtils {
                         isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement(),
-                        catalog.supportsPartitionModification());
+                        catalog.supportsPartitionModification(),
+                        resourceReadContext);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

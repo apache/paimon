@@ -104,6 +104,7 @@ paths:
           schema:
             type: string
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -438,6 +439,8 @@ paths:
                 $ref: '#/components/schemas/GetTableResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -464,6 +467,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       responses:
         "200":
           description: OK
@@ -473,6 +477,8 @@ paths:
                 $ref: '#/components/schemas/GetTableResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -574,6 +580,48 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "409":
           $ref: '#/components/responses/TableAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/read-grant:
+    post:
+      tags:
+        - read-grant
+      summary: Authorize candidate dependencies of a table or view read
+      operationId: getReadGrant
+      description: >
+        Authorizes typed TABLE/VIEW dependency targets discovered while reading a TABLE or VIEW
+        root, including dependencies discovered dynamically from blob view data. Loading the root
+        itself does not require a grant. The root identity and requested targets are untrusted;
+        the server must independently authenticate the caller, recheck permission on the root,
+        and decide whether every requested target belongs to the root's dependency closure. A
+        successful grant is bound to the authenticated principal, outermost root type and
+        identifier, server-approved typed targets, and expiry. Local system-table projections are
+        constructed from their origin table and use the origin TABLE as the authorized target.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReadGrantRequest'
+      responses:
+        "200":
+          description: Read grant bound to the exact dependencies approved by the server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetReadGrantResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          description: The requested TABLE or VIEW authorization root does not exist
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/commit:
@@ -711,6 +759,11 @@ paths:
         - table
       summary: Get table token
       operationId: getTableToken
+      description: >
+        When REST data tokens are enabled and X-Paimon-Read-Grant is present, the storage
+        backend must enforce the returned credential as read-only and scoped to the requested
+        table. Its lifetime must not exceed the read grant and should be substantially shorter
+        so revocation is bounded by a small storage-credential window.
       parameters:
         - name: prefix
           in: path
@@ -727,6 +780,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       responses:
         "200":
           description: DataToken for visit data.
@@ -736,6 +790,8 @@ paths:
                 $ref: '#/components/schemas/GetTableDataTokenResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -762,6 +818,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       requestBody:
         content:
           application/json:
@@ -777,7 +834,7 @@ paths:
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "403":
-          $ref: '#/components/responses/ForbiddenErrorResponse'
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         404:
           description:
             Not Found
@@ -813,6 +870,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       responses:
         "200":
           description: OK
@@ -822,6 +880,8 @@ paths:
                 $ref: '#/components/schemas/GetTableSnapshotResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         404:
           description:
             Not Found
@@ -865,6 +925,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       responses:
         "200":
           description: OK
@@ -874,6 +935,8 @@ paths:
                 $ref: '#/components/schemas/GetVersionSnapshotResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         404:
           description:
             Not Found
@@ -956,6 +1019,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
         - name: maxResults
           in: query
           schema:
@@ -979,6 +1043,8 @@ paths:
                 $ref: '#/components/schemas/ListPartitionsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -1125,6 +1191,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       requestBody:
         content:
           application/json:
@@ -1141,6 +1208,8 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/GrantAwareForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -1838,6 +1907,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/ReadGrantHeader'
       responses:
         "200":
           description: OK
@@ -1847,6 +1917,8 @@ paths:
                 $ref: '#/components/schemas/GetViewResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/ViewNotExistErrorResponse'
         "500":
@@ -2218,6 +2290,28 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
 
 components:
+  ##############################
+  # Reusable Request Parameters #
+  ##############################
+  parameters:
+    ReadGrantHeader:
+      name: X-Paimon-Read-Grant
+      in: header
+      required: false
+      description: >
+        Opaque short-lived grant issued by the generic read-grant endpoint. The server must
+        verify its integrity, audience, authenticated principal, expiry, outermost root type and
+        identifier, requested typed target, server-approved dependency relation, and graph limits
+        before honoring it. Authentication identity must come from the server authentication layer
+        rather than this or another client-controlled header. This header is read-only and must
+        never authorize mutations. Local system-table projections use the grant for their origin
+        table. When REST data tokens are used for a grant-backed read, returned storage credentials
+        must be read-only, target-scoped, and must not outlive the grant. An expired grant must
+        return 403 with resourceType READ_GRANT; clients retry only that error once through the
+        read-grant endpoint.
+      schema:
+        type: string
+
   #############################
   # Reusable Response Objects #
   #############################
@@ -2255,6 +2349,26 @@ components:
             "message": "Table has no permission",
             "code": 403
           }
+    GrantAwareForbiddenErrorResponse:
+      description: >
+        Used for 403 errors on a grant-aware endpoint. Only resourceType READ_GRANT
+        means that a correctly signed grant expired and may be renewed once. Every
+        other 403 is terminal for the current read.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            Forbidden:
+              value:
+                message: Table has no permission
+                resourceType: TABLE
+                code: 403
+            ReadGrantExpired:
+              value:
+                message: Read grant has expired
+                resourceType: READ_GRANT
+                code: 403
     ResourceNotExistErrorResponse:
       description:
         Used for 404 errors, which means the resource does not exist.
@@ -2601,7 +2715,7 @@ components:
         resourceType:
           type: string
           nullable: true
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "READ_GRANT", "DIALECT", "UNKNOWN" ]
         resourceName:
           type: string
           nullable: true
@@ -2629,6 +2743,37 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/ViewSchema'
+    CreateReadGrantRequest:
+      type: object
+      description: Request to issue, extend, or renew a grant for candidate dependency targets.
+      required:
+        - rootType
+        - rootIdentifier
+        - targets
+      properties:
+        rootType:
+          type: string
+          enum:
+            - TABLE
+            - VIEW
+          description: Untrusted type of the outermost resource which caused dependency reads.
+        rootIdentifier:
+          $ref: '#/components/schemas/Identifier'
+        targets:
+          type: array
+          description: >
+            Untrusted dependency targets requested by the engine. The server must recover the
+            previously approved graph from previousReadGrant, search the root and its authorized
+            nodes for a valid source-to-target relationship, and either approve every target or
+            reject the request. This array may be empty only when renewing a previous grant.
+          items:
+            $ref: '#/components/schemas/ReadAuthorizationResource'
+        previousReadGrant:
+          type: string
+          description: >
+            An opaque active or expired grant to renew or extend. The server recovers the
+            previously approved dependency state from this value or from server-side state.
+            Omit when requesting the first dependency grant for this root read.
     AlterViewRequest:
       type: object
       properties:
@@ -2822,6 +2967,7 @@ components:
         - $ref: '#/components/schemas/AddDialect'
         - $ref: '#/components/schemas/UpdateDialect'
         - $ref: '#/components/schemas/DropDialect'
+        - $ref: '#/components/schemas/UpdateDependencies'
     BaseViewChange:
       discriminator:
         propertyName: action
@@ -2832,6 +2978,7 @@ components:
           addDialect: '#/components/schemas/AddDialect'
           updateDialect: '#/components/schemas/UpdateDialect'
           dropDialect: '#/components/schemas/DropDialect'
+          updateDependencies: '#/components/schemas/UpdateDependencies'
       type: object
       required:
         - action
@@ -2898,6 +3045,17 @@ components:
           const: "dropDialect"
         dialect:
           type: string
+    UpdateDependencies:
+      allOf:
+        - $ref: '#/components/schemas/BaseViewChange'
+      properties:
+        action:
+          type: string
+          const: "updateDependencies"
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Identifier'
     DataField:
       type: object
       properties:
@@ -2966,6 +3124,19 @@ components:
           type: string
         object:
           type: string
+    ReadAuthorizationResource:
+      type: object
+      required:
+        - type
+        - identifier
+      properties:
+        type:
+          type: string
+          enum:
+            - TABLE
+            - VIEW
+        identifier:
+          $ref: '#/components/schemas/Identifier'
     Schema:
       type: object
       properties:
@@ -3341,7 +3512,7 @@ components:
           type: object
           additionalProperties:
             type: string
-        expiresAt:
+        expiresAtMillis:
           type: integer
           format: int64
     GetTableSnapshotResponse:
@@ -3591,6 +3762,21 @@ components:
           format: int64
         updatedBy:
           type: string
+    GetReadGrantResponse:
+      type: object
+      description: >
+        A successful response approves every dependency target submitted in the corresponding
+        request. The client retains those targets locally; the response does not echo the graph.
+      required:
+        - readGrant
+        - expiresAtMillis
+      properties:
+        readGrant:
+          type: string
+          description: Opaque tamper-resistant bearer credential.
+        expiresAtMillis:
+          type: integer
+          format: int64
     ListViewsResponse:
       type: object
       properties:
@@ -3731,6 +3917,14 @@ components:
           type: object
           additionalProperties:
             type: string
+        dependencies:
+          type: array
+          description: >
+            Direct dependencies associated with the view definition. A REST server must
+            treat values received from clients as untrusted until trusted server-side logic
+            validates them against the query; unverified dependencies cannot issue a read grant.
+          items:
+            $ref: '#/components/schemas/Identifier'
     Partition:
       type: object
       properties:

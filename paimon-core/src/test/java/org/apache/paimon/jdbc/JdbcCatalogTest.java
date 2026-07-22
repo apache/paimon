@@ -800,7 +800,17 @@ public class JdbcCatalogTest extends CatalogTestBase {
     public void testCreateViewStoresViewSchemaWithoutResolvingReferencedTable() throws Exception {
         String databaseName = "view_schema_db";
         Identifier identifier = Identifier.create(databaseName, "view_on_missing_table");
-        View view = createView(identifier);
+        Identifier dependency = Identifier.create(databaseName, "missing_table");
+        View baseView = createView(identifier);
+        View view =
+                new ViewImpl(
+                        identifier,
+                        baseView.rowType().getFields(),
+                        baseView.query(),
+                        baseView.dialects(),
+                        baseView.comment().orElse(null),
+                        baseView.options(),
+                        Collections.singletonList(dependency));
 
         catalog.createDatabase(databaseName, false);
         catalog.createView(identifier, view, false);
@@ -809,6 +819,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
                 fetchViewSchema((JdbcCatalog) catalog, databaseName, "view_on_missing_table");
         assertThat(viewSchemaJson).contains("\"query\"").contains("\"SELECT * FROM OTHER_TABLE\"");
         assertThat(catalog.getView(identifier).query()).isEqualTo("SELECT * FROM OTHER_TABLE");
+        assertThat(catalog.getView(identifier).dependencies()).containsExactly(dependency);
     }
 
     @Test

@@ -18,6 +18,9 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationResource;
+import org.apache.paimon.catalog.ReadAuthorizationRootType;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -25,6 +28,7 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
+import org.apache.paimon.rest.requests.CreateReadGrantRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
@@ -39,6 +43,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetReadGrantResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -336,6 +341,44 @@ public class RESTApiJsonTest {
         assertEquals(response.getId(), parseData.getId());
         assertEquals(response.getName(), parseData.getName());
         assertEquals(response.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void readGrantRequestAndResponseParseTest() throws Exception {
+        Identifier dependency = Identifier.create("db", "table");
+        Identifier root = Identifier.create("db", "root");
+        ReadAuthorizationResource target = ReadAuthorizationResource.table(dependency);
+        CreateReadGrantRequest initialRequest =
+                new CreateReadGrantRequest(
+                        ReadAuthorizationRootType.TABLE,
+                        root,
+                        Collections.singletonList(target),
+                        null);
+        CreateReadGrantRequest renewalRequest =
+                new CreateReadGrantRequest(
+                        ReadAuthorizationRootType.TABLE,
+                        root,
+                        Collections.emptyList(),
+                        "expired-grant");
+        String initialRequestJson = RESTApi.toJson(initialRequest);
+        CreateReadGrantRequest parsedInitialRequest =
+                RESTApi.fromJson(initialRequestJson, CreateReadGrantRequest.class);
+        CreateReadGrantRequest parsedRequest =
+                RESTApi.fromJson(RESTApi.toJson(renewalRequest), CreateReadGrantRequest.class);
+        assertEquals(Collections.singletonList(target), parsedInitialRequest.targets());
+        assertTrue(initialRequestJson.contains("\"targets\""));
+        assertFalse(initialRequestJson.contains("\"source\""));
+        assertFalse(initialRequestJson.contains("\"dependencies\""));
+        assertEquals(ReadAuthorizationRootType.TABLE, parsedRequest.rootType());
+        assertEquals(root, parsedRequest.rootIdentifier());
+        assertEquals(Collections.emptyList(), parsedRequest.targets());
+        assertEquals("expired-grant", parsedRequest.previousReadGrant());
+
+        GetReadGrantResponse response = new GetReadGrantResponse("read-grant", 123L);
+        GetReadGrantResponse parsedResponse =
+                RESTApi.fromJson(RESTApi.toJson(response), GetReadGrantResponse.class);
+        assertEquals("read-grant", parsedResponse.getReadGrant());
+        assertEquals(123L, parsedResponse.getExpiresAtMillis());
     }
 
     @Test

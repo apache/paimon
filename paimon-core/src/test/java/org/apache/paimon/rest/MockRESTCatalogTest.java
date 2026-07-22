@@ -25,6 +25,9 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
+import org.apache.paimon.catalog.ReadAuthorizationResource;
+import org.apache.paimon.catalog.ReadAuthorizationRootType;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -47,6 +50,7 @@ import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
+import org.apache.paimon.rest.requests.CreateReadGrantRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable;
@@ -55,6 +59,9 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -198,6 +205,99 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         RESTCatalog restCatalog2 = restCatalog.catalogLoader().load();
         Map<String, String> headers2 = restCatalog2.api().authFunction().apply(restAuthParameter);
         assertEquals(headers2.get("User-Agent"), "test");
+    }
+
+    @Test
+    void testViewDependenciesRoundTrip() throws Exception {
+        Identifier viewIdentifier = Identifier.create("view_dependencies_db", "my_view");
+        Identifier initialDependency =
+                Identifier.create(viewIdentifier.getDatabaseName(), "initial_table");
+        Identifier updatedDependency =
+                Identifier.create(viewIdentifier.getDatabaseName(), "updated_table");
+        catalog.createDatabase(viewIdentifier.getDatabaseName(), false);
+
+        View baseView = createView(viewIdentifier);
+        View view =
+                new ViewImpl(
+                        viewIdentifier,
+                        baseView.rowType().getFields(),
+                        baseView.query(),
+                        baseView.dialects(),
+                        baseView.comment().orElse(null),
+                        baseView.options(),
+                        Collections.singletonList(initialDependency));
+        catalog.createView(viewIdentifier, view, false);
+
+        assertThat(catalog.getView(viewIdentifier).dependencies())
+                .containsExactly(initialDependency);
+        List<View> listedViews =
+                catalog.listViewDetailsPaged(viewIdentifier.getDatabaseName(), null, null, null)
+                        .getElements();
+        assertThat(listedViews).hasSize(1);
+        assertThat(listedViews.get(0).dependencies()).containsExactly(initialDependency);
+
+        catalog.alterView(
+                viewIdentifier,
+                Collections.singletonList(
+                        ViewChange.updateDependencies(
+                                Collections.singletonList(updatedDependency))),
+                false);
+
+        assertThat(catalog.getView(viewIdentifier).dependencies())
+                .containsExactly(updatedDependency);
+        listedViews =
+                catalog.listViewDetailsPaged(viewIdentifier.getDatabaseName(), null, null, null)
+                        .getElements();
+        assertThat(listedViews).hasSize(1);
+        assertThat(listedViews.get(0).dependencies()).containsExactly(updatedDependency);
+    }
+
+    @Test
+    void testReadGrantEndpointAndGrantBackedTableRead() throws Exception {
+        String database = "read_grant_db";
+        Identifier root = Identifier.create(database, "root_view");
+        Identifier dependency = Identifier.create(database, "dependency_table");
+        catalog.createDatabase(database, false);
+        catalog.createTable(dependency, DEFAULT_TABLE_SCHEMA, false);
+
+        View baseView = createView(root);
+        catalog.createView(
+                root,
+                new ViewImpl(
+                        root,
+                        baseView.rowType().getFields(),
+                        baseView.query(),
+                        baseView.dialects(),
+                        baseView.comment().orElse(null),
+                        baseView.options(),
+                        Collections.singletonList(dependency)),
+                false);
+
+        restCatalogServer.clearReceivedHeaders();
+        restCatalogServer.clearReceivedReadGrantRequests();
+        assertThat(catalog.getView(root).dependencies()).containsExactly(dependency);
+        assertThat(restCatalogServer.getReceivedReadGrantRequests()).isEmpty();
+
+        ReadAuthorizationContext readContext = ReadAuthorizationContext.forView(root);
+        catalog.getTable(dependency, readContext);
+
+        List<CreateReadGrantRequest> requests = restCatalogServer.getReceivedReadGrantRequests();
+        assertThat(requests).hasSize(1);
+        CreateReadGrantRequest request = requests.get(0);
+        assertThat(request.rootType()).isEqualTo(ReadAuthorizationRootType.VIEW);
+        assertThat(request.rootIdentifier()).isEqualTo(root);
+        assertThat(request.targets()).containsExactly(ReadAuthorizationResource.table(dependency));
+        assertThat(request.previousReadGrant()).isNull();
+
+        String readGrant =
+                readContext
+                        .readGrant()
+                        .orElseThrow(() -> new AssertionError("No read grant was installed"));
+        assertThat(readContext.authorizedResources())
+                .containsExactly(ReadAuthorizationResource.table(dependency));
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .extracting(headers -> headers.get(RESTApi.READ_GRANT_HEADER.toLowerCase()))
+                .contains(readGrant);
     }
 
     @Test

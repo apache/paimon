@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,8 +47,19 @@ public class ViewImpl implements View {
             Map<String, String> dialects,
             @Nullable String comment,
             Map<String, String> options) {
+        this(identifier, fields, query, dialects, comment, options, Collections.emptyList());
+    }
+
+    public ViewImpl(
+            Identifier identifier,
+            List<DataField> fields,
+            String query,
+            Map<String, String> dialects,
+            @Nullable String comment,
+            Map<String, String> options,
+            List<Identifier> dependencies) {
         this.identifier = identifier;
-        this.viewSchema = new ViewSchema(fields, query, dialects, comment, options);
+        this.viewSchema = new ViewSchema(fields, query, dialects, comment, options, dependencies);
     }
 
     @Override
@@ -86,6 +98,11 @@ public class ViewImpl implements View {
     }
 
     @Override
+    public List<Identifier> dependencies() {
+        return this.viewSchema.dependencies();
+    }
+
+    @Override
     public View copy(Map<String, String> dynamicOptions) {
         Map<String, String> newOptions = new HashMap<>(options());
         newOptions.putAll(dynamicOptions);
@@ -95,7 +112,8 @@ public class ViewImpl implements View {
                 query(),
                 dialects(),
                 viewSchema.comment(),
-                newOptions);
+                newOptions,
+                dependencies());
     }
 
     @Override

@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.SnapshotLoader;
@@ -32,18 +33,29 @@ import java.util.Optional;
 /** Implementation of {@link SnapshotLoader}. */
 public class SnapshotLoaderImpl implements SnapshotLoader {
 
+    private static final long serialVersionUID = 3096335741107585269L;
+
     private final CatalogLoader catalogLoader;
     private final Identifier identifier;
+    private final ReadAuthorizationContext readContext;
 
     public SnapshotLoaderImpl(CatalogLoader catalogLoader, Identifier identifier) {
+        this(catalogLoader, identifier, ReadAuthorizationContext.direct());
+    }
+
+    public SnapshotLoaderImpl(
+            CatalogLoader catalogLoader,
+            Identifier identifier,
+            ReadAuthorizationContext readContext) {
         this.catalogLoader = catalogLoader;
         this.identifier = identifier;
+        this.readContext = readContext;
     }
 
     @Override
     public Optional<Snapshot> load() throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            return catalog.loadSnapshot(identifier).map(TableSnapshot::snapshot);
+            return catalog.loadSnapshot(identifier, readContext()).map(TableSnapshot::snapshot);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -66,6 +78,12 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     public SnapshotLoader copyWithBranch(String branch) {
         return new SnapshotLoaderImpl(
                 catalogLoader,
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch));
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch),
+                readContext());
+    }
+
+    private ReadAuthorizationContext readContext() {
+        // The field is null when deserializing instances written before read contexts existed.
+        return readContext == null ? ReadAuthorizationContext.direct() : readContext;
     }
 }

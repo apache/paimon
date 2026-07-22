@@ -38,6 +38,7 @@ public class ResourcePaths {
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
+    protected static final String READ_GRANT = "read-grant";
     protected static final String ROLLBACK = "rollback";
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
@@ -358,6 +359,10 @@ public class ResourcePaths {
     public String view(String databaseName, String viewName) {
         return SLASH.join(
                 V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
+    }
+
+    public String readGrant() {
+        return SLASH.join(V1, prefix, READ_GRANT);
     }
 
     public String renameView() {

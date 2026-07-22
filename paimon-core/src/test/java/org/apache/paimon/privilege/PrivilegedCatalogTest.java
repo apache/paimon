@@ -21,12 +21,16 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalogTest;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
+import org.apache.paimon.catalog.ReadAuthorizationResource;
+import org.apache.paimon.catalog.ReadAuthorizationRootType;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.util.Collections;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,12 +63,22 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         PrivilegedCatalog rootCatalog = ((PrivilegedCatalog) catalog);
         rootCatalog.createPrivilegedUser(USERNAME_TEST_USER, PASSWORD_TEST_USER);
         Catalog userCatalog = create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);
+        ReadAuthorizationContext readContext =
+                ReadAuthorizationContext.granted(
+                        ReadAuthorizationRootType.VIEW,
+                        Identifier.create("test_db", "authorized_view"),
+                        Collections.singletonList(ReadAuthorizationResource.table(identifier)),
+                        "signed-read-grant",
+                        System.currentTimeMillis() + 60_000L);
 
         FileStoreTable dataTable = (FileStoreTable) userCatalog.getTable(identifier);
 
         assertNoPrivilege(dataTable::snapshotManager);
         assertNoPrivilege(dataTable::latestSnapshot);
         assertNoPrivilege(() -> dataTable.snapshot(0));
+        FileStoreTable unverifiedContextTable =
+                (FileStoreTable) userCatalog.getTable(identifier, readContext);
+        assertNoPrivilege(unverifiedContextTable::newScan);
 
         rootCatalog.grantPrivilegeOnTable(USERNAME_TEST_USER, identifier, PrivilegeType.SELECT);
         userCatalog = create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);

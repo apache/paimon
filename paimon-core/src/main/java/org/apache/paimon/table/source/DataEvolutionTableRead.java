@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobView;
@@ -42,6 +43,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -51,15 +53,18 @@ public class DataEvolutionTableRead extends AppendTableRead {
 
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
+    private final ReadAuthorizationContext readContext;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
             @Nullable CatalogContext catalogContext,
-            @Nullable Supplier<InnerTableRead> readFactory) {
+            @Nullable Supplier<InnerTableRead> readFactory,
+            ReadAuthorizationContext readContext) {
         super(providerFactories, schema);
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
+        this.readContext = Objects.requireNonNull(readContext, "readContext");
     }
 
     @Override
@@ -134,7 +139,8 @@ public class DataEvolutionTableRead extends AppendTableRead {
         }
 
         BlobViewResolver resolver =
-                BlobViewLookup.createResolver(catalogContext, new ArrayList<>(viewStructs));
+                BlobViewLookup.createResolver(
+                        catalogContext, new ArrayList<>(viewStructs), readContext);
 
         RecordReader<InternalRow> reader = createDataReader(split, authResult);
         Set<Integer> blobViewFieldSet = new HashSet<>();

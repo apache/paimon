@@ -1044,7 +1044,8 @@ public class JdbcCatalog extends AbstractCatalog {
                     viewSchema.query(),
                     viewSchema.dialects(),
                     viewSchema.comment(),
-                    viewSchema.options());
+                    viewSchema.options(),
+                    viewSchema.dependencies());
         } catch (SQLException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -1066,7 +1067,8 @@ public class JdbcCatalog extends AbstractCatalog {
                         view.query(),
                         view.dialects(),
                         view.comment().orElse(null),
-                        view.options());
+                        view.options(),
+                        view.dependencies());
         String viewSchemaJson = JsonSerdeUtil.toJson(viewSchema);
 
         // Insert view
@@ -1295,6 +1297,9 @@ public class JdbcCatalog extends AbstractCatalog {
                         Map<String, String> newOptions = new HashMap<>(existingView.options());
                         String newComment = existingView.comment().orElse(null);
                         Map<String, String> newDialects = new HashMap<>(existingView.dialects());
+                        List<Identifier> newDependencies = existingView.dependencies();
+                        boolean queryChanged = false;
+                        boolean dependenciesUpdated = false;
                         for (ViewChange change : changes) {
                             if (change instanceof ViewChange.SetViewOption) {
                                 ViewChange.SetViewOption setOption =
@@ -1315,6 +1320,7 @@ public class JdbcCatalog extends AbstractCatalog {
                                             identifier, addDialect.dialect());
                                 }
                                 newDialects.put(addDialect.dialect(), addDialect.query());
+                                queryChanged = true;
                             } else if (change instanceof ViewChange.UpdateDialect) {
                                 ViewChange.UpdateDialect updateDialect =
                                         (ViewChange.UpdateDialect) change;
@@ -1323,6 +1329,7 @@ public class JdbcCatalog extends AbstractCatalog {
                                             identifier, updateDialect.dialect());
                                 }
                                 newDialects.put(updateDialect.dialect(), updateDialect.query());
+                                queryChanged = true;
                             } else if (change instanceof ViewChange.DropDialect) {
                                 ViewChange.DropDialect dropDialect =
                                         (ViewChange.DropDialect) change;
@@ -1331,7 +1338,15 @@ public class JdbcCatalog extends AbstractCatalog {
                                             identifier, dropDialect.dialect());
                                 }
                                 newDialects.remove(dropDialect.dialect());
+                                queryChanged = true;
+                            } else if (change instanceof ViewChange.UpdateDependencies) {
+                                newDependencies =
+                                        ((ViewChange.UpdateDependencies) change).dependencies();
+                                dependenciesUpdated = true;
                             }
+                        }
+                        if (queryChanged && !dependenciesUpdated) {
+                            newDependencies = Collections.emptyList();
                         }
 
                         ViewSchema updatedSchema =
@@ -1340,7 +1355,8 @@ public class JdbcCatalog extends AbstractCatalog {
                                         existingView.query(),
                                         newDialects,
                                         newComment,
-                                        newOptions);
+                                        newOptions,
+                                        newDependencies);
                         String viewSchemaJson = JsonSerdeUtil.toJson(updatedSchema);
                         JdbcUtils.updateView(
                                 connections,

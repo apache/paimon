@@ -18,6 +18,7 @@
 
 package org.apache.paimon.view;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -28,6 +29,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +44,7 @@ public class ViewSchema {
     private static final String FIELD_DIALECTS = "dialects";
     private static final String FIELD_COMMENT = "comment";
     private static final String FIELD_OPTIONS = "options";
+    private static final String FIELD_DEPENDENCIES = "dependencies";
 
     @JsonProperty(FIELD_FIELDS)
     private final List<DataField> fields;
@@ -59,18 +63,36 @@ public class ViewSchema {
     @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
+    @JsonProperty(FIELD_DEPENDENCIES)
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private final List<Identifier> dependencies;
+
+    public ViewSchema(
+            List<DataField> fields,
+            String query,
+            Map<String, String> dialects,
+            @Nullable String comment,
+            Map<String, String> options) {
+        this(fields, query, dialects, comment, options, Collections.emptyList());
+    }
+
     @JsonCreator
     public ViewSchema(
             @JsonProperty(FIELD_FIELDS) List<DataField> fields,
             @JsonProperty(FIELD_QUERY) String query,
             @JsonProperty(FIELD_DIALECTS) Map<String, String> dialects,
             @Nullable @JsonProperty(FIELD_COMMENT) String comment,
-            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
+            @Nullable @JsonProperty(FIELD_DEPENDENCIES) List<Identifier> dependencies) {
         this.fields = fields;
         this.query = query;
         this.dialects = dialects;
         this.options = options;
         this.comment = comment;
+        this.dependencies =
+                dependencies == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(dependencies));
     }
 
     @JsonGetter(FIELD_FIELDS)
@@ -99,6 +121,11 @@ public class ViewSchema {
         return options;
     }
 
+    @JsonGetter(FIELD_DEPENDENCIES)
+    public List<Identifier> dependencies() {
+        return dependencies;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) {
@@ -109,11 +136,12 @@ public class ViewSchema {
                 && Objects.equals(query, that.query)
                 && Objects.equals(dialects, that.dialects)
                 && Objects.equals(comment, that.comment)
-                && Objects.equals(options, that.options);
+                && Objects.equals(options, that.options)
+                && Objects.equals(dependencies, that.dependencies);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fields, query, dialects, comment, options);
+        return Objects.hash(fields, query, dialects, comment, options, dependencies);
     }
 }

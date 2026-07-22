@@ -23,6 +23,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ReadAuthorizationContext;
+import org.apache.paimon.catalog.ReadAuthorizationResource;
+import org.apache.paimon.catalog.ReadAuthorizationRootType;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -33,6 +36,7 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.ReadGrantExpiredException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -43,6 +47,7 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
+import org.apache.paimon.rest.requests.CreateReadGrantRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -66,6 +71,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetReadGrantResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -106,6 +112,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -150,6 +157,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    public static final String READ_GRANT_HEADER = "X-Paimon-Read-Grant";
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
 
@@ -511,6 +519,23 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** Get table metadata with the authorization context of the originating read. */
+    public GetTableResponse getTable(Identifier identifier, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return getTable(identifier);
+        }
+        return executeRead(
+                identifier,
+                readContext,
+                auth ->
+                        client.get(
+                                resourcePaths.table(
+                                        identifier.getDatabaseName(), identifier.getObjectName()),
+                                GetTableResponse.class,
+                                auth));
+    }
+
     /**
      * Get table by tableId.
      *
@@ -544,6 +569,26 @@ public class RESTApi {
         return response.getSnapshot();
     }
 
+    /** Load the latest snapshot with the authorization context of the originating read. */
+    public TableSnapshot loadSnapshot(Identifier identifier, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return loadSnapshot(identifier);
+        }
+        GetTableSnapshotResponse response =
+                executeRead(
+                        identifier,
+                        readContext,
+                        auth ->
+                                client.get(
+                                        resourcePaths.tableSnapshot(
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName()),
+                                        GetTableSnapshotResponse.class,
+                                        auth));
+        return response.getSnapshot();
+    }
+
     /**
      * Return the snapshot of table for given version. Version parsing order is:
      *
@@ -569,6 +614,28 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName(), version),
                         GetVersionSnapshotResponse.class,
                         restAuthFunction);
+        return response.getSnapshot();
+    }
+
+    /** Load a versioned snapshot with the authorization context of the originating read. */
+    public Snapshot loadSnapshot(
+            Identifier identifier, String version, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return loadSnapshot(identifier, version);
+        }
+        GetVersionSnapshotResponse response =
+                executeRead(
+                        identifier,
+                        readContext,
+                        auth ->
+                                client.get(
+                                        resourcePaths.tableSnapshot(
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName(),
+                                                version),
+                                        GetVersionSnapshotResponse.class,
+                                        auth));
         return response.getSnapshot();
     }
 
@@ -821,6 +888,28 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** Authorize a table query with the authorization context of the originating read. */
+    public AuthTableQueryResponse authTableQuery(
+            Identifier identifier,
+            @Nullable List<String> select,
+            ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return authTableQuery(identifier, select);
+        }
+        AuthTableQueryRequest request = new AuthTableQueryRequest(select);
+        return executeRead(
+                identifier,
+                readContext,
+                auth ->
+                        client.post(
+                                resourcePaths.authTable(
+                                        identifier.getDatabaseName(), identifier.getObjectName()),
+                                request,
+                                AuthTableQueryResponse.class,
+                                auth));
+    }
+
     /**
      * Drop table.
      *
@@ -911,6 +1000,28 @@ public class RESTApi {
                                 restAuthFunction));
     }
 
+    /** List partitions with the authorization context of the originating read. */
+    public List<Partition> listPartitions(
+            Identifier identifier, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return listPartitions(identifier);
+        }
+        return listDataFromPageApi(
+                queryParams ->
+                        executeRead(
+                                identifier,
+                                readContext,
+                                auth ->
+                                        client.get(
+                                                resourcePaths.partitions(
+                                                        identifier.getDatabaseName(),
+                                                        identifier.getObjectName()),
+                                                queryParams,
+                                                ListPartitionsResponse.class,
+                                                auth)));
+    }
+
     /**
      * List partitions for a table.
      *
@@ -952,6 +1063,41 @@ public class RESTApi {
         return new PagedList<>(partitions, response.getNextPageToken());
     }
 
+    /** List paged partitions with the authorization context of the originating read. */
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern,
+            ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+        }
+        ListPartitionsResponse response =
+                executeRead(
+                        identifier,
+                        readContext,
+                        auth ->
+                                client.get(
+                                        resourcePaths.partitions(
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName()),
+                                        buildPagedQueryParams(
+                                                maxResults,
+                                                pageToken,
+                                                Pair.of(
+                                                        PARTITION_NAME_PATTERN,
+                                                        partitionNamePattern)),
+                                        ListPartitionsResponse.class,
+                                        auth));
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(partitions, response.getNextPageToken());
+    }
+
     /**
      * List partitions by partition names for table.
      *
@@ -977,6 +1123,39 @@ public class RESTApi {
                         request,
                         ListPartitionsResponse.class,
                         restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return emptyList();
+        }
+        return partitions;
+    }
+
+    /** List named partitions with the authorization context of the originating read. */
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier,
+            List<Map<String, String>> partitionSpecs,
+            ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return listPartitionsByNames(identifier, partitionSpecs);
+        }
+        checkArgument(
+                partitionSpecs.size() <= 1000,
+                "The number of partition specs must not exceed 1000, but got %s",
+                partitionSpecs.size());
+        ListPartitionsByNamesRequest request = new ListPartitionsByNamesRequest(partitionSpecs);
+        ListPartitionsResponse response =
+                executeRead(
+                        identifier,
+                        readContext,
+                        auth ->
+                                client.post(
+                                        resourcePaths.listPartitionsByNames(
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName()),
+                                        request,
+                                        ListPartitionsResponse.class,
+                                        auth));
         List<Partition> partitions = response.getPartitions();
         if (partitions == null) {
             return emptyList();
@@ -1420,6 +1599,30 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** Get a dependency view with the authorization context of the originating read. */
+    public GetViewResponse getView(Identifier identifier, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return getView(identifier);
+        }
+        return executeRead(
+                ReadAuthorizationResource.view(identifier),
+                readContext,
+                auth ->
+                        client.get(
+                                resourcePaths.view(
+                                        identifier.getDatabaseName(), identifier.getObjectName()),
+                                GetViewResponse.class,
+                                auth));
+    }
+
+    /** Ask the server to authorize candidate dependencies for a table or view read. */
+    public GetReadGrantResponse getReadGrant(CreateReadGrantRequest request) {
+        Objects.requireNonNull(request, "request");
+        return client.post(
+                resourcePaths.readGrant(), request, GetReadGrantResponse.class, restAuthFunction);
+    }
+
     /**
      * Drop view.
      *
@@ -1630,6 +1833,124 @@ public class RESTApi {
                 resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableTokenResponse.class,
                 restAuthFunction);
+    }
+
+    /** Load a data token with the authorization context of the originating read. */
+    public GetTableTokenResponse loadTableToken(
+            Identifier identifier, ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return loadTableToken(identifier);
+        }
+        return executeRead(
+                identifier,
+                readContext,
+                auth ->
+                        client.get(
+                                resourcePaths.tableToken(
+                                        identifier.getDatabaseName(), identifier.getObjectName()),
+                                GetTableTokenResponse.class,
+                                auth));
+    }
+
+    private RESTAuthFunction authFunction(ReadAuthorizationContext readContext) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return restAuthFunction;
+        }
+        return restAuthFunction.withHeaders(
+                ImmutableMap.of(READ_GRANT_HEADER, readContext.readGrant().get()));
+    }
+
+    private <T> T executeRead(
+            Identifier target,
+            ReadAuthorizationContext readContext,
+            Function<RESTAuthFunction, T> request) {
+        return executeRead(ReadAuthorizationResource.table(target), readContext, request);
+    }
+
+    private <T> T executeRead(
+            ReadAuthorizationResource target,
+            ReadAuthorizationContext readContext,
+            Function<RESTAuthFunction, T> request) {
+        Objects.requireNonNull(readContext, "readContext");
+        if (readContext.isDirect()) {
+            return request.apply(restAuthFunction);
+        }
+
+        ensureReadGrant(target, readContext);
+        String failedGrant = readContext.readGrant().get();
+        try {
+            return request.apply(authFunction(readContext));
+        } catch (ReadGrantExpiredException firstFailure) {
+            renewReadGrant(readContext, failedGrant);
+            return request.apply(authFunction(readContext));
+        }
+    }
+
+    private void ensureReadGrant(
+            ReadAuthorizationResource target, ReadAuthorizationContext readContext) {
+        if (readContext.authorizes(target) && readContext.readGrant().isPresent()) {
+            return;
+        }
+        synchronized (readContext) {
+            if (readContext.authorizes(target) && readContext.readGrant().isPresent()) {
+                return;
+            }
+            Identifier root = authorizationRoot(readContext);
+            CreateReadGrantRequest request =
+                    new CreateReadGrantRequest(
+                            authorizationRootType(readContext),
+                            root,
+                            Collections.singletonList(target),
+                            readContext.readGrant().orElse(null));
+            installReadGrant(readContext, request, requestReadGrant(request));
+        }
+    }
+
+    private void renewReadGrant(ReadAuthorizationContext readContext, String failedGrant) {
+        synchronized (readContext) {
+            if (!readContext.readGrant().filter(failedGrant::equals).isPresent()) {
+                return;
+            }
+            Identifier root = authorizationRoot(readContext);
+            CreateReadGrantRequest request =
+                    new CreateReadGrantRequest(
+                            authorizationRootType(readContext),
+                            root,
+                            Collections.emptyList(),
+                            failedGrant);
+            installReadGrant(readContext, request, requestReadGrant(request));
+        }
+    }
+
+    private GetReadGrantResponse requestReadGrant(CreateReadGrantRequest request) {
+        try {
+            return getReadGrant(request);
+        } catch (NoSuchResourceException e) {
+            throw new ForbiddenException("Unable to authorize dependencies for the root read");
+        }
+    }
+
+    private static ReadAuthorizationRootType authorizationRootType(
+            ReadAuthorizationContext readContext) {
+        return readContext
+                .authorizationRootType()
+                .orElseThrow(() -> new SecurityException("Read authorization has no root type"));
+    }
+
+    private static Identifier authorizationRoot(ReadAuthorizationContext readContext) {
+        return readContext
+                .authorizationRoot()
+                .orElseThrow(() -> new SecurityException("Read authorization has no root"));
+    }
+
+    private static void installReadGrant(
+            ReadAuthorizationContext readContext,
+            CreateReadGrantRequest request,
+            GetReadGrantResponse response) {
+        readContext.updateGrant(
+                request.targets(), response.getReadGrant(), response.getExpiresAtMillis());
     }
 
     /** Util method to deserialize object from json. */

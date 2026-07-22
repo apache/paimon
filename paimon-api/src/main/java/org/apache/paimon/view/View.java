@@ -18,8 +18,11 @@
 
 package org.apache.paimon.view;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.RowType;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -51,6 +54,16 @@ public interface View {
 
     /** Options of this view. */
     Map<String, String> options();
+
+    /**
+     * Direct dependencies resolved when this view was created or updated.
+     *
+     * <p>A REST server must independently validate client-provided values against the view query
+     * before treating them as authoritative for authorization.
+     */
+    default List<Identifier> dependencies() {
+        return Collections.emptyList();
+    }
 
     /** Copy this view with adding dynamic options. */
     View copy(Map<String, String> dynamicOptions);
