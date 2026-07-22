@@ -47,24 +47,27 @@ public class CopyFullHistoryFileOperatorTest {
         byte[] content = "content".getBytes(StandardCharsets.UTF_8);
         Files.write(source, content);
 
+        CountingLocalFileIO sourceFileIO = new CountingLocalFileIO();
         CountingLocalFileIO targetFileIO = new CountingLocalFileIO();
         CopyFullHistoryFileOperator operator =
-                new CopyFullHistoryFileOperator(LocalFileIO.create(), targetFileIO);
+                new CopyFullHistoryFileOperator(sourceFileIO, targetFileIO);
         FullHistoryCopyPlan.FileCopy copy =
                 new FullHistoryCopyPlan.FileCopy(
                         new Path(source.toString()),
                         new Path(target.toString()),
                         FullHistoryCopyPlan.FileKind.DATA,
-                        content.length);
+                        -1L);
 
         try (KeyedOneInputStreamOperatorTestHarness<String, FullHistoryCopyPlan.FileCopy, Boolean>
                 harness = createHarness(operator)) {
             harness.open();
             harness.processElement(new StreamRecord<>(copy));
+            int sizeCallsAfterCopy = sourceFileIO.sizeCalls;
             int existsCallsAfterCopy = targetFileIO.existsCalls;
 
             harness.processElement(new StreamRecord<>(copy));
 
+            assertThat(sourceFileIO.sizeCalls).isEqualTo(sizeCallsAfterCopy);
             assertThat(targetFileIO.existsCalls).isEqualTo(existsCallsAfterCopy);
             assertThat(Files.readAllBytes(target)).isEqualTo(content);
         }
@@ -120,11 +123,18 @@ public class CopyFullHistoryFileOperatorTest {
         private static final long serialVersionUID = 1L;
 
         private int existsCalls;
+        private int sizeCalls;
 
         @Override
         public boolean exists(Path path) throws IOException {
             existsCalls++;
             return super.exists(path);
+        }
+
+        @Override
+        public long getFileSize(Path path) throws IOException {
+            sizeCalls++;
+            return super.getFileSize(path);
         }
     }
 }
