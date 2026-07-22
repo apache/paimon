@@ -134,13 +134,15 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             self._read(self.paths[0], options)
         self.assertEqual(1, dataset.call_count)
 
-    def test_zero_size_disables_cache(self):
-        options = self._options("0 b")
+    def test_zero_size_disables_and_clears_cache(self):
+        enabled = self._options()
+        disabled = self._options("0 b")
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
-            self._read(self.paths[0], options)
-            self._read(self.paths[0], options)
-        self.assertEqual(2, dataset.call_count)
+            self._read(self.paths[0], enabled)
+            self._read(self.paths[0], disabled)
+            self._read(self.paths[0], enabled)
+        self.assertEqual(3, dataset.call_count)
 
     def test_reuses_dataset(self):
         options = self._options()

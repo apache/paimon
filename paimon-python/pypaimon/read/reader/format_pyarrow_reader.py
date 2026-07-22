@@ -143,6 +143,12 @@ def _reset_file_format_dataset_cache():
         _FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
 
 
+def _remove_file_format_dataset_cache(file_io: FileIO):
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        _FILE_FORMAT_DATASET_CACHES.pop(file_io, None)
+
+
 def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[int]:
     try:
         if file_format == 'parquet':
@@ -168,6 +174,7 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
     if cache_max_size <= 0:
+        _remove_file_format_dataset_cache(file_io)
         return load()
 
     key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
