@@ -134,6 +134,12 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return wrapped.visitNotBetween(fieldRef, from, to).thenApply(this::applyOffset);
+    }
+
+    @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
         return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))

@@ -50,6 +50,11 @@ public class ConstantGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
+        return result;
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
             FieldRef fieldRef, Object literal) {
         return result;
@@ -123,6 +128,12 @@ public class ConstantGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return result;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
             FieldRef fieldRef, Object from, Object to) {
         return result;
     }
