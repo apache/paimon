@@ -136,6 +136,9 @@ public class KeyValueFileWriterFactory {
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
+        // Row limit applies to writes only; compaction output stays size-only.
+        long targetFileNumRows =
+                fileSource == FileSource.COMPACT ? Long.MAX_VALUE : options.targetFileNumRows();
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -143,7 +146,7 @@ public class KeyValueFileWriterFactory {
                             pathFactory.newPath(), key, fileSource, pathFactory.isExternalPath());
                 },
                 suggestedFileSize,
-                options.targetFileNumRows());
+                targetFileNumRows);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
@@ -157,8 +160,7 @@ public class KeyValueFileWriterFactory {
                             FileSource.APPEND,
                             pathFactory.isExternalPath());
                 },
-                suggestedFileSize,
-                options.targetFileNumRows());
+                suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingClusteringFileWriter() {

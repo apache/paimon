@@ -49,6 +49,12 @@ class FileStoreWrite:
         self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
+        # pypaimon has no row-count rolling yet; fail fast instead of silently ignoring the option.
+        row_cap = table.table_schema.options.get("target-file-num-rows")
+        if row_cap is not None and str(row_cap).strip() not in ("", str(2 ** 63 - 1)):
+            raise NotImplementedError(
+                "target-file-num-rows is set on this table but pypaimon writers do not support "
+                "row-count based file rolling yet; unset it or write with Java/Flink/Spark.")
         self.changelog_producer = self.options.changelog_producer()
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,

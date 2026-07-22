@@ -178,6 +178,29 @@ public class KeyValueFileReadWriteTest {
         testWriteAndReadDataFileImpl("avro-extract");
     }
 
+    @Test
+    public void testMergeTreeCompactionIgnoresRowLimit() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.TARGET_FILE_NUM_ROWS, 2L);
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(tempDir.toString(), "avro", options);
+        List<KeyValue> content = gen.next().content;
+
+        RollingFileWriter<KeyValue, DataFileMeta> appendWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        appendWriter.write(CloseableIterator.fromList(content, kv -> {}));
+        appendWriter.close();
+
+        RollingFileWriter<KeyValue, DataFileMeta> compactWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.COMPACT);
+        compactWriter.write(CloseableIterator.fromList(content, kv -> {}));
+        compactWriter.close();
+
+        // Writes roll by rows (cap=2); compaction output is size-only, so it is not row-split.
+        assertThat(appendWriter.result().size()).isGreaterThan(1);
+        assertThat(compactWriter.result()).hasSize(1);
+    }
+
     private void testWriteAndReadDataFileImpl(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);

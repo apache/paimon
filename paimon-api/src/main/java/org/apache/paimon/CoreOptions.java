@@ -823,11 +823,14 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .defaultValue(Long.MAX_VALUE)
                     .withDescription(
-                            "Target number of rows per data file; a file rolls when this or "
-                                    + "target-file-size is reached, whichever comes first. Enforced at "
-                                    + "bundle granularity, so a bundled write may exceed it by up to one "
-                                    + "bundle. Bounds per-file rows for wide columns to avoid "
-                                    + "data-evolution OOM. Disabled by default.");
+                            "Target number of rows per newly written data file; a file rolls when "
+                                    + "this or target-file-size is reached, whichever comes first. "
+                                    + "Enforced at bundle granularity, so a bundled write may exceed it "
+                                    + "by up to one bundle. Only constrains files at write time: "
+                                    + "compaction is size-based and may merge into larger files, and "
+                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "per-file rows for wide columns to avoid data-evolution OOM. "
+                                    + "Disabled by default.");
 
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
