@@ -17,10 +17,11 @@
 import gc
 import os
 import tempfile
+import threading
 import time
 import unittest
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -241,6 +242,54 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             "unknown", cache.get_or_load(key, load, lambda _: None))
         self.assertEqual(2, len(loads))
         self.assertEqual(0, len(cache._entries))
+
+    def test_coalesces_load_while_uncached_result_completes(self):
+        cache = reader_module._FileFormatDatasetCache(10)
+        key = (None, "unknown", "data")
+        setting_result = threading.Event()
+        waiter_started = threading.Event()
+        release_result = threading.Event()
+        loads = []
+        future_count = []
+
+        def new_future():
+            future = Future()
+            future_count.append(future)
+            if len(future_count) == 1:
+                original_set_result = future.set_result
+                original_result = future.result
+
+                def delayed_set_result(result):
+                    setting_result.set()
+                    release_result.wait()
+                    original_set_result(result)
+
+                def observed_result(*args, **kwargs):
+                    waiter_started.set()
+                    return original_result(*args, **kwargs)
+
+                future.set_result = delayed_set_result
+                future.result = observed_result
+            return future
+
+        def load():
+            loads.append(True)
+            return "unknown"
+
+        with patch.object(reader_module, "Future", side_effect=new_future):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first = executor.submit(
+                    cache.get_or_load, key, load, lambda _: None)
+                self.assertTrue(setting_result.wait(1))
+                second = executor.submit(
+                    cache.get_or_load, key, load, lambda _: None)
+                waited = waiter_started.wait(1)
+                release_result.set()
+
+                self.assertTrue(waited)
+                self.assertEqual("unknown", first.result())
+                self.assertEqual("unknown", second.result())
+        self.assertEqual(1, len(loads))
 
     def test_estimates_serialized_parquet_footer_size(self):
         dataset = reader_module.ds.dataset(self.paths[0], format="parquet")

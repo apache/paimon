@@ -83,9 +83,9 @@ class _FileFormatDatasetCache:
             dataset = loader()
             estimated_size = size_estimator(dataset)
         except BaseException as exception:
+            future.set_exception(exception)
             with self._lock:
                 self._loads.pop(key, None)
-            future.set_exception(exception)
             raise
 
         with self._lock:
@@ -97,8 +97,9 @@ class _FileFormatDatasetCache:
                 while self.estimated_size > self.max_size:
                     _, (_, evicted_size) = self._entries.popitem(last=False)
                     self.estimated_size -= evicted_size
-            self._loads.pop(key, None)
         future.set_result(dataset)
+        with self._lock:
+            self._loads.pop(key, None)
         return dataset
 
     def ensure_capacity(self, max_size: int):
