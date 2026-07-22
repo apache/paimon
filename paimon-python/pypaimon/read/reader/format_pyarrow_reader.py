@@ -53,19 +53,21 @@ class _FilesystemIdentity:
         )
 
 
-class _ParquetDatasetCache:
-    def __init__(self, max_entries: int):
-        self.max_entries = max_entries
+class _FileFormatDatasetCache:
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self.estimated_size = 0
         self._entries = OrderedDict()
         self._loads = {}
         self._lock = threading.Lock()
 
-    def get_or_load(self, key: Tuple[Any, str], loader: Callable[[], Any]):
+    def get_or_load(self, key: Tuple[Any, str, str], loader: Callable[[], Any],
+                    size_estimator: Callable[[Any], Optional[int]]):
         with self._lock:
-            dataset = self._entries.get(key)
-            if dataset is not None:
+            entry = self._entries.get(key)
+            if entry is not None:
                 self._entries.move_to_end(key)
-                return dataset
+                return entry[0]
 
             future = self._loads.get(key)
             if future is None:
@@ -80,6 +82,7 @@ class _ParquetDatasetCache:
 
         try:
             dataset = loader()
+            estimated_size = size_estimator(dataset)
         except BaseException as exception:
             with self._lock:
                 self._loads.pop(key, None)
@@ -87,69 +90,92 @@ class _ParquetDatasetCache:
             raise
 
         with self._lock:
-            self._entries[key] = dataset
-            self._entries.move_to_end(key)
-            while len(self._entries) > self.max_entries:
-                self._entries.popitem(last=False)
+            if estimated_size is not None:
+                estimated_size = max(1, estimated_size)
+                self._entries[key] = (dataset, estimated_size)
+                self.estimated_size += estimated_size
+                self._entries.move_to_end(key)
+                while self.estimated_size > self.max_size:
+                    _, (_, evicted_size) = self._entries.popitem(last=False)
+                    self.estimated_size -= evicted_size
             self._loads.pop(key, None)
         future.set_result(dataset)
         return dataset
 
-    def ensure_capacity(self, max_entries: int):
+    def ensure_capacity(self, max_size: int):
         with self._lock:
-            self.max_entries = max(self.max_entries, max_entries)
+            self.max_size = max(self.max_size, max_size)
 
 
-_PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
-_PARQUET_DATASET_CACHE_LOCK = threading.Lock()
-_PARQUET_DATASET_CACHE_PID = os.getpid()
+_FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
+_FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+_FILE_FORMAT_DATASET_CACHE_PID = os.getpid()
 
 
-def _ensure_parquet_dataset_cache_process():
-    global _PARQUET_DATASET_CACHES
-    global _PARQUET_DATASET_CACHE_LOCK
-    global _PARQUET_DATASET_CACHE_PID
+def _ensure_file_format_dataset_cache_process():
+    global _FILE_FORMAT_DATASET_CACHES
+    global _FILE_FORMAT_DATASET_CACHE_LOCK
+    global _FILE_FORMAT_DATASET_CACHE_PID
     current_pid = os.getpid()
-    if current_pid != _PARQUET_DATASET_CACHE_PID:
-        _PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
-        _PARQUET_DATASET_CACHE_LOCK = threading.Lock()
-        _PARQUET_DATASET_CACHE_PID = current_pid
+    if current_pid != _FILE_FORMAT_DATASET_CACHE_PID:
+        _FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
+        _FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+        _FILE_FORMAT_DATASET_CACHE_PID = current_pid
 
 
-def _parquet_dataset_cache(file_io: FileIO, max_entries: int) -> _ParquetDatasetCache:
-    _ensure_parquet_dataset_cache_process()
-    with _PARQUET_DATASET_CACHE_LOCK:
-        cache = _PARQUET_DATASET_CACHES.get(file_io)
+def _file_format_dataset_cache(file_io: FileIO,
+                               max_size: int) -> _FileFormatDatasetCache:
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        cache = _FILE_FORMAT_DATASET_CACHES.get(file_io)
         if cache is None:
-            cache = _ParquetDatasetCache(max_entries)
-            _PARQUET_DATASET_CACHES[file_io] = cache
+            cache = _FileFormatDatasetCache(max_size)
+            _FILE_FORMAT_DATASET_CACHES[file_io] = cache
         else:
-            cache.ensure_capacity(max_entries)
+            cache.ensure_capacity(max_size)
         return cache
 
 
-def _reset_parquet_dataset_cache():
-    global _PARQUET_DATASET_CACHES
-    _ensure_parquet_dataset_cache_process()
-    with _PARQUET_DATASET_CACHE_LOCK:
-        _PARQUET_DATASET_CACHES = weakref.WeakKeyDictionary()
+def _reset_file_format_dataset_cache():
+    global _FILE_FORMAT_DATASET_CACHES
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        _FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
 
 
-def _parquet_dataset(file_io: FileIO, file_path: str, cache_enabled: bool,
-                     cache_max_entries: int):
+def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[int]:
+    try:
+        if file_format == 'parquet':
+            footer_size = 0
+            for fragment in dataset.get_fragments():
+                metadata = fragment.metadata
+                if metadata is not None:
+                    footer_size += int(metadata.serialized_size)
+            if footer_size > 0:
+                return footer_size
+        return int(dataset.schema.serialize().size)
+    except Exception:
+        return None
+
+
+def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
+                         cache_max_size: int):
     file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
     filesystem = file_io.filesystem
 
     def load():
         return ds.dataset(
-            file_path_for_pyarrow, format='parquet', filesystem=filesystem)
+            file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
-    if not cache_enabled or cache_max_entries <= 0:
+    if cache_max_size <= 0:
         return load()
 
-    key = (_FilesystemIdentity(filesystem), file_path_for_pyarrow)
-    return _parquet_dataset_cache(
-        file_io, cache_max_entries).get_or_load(key, load)
+    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
+    return _file_format_dataset_cache(
+        file_io, cache_max_size).get_or_load(
+            key, load,
+            lambda dataset: _estimate_file_format_dataset_size(
+                dataset, file_format))
 
 
 class FormatPyArrowReader(RecordBatchReader):
@@ -167,22 +193,12 @@ class FormatPyArrowReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  options: CoreOptions = None,
                  nested_name_paths: Optional[List[List[str]]] = None):
-        if file_format == 'parquet':
-            cache_enabled = (
-                options.parquet_metadata_cache_enabled()
-                if options is not None else False
-            )
-            cache_max_entries = (
-                options.parquet_metadata_cache_max_entries()
-                if options is not None else 256
-            )
-            self.dataset = _parquet_dataset(
-                file_io, file_path, cache_enabled, cache_max_entries)
-        else:
-            file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-            self.dataset = ds.dataset(
-                file_path_for_pyarrow, format=file_format,
-                filesystem=file_io.filesystem)
+        cache_max_size = (
+            options.file_format_metadata_cache_max_size().get_bytes()
+            if options is not None else 10 * 1024 * 1024
+        )
+        self.dataset = _file_format_dataset(
+            file_io, file_format, file_path, cache_max_size)
         self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]

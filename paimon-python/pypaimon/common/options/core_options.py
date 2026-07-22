@@ -264,25 +264,15 @@ class CoreOptions:
         .with_description("Specify the message format of data files.")
     )
 
-    PARQUET_METADATA_CACHE_ENABLED: ConfigOption[bool] = (
-        ConfigOptions.key("parquet.metadata-cache-enabled")
-        .boolean_type()
-        .default_value(False)
+    FILE_FORMAT_METADATA_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("file-format.metadata-cache.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(10))
         .with_description(
-            "Cache PyArrow Dataset and footer-derived metadata for immutable Paimon "
-            "Parquet data files across reads in the current process. Do not enable this "
-            "for paths that may be overwritten in place."
-        )
-    )
-
-    PARQUET_METADATA_CACHE_MAX_ENTRIES: ConfigOption[int] = (
-        ConfigOptions.key("parquet.metadata-cache-max-entries")
-        .int_type()
-        .default_value(256)
-        .with_description(
-            "Maximum number of Parquet metadata entries cached per FileIO in the current "
-            "process. This limit counts entries, not retained bytes. When readers share a "
-            "FileIO, the largest requested value is used."
+            "Maximum estimated size of reusable PyArrow Dataset metadata cached per "
+            "FileIO in the current process. Actual retained memory may be higher. "
+            "The cache assumes immutable Paimon data files. Set to 0 to disable it. "
+            "When readers share a FileIO, the largest requested value is used."
         )
     )
 
@@ -1045,11 +1035,11 @@ class CoreOptions:
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)
 
-    def parquet_metadata_cache_enabled(self) -> bool:
-        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_ENABLED, False)
-
-    def parquet_metadata_cache_max_entries(self) -> int:
-        return self.options.get(CoreOptions.PARQUET_METADATA_CACHE_MAX_ENTRIES, 256)
+    def file_format_metadata_cache_max_size(self) -> MemorySize:
+        return self.options.get(
+            CoreOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE,
+            MemorySize.of_mebi_bytes(10),
+        )
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)

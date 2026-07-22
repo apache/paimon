@@ -36,6 +36,9 @@ from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
+DEFAULT_CACHE_SIZE = 10 * 1024 * 1024
+
+
 class _CountingInputFile:
     def __init__(self, wrapped, file_system):
         self._wrapped = wrapped
@@ -75,9 +78,9 @@ class _CountingLocalFileSystem(FsspecLocalFileSystem):
         self.reads = []
 
 
-class ParquetMetadataCacheTest(unittest.TestCase):
+class FileFormatMetadataCacheTest(unittest.TestCase):
     def setUp(self):
-        reader_module._reset_parquet_dataset_cache()
+        reader_module._reset_file_format_dataset_cache()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.file_io = LocalFileIO(self.temp_dir.name, Options({}))
         self.paths = []
@@ -91,14 +94,13 @@ class ParquetMetadataCacheTest(unittest.TestCase):
             self.paths.append(path)
 
     def tearDown(self):
-        reader_module._reset_parquet_dataset_cache()
+        reader_module._reset_file_format_dataset_cache()
         self.temp_dir.cleanup()
 
     @staticmethod
-    def _options(enabled, max_entries=256):
+    def _options(max_size="10 mb"):
         return CoreOptions(Options({
-            "parquet.metadata-cache-enabled": enabled,
-            "parquet.metadata-cache-max-entries": max_entries,
+            "file-format.metadata-cache.max-size": max_size,
         }))
 
     def _read(self, path, options, file_io=None):
@@ -120,11 +122,20 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         finally:
             reader.close()
 
-    def test_disabled_by_default(self):
+    def test_enabled_by_default(self):
         options = CoreOptions(Options({}))
-        self.assertFalse(options.parquet_metadata_cache_enabled())
-        self.assertEqual(256, options.parquet_metadata_cache_max_entries())
+        self.assertEqual(
+            DEFAULT_CACHE_SIZE,
+            options.file_format_metadata_cache_max_size().get_bytes())
 
+        original = reader_module.ds.dataset
+        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+            self._read(self.paths[0], options)
+            self._read(self.paths[0], options)
+        self.assertEqual(1, dataset.call_count)
+
+    def test_zero_size_disables_cache(self):
+        options = self._options("0 b")
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
             self._read(self.paths[0], options)
@@ -132,7 +143,7 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         self.assertEqual(2, dataset.call_count)
 
     def test_reuses_dataset(self):
-        options = self._options(True)
+        options = self._options()
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
             first = self._read(self.paths[0], options)
@@ -157,58 +168,126 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         file_io = LocalFileIO(self.temp_dir.name, Options({}))
         file_io.filesystem = pafs.PyFileSystem(pafs.FSSpecHandler(counting))
 
-        uncached = self._read(path, self._options(False), file_io)
+        uncached = self._read(path, self._options("0 b"), file_io)
         uncached_opens = counting.opens
         uncached_reads = len(counting.reads)
 
         counting.reset_counts()
-        reader_module._reset_parquet_dataset_cache()
-        self._read(path, self._options(True), file_io)
+        reader_module._reset_file_format_dataset_cache()
+        self._read(path, self._options(), file_io)
         counting.reset_counts()
-        cached = self._read(path, self._options(True), file_io)
+        cached = self._read(path, self._options(), file_io)
 
         self.assertEqual(uncached, cached)
         self.assertLess(counting.opens, uncached_opens)
         self.assertLess(len(counting.reads), uncached_reads)
 
-    def test_evicts_least_recently_used_entry(self):
-        options = self._options(True, max_entries=2)
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
-            for path in self.paths:
-                self._read(path, options)
-            self._read(self.paths[0], options)
-        self.assertEqual(4, dataset.call_count)
+    def test_evicts_least_recently_used_entry_by_estimated_size(self):
+        cache = reader_module._FileFormatDatasetCache(10)
+        first_key = (None, "parquet", "first")
+        second_key = (None, "parquet", "second")
+        third_key = (None, "parquet", "third")
+
+        cache.get_or_load(first_key, lambda: "first", lambda _: 4)
+        cache.get_or_load(second_key, lambda: "second", lambda _: 4)
+        cache.get_or_load(first_key, lambda: "unused", lambda _: 4)
+        cache.get_or_load(third_key, lambda: "third", lambda _: 4)
+
+        self.assertEqual([first_key, third_key], list(cache._entries.keys()))
+        self.assertEqual(8, cache.estimated_size)
+
+    def test_does_not_retain_entry_larger_than_size_limit(self):
+        cache = reader_module._FileFormatDatasetCache(5)
+        loads = []
+        key = (None, "parquet", "large")
+
+        def load():
+            loads.append(True)
+            return "large"
+
+        self.assertEqual(
+            "large", cache.get_or_load(key, load, lambda _: 6))
+        self.assertEqual(
+            "large", cache.get_or_load(key, load, lambda _: 6))
+        self.assertEqual(2, len(loads))
+        self.assertEqual(0, len(cache._entries))
+        self.assertEqual(0, cache.estimated_size)
+
+    def test_does_not_retain_entry_without_size_estimate(self):
+        cache = reader_module._FileFormatDatasetCache(10)
+        key = (None, "unknown", "data")
+        loads = []
+
+        def load():
+            loads.append(True)
+            return "unknown"
+
+        self.assertEqual(
+            "unknown", cache.get_or_load(key, load, lambda _: None))
+        self.assertEqual(
+            "unknown", cache.get_or_load(key, load, lambda _: None))
+        self.assertEqual(2, len(loads))
+        self.assertEqual(0, len(cache._entries))
+
+    def test_estimates_serialized_parquet_footer_size(self):
+        dataset = reader_module.ds.dataset(self.paths[0], format="parquet")
+        expected = sum(
+            fragment.metadata.serialized_size
+            for fragment in dataset.get_fragments()
+        )
+        self.assertGreater(expected, 0)
+        self.assertEqual(
+            expected,
+            reader_module._estimate_file_format_dataset_size(
+                dataset, "parquet"))
 
     def test_cache_capacity_does_not_shrink(self):
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
-            for path in self.paths:
-                self._read(path, self._options(True, max_entries=3))
-            self._read(self.paths[2], self._options(True, max_entries=1))
-            self._read(self.paths[0], self._options(True, max_entries=1))
-        self.assertEqual(3, dataset.call_count)
-        self.assertEqual(
-            3, reader_module._parquet_dataset_cache(self.file_io, 1).max_entries)
+        cache = reader_module._file_format_dataset_cache(
+            self.file_io, 3 * 1024 * 1024)
+        same_cache = reader_module._file_format_dataset_cache(
+            self.file_io, 1024 * 1024)
+
+        self.assertIs(cache, same_cache)
+        self.assertEqual(3 * 1024 * 1024, cache.max_size)
 
     def test_cache_capacity_is_isolated_by_file_io(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
 
-        first_cache = reader_module._parquet_dataset_cache(self.file_io, 3)
-        second_cache = reader_module._parquet_dataset_cache(other_file_io, 1)
+        first_cache = reader_module._file_format_dataset_cache(
+            self.file_io, 3 * 1024 * 1024)
+        second_cache = reader_module._file_format_dataset_cache(
+            other_file_io, 1024 * 1024)
 
         self.assertIsNot(first_cache, second_cache)
-        self.assertEqual(3, first_cache.max_entries)
-        self.assertEqual(1, second_cache.max_entries)
+        self.assertEqual(3 * 1024 * 1024, first_cache.max_size)
+        self.assertEqual(1024 * 1024, second_cache.max_size)
 
     def test_does_not_share_across_filesystems(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
         original = reader_module.ds.dataset
         with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
-            reader_module._parquet_dataset(
-                self.file_io, self.paths[0], True, 256)
-            reader_module._parquet_dataset(
-                other_file_io, self.paths[0], True, 256)
+            reader_module._file_format_dataset(
+                self.file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
+            reader_module._file_format_dataset(
+                other_file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
+        self.assertEqual(2, dataset.call_count)
+
+    def test_does_not_share_across_file_formats(self):
+        parquet_dataset = object()
+        orc_dataset = object()
+        with patch.object(
+                reader_module.ds, "dataset",
+                side_effect=[parquet_dataset, orc_dataset]) as dataset:
+            with patch.object(
+                    reader_module, "_estimate_file_format_dataset_size",
+                    return_value=1):
+                first = reader_module._file_format_dataset(
+                    self.file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
+                second = reader_module._file_format_dataset(
+                    self.file_io, "orc", self.paths[0], DEFAULT_CACHE_SIZE)
+
+        self.assertIs(parquet_dataset, first)
+        self.assertIs(orc_dataset, second)
         self.assertEqual(2, dataset.call_count)
 
     def test_cache_key_retains_filesystem_wrapper(self):
@@ -218,8 +297,9 @@ class ParquetMetadataCacheTest(unittest.TestCase):
         file_io = LocalFileIO(self.temp_dir.name, Options({}))
         file_io.filesystem = filesystem
 
-        reader_module._parquet_dataset(
-            file_io, os.path.basename(self.paths[0]), True, 256)
+        reader_module._file_format_dataset(
+            file_io, "parquet", os.path.basename(self.paths[0]),
+            DEFAULT_CACHE_SIZE)
         file_io.filesystem = root
         del filesystem
         gc.collect()
@@ -244,11 +324,13 @@ class ParquetMetadataCacheTest(unittest.TestCase):
             with patch.object(
                     reader_module._FilesystemIdentity, "__hash__", return_value=1):
                 file_io.filesystem = first_filesystem
-                first = reader_module._parquet_dataset(
-                    file_io, file_name, True, 256).to_table()
+                first = reader_module._file_format_dataset(
+                    file_io, "parquet", file_name,
+                    DEFAULT_CACHE_SIZE).to_table()
                 file_io.filesystem = second_filesystem
-                second = reader_module._parquet_dataset(
-                    file_io, file_name, True, 256).to_table()
+                second = reader_module._file_format_dataset(
+                    file_io, "parquet", file_name,
+                    DEFAULT_CACHE_SIZE).to_table()
 
             self.assertEqual([1], first.column("value").to_pylist())
             self.assertEqual([2], second.column("value").to_pylist())
@@ -257,9 +339,11 @@ class ParquetMetadataCacheTest(unittest.TestCase):
             second_dir.cleanup()
 
     def test_resets_after_process_change(self):
-        parent_cache = reader_module._parquet_dataset_cache(self.file_io, 256)
+        parent_cache = reader_module._file_format_dataset_cache(
+            self.file_io, DEFAULT_CACHE_SIZE)
         with patch.object(reader_module.os, "getpid", return_value=os.getpid() + 1):
-            child_cache = reader_module._parquet_dataset_cache(self.file_io, 256)
+            child_cache = reader_module._file_format_dataset_cache(
+                self.file_io, DEFAULT_CACHE_SIZE)
         self.assertIsNot(parent_cache, child_cache)
 
     def test_coalesces_concurrent_loads(self):
@@ -273,7 +357,7 @@ class ParquetMetadataCacheTest(unittest.TestCase):
                 reader_module.ds, "dataset", side_effect=delayed_dataset) as dataset:
             with ThreadPoolExecutor(max_workers=8) as executor:
                 results = list(executor.map(
-                    lambda _: self._read(self.paths[0], self._options(True)),
+                    lambda _: self._read(self.paths[0], self._options()),
                     range(8),
                 ))
 
