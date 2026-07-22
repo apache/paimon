@@ -31,8 +31,14 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -48,6 +54,7 @@ import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -375,6 +382,151 @@ public class FullHistoryMetadataRewriterTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("snapshot")
                 .hasMessageContaining("does not match source semantics");
+    }
+
+    @Test
+    public void testStreamingValidationRejectsCorruptedManifestPruningMetadata() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("corrupted-meta-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("corrupted-meta-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("corrupted-meta-source-external").toUri()).toString();
+        String targetExternal =
+                new Path(tempDir.resolve("corrupted-meta-target-external").toUri()).toString();
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        writeRows(source, 0, "A", 1);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryCopyPlan payloadPlan =
+                FullHistoryCopyPlan.buildPayload(
+                        new FullHistoryFileCollector(source).collect(), mapping, fileIO);
+        FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false);
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        assertThat(target.newScan().withBucket(0).plan().splits()).isNotEmpty();
+
+        Snapshot snapshot = target.snapshotManager().latestSnapshot();
+        ManifestList manifestList = target.store().manifestListFactory().create();
+        List<ManifestFileMeta> metas =
+                manifestList.read(snapshot.deltaManifestList(), snapshot.deltaManifestListSize());
+        assertThat(metas).isNotEmpty();
+        List<ManifestFileMeta> corruptedMetas = new ArrayList<>();
+        for (ManifestFileMeta meta : metas) {
+            corruptedMetas.add(
+                    new ManifestFileMeta(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            meta.numAddedFiles(),
+                            meta.numDeletedFiles(),
+                            meta.partitionStats(),
+                            meta.schemaId(),
+                            100,
+                            100,
+                            meta.minLevel(),
+                            meta.maxLevel(),
+                            meta.minRowId(),
+                            meta.maxRowId()));
+        }
+        Pair<String, Long> corruptedList = manifestList.write(corruptedMetas);
+        fileIO.overwriteFileUtf8(
+                target.snapshotManager().snapshotPath(snapshot.id()),
+                copyWithDeltaManifestList(snapshot, corruptedList).toJson());
+        FileStoreTable corruptedTarget = FileStoreTableFactory.create(fileIO, targetRoot);
+
+        assertThat(corruptedTarget.newScan().withBucket(0).plan().splits()).isEmpty();
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                source,
+                                                corruptedTarget,
+                                                mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("manifest metadata")
+                .hasMessageContaining("does not match its entries");
+    }
+
+    @Test
+    public void testStreamingValidationAllowsManifestRerollAfterPathRewrite() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("reroll-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("reroll-target/table").toString());
+        String sourceExternal =
+                new Path(tempDir.resolve("reroll-source-external").toUri()).toString();
+        StringBuilder targetExternalBuilder =
+                new StringBuilder(
+                        new Path(tempDir.resolve("reroll-target-external").toUri()).toString());
+        for (int i = 0; i < 80; i++) {
+            targetExternalBuilder
+                    .append("/target-segment-")
+                    .append(i)
+                    .append("-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        }
+        String targetExternal = targetExternalBuilder.toString();
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, sourceRoot.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "id");
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, sourceExternal);
+        options.set(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, ExternalPathStrategy.ROUND_ROBIN);
+        options.set(CoreOptions.MANIFEST_COMPRESSION, "null");
+        options.set("manifest.target-file-size", "4MB");
+        RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, sourceRoot),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+        writeRows(source, 0, 1);
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 2_000; i++) {
+            String fileName = "data-" + i;
+            DataFileMeta dataFile =
+                    DataFileTestUtils.newFile(fileName, 0, i, i, i)
+                            .newExternalPath(new Path(sourceExternal, fileName).toString());
+            entries.add(ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, dataFile));
+        }
+        ManifestFile sourceManifestFile = source.store().manifestFileFactory().create();
+        List<ManifestFileMeta> sourceMetas = sourceManifestFile.write(entries);
+        assertThat(sourceMetas).hasSize(1);
+        Pair<String, Long> sourceManifestList =
+                source.store().manifestListFactory().create().write(sourceMetas);
+        Snapshot sourceSnapshot = source.snapshotManager().latestSnapshot();
+        fileIO.overwriteFileUtf8(
+                source.snapshotManager().snapshotPath(sourceSnapshot.id()),
+                copyWithDeltaManifestList(sourceSnapshot, sourceManifestList).toJson());
+        source = FileStoreTableFactory.create(fileIO, sourceRoot);
+
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        new FullHistoryMetadataRewriter(source, fileIO, targetRoot, mapping).rewrite();
+        FileStoreTable target = FileStoreTableFactory.create(fileIO, targetRoot);
+        Snapshot targetSnapshot = target.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> targetMetas =
+                target.store()
+                        .manifestListFactory()
+                        .create()
+                        .read(
+                                targetSnapshot.deltaManifestList(),
+                                targetSnapshot.deltaManifestListSize());
+
+        assertThat(targetMetas).hasSizeGreaterThan(sourceMetas.size());
+        FullHistoryRootValidator.validate(source, target, mapping, "main");
     }
 
     @Test
@@ -1074,6 +1226,33 @@ public class FullHistoryMetadataRewriterTest {
                 roots.changelogManifestList(),
                 roots.changelogManifestListSize(),
                 roots.indexManifest(),
+                snapshot.commitUser(),
+                snapshot.commitIdentifier(),
+                snapshot.commitKind(),
+                snapshot.timeMillis(),
+                snapshot.totalRecordCount(),
+                snapshot.deltaRecordCount(),
+                snapshot.changelogRecordCount(),
+                snapshot.watermark(),
+                snapshot.statistics(),
+                snapshot.properties(),
+                snapshot.nextRowId(),
+                snapshot.operation());
+    }
+
+    private static Snapshot copyWithDeltaManifestList(
+            Snapshot snapshot, Pair<String, Long> deltaManifestList) {
+        return new Snapshot(
+                snapshot.version(),
+                snapshot.id(),
+                snapshot.schemaId(),
+                snapshot.baseManifestList(),
+                snapshot.baseManifestListSize(),
+                deltaManifestList.getLeft(),
+                deltaManifestList.getRight(),
+                snapshot.changelogManifestList(),
+                snapshot.changelogManifestListSize(),
+                snapshot.indexManifest(),
                 snapshot.commitUser(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),

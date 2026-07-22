@@ -92,6 +92,7 @@ public class FullHistoryCloneMarkerTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("external target root")
                 .hasMessageContaining(targetExternal.toString());
+        assertThat(fileIO.exists(new Path(targetRoot, FullHistoryCloneMarker.FILE_NAME))).isFalse();
     }
 
     @Test
