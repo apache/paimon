@@ -181,7 +181,7 @@ public class VectoredReadUtils {
     private static void fallbackToReadSequence(
             SeekableInputStream in, List<? extends FileRange> ranges) throws IOException {
         for (FileRange range : ranges) {
-            byte[] bytes = new byte[range.getLength()];
+            byte[] bytes = getOrCreateBuffer(range);
             in.seek(range.getOffset());
             IOUtils.readFully(in, bytes);
             range.getData().complete(bytes);
@@ -190,13 +190,13 @@ public class VectoredReadUtils {
 
     private static void readSingleRange(VectoredReadable readable, FileRange range) {
         if (range.getLength() == 0) {
-            range.getData().complete(new byte[0]);
+            range.getData().complete(getOrCreateBuffer(range));
             return;
         }
         try {
             long position = range.getOffset();
             int length = range.getLength();
-            byte[] buffer = new byte[length];
+            byte[] buffer = getOrCreateBuffer(range);
             readable.preadFully(position, buffer, 0, length);
             range.getData().complete(buffer);
         } catch (Exception ex) {
@@ -212,7 +212,7 @@ public class VectoredReadUtils {
         }
         long offset = combinedRange.offset;
         for (FileRange fileRange : combinedRange.underlying) {
-            byte[] buffer = new byte[fileRange.getLength()];
+            byte[] buffer = getOrCreateBuffer(fileRange);
             copyMultiBytesToBytes(
                     segments,
                     (int) (fileRange.getOffset() - offset),
@@ -220,6 +220,13 @@ public class VectoredReadUtils {
                     fileRange.getLength());
             fileRange.getData().complete(buffer);
         }
+    }
+
+    private static byte[] getOrCreateBuffer(FileRange range) {
+        if (range instanceof FileRange.FileRangeImpl) {
+            return ((FileRange.FileRangeImpl) range).getOrCreateBuffer();
+        }
+        return new byte[range.getLength()];
     }
 
     private static void completeFileRangesExceptionally(
