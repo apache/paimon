@@ -173,8 +173,7 @@ public class FallbackReadFileStoreTableTest {
         ChainGroupReadTable chainGroup = Mockito.mock(ChainGroupReadTable.class);
         InnerTableRead wrappedRead = Mockito.mock(InnerTableRead.class);
         InnerTableRead chainGroupRead = Mockito.mock(InnerTableRead.class);
-        Mockito.when(wrapped.coreOptions())
-                .thenReturn(CoreOptions.fromMap(Collections.emptyMap()));
+        Mockito.when(wrapped.coreOptions()).thenReturn(CoreOptions.fromMap(Collections.emptyMap()));
         Mockito.when(wrapped.newRead()).thenReturn(wrappedRead);
         Mockito.when(chainGroup.newRead()).thenReturn(chainGroupRead);
 
@@ -182,8 +181,7 @@ public class FallbackReadFileStoreTableTest {
         QueryAuthSplit wrappedSplit =
                 new QueryAuthSplit(
                         Mockito.mock(DataSplit.class),
-                        new TableQueryAuthResult(
-                                null, Collections.singletonMap("a", "mask")));
+                        new TableQueryAuthResult(null, Collections.singletonMap("a", "mask")));
         FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit =
                 new FallbackReadFileStoreTable.FallbackSplitImpl(wrappedSplit, false);
         RecordReader<InternalRow> reader = Mockito.mock(RecordReader.class);
