@@ -106,8 +106,7 @@ class FullHistoryCloneFinalizeOperator extends BoundedOneInputOperator<Boolean, 
                 .rewrite();
         FileStoreTable targetTable =
                 FileStoreTableFactory.create(targetFileIO, clonePlan.targetRoot());
-        new FullHistoryCloneValidator(
-                        sourceTable, targetTable, mapping, clonePlan.payloadCopyPlan())
+        new FullHistoryCloneValidator(sourceTable, targetTable, mapping)
                 .validatePublishedCloneStreaming();
         FullHistorySourceFingerprint.verify(sourceTable, clonePlan.sourceFingerprint());
         FullHistoryCloneMarker.markSuccessful(

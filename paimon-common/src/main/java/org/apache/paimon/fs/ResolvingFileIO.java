@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTTokenFileIO;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -75,6 +76,24 @@ public class ResolvingFileIO implements FileIO {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return wrap(() -> fileIO(path).newOutputStream(path, overwrite));
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        TwoPhaseOutputStream delegate =
+                wrap(() -> fileIO(path).newTwoPhaseOutputStream(path, overwrite));
+        return new ForwardingTwoPhaseOutputStream(delegate) {
+            @Override
+            protected Committer wrapCommitter(Committer committer) {
+                return new ResolvingCommitter(committer);
+            }
+
+            @Override
+            protected <T> T invoke(IOCallable<T> callable) throws IOException {
+                return wrap(callable::call);
+            }
+        };
     }
 
     @Override
@@ -135,6 +154,64 @@ public class ResolvingFileIO implements FileIO {
     @FunctionalInterface
     protected interface Func<T> {
         T apply() throws IOException;
+    }
+
+    private static class ResolvingCommitter implements TwoPhaseOutputStream.Committer {
+
+        private static final long serialVersionUID = 1L;
+
+        private final TwoPhaseOutputStream.Committer delegate;
+
+        private ResolvingCommitter(TwoPhaseOutputStream.Committer delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void commit(FileIO fileIO) throws IOException {
+            ResolvingFileIO resolvingFileIO = resolvingFileIO(fileIO);
+            resolvingFileIO.wrap(
+                    () -> {
+                        delegate.commit(resolvingFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        @Override
+        public void discard(FileIO fileIO) throws IOException {
+            ResolvingFileIO resolvingFileIO = resolvingFileIO(fileIO);
+            resolvingFileIO.wrap(
+                    () -> {
+                        delegate.discard(resolvingFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        @Override
+        public Path targetPath() {
+            return delegate.targetPath();
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            ResolvingFileIO resolvingFileIO = resolvingFileIO(fileIO);
+            resolvingFileIO.wrap(
+                    () -> {
+                        delegate.clean(resolvingFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        private static ResolvingFileIO resolvingFileIO(FileIO fileIO) throws IOException {
+            if (fileIO instanceof RESTTokenFileIO) {
+                fileIO = ((RESTTokenFileIO) fileIO).fileIO();
+            }
+            if (!(fileIO instanceof ResolvingFileIO)) {
+                throw new IOException(
+                        "Resolving committer requires ResolvingFileIO, but found "
+                                + fileIO.getClass().getName());
+            }
+            return (ResolvingFileIO) fileIO;
+        }
     }
 
     private static class CacheKey implements Serializable {

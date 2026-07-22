@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTTokenFileIO;
 
 import java.io.IOException;
 
@@ -59,6 +60,24 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return wrap(() -> fileIO(path).newOutputStream(path, overwrite));
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        TwoPhaseOutputStream delegate =
+                wrap(() -> fileIO(path).newTwoPhaseOutputStream(path, overwrite));
+        return new ForwardingTwoPhaseOutputStream(delegate) {
+            @Override
+            protected Committer wrapCommitter(Committer committer) {
+                return new PluginCommitter(committer);
+            }
+
+            @Override
+            protected <T> T invoke(IOCallable<T> callable) throws IOException {
+                return wrap(callable::call);
+            }
+        };
     }
 
     @Override
@@ -125,5 +144,63 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     @FunctionalInterface
     protected interface Func<T> {
         T apply() throws IOException;
+    }
+
+    private static class PluginCommitter implements TwoPhaseOutputStream.Committer {
+
+        private static final long serialVersionUID = 1L;
+
+        private final TwoPhaseOutputStream.Committer delegate;
+
+        private PluginCommitter(TwoPhaseOutputStream.Committer delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void commit(FileIO fileIO) throws IOException {
+            PluginFileIO pluginFileIO = pluginFileIO(fileIO);
+            pluginFileIO.wrap(
+                    () -> {
+                        delegate.commit(pluginFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        @Override
+        public void discard(FileIO fileIO) throws IOException {
+            PluginFileIO pluginFileIO = pluginFileIO(fileIO);
+            pluginFileIO.wrap(
+                    () -> {
+                        delegate.discard(pluginFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        @Override
+        public Path targetPath() {
+            return delegate.targetPath();
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            PluginFileIO pluginFileIO = pluginFileIO(fileIO);
+            pluginFileIO.wrap(
+                    () -> {
+                        delegate.clean(pluginFileIO.fileIO(targetPath()));
+                        return null;
+                    });
+        }
+
+        private static PluginFileIO pluginFileIO(FileIO fileIO) throws IOException {
+            if (fileIO instanceof RESTTokenFileIO) {
+                fileIO = ((RESTTokenFileIO) fileIO).fileIO();
+            }
+            if (!(fileIO instanceof PluginFileIO)) {
+                throw new IOException(
+                        "Plugin committer requires PluginFileIO, but found "
+                                + fileIO.getClass().getName());
+            }
+            return (PluginFileIO) fileIO;
+        }
     }
 }

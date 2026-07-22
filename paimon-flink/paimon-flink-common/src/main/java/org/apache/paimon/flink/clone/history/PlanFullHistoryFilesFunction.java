@@ -20,6 +20,7 @@ package org.apache.paimon.flink.clone.history;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.clone.FullHistoryClonePlan;
 import org.apache.paimon.clone.FullHistoryCopyPlan;
 import org.apache.paimon.clone.FullHistoryPayloadFileVisitor;
 import org.apache.paimon.clone.FullHistorySourceFingerprint;
@@ -51,6 +52,7 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
     private final String sourceTableName;
     private final List<String> pathMappings;
     private final String expectedFingerprint;
+    private final FullHistoryClonePlan clonePlan;
 
     private transient Catalog sourceCatalog;
     private transient FileStoreTable sourceTable;
@@ -61,12 +63,14 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
             String sourceDatabase,
             String sourceTableName,
             List<String> pathMappings,
-            String expectedFingerprint) {
+            String expectedFingerprint,
+            FullHistoryClonePlan clonePlan) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.sourceDatabase = sourceDatabase;
         this.sourceTableName = sourceTableName;
         this.pathMappings = pathMappings;
         this.expectedFingerprint = expectedFingerprint;
+        this.clonePlan = clonePlan;
     }
 
     /** Do not annotate with {@code @Override} to retain compatibility with Flink 1.18-. */
@@ -122,6 +126,7 @@ class PlanFullHistoryFilesFunction extends ProcessFunction<Integer, FullHistoryC
                 !source.equals(target),
                 "Source and target file paths must be different: %s",
                 source);
+        clonePlan.validatePayloadTarget(target);
         long size = expectedSize < 0 ? sourceFileIO.getFileSize(source) : expectedSize;
         return new FullHistoryCopyPlan.FileCopy(source, target, kind, size);
     }

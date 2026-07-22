@@ -51,19 +51,6 @@ public class FullHistoryClonePlanner {
         this.pathMapping = pathMapping;
     }
 
-    public FullHistoryClonePlan plan() throws IOException {
-        FullHistoryClonePlan structure = planStructure();
-        FullHistoryFileSet fileSet = new FullHistoryFileCollector(sourceTable).collect();
-        FullHistoryCopyPlan payloadPlan =
-                FullHistoryCopyPlan.buildPayload(fileSet, pathMapping, sourceTable.fileIO());
-        return new FullHistoryClonePlan(
-                structure.sourceRoot(),
-                structure.targetRoot(),
-                structure.sourceFingerprint(),
-                payloadPlan,
-                structure.externalTargetRoots());
-    }
-
     public FullHistoryClonePlan planStructure() throws IOException {
         validateSupportedSchemas(sourceTable);
         validateSchemaPathMappings(sourceTable, pathMapping);
@@ -78,7 +65,6 @@ public class FullHistoryClonePlanner {
                 sourceTable.location(),
                 targetRoot,
                 FullHistorySourceFingerprint.compute(sourceTable),
-                FullHistoryCopyPlan.empty(),
                 externalTargetRoots);
     }
 
@@ -131,25 +117,31 @@ public class FullHistoryClonePlanner {
         for (String branch : branches) {
             FileStoreTable branchTable = table.switchToBranch(branch);
             for (TableSchema schema : branchTable.schemaManager().listAll()) {
+                CoreOptions sourceOptions = CoreOptions.fromMap(schema.options());
                 Map<String, String> targetOptions =
                         FullHistoryMetadataRewriter.rewriteOptions(
                                 schema.options(), mapping, branchTable.location());
                 CoreOptions options = CoreOptions.fromMap(targetOptions);
                 if (options.externalPathStrategy() != CoreOptions.ExternalPathStrategy.NONE
                         && options.dataFileExternalPaths() != null) {
-                    Arrays.stream(options.dataFileExternalPaths().split(","))
+                    Arrays.stream(sourceOptions.dataFileExternalPaths().split(","))
                             .map(String::trim)
-                            .map(Path::new)
-                            .forEach(roots::add);
+                            .forEach(path -> addMappedRoots(roots, mapping, path));
                 }
-                if (options.globalIndexExternalPath() != null) {
-                    roots.add(options.globalIndexExternalPath());
+                if (sourceOptions.globalIndexExternalPath() != null) {
+                    addMappedRoots(
+                            roots, mapping, sourceOptions.globalIndexExternalPath().toString());
                 }
                 if (options.dataFilePathDirectory() != null) {
                     Path dataRoot = new Path(targetTableRoot, options.dataFilePathDirectory());
                     if (!PathMapping.isSameOrDescendant(
                             dataRoot.toString(), targetTableRoot.toString())) {
-                        roots.add(dataRoot);
+                        String sourceDataPath = sourceOptions.dataFilePathDirectory();
+                        Path sourceDataRoot = new Path(sourceDataPath);
+                        if (sourceDataRoot.toUri().getScheme() == null) {
+                            sourceDataRoot = new Path(branchTable.location(), sourceDataRoot);
+                        }
+                        addMappedRoots(roots, mapping, sourceDataRoot.toString());
                     }
                 }
             }
@@ -184,5 +176,9 @@ public class FullHistoryClonePlanner {
         }
         externalRoots.sort(Comparator.comparing(Path::toString));
         return externalRoots;
+    }
+
+    private static void addMappedRoots(Set<Path> roots, PathMapping mapping, String sourceRoot) {
+        mapping.mappedTargetPrefixesUnder(sourceRoot).stream().map(Path::new).forEach(roots::add);
     }
 }

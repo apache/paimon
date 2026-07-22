@@ -46,39 +46,6 @@ public class FullHistoryCopyPlan implements Serializable {
         return new FullHistoryCopyPlan(Collections.emptyList());
     }
 
-    public static FullHistoryCopyPlan build(FullHistoryFileSet fileSet, PathMapping mapping) {
-        List<FileCopy> files = new ArrayList<>();
-        Map<String, Path> targetToSource = new HashMap<>();
-
-        try {
-            addFiles(
-                    files,
-                    targetToSource,
-                    fileSet.metadataFiles(),
-                    FileKind.METADATA,
-                    mapping,
-                    null);
-            addPayloadFiles(
-                    files,
-                    targetToSource,
-                    fileSet.dataPayloadPaths(),
-                    FileKind.DATA,
-                    mapping,
-                    null);
-            addPayloadFiles(
-                    files,
-                    targetToSource,
-                    fileSet.indexPayloadPaths(),
-                    FileKind.INDEX,
-                    mapping,
-                    null);
-        } catch (IOException e) {
-            throw new IllegalStateException("Unexpected file size lookup while building plan.", e);
-        }
-
-        return new FullHistoryCopyPlan(files);
-    }
-
     public static FullHistoryCopyPlan buildPayload(
             FullHistoryFileSet fileSet, PathMapping mapping, FileIO sourceFileIO)
             throws IOException {
@@ -99,32 +66,6 @@ public class FullHistoryCopyPlan implements Serializable {
                 mapping,
                 sourceFileIO);
         return new FullHistoryCopyPlan(files);
-    }
-
-    private static void addFiles(
-            List<FileCopy> files,
-            Map<String, Path> targetToSource,
-            Iterable<Path> sourceFiles,
-            FileKind kind,
-            PathMapping mapping,
-            FileIO sourceFileIO)
-            throws IOException {
-        for (Path source : sourceFiles) {
-            Path target = new Path(mapping.rewriteRequired(source.toString()));
-            checkArgument(
-                    !source.equals(target),
-                    "Source and target file paths must be different: %s",
-                    source);
-            Path previousSource = targetToSource.put(target.toString(), source);
-            checkArgument(
-                    previousSource == null || previousSource.equals(source),
-                    "Found target path conflict: source paths %s and %s both map to %s",
-                    previousSource,
-                    source,
-                    target);
-            long expectedSize = sourceFileIO == null ? -1L : sourceFileIO.getFileSize(source);
-            files.add(new FileCopy(source, target, kind, expectedSize));
-        }
     }
 
     private static void addPayloadFiles(

@@ -142,6 +142,89 @@ public class FullHistoryCloneMarkerTest {
     }
 
     @Test
+    public void testPlannerOwnsNestedExternalMappingTargets() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("mapped-nested-source-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("mapped-nested-target-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("mapped-nested-source-external").toUri());
+        Path targetExternal = new Path(tempDir.resolve("mapped-nested-target-external").toUri());
+        Path nestedSource = new Path(sourceExternal, "bucket-0");
+        Path nestedTarget = new Path(tempDir.resolve("mapped-nested-target-bucket").toUri());
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal,
+                                nestedSource + "=" + nestedTarget));
+
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+
+        assertThat(plan.externalTargetRoots())
+                .containsExactlyInAnyOrder(targetExternal, nestedTarget);
+        FullHistoryCloneMarker.prepare(fileIO, plan, mapping, false);
+        assertThat(fileIO.exists(new Path(targetExternal, FullHistoryCloneMarker.FILE_NAME)))
+                .isTrue();
+        assertThat(fileIO.exists(new Path(nestedTarget, FullHistoryCloneMarker.FILE_NAME)))
+                .isTrue();
+    }
+
+    @Test
+    public void testPlanRejectsPayloadOutsideOwnedRoots() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("guard-source-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("guard-target-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("guard-source-external").toUri());
+        Path targetExternal = new Path(tempDir.resolve("guard-target-external").toUri());
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+
+        assertThatThrownBy(
+                        () ->
+                                plan.validatePayloadTarget(
+                                        new Path(tempDir.resolve("unowned/file").toUri())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("outside full-history clone owned roots");
+    }
+
+    @Test
+    public void testPlanRejectsPayloadInControlNamespace() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("reserved-source-table").toString());
+        Path targetRoot = new Path(tempDir.resolve("reserved-target-table").toString());
+        Path sourceExternal = new Path(tempDir.resolve("reserved-source-external").toUri());
+        Path targetExternal = new Path(tempDir.resolve("reserved-target-external").toUri());
+        FileStoreTable source = createTable(sourceRoot, sourceExternal);
+        PathMapping mapping =
+                PathMapping.parse(
+                        Arrays.asList(
+                                sourceRoot + "=" + targetRoot,
+                                sourceExternal + "=" + targetExternal));
+        FullHistoryClonePlan plan = new FullHistoryClonePlanner(source, mapping).planStructure();
+
+        assertThatThrownBy(
+                        () ->
+                                plan.validatePayloadTarget(
+                                        new Path(
+                                                targetRoot,
+                                                FullHistoryCloneMarker.SUCCESS_FILE_NAME)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved control namespace");
+        assertThatThrownBy(
+                        () ->
+                                plan.validatePayloadTarget(
+                                        new Path(
+                                                new Path(
+                                                        targetExternal,
+                                                        FullHistoryCloneMarker.FILE_NAME),
+                                                "forged-payload")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved control namespace");
+    }
+
+    @Test
     public void testRejectUnownedOrDifferentClone() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("source-reject").toString());
         Path targetRoot = new Path(tempDir.resolve("target-reject").toString());

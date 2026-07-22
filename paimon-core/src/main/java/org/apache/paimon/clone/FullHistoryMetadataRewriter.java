@@ -504,11 +504,33 @@ public class FullHistoryMetadataRewriter {
         }
 
         private void copyStatistics(String fileName) throws IOException {
-            if (fileName == null || copiedStatistics.put(fileName, true) != null) {
+            if (fileName == null) {
+                return;
+            }
+            Path statisticsReference = new Path(fileName);
+            checkArgument(
+                    statisticsReference.toUri().getScheme() == null
+                            && statisticsReference.toUri().getAuthority() == null
+                            && !statisticsReference.toUri().getPath().startsWith("/")
+                            && fileName.equals(statisticsReference.getName())
+                            && !".".equals(fileName)
+                            && !"..".equals(fileName),
+                    "Statistics reference must be a file name, but found: %s",
+                    fileName);
+            if (copiedStatistics.put(fileName, true) != null) {
                 return;
             }
             Path sourcePath = source.store().pathFactory().statsFileFactory().toPath(fileName);
             Path targetPath = target.store().pathFactory().statsFileFactory().toPath(fileName);
+            checkArgument(
+                    PathMapping.isSameOrDescendant(
+                                    sourcePath.toString(),
+                                    source.store().pathFactory().statisticsPath().toString())
+                            && PathMapping.isSameOrDescendant(
+                                    targetPath.toString(),
+                                    target.store().pathFactory().statisticsPath().toString()),
+                    "Statistics reference escaped its statistics directory: %s",
+                    fileName);
             long sourceSize = source.fileIO().getFileSize(sourcePath);
             FullHistoryFileCopier.copyFile(
                     source.fileIO(),
