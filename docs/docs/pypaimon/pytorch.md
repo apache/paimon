@@ -66,16 +66,16 @@ size limit with:
 
 ```python
 table = table.copy({
-    "file-format.metadata-cache.max-size": "10 mb",
+    "file-format.metadata-cache.max-size": "50 mb",
 })
 read_builder = table.new_read_builder()
 ```
 
-The default limit is 10 MB; set it to `0 b` to disable the cache. The cache is
-local to each process and `FileIO`, and benefits workers reused with
-`DataLoader(..., persistent_workers=True)`. The limit estimates retained
-metadata size, so actual memory usage may be higher. The cache assumes immutable
-Paimon data files.
+The default limit is 50 MB; set it to `0 b` to bypass the cache. The cache is
+local to each process and benefits workers reused with
+`DataLoader(..., persistent_workers=True)`. The limit estimates retained metadata
+size, so actual memory usage may be higher. The cache assumes immutable Paimon
+data files.
 
 ## Shuffle
 

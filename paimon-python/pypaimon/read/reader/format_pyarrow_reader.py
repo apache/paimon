@@ -17,7 +17,6 @@
 
 import os
 import threading
-import weakref
 from collections import OrderedDict
 from concurrent.futures import Future
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -106,47 +105,53 @@ class _FileFormatDatasetCache:
         with self._lock:
             self.max_size = max(self.max_size, max_size)
 
+    def remove(self, key: Tuple[Any, str, str]):
+        with self._lock:
+            entry = self._entries.pop(key, None)
+            if entry is not None:
+                self.estimated_size -= entry[1]
 
-_FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
+
+_FILE_FORMAT_DATASET_CACHE = None
 _FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
 _FILE_FORMAT_DATASET_CACHE_PID = os.getpid()
 
 
 def _ensure_file_format_dataset_cache_process():
-    global _FILE_FORMAT_DATASET_CACHES
+    global _FILE_FORMAT_DATASET_CACHE
     global _FILE_FORMAT_DATASET_CACHE_LOCK
     global _FILE_FORMAT_DATASET_CACHE_PID
     current_pid = os.getpid()
     if current_pid != _FILE_FORMAT_DATASET_CACHE_PID:
-        _FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
+        _FILE_FORMAT_DATASET_CACHE = None
         _FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
         _FILE_FORMAT_DATASET_CACHE_PID = current_pid
 
 
-def _file_format_dataset_cache(file_io: FileIO,
-                               max_size: int) -> _FileFormatDatasetCache:
+def _file_format_dataset_cache(max_size: int) -> _FileFormatDatasetCache:
+    global _FILE_FORMAT_DATASET_CACHE
     _ensure_file_format_dataset_cache_process()
     with _FILE_FORMAT_DATASET_CACHE_LOCK:
-        cache = _FILE_FORMAT_DATASET_CACHES.get(file_io)
-        if cache is None:
-            cache = _FileFormatDatasetCache(max_size)
-            _FILE_FORMAT_DATASET_CACHES[file_io] = cache
+        if _FILE_FORMAT_DATASET_CACHE is None:
+            _FILE_FORMAT_DATASET_CACHE = _FileFormatDatasetCache(max_size)
         else:
-            cache.ensure_capacity(max_size)
-        return cache
+            _FILE_FORMAT_DATASET_CACHE.ensure_capacity(max_size)
+        return _FILE_FORMAT_DATASET_CACHE
 
 
 def _reset_file_format_dataset_cache():
-    global _FILE_FORMAT_DATASET_CACHES
+    global _FILE_FORMAT_DATASET_CACHE
     _ensure_file_format_dataset_cache_process()
     with _FILE_FORMAT_DATASET_CACHE_LOCK:
-        _FILE_FORMAT_DATASET_CACHES = weakref.WeakKeyDictionary()
+        _FILE_FORMAT_DATASET_CACHE = None
 
 
-def _remove_file_format_dataset_cache(file_io: FileIO):
+def _remove_file_format_dataset_cache_entry(key: Tuple[Any, str, str]):
     _ensure_file_format_dataset_cache_process()
     with _FILE_FORMAT_DATASET_CACHE_LOCK:
-        _FILE_FORMAT_DATASET_CACHES.pop(file_io, None)
+        cache = _FILE_FORMAT_DATASET_CACHE
+    if cache is not None:
+        cache.remove(key)
 
 
 def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[int]:
@@ -173,16 +178,16 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
         return ds.dataset(
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
+    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
     if cache_max_size <= 0:
-        _remove_file_format_dataset_cache(file_io)
+        _remove_file_format_dataset_cache_entry(key)
         return load()
 
-    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
-    return _file_format_dataset_cache(
-        file_io, cache_max_size).get_or_load(
-            key, load,
-            lambda dataset: _estimate_file_format_dataset_size(
-                dataset, file_format))
+    return _file_format_dataset_cache(cache_max_size).get_or_load(
+        key,
+        load,
+        lambda dataset: _estimate_file_format_dataset_size(
+            dataset, file_format))
 
 
 class FormatPyArrowReader(RecordBatchReader):
@@ -202,7 +207,7 @@ class FormatPyArrowReader(RecordBatchReader):
                  nested_name_paths: Optional[List[List[str]]] = None):
         cache_max_size = (
             options.file_format_metadata_cache_max_size().get_bytes()
-            if options is not None else 10 * 1024 * 1024
+            if options is not None else 50 * 1024 * 1024
         )
         self.dataset = _file_format_dataset(
             file_io, file_format, file_path, cache_max_size)

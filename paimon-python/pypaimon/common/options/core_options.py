@@ -267,12 +267,12 @@ class CoreOptions:
     FILE_FORMAT_METADATA_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("file-format.metadata-cache.max-size")
         .memory_type()
-        .default_value(MemorySize.of_mebi_bytes(10))
+        .default_value(MemorySize.of_mebi_bytes(50))
         .with_description(
-            "Maximum estimated size of reusable PyArrow Dataset metadata cached per "
-            "FileIO in the current process. Actual retained memory may be higher. "
-            "The cache assumes immutable Paimon data files. Set to 0 to disable it. "
-            "When readers share a FileIO, the largest requested value is used."
+            "Maximum estimated size of reusable PyArrow Dataset metadata cached in the "
+            "current process. Actual retained memory may be higher. The cache assumes "
+            "immutable Paimon data files. Set to 0 to bypass it. When readers request "
+            "different positive values, the largest value is used."
         )
     )
 
@@ -1038,7 +1038,7 @@ class CoreOptions:
     def file_format_metadata_cache_max_size(self) -> MemorySize:
         return self.options.get(
             CoreOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE,
-            MemorySize.of_mebi_bytes(10),
+            MemorySize.of_mebi_bytes(50),
         )
 
     def file_compression(self, default=None):

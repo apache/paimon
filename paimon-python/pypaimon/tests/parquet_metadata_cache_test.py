@@ -36,7 +36,7 @@ from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
-DEFAULT_CACHE_SIZE = 10 * 1024 * 1024
+DEFAULT_CACHE_SIZE = 50 * 1024 * 1024
 
 
 class _CountingInputFile:
@@ -98,7 +98,7 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     @staticmethod
-    def _options(max_size="10 mb"):
+    def _options(max_size="50 mb"):
         return CoreOptions(Options({
             "file-format.metadata-cache.max-size": max_size,
         }))
@@ -134,7 +134,7 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             self._read(self.paths[0], options)
         self.assertEqual(1, dataset.call_count)
 
-    def test_zero_size_disables_and_clears_cache(self):
+    def test_zero_size_bypasses_and_removes_entry(self):
         enabled = self._options()
         disabled = self._options("0 b")
         original = reader_module.ds.dataset
@@ -142,6 +142,17 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             self._read(self.paths[0], enabled)
             self._read(self.paths[0], disabled)
             self._read(self.paths[0], enabled)
+        self.assertEqual(3, dataset.call_count)
+
+    def test_zero_size_keeps_other_entries(self):
+        enabled = self._options()
+        disabled = self._options("0 b")
+        original = reader_module.ds.dataset
+        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+            self._read(self.paths[0], enabled)
+            self._read(self.paths[1], enabled)
+            self._read(self.paths[0], disabled)
+            self._read(self.paths[1], enabled)
         self.assertEqual(3, dataset.call_count)
 
     def test_reuses_dataset(self):
@@ -243,26 +254,25 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             reader_module._estimate_file_format_dataset_size(
                 dataset, "parquet"))
 
-    def test_cache_capacity_does_not_shrink(self):
-        cache = reader_module._file_format_dataset_cache(
-            self.file_io, 3 * 1024 * 1024)
-        same_cache = reader_module._file_format_dataset_cache(
-            self.file_io, 1024 * 1024)
+    def test_process_cache_uses_largest_requested_capacity(self):
+        cache = reader_module._file_format_dataset_cache(3 * 1024 * 1024)
+        same_cache = reader_module._file_format_dataset_cache(1024 * 1024)
 
         self.assertIs(cache, same_cache)
         self.assertEqual(3 * 1024 * 1024, cache.max_size)
 
-    def test_cache_capacity_is_isolated_by_file_io(self):
+    def test_shares_cache_across_file_io_with_same_filesystem(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
+        other_file_io.filesystem = self.file_io.filesystem
 
-        first_cache = reader_module._file_format_dataset_cache(
-            self.file_io, 3 * 1024 * 1024)
-        second_cache = reader_module._file_format_dataset_cache(
-            other_file_io, 1024 * 1024)
+        original = reader_module.ds.dataset
+        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+            reader_module._file_format_dataset(
+                self.file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
+            reader_module._file_format_dataset(
+                other_file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
 
-        self.assertIsNot(first_cache, second_cache)
-        self.assertEqual(3 * 1024 * 1024, first_cache.max_size)
-        self.assertEqual(1024 * 1024, second_cache.max_size)
+        self.assertEqual(1, dataset.call_count)
 
     def test_does_not_share_across_filesystems(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
@@ -341,11 +351,9 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             second_dir.cleanup()
 
     def test_resets_after_process_change(self):
-        parent_cache = reader_module._file_format_dataset_cache(
-            self.file_io, DEFAULT_CACHE_SIZE)
+        parent_cache = reader_module._file_format_dataset_cache(DEFAULT_CACHE_SIZE)
         with patch.object(reader_module.os, "getpid", return_value=os.getpid() + 1):
-            child_cache = reader_module._file_format_dataset_cache(
-                self.file_io, DEFAULT_CACHE_SIZE)
+            child_cache = reader_module._file_format_dataset_cache(DEFAULT_CACHE_SIZE)
         self.assertIsNot(parent_cache, child_cache)
 
     def test_coalesces_concurrent_loads(self):
