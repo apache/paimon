@@ -120,6 +120,80 @@ class RemainingRowsTest(unittest.TestCase):
         self.assertTrue(rr.exhausted())
 
 
+class PipelinedBatchGeneratorTest(unittest.TestCase):
+
+    def setUp(self):
+        self.read = TableRead.__new__(TableRead)
+        self.read.limit = None
+        self.schema = pa.schema([('value', pa.int64())])
+
+    def _batch(self, value):
+        return pa.RecordBatch.from_arrays(
+            [pa.array([value], type=pa.int64())], schema=self.schema)
+
+    def test_reads_concurrently_and_emits_in_split_order(self):
+        second_started = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            if value == 0 and not second_started.wait(5):
+                raise TimeoutError('second split did not start concurrently')
+            if value == 1:
+                second_started.set()
+            yield self._batch(value)
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            batches = list(self.read._pipelined_arrow_batch_generator(
+                [0, 1, 2], self.schema, 1, 2))
+
+        self.assertEqual(
+            [0, 1, 2],
+            [batch.column(0)[0].as_py() for batch in batches],
+        )
+
+    def test_propagates_worker_error(self):
+        def generate(splits, schema, blob_parallelism):
+            if splits[0] == 0:
+                raise RuntimeError('simulated streaming failure')
+            yield self._batch(splits[0])
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, 'simulated streaming failure'
+            ):
+                list(self.read._pipelined_arrow_batch_generator(
+                    [0, 1], self.schema, 1, 2))
+
+    def test_close_cancels_workers(self):
+        started = threading.Barrier(2)
+        closed = []
+        closed_lock = threading.Lock()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            try:
+                started.wait(5)
+                while True:
+                    yield self._batch(value)
+            finally:
+                with closed_lock:
+                    closed.append(value)
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            batches = self.read._pipelined_arrow_batch_generator(
+                [0, 1], self.schema, 1, 2)
+            next(batches)
+            batches.close()
+
+        self.assertCountEqual([0, 1], closed)
+
+
 class ParallelReaderAppendOnlyTest(unittest.TestCase):
     """Append-only multi-partition table — parallel must match serial exactly."""
 
@@ -225,6 +299,57 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             .sort_values('user_id').reset_index(drop=True)
         self.assertTrue(serial_df.equals(parallel_df))
 
+    def test_parallel_batch_reader_matches_serial(self):
+        rb = self.table.new_read_builder()
+        splits = self._scan_splits(rb)
+        read = rb.new_read()
+        serial = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=1))
+        parallel = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=4))
+        self.assertEqual(serial, parallel)
+
+    def test_parallel_batch_reader_uses_table_option(self):
+        rb = self.table_opt_4.new_read_builder()
+        splits = self._scan_splits(rb)
+        read = rb.new_read()
+        with mock.patch.object(
+            read,
+            '_pipelined_arrow_batch_generator',
+            wraps=read._pipelined_arrow_batch_generator,
+        ) as pipeline:
+            result = pa.Table.from_batches(
+                read.to_arrow_batch_reader(splits))
+        pipeline.assert_called_once()
+        self.assertEqual(self.expected_rows, result.num_rows)
+
+    def test_default_batch_reader_auto_uses_pipeline_when_multicore(self):
+        if (os.cpu_count() or 1) < 2:
+            self.skipTest('single-core runner: auto resolves to serial')
+        rb = self.table.new_read_builder()
+        splits = self._scan_splits(rb)
+        read = rb.new_read()
+        with mock.patch.object(
+            read,
+            '_pipelined_arrow_batch_generator',
+            wraps=read._pipelined_arrow_batch_generator,
+        ) as pipeline:
+            result = pa.Table.from_batches(
+                read.to_arrow_batch_reader(splits))
+        pipeline.assert_called_once()
+        self.assertEqual(self.expected_rows, result.num_rows)
+
+    def test_parallel_batch_reader_limit_matches_serial(self):
+        rb = self.table.new_read_builder().with_limit(600)
+        splits = self._scan_splits(rb)
+        read = rb.new_read()
+        serial = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=1))
+        parallel = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=4))
+        self.assertEqual(serial, parallel)
+        self.assertEqual(600, parallel.num_rows)
+
     def test_default_none_runs_auto_parallel(self):
         # No runtime arg and no table option => auto. With >= 2 splits on a
         # multi-core box this takes the parallel fan-out path; the result
@@ -257,11 +382,13 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
     def test_method_arg_overrides_option_to_serial(self):
         # option=4 but caller passes 1: should disable parallelism.
         read = self.table_opt_4.new_read_builder().new_read()
-        with mock.patch.object(read, '_to_arrow_parallel') as patched:
+        with mock.patch.object(read, '_to_arrow_parallel') as patched, \
+                mock.patch.object(read, '_pipelined_arrow_batch_generator') as pipeline:
             patched.side_effect = AssertionError(
                 "_to_arrow_parallel should not be called when arg=1 overrides option")
             splits = self._scan_splits(self.table_opt_4.new_read_builder())
             read.to_arrow(splits, parallelism=1)
+        pipeline.assert_not_called()
 
     def test_method_arg_overrides_option_to_parallel(self):
         # option=1 (forces serial) but caller passes 4: should enable parallelism.
@@ -305,6 +432,8 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         self.assertNotIn("read.parallelism", str(ctx.exception))
         with self.assertRaises(ValueError):
             read.to_pandas(splits, parallelism=-1)
+        with self.assertRaises(ValueError):
+            read.to_arrow_batch_reader(splits, parallelism=0)
 
     def test_invalid_option_value_raises(self):
         # Build a fresh table with an invalid option value.
@@ -452,6 +581,20 @@ class ParallelReaderPrimaryKeyTest(unittest.TestCase):
         self.assertEqual(len(updated), 1)
         self.assertEqual(updated.iloc[0].behavior, 'v2-updated')
         self.assertEqual(updated.iloc[0].item_id, 9001)
+
+    def test_parallel_batch_reader_merge_matches_serial(self):
+        rb = self.table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        read = rb.new_read()
+        serial = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=1))
+        parallel = pa.Table.from_batches(
+            read.to_arrow_batch_reader(splits, parallelism=4))
+        serial = serial.to_pandas().sort_values(
+            ['dt', 'user_id']).reset_index(drop=True)
+        parallel = parallel.to_pandas().sort_values(
+            ['dt', 'user_id']).reset_index(drop=True)
+        self.assertTrue(serial.equals(parallel))
 
     def test_parallel_with_limit_pk(self):
         limit = 12

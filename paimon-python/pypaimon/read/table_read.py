@@ -16,6 +16,7 @@
 # under the License.
 
 import os
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterator, List, Optional
@@ -82,6 +83,8 @@ class TableRead:
     # workers (P) each spin up blob_parallelism (B) blob threads, so peak
     # connections ~= P*B. Shrink per-split B to keep the product bounded.
     _MAX_TOTAL_BLOB_WORKERS = 64
+    _PIPELINE_QUEUE_BATCHES = 2
+    _PIPELINE_QUEUE_TIMEOUT_SECONDS = 0.1
 
     def __init__(
         self,
@@ -137,14 +140,107 @@ class TableRead:
 
         return _record_generator()
 
-    def to_arrow_batch_reader(self, splits: List[Split],
-                              blob_parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
+    def to_arrow_batch_reader(
+        self,
+        splits: List[Split],
+        blob_parallelism: Optional[int] = None,
+        parallelism: Optional[int] = None,
+    ) -> pyarrow.ipc.RecordBatchReader:
+        """Stream Arrow batches while reading multiple splits concurrently.
+
+        Batches preserve input split order. At most two batches per in-flight
+        split are buffered, keeping memory bounded while overlapping split I/O.
+        """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
+        effective = self._resolve_parallelism(parallelism, len(splits))
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
+        if self._should_run_parallel(splits, effective):
+            workers = min(effective, len(splits))
+            effective_bp = self._cap_blob_parallelism(workers, effective_bp)
+            batch_iterator = self._pipelined_arrow_batch_generator(
+                splits, schema, effective_bp, workers)
+        else:
+            batch_iterator = self._arrow_batch_generator(
+                splits, schema, effective_bp)
         return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
+
+    def _pipelined_arrow_batch_generator(
+        self,
+        splits: List[Split],
+        schema: pyarrow.Schema,
+        blob_parallelism: int,
+        workers: int,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        cancel = threading.Event()
+        end = object()
+        queues = {}
+
+        def put_item(output_queue, item) -> bool:
+            while not cancel.is_set():
+                try:
+                    output_queue.put(
+                        item, timeout=self._PIPELINE_QUEUE_TIMEOUT_SECONDS)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
+        def read_split(split, output_queue):
+            batch_iterator = self._arrow_batch_generator(
+                [split], schema, blob_parallelism)
+            try:
+                for batch in batch_iterator:
+                    if not put_item(output_queue, batch):
+                        return
+            except BaseException as exception:
+                put_item(output_queue, exception)
+            finally:
+                try:
+                    batch_iterator.close()
+                except BaseException as exception:
+                    put_item(output_queue, exception)
+                finally:
+                    put_item(output_queue, end)
+
+        executor = ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="pypaimon-stream-read",
+        )
+
+        def schedule(index: int):
+            if index >= len(splits):
+                return
+            output_queue = queue.Queue(maxsize=self._PIPELINE_QUEUE_BATCHES)
+            queues[index] = output_queue
+            executor.submit(read_split, splits[index], output_queue)
+
+        remaining = self.limit
+        try:
+            for index in range(workers):
+                schedule(index)
+
+            for index in range(len(splits)):
+                output_queue = queues.pop(index)
+                while True:
+                    item = output_queue.get()
+                    if item is end:
+                        break
+                    if isinstance(item, BaseException):
+                        raise item
+                    batch = item
+                    if remaining is not None and batch.num_rows > remaining:
+                        batch = batch.slice(0, remaining)
+                    yield batch
+                    if remaining is not None:
+                        remaining -= batch.num_rows
+                        if remaining <= 0:
+                            return
+                schedule(index + workers)
+        finally:
+            cancel.set()
+            executor.shutdown(wait=True)
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
@@ -207,7 +303,11 @@ class TableRead:
         if self._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
-        batch_reader = self.to_arrow_batch_reader(splits, blob_parallelism=effective_bp)
+        batch_reader = self.to_arrow_batch_reader(
+            splits,
+            blob_parallelism=effective_bp,
+            parallelism=effective,
+        )
 
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
