@@ -221,6 +221,19 @@ public class PathMappingTest {
     }
 
     @Test
+    public void testNonLocalMappingRequiresAuthority() {
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Arrays.asList(
+                                                "hdfs://source/a=hdfs:/clone",
+                                                "hdfs://source/b=hdfs://namenode/clone")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Non-local path mapping prefix must include authority")
+                .hasMessageContaining("hdfs:/clone");
+    }
+
+    @Test
     public void testOverlappingSourceAndTargetPrefixesFail() {
         assertThatThrownBy(
                         () ->

@@ -163,6 +163,19 @@ public class PathMapping implements Serializable {
         return result;
     }
 
+    List<String> mappedTargetPrefixesUnder(String sourceRoot) {
+        String normalizedRoot = normalizeRuntimePath(sourceRoot);
+        List<String> result = new ArrayList<>();
+        result.add(rewriteRequired(normalizedRoot));
+        for (Entry entry : entries) {
+            if (isSameOrDescendant(entry.sourcePrefix, normalizedRoot)
+                    && !result.contains(entry.targetPrefix)) {
+                result.add(entry.targetPrefix);
+            }
+        }
+        return result;
+    }
+
     public String identity() {
         List<String> mappings = new ArrayList<>();
         for (Entry entry : entries) {
@@ -180,6 +193,12 @@ public class PathMapping implements Serializable {
                 "Path mapping prefixes must not contain a query or fragment.");
         checkArgument(
                 uri.getUserInfo() == null, "Path mapping prefixes must not contain user info.");
+        checkArgument(
+                uri.getScheme() == null
+                        || "file".equalsIgnoreCase(uri.getScheme())
+                        || uri.getAuthority() != null,
+                "Non-local path mapping prefix must include authority: %s",
+                normalized);
         while (normalized.length() > 1
                 && normalized.endsWith("/")
                 && !normalized.matches("^[A-Za-z][A-Za-z0-9+.-]*:/+$")) {

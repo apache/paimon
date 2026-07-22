@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Immutable plan for a full-history clone. */
 public class FullHistoryClonePlan implements Serializable {
 
@@ -33,19 +35,16 @@ public class FullHistoryClonePlan implements Serializable {
     private final Path sourceRoot;
     private final Path targetRoot;
     private final String sourceFingerprint;
-    private final FullHistoryCopyPlan payloadCopyPlan;
     private final List<Path> externalTargetRoots;
 
     FullHistoryClonePlan(
             Path sourceRoot,
             Path targetRoot,
             String sourceFingerprint,
-            FullHistoryCopyPlan payloadCopyPlan,
             List<Path> externalTargetRoots) {
         this.sourceRoot = sourceRoot;
         this.targetRoot = targetRoot;
         this.sourceFingerprint = sourceFingerprint;
-        this.payloadCopyPlan = payloadCopyPlan;
         this.externalTargetRoots =
                 Collections.unmodifiableList(new ArrayList<>(externalTargetRoots));
     }
@@ -62,11 +61,35 @@ public class FullHistoryClonePlan implements Serializable {
         return sourceFingerprint;
     }
 
-    public FullHistoryCopyPlan payloadCopyPlan() {
-        return payloadCopyPlan;
-    }
-
     public List<Path> externalTargetRoots() {
         return externalTargetRoots;
+    }
+
+    public void validatePayloadTarget(Path target) {
+        boolean owned = PathMapping.isSameOrDescendant(target.toString(), targetRoot.toString());
+        if (!owned) {
+            for (Path externalRoot : externalTargetRoots) {
+                if (PathMapping.isSameOrDescendant(target.toString(), externalRoot.toString())) {
+                    owned = true;
+                    break;
+                }
+            }
+        }
+        checkArgument(
+                owned, "Payload target is outside full-history clone owned roots: %s", target);
+        validateNotControlPath(targetRoot, target);
+        for (Path externalRoot : externalTargetRoots) {
+            validateNotControlPath(externalRoot, target);
+        }
+    }
+
+    private static void validateNotControlPath(Path root, Path target) {
+        Path marker = new Path(root, FullHistoryCloneMarker.FILE_NAME);
+        Path success = new Path(root, FullHistoryCloneMarker.SUCCESS_FILE_NAME);
+        checkArgument(
+                !PathMapping.isSameOrDescendant(target.toString(), marker.toString())
+                        && !PathMapping.isSameOrDescendant(target.toString(), success.toString()),
+                "Payload target uses a reserved control namespace: %s",
+                target);
     }
 }

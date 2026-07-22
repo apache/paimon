@@ -29,8 +29,11 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import java.util.Collections;
 import java.util.Map;
 
 /** Copies one planned full-history payload file per input record. */
@@ -47,6 +50,7 @@ class CopyFullHistoryFileOperator
     private transient Catalog sourceCatalog;
     private transient FileIO sourceFileIO;
     private transient FileIO targetFileIO;
+    private transient ValueState<String> copiedFile;
 
     CopyFullHistoryFileOperator(
             Map<String, String> sourceCatalogConfig,
@@ -59,26 +63,63 @@ class CopyFullHistoryFileOperator
         this.sourceTableName = sourceTableName;
     }
 
+    CopyFullHistoryFileOperator(FileIO sourceFileIO, FileIO targetFileIO) {
+        this.sourceCatalogConfig = Collections.emptyMap();
+        this.targetCatalogConfig = Collections.emptyMap();
+        this.sourceDatabase = "";
+        this.sourceTableName = "";
+        this.sourceFileIO = sourceFileIO;
+        this.targetFileIO = targetFileIO;
+    }
+
     @Override
     public void open() throws Exception {
         super.open();
-        sourceCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
-        FileStoreTable sourceTable =
-                (FileStoreTable)
-                        sourceCatalog.getTable(Identifier.create(sourceDatabase, sourceTableName));
-        sourceFileIO = sourceTable.fileIO();
+        if (sourceFileIO == null) {
+            sourceCatalog =
+                    FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
+            FileStoreTable sourceTable =
+                    (FileStoreTable)
+                            sourceCatalog.getTable(
+                                    Identifier.create(sourceDatabase, sourceTableName));
+            sourceFileIO = sourceTable.fileIO();
+        }
+        copiedFile =
+                getPartitionedState(
+                        new ValueStateDescriptor<>("full-history-copied-file", String.class));
     }
 
     @Override
     public void processElement(StreamRecord<FullHistoryCopyPlan.FileCopy> record) throws Exception {
         FullHistoryCopyPlan.FileCopy file = record.getValue();
+        String identity = copyIdentity(file);
+        String previousIdentity = copiedFile.value();
+        if (previousIdentity != null) {
+            if (!previousIdentity.equals(identity)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Conflicting clone payloads map to target %s: %s and %s.",
+                                file.target(), previousIdentity, identity));
+            }
+            return;
+        }
         if (targetFileIO == null) {
             targetFileIO =
                     FullHistoryFileIOUtils.createResolvingFileIO(
                             file.target(), targetCatalogConfig);
         }
         FullHistoryFileCopier.copyFile(sourceFileIO, targetFileIO, file, false);
+        copiedFile.update(identity);
+    }
+
+    private static String copyIdentity(FullHistoryCopyPlan.FileCopy file) {
+        return file.source()
+                + "\n"
+                + file.target()
+                + "\n"
+                + file.kind()
+                + "\n"
+                + file.expectedSize();
     }
 
     @Override
