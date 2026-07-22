@@ -48,7 +48,8 @@ class HeapVectorCapacityTest {
 
         vector.reserve(threshold);
         int expandedCapacity = vector.getCapacity();
-        // Use ceiling division (shrink ratio = 4) so capacity is not strictly greater than usage * 4.
+        // Use ceiling division (shrink ratio = 4)
+        // so capacity is not strictly greater than usage * 4.
         vector.addElementsAppended((expandedCapacity + 3) / 4);
         vector.reset();
 
