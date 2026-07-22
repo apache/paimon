@@ -94,7 +94,9 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
+                    if (globalIndex == null
+                            || (!table.primaryKeys().isEmpty()
+                                    && globalIndex.sourceMeta() != null)) {
                         return false;
                     }
                     return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()

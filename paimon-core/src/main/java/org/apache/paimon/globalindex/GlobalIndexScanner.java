@@ -195,8 +195,8 @@ public class GlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        List<IndexFileMeta> ordinaryIndexFiles = ordinaryGlobalIndexFiles(indexFiles);
-        if (ordinaryIndexFiles.isEmpty()) {
+        List<IndexFileMeta> readableIndexFiles = readableGlobalIndexFiles(table, indexFiles);
+        if (readableIndexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
@@ -208,7 +208,7 @@ public class GlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        ordinaryIndexFiles));
+                        readableIndexFiles));
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -250,7 +250,7 @@ public class GlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null || globalIndex.sourceMeta() != null) {
+                    if (!isReadableGlobalIndex(table, globalIndex)) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
@@ -270,15 +270,21 @@ public class GlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
-    private static List<IndexFileMeta> ordinaryGlobalIndexFiles(
-            Collection<IndexFileMeta> indexFiles) {
+    private static List<IndexFileMeta> readableGlobalIndexFiles(
+            FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
                 .filter(
                         indexFile -> {
                             GlobalIndexMeta meta = indexFile.globalIndexMeta();
-                            return meta != null && meta.sourceMeta() == null;
+                            return isReadableGlobalIndex(table, meta);
                         })
                 .collect(Collectors.toList());
+    }
+
+    static boolean isReadableGlobalIndex(
+            FileStoreTable table, @Nullable GlobalIndexMeta globalIndex) {
+        return globalIndex != null
+                && (table.primaryKeys().isEmpty() || globalIndex.sourceMeta() == null);
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {

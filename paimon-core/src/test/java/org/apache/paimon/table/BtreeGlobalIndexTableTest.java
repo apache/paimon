@@ -284,10 +284,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testSourceBackedIndexIsExcludedFromGlobalRowIdScan() throws Exception {
+    public void testDataEvolutionSourceBackedIndexParticipatesInGlobalRowIdScan() throws Exception {
         write(10L);
         FileStoreTable table =
                 tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
         IndexFileMeta sourceBacked =
                 new IndexFileMeta(
                         "btree",
@@ -298,43 +299,45 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         null);
 
         assertThat(GlobalIndexScanner.create(table, Collections.singletonList(sourceBacked)))
-                .isEmpty();
+                .isPresent();
 
         GlobalIndexCoverage coverage =
                 new GlobalIndexCoverage(
                         table,
-                        table.snapshotManager().latestSnapshot(),
+                        snapshot,
                         PartitionPredicate.ALWAYS_TRUE,
                         Collections.singletonList(sourceBacked));
-        assertThat(coverage.unindexedRanges(1)).containsExactly(new Range(0, 9));
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
-    public void testOrdinaryAndSourceBackedBTreeIndexesCanCoexist() throws Exception {
+    public void testOrdinaryAndSourceBackedBTreeIndexCoverageCanCoexist() throws Exception {
         write(10L);
-        createIndex("f1");
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        List<IndexFileMeta> mixedIndexes =
-                table.store().newIndexFileHandler().scan(snapshot, "btree").stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .collect(Collectors.toCollection(ArrayList::new));
+        List<IndexFileMeta> mixedIndexes = new ArrayList<>();
+        mixedIndexes.add(
+                new IndexFileMeta(
+                        "btree",
+                        "ordinary-index",
+                        0,
+                        5,
+                        new GlobalIndexMeta(0, 4, 1, null, null),
+                        null));
         mixedIndexes.add(
                 new IndexFileMeta(
                         "btree",
                         "source-backed-index",
                         0,
-                        10,
-                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                        5,
+                        new GlobalIndexMeta(5, 9, 1, null, null, new byte[] {1}),
                         null));
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
 
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, mixedIndexes).orElseThrow(AssertionError::new)) {
-            assertThat(scanner.scan(predicate).get().results().toRangeList())
-                    .containsExactly(new Range(7, 7));
-        }
+        GlobalIndexCoverage coverage =
+                new GlobalIndexCoverage(
+                        table, snapshot, PartitionPredicate.ALWAYS_TRUE, mixedIndexes);
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
