@@ -535,7 +535,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             throw new IllegalArgumentException(
                                     "The changes in "
                                             + pathFactory.getPartitionString(entry.partition())
-                                            + " do not belong to the specified overwrite partitions");
+                                            + " does not belong to this partition");
                         }
                     }
                 }
