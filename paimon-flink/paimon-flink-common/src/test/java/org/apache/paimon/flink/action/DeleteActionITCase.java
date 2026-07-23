@@ -44,6 +44,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link DeleteAction}. */
 public class DeleteActionITCase extends ActionITCaseBase {
@@ -93,6 +94,33 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
         validateStreamingReadResult(iterator, expected);
         iterator.close();
+    }
+
+    @Test
+    public void testRejectRegularAppendOnlyTable() throws Exception {
+        createFileStoreTable(
+                ROW_TYPE,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonMap("bucket", "-1"));
+
+        DeleteAction action =
+                createAction(
+                        DeleteAction.class,
+                        "delete",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--where",
+                        "k=1");
+
+        assertThatThrownBy(action::run)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("regular append-only tables");
     }
 
     private void prepareTable() throws Exception {
