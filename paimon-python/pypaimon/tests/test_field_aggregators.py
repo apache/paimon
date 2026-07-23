@@ -26,12 +26,12 @@ on real PK tables lives in ``test_aggregation_e2e.py``.
 
 import datetime
 import unittest
-from decimal import Decimal
+from decimal import Decimal as BigDecimal
 from functools import reduce
 from typing import List
 
 from pypaimon.common.options import CoreOptions, Options
-from pypaimon.data import Timestamp
+from pypaimon.data import Timestamp, Decimal
 from pypaimon.read.reader.aggregate import create_field_aggregator
 from pypaimon.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
@@ -44,6 +44,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldMinAgg,
     FieldPrimaryKeyAgg,
     FieldSumAgg,
+    FieldProductAgg,
     FieldListaggAgg,
     FieldNestedUpdateAgg,
     FieldCollectAgg,
@@ -141,21 +142,6 @@ class FieldFirstNonNullValueAggTest(unittest.TestCase):
 
 class FieldSumAggTest(unittest.TestCase):
 
-    def test_int_sum(self):
-        agg = _make("sum", "BIGINT")
-        self.assertIsInstance(agg, FieldSumAgg)
-        self.assertEqual(agg.agg(None, 5), 5)
-        self.assertEqual(agg.agg(5, 7), 12)
-
-    def test_float_sum(self):
-        agg = _make("sum", "DOUBLE")
-        self.assertAlmostEqual(agg.agg(1.5, 2.25), 3.75)
-
-    def test_decimal_sum(self):
-        agg = _make("sum", "DECIMAL(10,2)")
-        result = agg.agg(Decimal("1.23"), Decimal("4.56"))
-        self.assertEqual(result, Decimal("5.79"))
-
     def test_null_inputs_return_non_null_operand(self):
         agg = _make("sum", "INT")
         self.assertEqual(agg.agg(None, 5), 5)
@@ -165,6 +151,313 @@ class FieldSumAggTest(unittest.TestCase):
     def test_non_numeric_type_rejected_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
             _make("sum", "VARCHAR")
+        self.assertIn("numeric", str(ctx.exception))
+
+    def test_int_sum(self):
+        agg = _make("sum", "INT")
+        self.assertIsInstance(agg, FieldSumAgg)
+
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 11)
+        self.assertEqual(agg.retract(10, 5), 5)
+        self.assertEqual(agg.retract(None, 5), -5)
+
+    def test_byte_sum(self):
+        agg = _make("sum", "TINYINT")
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 11)
+        self.assertEqual(agg.retract(10, 5), 5)
+        self.assertEqual(agg.retract(None, 5), -5)
+
+    def test_short_sum(self):
+        agg = _make("sum", "SMALLINT")
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 11)
+        self.assertEqual(agg.retract(10, 5), 5)
+        self.assertEqual(agg.retract(None, 5), -5)
+
+    def test_long_sum(self):
+        agg = _make("sum", "BIGINT")
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 11)
+        self.assertEqual(agg.retract(10, 5), 5)
+        self.assertEqual(agg.retract(None, 5), -5)
+
+    def test_byte_overflow(self):
+        agg = _make("sum", "TINYINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(127, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-128, -1)
+
+    def test_short_overflow(self):
+        agg = _make("sum", "SMALLINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(32767, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-32768, -1)
+
+    def test_int_overflow(self):
+        agg = _make("sum", "INT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(2147483647, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-2147483648, -1)
+
+    def test_long_overflow(self):
+        agg = _make("sum", "BIGINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(9223372036854775807, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-9223372036854775808, -1)
+
+    def test_byte_retract_overflow(self):
+        agg = _make("sum", "TINYINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-128, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(127, -1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(None, -128)
+
+    def test_short_retract_overflow(self):
+        agg = _make("sum", "SMALLINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-32768, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(32767, -1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(None, -32768)
+
+    def test_int_retract_overflow(self):
+        agg = _make("sum", "INT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-2147483648, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(2147483647, -1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(None, -2147483648)
+
+    def test_long_retract_overflow(self):
+        agg = _make("sum", "BIGINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-9223372036854775808, 1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(9223372036854775807, -1)
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(None, -9223372036854775808)
+
+    def test_float_sum(self):
+        agg = _make("sum", "FLOAT")
+
+        self.assertEqual(agg.agg(None, 10.0), 10.0)
+        self.assertEqual(agg.agg(1.0, 10.0), 11.0)
+        self.assertEqual(agg.retract(10.0, 5.0), 5.0)
+        self.assertEqual(agg.retract(None, 5.0), -5.0)
+
+    def test_double_sum(self):
+        agg = _make("sum", "DOUBLE")
+
+        self.assertEqual(agg.agg(1.5, 2.25), 3.75)
+        self.assertEqual(agg.agg(None, 10.0), 10.0)
+        self.assertEqual(agg.agg(1.0, 10.0), 11.0)
+        self.assertEqual(agg.retract(10.0, 5.0), 5.0)
+        self.assertEqual(agg.retract(None, 5.0), -5.0)
+
+    def test_decimal_sum(self):
+        agg = _make("sum", "DECIMAL(10,2)")
+
+        self.assertEqual(agg.agg(None, BigDecimal("10.00")), BigDecimal("10.00"))
+        self.assertEqual(agg.agg(BigDecimal("1.23"), BigDecimal("4.56")), BigDecimal("5.79"))
+        self.assertEqual(agg.retract(BigDecimal("10.00"), BigDecimal("5.00")), BigDecimal("5.00"))
+        self.assertEqual(agg.retract(None, BigDecimal("5.00")), BigDecimal("-5.00"))
+
+
+class FieldProductAggTest(unittest.TestCase):
+
+    @staticmethod
+    def to_decimal(value, precision: int = 10, scale: int = 0) -> "BigDecimal":
+        return Decimal.from_big_decimal(BigDecimal(str(value)), precision, scale).to_big_decimal()
+
+    def test_int(self):
+        agg = _make("product", "INT")
+        self.assertIsInstance(agg, FieldProductAgg)
+
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 10)
+        self.assertEqual(agg.retract(10, 5), 2)
+        self.assertIsNone(agg.retract(None, 5))
+
+    def test_byte(self):
+        agg = _make("product", "TINYINT")
+
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 10)
+        self.assertEqual(agg.retract(10, 5), 2)
+        self.assertIsNone(agg.retract(None, 5))
+
+    def test_short(self):
+        agg = _make("product", "SMALLINT")
+
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 10)
+        self.assertEqual(agg.retract(10, 5), 2)
+        self.assertIsNone(agg.retract(None, 5))
+
+    def test_long(self):
+        agg = _make("product", "BIGINT")
+
+        self.assertEqual(agg.agg(None, 10), 10)
+        self.assertEqual(agg.agg(1, 10), 10)
+        self.assertEqual(agg.retract(10, 5), 2)
+        self.assertIsNone(agg.retract(None, 5))
+
+    def test_float(self):
+        agg = _make("product", "FLOAT")
+
+        self.assertEqual(agg.agg(None, 10.0), 10.0)
+        self.assertEqual(agg.agg(1.0, 10.0), 10.0)
+        self.assertEqual(agg.retract(10.0, 5.0), 2.0)
+        self.assertIsNone(agg.retract(None, 5.0))
+
+    def test_double(self):
+        agg = _make("product", "DOUBLE")
+
+        self.assertEqual(agg.agg(None, 10.0), 10.0)
+        self.assertEqual(agg.agg(1.0, 10.0), 10.0)
+        self.assertEqual(agg.retract(10.0, 5.0), 2.0)
+        self.assertIsNone(agg.retract(None, 5.0))
+
+    def test_decimal_no_precision_scale(self):
+        agg = _make("product", "DECIMAL")
+
+        self.assertEqual(agg.agg(None, self.to_decimal(10)), self.to_decimal(10))
+        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10)), self.to_decimal(10))
+        self.assertEqual(agg.agg(self.to_decimal(1.3), self.to_decimal(10)), self.to_decimal(10))
+        self.assertEqual(agg.agg(self.to_decimal(1.5), self.to_decimal(10)), self.to_decimal(20))
+        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5)), self.to_decimal(2))
+        self.assertIsNone(agg.retract(None, self.to_decimal(5)))
+
+    def test_decimal(self):
+        agg = _make("product", "DECIMAL(8,2)")
+
+        self.assertEqual(agg.agg(BigDecimal("1.50"), BigDecimal("2.00")), BigDecimal("3.00"))
+        self.assertEqual(agg.agg(BigDecimal("1.50"), BigDecimal("2.01")), BigDecimal("3.02"))
+        self.assertEqual(agg.retract(BigDecimal("3.00"), BigDecimal("2.00")), BigDecimal("1.50"))
+        self.assertEqual(agg.agg(None, self.to_decimal(10.15)), self.to_decimal(10.15))
+        self.assertIsNone(agg.retract(None, self.to_decimal(5.02)))
+
+    def test_numeric(self):
+        agg = _make("product", "NUMERIC(12,2)")
+
+        self.assertEqual(agg.agg(None, self.to_decimal(10, 12, 2)), self.to_decimal(10, 12, 2))
+        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10, 12, 2)), self.to_decimal(10, 12, 2))
+        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5, 12, 2)), self.to_decimal(2, 12, 2))
+        self.assertIsNone(agg.retract(None, self.to_decimal(5, 12, 2)))
+
+    def test_dec(self):
+        agg = _make("product", "DEC(12)")
+
+        self.assertEqual(agg.agg(None, self.to_decimal(10, 12)), self.to_decimal(10, 12))
+        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10, 12)), self.to_decimal(10, 12))
+        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5, 12)), self.to_decimal(2, 12))
+        self.assertIsNone(agg.retract(None, self.to_decimal(5, 12)))
+
+    def test_byte_overflow(self):
+        agg = _make("product", "TINYINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(64, 2)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-64, 4)
+
+    def test_short_overflow(self):
+        agg = _make("product", "SMALLINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(1000, 100)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-32768, 2)
+
+    def test_int_overflow(self):
+        agg = _make("product", "INT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(100000, 100000)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-2147483648, -1)
+
+    def test_long_overflow(self):
+        agg = _make("product", "BIGINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(9223372036854775807, 2)
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(-9223372036854775808, -1)
+
+    def test_byte_retract_overflow(self):
+        agg = _make("product", "TINYINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-128, -1)
+
+    def test_short_retract_overflow(self):
+        agg = _make("product", "SMALLINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-32768, -1)
+
+    def test_int_retract_overflow(self):
+        agg = _make("product", "INT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-2147483648, -1)
+
+    def test_long_retract_overflow(self):
+        agg = _make("product", "BIGINT")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(-9223372036854775808, -1)
+
+    def test_null_inputs(self):
+        agg = _make("product", "INT")
+
+        self.assertEqual(agg.agg(None, 5), 5)
+        self.assertEqual(agg.agg(5, None), 5)
+        self.assertIsNone(agg.agg(None, None))
+
+        self.assertEqual(agg.retract(5, None), 5)
+        self.assertIsNone(agg.retract(None, 5))
+        self.assertIsNone(agg.retract(None, None))
+
+    def test_non_numeric_type_rejected_at_construction(self):
+        with self.assertRaises(ValueError) as ctx:
+            _make("product", "VARCHAR")
+
         self.assertIn("numeric", str(ctx.exception))
 
 
