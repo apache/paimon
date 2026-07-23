@@ -315,12 +315,14 @@ class TestOverwriteConflictDetection(unittest.TestCase):
 class _FakeSnapshot:
 
     def __init__(self, snapshot_id, commit_kind, next_row_id=None,
-                 commit_user=None, commit_identifier=None):
+                 commit_user=None, commit_identifier=None,
+                 delta_manifest_list=None):
         self.id = snapshot_id
         self.commit_kind = commit_kind
         self.next_row_id = next_row_id
         self.commit_user = commit_user
         self.commit_identifier = commit_identifier
+        self.delta_manifest_list = delta_manifest_list
 
 
 class _FakeSnapshotManager:
@@ -427,7 +429,7 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                 self.assertIsNone(
                     detection.check_row_id_from_snapshot(compact_snap, delta))
 
-    def test_own_history_is_discovered_once_and_not_scanned(self):
+    def test_own_history_is_not_scanned(self):
         base = _FakeSnapshot(1, "APPEND", next_row_id=1000)
         own = [
             _FakeSnapshot(
@@ -459,8 +461,9 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                 detection.check_row_id_from_snapshot(latest, delta))
 
         self.assertEqual([], scanner.entry_calls)
-        for snapshot_id in range(2, 9):
-            self.assertEqual(1, manager.requests.count(snapshot_id))
+        for snapshot_id in range(2, 8):
+            self.assertEqual(2, manager.requests.count(snapshot_id))
+        self.assertEqual(1, manager.requests.count(8))
 
     def test_cached_external_history_checks_later_windows(self):
         base = _FakeSnapshot(1, "APPEND", next_row_id=1000)
@@ -501,6 +504,88 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("updating the same file", str(result))
         self.assertEqual([2, 2], scanner.entry_calls)
+
+    def test_reused_snapshot_id_invalidates_cached_history(self):
+        base = _FakeSnapshot(1, "APPEND", next_row_id=1000)
+        own = _FakeSnapshot(
+            2, "APPEND", next_row_id=1000,
+            commit_user="incremental", commit_identifier=1,
+            delta_manifest_list="own-manifest")
+        manager = _FakeSnapshotManager([base, own])
+        scanner = _FakeCommitScanner({})
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=manager,
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=scanner,
+        )
+        detection.set_row_id_check_from_snapshot(1)
+        detection.ignore_row_id_commit("incremental", 1)
+
+        delta = self._blob_delta()
+        self.assertIsNone(detection.check_row_id_from_snapshot(own, delta))
+
+        replacement = _FakeSnapshot(
+            2, "APPEND", next_row_id=1000,
+            commit_user="external", commit_identifier=1,
+            delta_manifest_list="external-manifest")
+        manager._by_id[2] = replacement
+        scanner._by_id[2] = [_make_entry(
+            "external.parquet",
+            first_row_id=0,
+            row_count=51,
+            write_cols=["col_a"],
+        )]
+
+        result = detection.check_row_id_from_snapshot(replacement, delta)
+
+        self.assertIsNotNone(result)
+        self.assertIn("updating the same file", str(result))
+        self.assertEqual([2], scanner.entry_calls)
+
+    def test_rebuilt_history_past_cursor_invalidates_cache(self):
+        base = _FakeSnapshot(1, "APPEND", next_row_id=1000)
+        own = _FakeSnapshot(
+            2, "APPEND", next_row_id=1000,
+            commit_user="incremental", commit_identifier=1,
+            delta_manifest_list="own-manifest")
+        manager = _FakeSnapshotManager([base, own])
+        scanner = _FakeCommitScanner({})
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=manager,
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=scanner,
+        )
+        detection.set_row_id_check_from_snapshot(1)
+        detection.ignore_row_id_commit("incremental", 1)
+
+        delta = self._blob_delta()
+        self.assertIsNone(detection.check_row_id_from_snapshot(own, delta))
+
+        replacement = _FakeSnapshot(
+            2, "APPEND", next_row_id=1000,
+            commit_user="external", commit_identifier=1,
+            delta_manifest_list="external-manifest")
+        latest = _FakeSnapshot(
+            3, "APPEND", next_row_id=1000,
+            commit_user="external", commit_identifier=2,
+            delta_manifest_list="latest-manifest")
+        manager._by_id.update({2: replacement, 3: latest})
+        scanner._by_id[2] = [_make_entry(
+            "external.parquet",
+            first_row_id=0,
+            row_count=51,
+            write_cols=["col_a"],
+        )]
+
+        result = detection.check_row_id_from_snapshot(latest, delta)
+
+        self.assertIsNotNone(result)
+        self.assertIn("updating the same file", str(result))
+        self.assertEqual([2], scanner.entry_calls)
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):

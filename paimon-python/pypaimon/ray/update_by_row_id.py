@@ -37,6 +37,7 @@ from pypaimon.ray.data_evolution_merge_into import (
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
 from pypaimon.schema.data_types import is_blob_file_field
+from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
 
 __all__ = ["update_by_row_id"]
 
@@ -229,18 +230,25 @@ class _IncrementalUpdateCommitter:
                 self._pending_messages, commit_identifier
             )
         except Exception as error:
-            # Defer the error; this window's commit outcome is uncertain.
-            self._uncertain_messages.extend(self._pending_messages)
-            self._pending_messages = []
-            self._pending_groups = 0
+            if isinstance(error, CommitOutcomeUnknownError):
+                self._uncertain_messages.extend(self._pending_messages)
+                self._pending_messages = []
+                self._pending_groups = 0
             self._deferred_error = error
             return
 
-        # Later windows are disjoint by _FIRST_ROW_ID.
-        self._table_commit.ignore_row_id_conflict_for_commit(commit_identifier)
+        committed_messages = self._pending_messages
         self._pending_messages = []
         self._pending_groups = 0
         self._next_commit_identifier += 1
+        try:
+            # Later windows are disjoint by _FIRST_ROW_ID.
+            self._table_commit.ignore_row_id_conflict_for_commit(
+                commit_identifier)
+        except Exception as error:
+            self._uncertain_messages.extend(committed_messages)
+            self._deferred_error = error
+            return
         logger.info(
             "Incrementally committed %d update_by_row_id file groups.",
             group_count,

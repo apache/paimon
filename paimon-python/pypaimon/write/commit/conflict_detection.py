@@ -162,6 +162,7 @@ class ConflictDetection:
         self._row_id_ignored_commits = set()
         self._row_id_history_base_snapshot = None
         self._row_id_history_cursor = None
+        self._row_id_history_cursor_identity = None
         self._row_id_external_snapshots = []
         self.commit_scanner = commit_scanner
 
@@ -181,8 +182,13 @@ class ConflictDetection:
         if self._row_id_check_from_snapshot == snapshot_id:
             return
         self._row_id_check_from_snapshot = snapshot_id
+        self.reset_row_id_history()
+
+    def reset_row_id_history(self):
+        """Discard cached row-id conflict history."""
         self._row_id_history_base_snapshot = None
         self._row_id_history_cursor = None
+        self._row_id_history_cursor_identity = None
         self._row_id_external_snapshots = []
 
     def ignore_row_id_commit(self, commit_user, commit_identifier):
@@ -192,11 +198,27 @@ class ConflictDetection:
     def _row_id_history_snapshots(self, latest_snapshot):
         """Cache external history while skipping registered disjoint windows."""
         base_snapshot = self._row_id_check_from_snapshot
-        if (self._row_id_history_base_snapshot != base_snapshot
-                or self._row_id_history_cursor is None
-                or latest_snapshot.id < self._row_id_history_cursor):
+        reset_history = (
+            self._row_id_history_base_snapshot != base_snapshot
+            or self._row_id_history_cursor is None
+            or latest_snapshot.id < self._row_id_history_cursor
+        )
+        if not reset_history:
+            cursor_snapshot = (
+                latest_snapshot
+                if latest_snapshot.id == self._row_id_history_cursor
+                else self.snapshot_manager.get_snapshot_by_id(
+                    self._row_id_history_cursor)
+            )
+            reset_history = (
+                self._snapshot_identity(cursor_snapshot)
+                != self._row_id_history_cursor_identity
+            )
+
+        if reset_history:
             self._row_id_history_base_snapshot = base_snapshot
             self._row_id_history_cursor = base_snapshot
+            self._row_id_history_cursor_identity = None
             self._row_id_external_snapshots = []
 
         for snapshot_id in range(
@@ -213,7 +235,25 @@ class ConflictDetection:
                 self._row_id_external_snapshots.append(snapshot)
 
         self._row_id_history_cursor = latest_snapshot.id
+        self._row_id_history_cursor_identity = self._snapshot_identity(
+            latest_snapshot)
         return self._row_id_external_snapshots
+
+    @staticmethod
+    def _snapshot_identity(snapshot):
+        if snapshot is None:
+            return None
+        return (
+            snapshot.id,
+            getattr(snapshot, "commit_user", None),
+            getattr(snapshot, "commit_identifier", None),
+            getattr(snapshot, "commit_kind", None),
+            getattr(snapshot, "time_millis", None),
+            getattr(snapshot, "base_manifest_list", None),
+            getattr(snapshot, "delta_manifest_list", None),
+            getattr(snapshot, "changelog_manifest_list", None),
+            getattr(snapshot, "index_manifest", None),
+        )
 
     @staticmethod
     def has_global_index_additions(index_entries=None):
