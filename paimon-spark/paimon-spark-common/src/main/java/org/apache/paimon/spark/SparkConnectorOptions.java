@@ -39,6 +39,13 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
 
+    public static final ConfigOption<Long> DELETE_POINT_DELETE_MAX_ROWS =
+            key("delete.point-delete.max-rows")
+                    .longType()
+                    .defaultValue(1000000L)
+                    .withDescription(
+                            "Max number of -D rows the primary-key point-delete fast path may build on the driver; beyond this, DELETE falls back to the scan-based path.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
