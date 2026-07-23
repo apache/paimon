@@ -19,6 +19,7 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -50,6 +51,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +62,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -976,6 +979,170 @@ public class JdbcCatalogTest extends CatalogTestBase {
                         catalog.listViewDetailsPaged(Catalog.SYSTEM_DATABASE_NAME, 10, null, null)
                                 .getElements())
                 .isEmpty();
+    }
+
+    @Override
+    @Test
+    public void testListViewsPaged() throws Exception {
+        String databaseName = "views_paged_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Empty database returns an empty page with no next token.
+        PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null, null);
+        assertThat(pagedViews.getElements()).isEmpty();
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        String[] sortedViewNames = Arrays.stream(viewNames).sorted().toArray(String[]::new);
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        // maxResults == null: return all views ordered by name, no next page.
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, null);
+        assertThat(pagedViews.getElements()).containsExactly(sortedViewNames);
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // maxResults == 0 is treated as "no paging" per the Catalog contract.
+        pagedViews = catalog.listViewsPaged(databaseName, 0, null, null);
+        assertThat(pagedViews.getElements()).containsExactly(sortedViewNames);
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // An empty pattern means "no pattern": all views are returned.
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "");
+        assertThat(pagedViews.getElements()).containsExactly(sortedViewNames);
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // Page through with maxResults = 2. nextPageToken is the last name of the current page.
+        int maxResults = 2;
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null, null);
+        assertThat(pagedViews.getElements()).containsExactly("abd", "def");
+        assertThat(pagedViews.getNextPageToken()).isEqualTo("def");
+
+        pagedViews =
+                catalog.listViewsPaged(
+                        databaseName, maxResults, pagedViews.getNextPageToken(), null);
+        assertThat(pagedViews.getElements()).containsExactly("opr", "view1");
+        assertThat(pagedViews.getNextPageToken()).isEqualTo("view1");
+
+        pagedViews =
+                catalog.listViewsPaged(
+                        databaseName, maxResults, pagedViews.getNextPageToken(), null);
+        assertThat(pagedViews.getElements()).containsExactly("view2", "view3");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // maxResults larger than the full set returns everything in one page.
+        maxResults = 8;
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null, null);
+        assertThat(pagedViews.getElements()).containsExactly(sortedViewNames);
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // pageToken resumes strictly after the token value.
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, "view1", null);
+        assertThat(pagedViews.getElements()).containsExactly("view2", "view3");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // A negative maxResults is rejected.
+        assertThatThrownBy(() -> catalog.listViewsPaged(databaseName, -1, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // DatabaseNotExistException when the database does not exist.
+        final int finalMaxResults = maxResults;
+        assertThatThrownBy(
+                        () ->
+                                catalog.listViewsPaged(
+                                        "non_existing_db", finalMaxResults, "view1", null))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        // Pattern filtering uses standard SQL LIKE: '%' matches any sequence, '_' a single char.
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view%");
+        assertThat(pagedViews.getElements()).containsExactly("view1", "view2", "view3");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view_");
+        assertThat(pagedViews.getElements()).containsExactly("view1", "view2", "view3");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "_bd");
+        assertThat(pagedViews.getElements()).containsExactly("abd");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "zzz%");
+        assertThat(pagedViews.getElements()).isEmpty();
+        assertThat(pagedViews.getNextPageToken()).isNull();
+
+        // Pattern combined with paging.
+        pagedViews = catalog.listViewsPaged(databaseName, 2, null, "view%");
+        assertThat(pagedViews.getElements()).containsExactly("view1", "view2");
+        assertThat(pagedViews.getNextPageToken()).isEqualTo("view2");
+
+        pagedViews =
+                catalog.listViewsPaged(databaseName, 2, pagedViews.getNextPageToken(), "view%");
+        assertThat(pagedViews.getElements()).containsExactly("view3");
+        assertThat(pagedViews.getNextPageToken()).isNull();
+    }
+
+    @Override
+    @Test
+    public void testListViewDetailsPaged() throws Exception {
+        String databaseName = "view_details_paged_db";
+        catalog.createDatabase(databaseName, false);
+
+        PagedList<View> pagedViewDetails =
+                catalog.listViewDetailsPaged(databaseName, null, null, null);
+        assertThat(pagedViewDetails.getElements()).isEmpty();
+        assertThat(pagedViewDetails.getNextPageToken()).isNull();
+
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        String[] sortedViewNames = Arrays.stream(viewNames).sorted().toArray(String[]::new);
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, null);
+        assertThat(viewNames(pagedViewDetails)).containsExactly(sortedViewNames);
+        assertThat(pagedViewDetails.getNextPageToken()).isNull();
+
+        // maxResults == 0 and an empty pattern both mean "no filtering / no paging".
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, 0, null, "");
+        assertThat(viewNames(pagedViewDetails)).containsExactly(sortedViewNames);
+        assertThat(pagedViewDetails.getNextPageToken()).isNull();
+
+        int maxResults = 2;
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, maxResults, null, null);
+        assertThat(viewNames(pagedViewDetails)).containsExactly("abd", "def");
+        assertThat(pagedViewDetails.getNextPageToken()).isEqualTo("def");
+
+        pagedViewDetails =
+                catalog.listViewDetailsPaged(
+                        databaseName, maxResults, pagedViewDetails.getNextPageToken(), null);
+        assertThat(viewNames(pagedViewDetails)).containsExactly("opr", "view1");
+        assertThat(pagedViewDetails.getNextPageToken()).isEqualTo("view1");
+
+        pagedViewDetails =
+                catalog.listViewDetailsPaged(
+                        databaseName, maxResults, pagedViewDetails.getNextPageToken(), null);
+        assertThat(viewNames(pagedViewDetails)).containsExactly("view2", "view3");
+        assertThat(pagedViewDetails.getNextPageToken()).isNull();
+
+        // DatabaseNotExistException when the database does not exist.
+        final int finalMaxResults = maxResults;
+        assertThatThrownBy(
+                        () ->
+                                catalog.listViewDetailsPaged(
+                                        "non_existing_db", finalMaxResults, null, null))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        // Pattern filtering.
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view%");
+        assertThat(viewNames(pagedViewDetails)).containsExactly("view1", "view2", "view3");
+        assertThat(pagedViewDetails.getNextPageToken()).isNull();
+    }
+
+    private static List<String> viewNames(PagedList<View> views) {
+        return views.getElements().stream().map(View::name).collect(Collectors.toList());
     }
 
     @Test
