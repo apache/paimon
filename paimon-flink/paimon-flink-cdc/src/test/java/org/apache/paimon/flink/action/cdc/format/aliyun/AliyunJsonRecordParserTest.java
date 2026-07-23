@@ -63,10 +63,11 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
 
     private static ObjectMapper objMapper = new ObjectMapper();
 
-    // now() generates a timestamp with millisecond precision. When the millisecond part is .000,
-    // LocalDateTime.toString() omits the fractional seconds entirely, so the decimal part is
-    // optional.
-    String dateTimeRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?";
+    // now() generates a timestamp with millisecond precision. LocalDateTime.toString() omits the
+    // whole :ss part when both seconds and milliseconds are zero (e.g. 2026-07-23T12:34), omits
+    // .mmm when milliseconds are zero (e.g. ...:12:34:56), and keeps .mmm otherwise.
+    // Match all three forms: HH:mm, HH:mm:ss, HH:mm:ss.SSS.
+    String dateTimeRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{3})?)?";
 
     @Before
     public void setup() {
