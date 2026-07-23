@@ -38,9 +38,6 @@ import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -59,8 +56,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validates that each cloned history root resolves to the same canonical metadata content. */
 class FullHistoryRootValidator {
-
-    private static final long MAX_CACHED_METADATA_DIGESTS = 10_000;
 
     static void validate(
             FileStoreTable source, FileStoreTable target, PathMapping pathMapping, String branch)
@@ -125,9 +120,11 @@ class FullHistoryRootValidator {
         private final IndexManifestEntrySerializer indexEntrySerializer =
                 new IndexManifestEntrySerializer();
         private final MessageDigest entryHasher = newSha256();
-        private final Cache<String, ManifestDigest> manifestDigests = newDigestCache();
-        private final Cache<String, ManifestListDigest> manifestListDigests = newDigestCache();
-        private final Cache<String, EntryMultisetDigest> indexManifestDigests = newDigestCache();
+        // Keep fixed-size metadata digests for the branch. Eviction can turn validation of shared
+        // history into repeated full remote reads once the active manifest set exceeds the cache.
+        private final Map<String, ManifestDigest> manifestDigests = new HashMap<>();
+        private final Map<String, ManifestListDigest> manifestListDigests = new HashMap<>();
+        private final Map<String, EntryMultisetDigest> indexManifestDigests = new HashMap<>();
 
         private RootDigestContext(
                 FileStoreTable table, PathMapping pathMapping, boolean rewritePaths) {
@@ -209,7 +206,7 @@ class FullHistoryRootValidator {
 
         private EntryMultisetDigest manifestListDigest(
                 String fileName, @Nullable Long declaredFileSize) throws IOException {
-            ManifestListDigest cached = manifestListDigests.getIfPresent(fileName);
+            ManifestListDigest cached = manifestListDigests.get(fileName);
             if (cached != null) {
                 validateFileSize("manifest list", fileName, declaredFileSize, cached.fileSize);
                 return cached.entries;
@@ -245,7 +242,7 @@ class FullHistoryRootValidator {
         }
 
         private EntryMultisetDigest manifestDigest(ManifestFileMeta meta) throws IOException {
-            ManifestDigest cached = manifestDigests.getIfPresent(meta.fileName());
+            ManifestDigest cached = manifestDigests.get(meta.fileName());
             if (cached != null) {
                 validateManifest(meta, cached);
                 return cached.entries;
@@ -292,7 +289,7 @@ class FullHistoryRootValidator {
         }
 
         private EntryMultisetDigest indexManifestDigest(String fileName) throws IOException {
-            EntryMultisetDigest cached = indexManifestDigests.getIfPresent(fileName);
+            EntryMultisetDigest cached = indexManifestDigests.get(fileName);
             if (cached != null) {
                 return cached;
             }
@@ -549,10 +546,6 @@ class FullHistoryRootValidator {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available.", e);
         }
-    }
-
-    private static <T> Cache<String, T> newDigestCache() {
-        return CacheBuilder.newBuilder().maximumSize(MAX_CACHED_METADATA_DIGESTS).build();
     }
 
     private static void writeLong(byte[] target, int offset, long value) {

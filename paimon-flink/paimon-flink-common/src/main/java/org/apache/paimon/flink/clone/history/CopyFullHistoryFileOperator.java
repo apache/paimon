@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.clone.FullHistoryCopyPlan;
 import org.apache.paimon.clone.FullHistoryFileCopier;
+import org.apache.paimon.clone.PathMapping;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.fs.FileIO;
@@ -120,6 +121,10 @@ class CopyFullHistoryFileOperator
                 + file.kind()
                 + "\n"
                 + file.expectedSize();
+    }
+
+    static String copyKey(FullHistoryCopyPlan.FileCopy file) {
+        return PathMapping.conflictKey(file.target());
     }
 
     @Override

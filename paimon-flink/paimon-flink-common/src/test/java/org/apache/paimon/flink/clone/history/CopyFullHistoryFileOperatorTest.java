@@ -97,6 +97,32 @@ public class CopyFullHistoryFileOperatorTest {
         }
     }
 
+    @Test
+    public void testCaseOnlyLocalTargetWithDifferentSourceFails() throws Exception {
+        java.nio.file.Path firstSource = tempDir.resolve("case-source-1");
+        java.nio.file.Path secondSource = tempDir.resolve("case-source-2");
+        java.nio.file.Path firstTarget = tempDir.resolve("case-target");
+        java.nio.file.Path secondTarget = tempDir.resolve("CASE-TARGET");
+        Files.write(firstSource, new byte[] {1});
+        Files.write(secondSource, new byte[] {2});
+
+        CopyFullHistoryFileOperator operator =
+                new CopyFullHistoryFileOperator(LocalFileIO.create(), LocalFileIO.create());
+
+        try (KeyedOneInputStreamOperatorTestHarness<String, FullHistoryCopyPlan.FileCopy, Boolean>
+                harness = createHarness(operator)) {
+            harness.open();
+            harness.processElement(new StreamRecord<>(copy(firstSource, firstTarget)));
+
+            assertThatThrownBy(
+                            () ->
+                                    harness.processElement(
+                                            new StreamRecord<>(copy(secondSource, secondTarget))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Conflicting clone payloads map to target");
+        }
+    }
+
     private static FullHistoryCopyPlan.FileCopy copy(
             java.nio.file.Path source, java.nio.file.Path target) {
         return new FullHistoryCopyPlan.FileCopy(
@@ -111,7 +137,7 @@ public class CopyFullHistoryFileOperatorTest {
             createHarness(CopyFullHistoryFileOperator operator) throws Exception {
         return new KeyedOneInputStreamOperatorTestHarness<>(
                 operator,
-                file -> file.target().toString(),
+                CopyFullHistoryFileOperator::copyKey,
                 BasicTypeInfo.STRING_TYPE_INFO,
                 1,
                 1,

@@ -30,6 +30,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -151,7 +152,8 @@ public class PathMapping implements Serializable {
         Map<String, String> targetToSource = new HashMap<>();
         for (String sourcePath : sourcePaths) {
             String targetPath = rewriteRequired(sourcePath);
-            String previousSource = targetToSource.put(targetPath, sourcePath);
+            String previousSource =
+                    targetToSource.put(conflictKey(new Path(targetPath)), sourcePath);
             checkArgument(
                     previousSource == null || previousSource.equals(sourcePath),
                     "Found target path conflict: source paths %s and %s both map to %s",
@@ -185,6 +187,15 @@ public class PathMapping implements Serializable {
         return String.join("\n", mappings);
     }
 
+    /** Returns a conservative key for detecting paths which may alias on a local file system. */
+    public static String conflictKey(Path path) {
+        URI uri = path.toUri();
+        if (isLocalAbsolutePath(uri)) {
+            return "local:" + uri.getPath().toLowerCase(Locale.ROOT);
+        }
+        return path.toString();
+    }
+
     private static String normalizePrefix(String prefix) {
         String normalized = new Path(prefix.trim()).toString();
         URI uri = new Path(normalized).toUri();
@@ -197,6 +208,11 @@ public class PathMapping implements Serializable {
                 !((uri.getScheme() == null || "file".equalsIgnoreCase(uri.getScheme()))
                         && uri.getAuthority() != null),
                 "Local path mapping prefix must not include authority: %s",
+                normalized);
+        checkArgument(
+                !((uri.getScheme() == null || "file".equalsIgnoreCase(uri.getScheme()))
+                        && !uri.getPath().startsWith("/")),
+                "Local path mapping prefix must be absolute: %s",
                 normalized);
         checkArgument(
                 uri.getScheme() == null
@@ -239,20 +255,20 @@ public class PathMapping implements Serializable {
     }
 
     static boolean overlaps(String left, String right) {
-        return isSameOrDescendantForOverlap(left, right)
-                || isSameOrDescendantForOverlap(right, left);
+        return isSameOrDescendantForConflict(left, right)
+                || isSameOrDescendantForConflict(right, left);
     }
 
     private static boolean samePath(String left, String right) {
-        return isSameOrDescendantForOverlap(left, right)
-                && isSameOrDescendantForOverlap(right, left);
+        return isSameOrDescendantForConflict(left, right)
+                && isSameOrDescendantForConflict(right, left);
     }
 
     static boolean isSameOrDescendant(String path, String parent) {
         return isSameOrDescendant(path, parent, false);
     }
 
-    private static boolean isSameOrDescendantForOverlap(String path, String parent) {
+    static boolean isSameOrDescendantForConflict(String path, String parent) {
         return isSameOrDescendant(path, parent, true);
     }
 
@@ -267,6 +283,10 @@ public class PathMapping implements Serializable {
         }
         String pathPart = pathUri.getPath();
         String parentPart = parentUri.getPath();
+        if (allowLocalAlias && isLocalAbsolutePath(pathUri) && isLocalAbsolutePath(parentUri)) {
+            pathPart = pathPart.toLowerCase(Locale.ROOT);
+            parentPart = parentPart.toLowerCase(Locale.ROOT);
+        }
         return pathPart.equals(parentPart)
                 || (parentPart.endsWith("/") && pathPart.startsWith(parentPart))
                 || pathPart.startsWith(parentPart + "/");

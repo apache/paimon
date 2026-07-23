@@ -255,6 +255,37 @@ public class PathMappingTest {
     }
 
     @Test
+    public void testLocalMappingRequiresAbsolutePath() {
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Collections.singletonList("relative/source=/tmp/target")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Local path mapping prefix must be absolute")
+                .hasMessageContaining("relative/source");
+
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Collections.singletonList("/tmp/source=relative/target")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Local path mapping prefix must be absolute")
+                .hasMessageContaining("relative/target");
+    }
+
+    @Test
+    public void testCaseOnlyLocalTargetPrefixesCannotOverlap() {
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Arrays.asList(
+                                                "/tmp/source-a=/tmp/CLONE",
+                                                "/tmp/source-b=/tmp/clone/data")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Target path mapping prefixes must not overlap");
+    }
+
+    @Test
     public void testOverlappingSourceAndTargetPrefixesFail() {
         assertThatThrownBy(
                         () ->

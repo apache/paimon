@@ -29,8 +29,8 @@ import java.io.OutputStream;
  * Executes a full-history copy plan with explicit source and target {@link FileIO}s.
  *
  * <p>Non-overwrite copies stream directly to clone-owned target paths. The clone protocol keeps
- * those paths private until metadata validation succeeds and cleans incomplete files after a
- * recoverable copy failure.
+ * those paths private until metadata validation succeeds and attempts to clean files created by a
+ * failed copy.
  */
 public class FullHistoryFileCopier {
 
@@ -50,14 +50,10 @@ public class FullHistoryFileCopier {
             FullHistoryCopyPlan.FileCopy file,
             boolean overwrite)
             throws IOException {
-        long sourceSize = sourceFileIO.getFileSize(file.source());
-        long expectedSize = file.expectedSize() < 0 ? sourceSize : file.expectedSize();
-        if (sourceSize != expectedSize) {
-            throw new IOException(
-                    String.format(
-                            "Source file %s has size %s but clone plan expects %s.",
-                            file.source(), sourceSize, expectedSize));
-        }
+        long expectedSize =
+                file.expectedSize() < 0
+                        ? sourceFileIO.getFileSize(file.source())
+                        : file.expectedSize();
 
         if (!overwrite && targetFileIO.exists(file.target())) {
             long targetSize = targetFileIO.getFileSize(file.target());
@@ -95,29 +91,25 @@ public class FullHistoryFileCopier {
             FullHistoryCopyPlan.FileCopy file,
             long expectedSize)
             throws IOException {
-        boolean targetOpened = false;
+        boolean targetWriteAttempted = false;
         try (SeekableInputStream input = sourceFileIO.newInputStream(file.source())) {
+            targetWriteAttempted = true;
             try (PositionOutputStream output = targetFileIO.newOutputStream(file.target(), false)) {
-                targetOpened = true;
                 copyBytes(input, output, expectedSize);
             }
-        } catch (Throwable failure) {
+        } catch (IOException | RuntimeException failure) {
             try {
-                if (targetFileIO.exists(file.target())) {
-                    if (targetFileIO.getFileSize(file.target()) == expectedSize) {
-                        return;
-                    }
-                    if (targetOpened && !targetFileIO.delete(file.target(), false)) {
-                        failure.addSuppressed(
-                                new IOException(
-                                        "Failed to clean incomplete clone target "
-                                                + file.target()));
-                    }
+                if (targetWriteAttempted
+                        && targetFileIO.exists(file.target())
+                        && !targetFileIO.delete(file.target(), false)) {
+                    failure.addSuppressed(
+                            new IOException(
+                                    "Failed to clean failed clone target " + file.target()));
                 }
-            } catch (Throwable cleanupFailure) {
+            } catch (IOException | RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
-            rethrow(failure);
+            throw failure;
         }
     }
 
@@ -138,17 +130,6 @@ public class FullHistoryFileCopier {
                             "Copied %s bytes from source but clone plan expects %s.",
                             copied, expectedSize));
         }
-    }
-
-    private static void rethrow(Throwable failure) throws IOException {
-        if (failure instanceof IOException) {
-            throw (IOException) failure;
-        } else if (failure instanceof RuntimeException) {
-            throw (RuntimeException) failure;
-        } else if (failure instanceof Error) {
-            throw (Error) failure;
-        }
-        throw new IOException(failure);
     }
 
     private FullHistoryFileCopier() {}

@@ -216,6 +216,15 @@ public class FullHistoryCloneMarkerTest {
                         () ->
                                 plan.validatePayloadTarget(
                                         new Path(
+                                                targetRoot,
+                                                FullHistoryCloneMarker.SUCCESS_FILE_NAME
+                                                        .toLowerCase())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved control namespace");
+        assertThatThrownBy(
+                        () ->
+                                plan.validatePayloadTarget(
+                                        new Path(
                                                 new Path(
                                                         targetExternal,
                                                         FullHistoryCloneMarker.FILE_NAME),
