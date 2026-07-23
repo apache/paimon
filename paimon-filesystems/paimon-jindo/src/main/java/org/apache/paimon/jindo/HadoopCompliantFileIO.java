@@ -106,27 +106,20 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             return;
         }
         // Enable file io cache
-        if (context.options().get("fs.jindocache.namespace.rpc.address") == null) {
-            LOG.info(
-                    "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
-        } else {
-            metaCacheEnabled =
-                    context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
-            readCacheEnabled =
-                    context.options().get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
-            writeCacheEnabled =
-                    context.options().get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
-            String whitelist = context.options().get(IO_CACHE_WHITELIST_PATH);
-            if (!whitelist.equals("*")) {
-                cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
-            }
-            LOG.info(
-                    "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist path: {}",
-                    metaCacheEnabled,
-                    readCacheEnabled,
-                    writeCacheEnabled,
-                    whitelist);
+        metaCacheEnabled = context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
+        readCacheEnabled = context.options().get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
+        writeCacheEnabled =
+                context.options().get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
+        String whitelist = context.options().get(IO_CACHE_WHITELIST_PATH);
+        if (!whitelist.equals("*")) {
+            cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
         }
+        LOG.info(
+                "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist path: {}",
+                metaCacheEnabled,
+                readCacheEnabled,
+                writeCacheEnabled,
+                whitelist);
     }
 
     @Override

@@ -117,7 +117,7 @@ public class RESTCatalogOptions {
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
             ConfigOptions.key("io-cache.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
 
