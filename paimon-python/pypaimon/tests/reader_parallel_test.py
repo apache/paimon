@@ -25,9 +25,11 @@ import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pyarrow.dataset as ds
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.table_read import TableRead, _RemainingRows
+from pypaimon.read.table_read import (
+    TableRead, _MAX_PIPELINE_SPLIT_WORKERS, _RemainingRows)
 
 
 class ResolveParallelismTest(unittest.TestCase):
@@ -157,6 +159,28 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
             [batch.column(0)[0].as_py() for batch in batches],
         )
 
+    def test_lookahead_keeps_workers_busy_behind_slow_first_split(self):
+        third_started = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            if value == 0 and not third_started.wait(5):
+                raise TimeoutError('lookahead split did not start')
+            if value == 2:
+                third_started.set()
+            yield self._batch(value)
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            batches = list(self.read._pipelined_arrow_batch_generator(
+                [0, 1, 2, 3], self.schema, 1, 2))
+
+        self.assertEqual(
+            [0, 1, 2, 3],
+            [batch.column(0)[0].as_py() for batch in batches],
+        )
+
     def test_propagates_worker_error(self):
         def generate(splits, schema, blob_parallelism):
             if splits[0] == 0:
@@ -220,6 +244,7 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
         ):
             reader = self.read.to_arrow_batch_reader(
                 [0, 1], parallelism=2)
+            self.assertIsInstance(reader, pa.ipc.RecordBatchReader)
             reader.read_next_batch()
             reader.close()
 
@@ -227,6 +252,22 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
         while len(closed) < 2 and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertCountEqual([0, 1], closed)
+
+    def test_public_reader_works_with_scanner_from_batches(self):
+        def generate(splits, schema, blob_parallelism):
+            yield self._batch(splits[0])
+
+        with mock.patch(
+            'pypaimon.read.table_read.PyarrowFieldParser.from_paimon_schema',
+            return_value=self.schema,
+        ), mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            reader = self.read.to_arrow_batch_reader(
+                [0, 1], parallelism=2)
+            result = ds.Scanner.from_batches(reader).to_table()
+
+        self.assertEqual([0, 1], result.column(0).to_pylist())
 
     def test_close_does_not_wait_for_blocked_split(self):
         blocked = threading.Event()
@@ -255,6 +296,70 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
                 self.assertLess(time.monotonic() - started, 1)
         finally:
             release.set()
+
+    def test_blocked_readers_do_not_exceed_global_worker_limit(self):
+        release = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            yield self._batch(splits[0])
+            release.wait(5)
+
+        worker_slots = threading.BoundedSemaphore(2)
+        readers = []
+        try:
+            with mock.patch(
+                'pypaimon.read.table_read._PIPELINE_WORKER_SLOTS',
+                worker_slots,
+            ), mock.patch(
+                'pypaimon.read.table_read.PyarrowFieldParser.from_paimon_schema',
+                return_value=self.schema,
+            ), mock.patch.object(
+                self.read, '_arrow_batch_generator', side_effect=generate
+            ):
+                for _ in range(3):
+                    reader = self.read.to_arrow_batch_reader(
+                        [0, 1], parallelism=2)
+                    reader.read_next_batch()
+                    reader.close()
+                    readers.append(reader)
+
+                active = [
+                    thread for thread in threading.enumerate()
+                    if thread.name.startswith('pypaimon-stream-read-')
+                ]
+                self.assertLessEqual(len(active), 2)
+        finally:
+            release.set()
+            deadline = time.monotonic() + 1
+            while (any(thread.name.startswith('pypaimon-stream-read-')
+                       for thread in threading.enumerate())
+                   and time.monotonic() < deadline):
+                time.sleep(0.01)
+
+    def test_public_reader_caps_pipeline_workers(self):
+        splits = list(range(_MAX_PIPELINE_SPLIT_WORKERS + 10))
+
+        def generate(splits, schema, blob_parallelism):
+            yield self._batch(splits[0])
+
+        with mock.patch(
+            'pypaimon.read.table_read.PyarrowFieldParser.from_paimon_schema',
+            return_value=self.schema,
+        ), mock.patch.object(
+            self.read,
+            '_pipelined_arrow_batch_generator',
+            wraps=self.read._pipelined_arrow_batch_generator,
+        ) as pipeline, mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            reader = self.read.to_arrow_batch_reader(
+                splits, parallelism=len(splits))
+            reader.read_all()
+
+        self.assertEqual(
+            _MAX_PIPELINE_SPLIT_WORKERS,
+            pipeline.call_args.args[3],
+        )
 
     def test_later_error_bypasses_blocked_earlier_split(self):
         first_started = threading.Event()
@@ -299,7 +404,9 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
                 [0, 1], parallelism=2)
             with self.assertRaises(StopIteration):
                 reader.read_next_batch()
-            reader.close()
+            close_reader = getattr(reader, 'close', None)
+            if close_reader is not None:
+                close_reader()
 
         pipeline.assert_not_called()
         serial.assert_not_called()
@@ -456,8 +563,12 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         read = rb.new_read()
         serial = pa.Table.from_batches(
             read.to_arrow_batch_reader(splits, parallelism=1))
-        parallel = pa.Table.from_batches(
-            read.to_arrow_batch_reader(splits, parallelism=4))
+        with mock.patch.object(
+            read, '_pipelined_arrow_batch_generator'
+        ) as pipeline:
+            parallel = pa.Table.from_batches(
+                read.to_arrow_batch_reader(splits, parallelism=4))
+        pipeline.assert_not_called()
         self.assertEqual(serial, parallel)
         self.assertEqual(600, parallel.num_rows)
 

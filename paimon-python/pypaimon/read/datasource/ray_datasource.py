@@ -174,7 +174,9 @@ class RayDatasource(Datasource):
                         table = table.cast(schema)
                     yield table
             finally:
-                batch_reader.close()
+                close_reader = getattr(batch_reader, "close", None)
+                if close_reader is not None:
+                    close_reader()
 
             if not has_data:
                 yield pyarrow.Table.from_arrays(
