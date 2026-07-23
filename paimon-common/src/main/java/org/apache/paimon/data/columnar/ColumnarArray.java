@@ -146,6 +146,10 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalArray getArray(int pos) {
+        if (data instanceof VecColumnVector) {
+            // A nested VECTOR is exposed as ARRAY; a vector is an array.
+            return ((VecColumnVector) data).getVector(offset + pos);
+        }
         InternalArray array = ((ArrayColumnVector) data).getArray(offset + pos);
         if (array instanceof ColumnarArray) {
             ((ColumnarArray) array).setFileIO(fileIO);
