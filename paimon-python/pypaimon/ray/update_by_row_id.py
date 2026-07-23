@@ -56,6 +56,7 @@ def update_by_row_id(
     update_cols: List[str],
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    max_groups_per_commit: Optional[int] = None,
 ) -> Dict[str, int]:
     """Update ``update_cols`` of a data-evolution table by ``_ROW_ID``.
 
@@ -64,6 +65,11 @@ def update_by_row_id(
     routed to the data file owning its row id and only those files are rewritten --
     the target is never fully read and there is no join against it. Requires
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
+
+    By default all file groups are committed atomically after every worker
+    finishes. Set ``max_groups_per_commit`` to incrementally commit each completed
+    window of target file groups. Incremental mode can leave earlier windows
+    committed if a later window fails.
 
     Returns ``{"num_updated": <rows>}``.
     """
@@ -74,6 +80,11 @@ def update_by_row_id(
     _require_ray_join()
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
+    if max_groups_per_commit is not None:
+        if (isinstance(max_groups_per_commit, bool)
+                or not isinstance(max_groups_per_commit, int)
+                or max_groups_per_commit <= 0):
+            raise ValueError("max_groups_per_commit must be a positive integer.")
     update_cols = list(dict.fromkeys(update_cols))  # de-dup, keep order
     num_partitions = _resolve_num_partitions(num_partitions)
 
@@ -139,20 +150,111 @@ def update_by_row_id(
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return {"num_updated": 0}
+    incremental_committer = (
+        _IncrementalUpdateCommitter(table, max_groups_per_commit)
+        if max_groups_per_commit is not None else None
+    )
     try:
+        apply_kwargs = {
+            "num_partitions": num_partitions,
+            "ray_remote_args": ray_remote_args,
+            "base_snapshot_id": base.id,
+        }
+        if incremental_committer is not None:
+            apply_kwargs["on_group_result"] = incremental_committer.add_group
         msgs, num_updated, _ = distributed_update_apply(
-            update_ds, table, update_cols,
-            num_partitions=num_partitions,
-            ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
+            update_ds, table, update_cols, **apply_kwargs
         )
+        if incremental_committer is None:
+            if msgs:
+                _commit_update_messages(table, msgs)
+        else:
+            incremental_committer.finish()
     except Exception as e:
+        if incremental_committer is not None:
+            incremental_committer.abort_pending()
         _reraise_inner(e)
-        raise  # _reraise_inner always raises; keeps msgs/num_updated defined for linters
-
-    if msgs:
-        _commit_update_messages(table, msgs)
+        raise  # _reraise_inner always raises; keeps num_updated defined for linters
+    finally:
+        if incremental_committer is not None:
+            incremental_committer.close()
     return {"num_updated": num_updated}
+
+
+class _IncrementalUpdateCommitter:
+
+    def __init__(self, table, max_groups_per_commit: int):
+        self._table = table
+        self._max_groups_per_commit = max_groups_per_commit
+        self._pending_messages: list = []
+        self._pending_groups = 0
+        self._table_commit = None
+        self._next_commit_identifier = 1
+        self._pending_commit_started = False
+
+    def add_group(self, commit_messages, _num_updated, _row_ids) -> None:
+        self._pending_messages.extend(commit_messages)
+        self._pending_groups += 1
+        if self._pending_groups >= self._max_groups_per_commit:
+            self._commit_pending()
+
+    def finish(self) -> None:
+        self._commit_pending()
+
+    def _commit_pending(self) -> None:
+        if self._pending_groups == 0:
+            return
+        if not self._pending_messages:
+            self._pending_groups = 0
+            return
+
+        if self._table_commit is None:
+            self._table_commit = (
+                self._table.new_stream_write_builder().new_commit()
+            )
+
+        self._pending_commit_started = True
+        group_count = self._pending_groups
+        self._table_commit.commit(
+            self._pending_messages, self._next_commit_identifier
+        )
+        self._pending_messages = []
+        self._pending_groups = 0
+        self._pending_commit_started = False
+        self._next_commit_identifier += 1
+        logger.info(
+            "Incrementally committed %d update_by_row_id file groups.",
+            group_count,
+        )
+
+    def abort_pending(self) -> None:
+        if not self._pending_messages or self._pending_commit_started:
+            return
+
+        if self._table_commit is None:
+            _abort_pending_update_messages(self._table, self._pending_messages)
+            return
+
+        try:
+            self._table_commit.abort(self._pending_messages)
+        except Exception as abort_error:
+            logger.warning(
+                "Failed to abort pending incremental update_by_row_id messages: %s",
+                abort_error,
+                exc_info=abort_error,
+            )
+
+    def close(self) -> None:
+        if self._table_commit is None:
+            return
+        try:
+            self._table_commit.close()
+        except Exception as close_error:
+            logger.warning(
+                "Failed to close incremental update_by_row_id commit: %s",
+                close_error,
+                exc_info=close_error,
+            )
 
 
 def _commit_update_messages(table, commit_messages) -> None:

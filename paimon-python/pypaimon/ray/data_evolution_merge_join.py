@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
@@ -445,7 +445,15 @@ def distributed_update_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    on_group_result: Optional[Callable[[list, int, list], None]] = None,
 ) -> Tuple[list, int, list]:
+    """Apply updates grouped by target file and collect their commit messages.
+
+    When ``on_group_result`` is set, it is called on the driver once for every
+    completed ``_FIRST_ROW_ID`` group. Commit messages are delivered to the
+    callback instead of being retained in the returned list, which lets callers
+    commit completed file groups incrementally while the remaining groups run.
+    """
     import numpy as np
     import pickle
     import uuid
@@ -599,13 +607,25 @@ def distributed_update_apply(
     num_updated = 0
     action_row_ids = []
     for batch in msgs_ds.iter_batches(batch_format="pyarrow"):
-        for blob in batch.column("msgs_blob").to_pylist():
-            all_msgs.extend(pickle.loads(blob))
-        for n in batch.column("n_updated").to_pylist():
+        message_blobs = batch.column("msgs_blob").to_pylist()
+        updated_counts = batch.column("n_updated").to_pylist()
+        row_id_blobs = (
+            batch.column("row_ids_blob").to_pylist()
+            if collect_row_ids else [None] * len(message_blobs)
+        )
+        for blob, n, row_ids_blob in zip(
+                message_blobs, updated_counts, row_id_blobs):
+            group_msgs = pickle.loads(blob)
+            group_row_ids = (
+                pickle.loads(row_ids_blob) if collect_row_ids else []
+            )
+            if on_group_result is None:
+                all_msgs.extend(group_msgs)
+            else:
+                on_group_result(group_msgs, n, group_row_ids)
             num_updated += n
-        if collect_row_ids:
-            for blob in batch.column("row_ids_blob").to_pylist():
-                action_row_ids.extend(pickle.loads(blob))
+            if collect_row_ids:
+                action_row_ids.extend(group_row_ids)
     return all_msgs, num_updated, action_row_ids
 
 

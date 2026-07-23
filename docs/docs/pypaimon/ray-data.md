@@ -524,6 +524,7 @@ metrics = update_by_row_id(
     source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas, carrying _ROW_ID
     catalog_options={"warehouse": "/path/to/warehouse"},
     update_cols=["feature"],     # non-blob columns to overwrite
+    max_groups_per_commit=64,    # optional incremental commit window
 )
 print(metrics)   # {"num_updated": 50}
 ```
@@ -537,6 +538,9 @@ print(metrics)   # {"num_updated": 50}
 - `num_partitions`: parallelism for grouping the update rows by target file;
   defaults to `max(1, cluster_cpus * 2)`.
 - `ray_remote_args`: Ray remote options applied to the update tasks.
+- `max_groups_per_commit`: optional positive number of completed target file groups
+  per commit. By default, all groups are committed together after every worker
+  finishes. For example, `64` commits after each 64 `_FIRST_ROW_ID` file groups.
 
 **Returns:** `{"num_updated": <rows>}`.
 
@@ -548,6 +552,9 @@ print(metrics)   # {"num_updated": 50}
 - Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
 - Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
   in its data file, so it can't be told apart from a live row without reading the target.
+- Incremental commit mode overlaps later worker writes with earlier commits, but is not
+  atomic across the whole operation. If a later group fails, earlier committed windows
+  remain visible.
 
 ## Read By Row Id
 

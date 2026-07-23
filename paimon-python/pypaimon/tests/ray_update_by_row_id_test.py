@@ -130,6 +130,182 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(got[21], 999)
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
 
+    def test_incrementally_commits_file_group_windows(self):
+        target = self._create()
+        chunks = [
+            [group_start, group_start + 1]
+            for group_start in range(10, 90, 10)
+        ]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x"] * len(chunk), "age": [0] * len(chunk)},
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        rid = self._rowid_by_id(target)
+        updated_ids = [chunk[0] for chunk in chunks]
+        src = pa.table(
+            {
+                "_ROW_ID": [rid[row_id] for row_id in updated_ids],
+                "age": updated_ids,
+            },
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+
+        stats = update_by_row_id(
+            target,
+            ray.data.from_arrow(src).repartition(8),
+            self.catalog_options,
+            update_cols=["age"],
+            num_partitions=4,
+            max_groups_per_commit=3,
+        )
+
+        self.assertEqual({"num_updated": 8}, stats)
+        latest = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(base_snapshot_id + 3, latest.id)
+        incremental_snapshots = [
+            table.snapshot_manager().get_snapshot_by_id(base_snapshot_id + offset)
+            for offset in range(1, 4)
+        ]
+        self.assertEqual(1, len({
+            snapshot.commit_user for snapshot in incremental_snapshots
+        }))
+        self.assertEqual(
+            [1, 2, 3],
+            [snapshot.commit_identifier for snapshot in incremental_snapshots],
+        )
+
+        back = self._read(target).sort_by("id").to_pydict()
+        got = dict(zip(back["id"], back["age"]))
+        self.assertEqual(
+            {row_id: row_id for row_id in updated_ids},
+            {row_id: got[row_id] for row_id in updated_ids},
+        )
+        for chunk in chunks:
+            self.assertEqual(0, got[chunk[1]])
+
+    def test_incremental_committer_batches_complete_groups(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commits": [], "aborts": [], "close_calls": 0}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commits"].append((list(msgs), commit_identifier))
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def close(self):
+                recorder["close_calls"] += 1
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["group-1"], 1, [])
+        self.assertEqual([], recorder["commits"])
+        committer.add_group(["group-2"], 1, [])
+        committer.add_group(["group-3"], 1, [])
+        committer.finish()
+        committer.close()
+
+        self.assertEqual([
+            (["group-1", "group-2"], 1),
+            (["group-3"], 2),
+        ], recorder["commits"])
+        self.assertEqual([], recorder["aborts"])
+        self.assertEqual(1, recorder["close_calls"])
+
+    def test_incremental_committer_aborts_only_uncommitted_groups(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commits": [], "aborts": []}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commits"].append((list(msgs), commit_identifier))
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["committed-1"], 1, [])
+        committer.add_group(["committed-2"], 1, [])
+        committer.add_group(["pending"], 1, [])
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual([
+            (["committed-1", "committed-2"], 1),
+        ], recorder["commits"])
+        self.assertEqual([["pending"]], recorder["aborts"])
+
+    def test_incremental_committer_does_not_abort_uncertain_commit(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"abort_calls": 0}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                raise RuntimeError("commit outcome is uncertain")
+
+            def abort(self, msgs):
+                recorder["abort_calls"] += 1
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 1)
+        with self.assertRaisesRegex(RuntimeError, "outcome is uncertain"):
+            committer.add_group(["possibly-committed"], 1, [])
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual(0, recorder["abort_calls"])
+
+    def test_rejects_invalid_max_groups_per_commit(self):
+        target = self._create()
+        src = pa.table({"_ROW_ID": pa.array([], pa.int64()),
+                        "age": pa.array([], pa.int32())})
+        for value in (0, -1, True, 1.5):
+            with self.assertRaisesRegex(
+                    ValueError, "max_groups_per_commit must be a positive integer"):
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=value,
+                )
+
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
         # which uses it for commit-time conflict detection against concurrent writers.
