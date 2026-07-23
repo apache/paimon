@@ -19,11 +19,13 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.oss.OSSLoader;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SensitiveConfigUtils;
@@ -41,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -90,6 +93,15 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private final FileIO blobFileIO;
+
+    public JindoFileIO() {
+        this(new OSSLoader().load(new Path("oss:///")));
+    }
+
+    JindoFileIO(FileIO blobFileIO) {
+        this.blobFileIO = blobFileIO;
+    }
 
     @Override
     public boolean isObjectStore() {
@@ -99,6 +111,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     @Override
     public void configure(CatalogContext context) {
         super.configure(context);
+        blobFileIO.configure(context);
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
@@ -196,6 +209,13 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         JindoHadoopSystem fs = pair.getKey();
         return new JindoTwoPhaseOutputStream(
                 new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        return blobFileIO.createBlobPresignedUrl(tableRoot, descriptor, extension, validity);
     }
 
     @Override
