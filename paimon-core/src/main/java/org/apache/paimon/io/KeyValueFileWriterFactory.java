@@ -138,7 +138,9 @@ public class KeyValueFileWriterFactory {
         WriteFormatKey key = new WriteFormatKey(level, false);
         // Row limit applies to writes only; compaction output stays size-only.
         long targetRowNumPerFile =
-                fileSource == FileSource.COMPACT ? Long.MAX_VALUE : options.targetRowNumPerFile();
+                fileSource == FileSource.COMPACT
+                        ? Long.MAX_VALUE
+                        : options.writeTargetRowNumPerFile();
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);

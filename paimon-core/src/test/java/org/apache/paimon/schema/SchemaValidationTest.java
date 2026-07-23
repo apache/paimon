@@ -113,11 +113,11 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testTargetRowNumPerFileMustBePositive() {
+    public void testWriteTargetRowNumPerFileMustBePositive() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.TARGET_ROW_NUM_PER_FILE.key(), "0");
+        options.put(CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), "0");
         assertThatThrownBy(() -> validateTableSchemaExec(options))
-                .hasMessageContaining("target-row-num-per-file should be at least 1");
+                .hasMessageContaining("write.target-row-num-per-file should be at least 1");
     }
 
     @Test

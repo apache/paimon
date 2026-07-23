@@ -96,7 +96,8 @@ public class DataEvolutionPartialWriteOperator
         // Data evolution requires a single output file: disable both size and row rolling.
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
-        options.put(CoreOptions.TARGET_ROW_NUM_PER_FILE.key(), String.valueOf(Long.MAX_VALUE));
+        options.put(
+                CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), String.valueOf(Long.MAX_VALUE));
         return options;
     }
 
