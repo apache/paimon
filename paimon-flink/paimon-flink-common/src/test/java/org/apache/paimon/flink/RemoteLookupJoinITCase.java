@@ -24,6 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.query.RemoteTableQuery;
 import org.apache.paimon.flink.service.QueryService;
+import org.apache.paimon.metrics.MetricGroupImpl;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
@@ -143,6 +145,25 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         proxy.close();
     }
 
+    @Test
+    public void testRemoteQueryServicePartialLookupMetrics() throws Throwable {
+        sql("CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '1')");
+        ServiceProxy proxy = launchQueryServer("DIM");
+        proxy.write(GenericRow.of(1, 11));
+
+        RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
+        assertThat(query.lookup(row(), 0, row(1))).isNotNull();
+        assertThat(proxy.metrics().lookupCount()).isEqualTo(1);
+        assertThat(proxy.metrics().remoteAccessCount()).isEqualTo(1);
+
+        assertThat(query.lookup(row(), 0, row(1))).isNotNull();
+        assertThat(proxy.metrics().lookupCount()).isEqualTo(2);
+        assertThat(proxy.metrics().remoteAccessCount()).isEqualTo(1);
+
+        query.close();
+        proxy.close();
+    }
+
     @Disabled // TODO unstable
     @Test
     public void testServiceFileCleaned() throws Exception {
@@ -211,7 +232,14 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     private ServiceProxy launchQueryServer(String tableName) throws Throwable {
         FileStoreTable table = (FileStoreTable) paimonTable(tableName);
-        LocalTableQuery query = table.newLocalTableQuery().withIOManager(IOManager.create(path));
+        PartialLookupMetrics metrics =
+                new PartialLookupMetrics(
+                        (groupName, variables) -> new MetricGroupImpl(groupName, variables),
+                        table.name());
+        LocalTableQuery query =
+                table.newLocalTableQuery()
+                        .withIOManager(IOManager.create(path))
+                        .withMetrics(metrics);
         KvQueryServer server =
                 new KvQueryServer(
                         0,
@@ -231,11 +259,13 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         return new ServiceProxy() {
 
             @Override
-            public void write(InternalRow row) throws Exception {
+            public void write(InternalRow... rows) throws Exception {
                 BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
                 BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit();
-                write.write(row);
+                for (InternalRow row : rows) {
+                    write.write(row);
+                }
                 List<CommitMessage> commitMessages = write.prepareCommit();
                 commit.commit(commitMessages);
 
@@ -248,6 +278,11 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
             }
 
             @Override
+            public PartialLookupMetrics metrics() {
+                return metrics;
+            }
+
+            @Override
             public void close() throws IOException {
                 server.shutdown();
                 query.close();
@@ -257,6 +292,8 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     private interface ServiceProxy extends Closeable {
 
-        void write(InternalRow row) throws Exception;
+        void write(InternalRow... rows) throws Exception;
+
+        PartialLookupMetrics metrics();
     }
 }
