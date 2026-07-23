@@ -38,4 +38,19 @@ class VectorTypeTest {
         assertThat(DataTypes.VECTOR(Integer.MAX_VALUE, DataTypes.DOUBLE()).defaultSize())
                 .isEqualTo(Integer.MAX_VALUE);
     }
+
+    @Test
+    void testIsPrunedFromRejectsDifferentLength() {
+        DataType left = DataTypes.VECTOR(3, DataTypes.FLOAT());
+        DataType right = DataTypes.VECTOR(5, DataTypes.FLOAT());
+        assertThat(left.isPrunedFrom(right)).isFalse();
+        assertThat(right.isPrunedFrom(left)).isFalse();
+    }
+
+    @Test
+    void testIsPrunedFromAcceptsSameElementTypeAndLength() {
+        DataType left = DataTypes.VECTOR(3, DataTypes.FLOAT());
+        DataType right = DataTypes.VECTOR(3, DataTypes.FLOAT());
+        assertThat(left.isPrunedFrom(right)).isTrue();
+    }
 }
