@@ -48,6 +48,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldNestedUpdateAgg,
     FieldCollectAgg,
     FieldMergeMapWithKeyTimeAgg,
+    FieldMergeMapAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
 from pypaimon.table.row.generic_row import GenericRow
@@ -1918,6 +1919,56 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
                     "key1": self.row("A", "17682882903686900100"),
                 },
             )
+
+
+class FieldMergeMapAggTest(unittest.TestCase):
+
+    def _make(self, options: CoreOptions = None):
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        return create_field_aggregator(
+            MapType(True, AtomicType("INT"), AtomicType("STRING")),
+            "field0", "merge_map", options=options
+        )
+
+    def test_field_merge_map_agg(self):
+        agg = self._make()
+        self.assertIsInstance(agg, FieldMergeMapAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+        self.assertEqual(agg.agg({1: "A"}, None), {1: "A"})
+        self.assertEqual(agg.agg(None, {1: "A"}), {1: "A"})
+
+        acc = agg.agg(None, {1: "A"})
+        self.assertEqual(acc, {1: "A"})
+
+        acc = agg.agg(acc, {1: "A", 2: "B"})
+        self.assertEqual(acc, {1: "A", 2: "B"})
+
+        acc = agg.agg(acc, {1: "a", 3: "c"})
+        self.assertEqual(acc, {1: "a", 2: "B", 3: "c"})
+
+    def test_field_merge_map_agg_retract(self):
+        agg = self._make()
+
+        result = agg.retract(
+            {1: "A", 2: "B", 3: "C"},
+            {1: "A", 2: "A"},
+        )
+        self.assertEqual(result, {3: "C"})
+        self.assertEqual(agg.retract(None, {1: "A"}), None)
+        self.assertEqual(agg.retract(result, None), {3: "C"})
+        self.assertEqual(agg.retract(result, {}), {3: "C"})
+
+    def test_field_merge_map_agg_for_pyarrow(self):
+        agg = self._make()
+        acc = agg.agg(None, [{'key': 1, 'value': 'A'}])
+        acc = agg.agg(acc, [{'key': 1, 'value': 'a'}, {'key': 2, 'value': 'B'}])
+        self.assertEqual(acc, {1: "a", 2: "B"})
+
+        acc = agg.retract(acc, [{'key': 1, 'value': 'A'}, {'key': 3, 'value': 'C'}])
+        self.assertEqual(acc, {2: "B"})
 
 
 class RegistrationTest(unittest.TestCase):

@@ -66,6 +66,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "nested_update",
     "collect",
     "merge_map_with_keytime",
+    "merge_map",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
