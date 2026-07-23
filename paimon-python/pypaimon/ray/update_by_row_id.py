@@ -190,16 +190,21 @@ class _IncrementalUpdateCommitter:
         self._pending_groups = 0
         self._table_commit = None
         self._next_commit_identifier = 1
-        self._pending_commit_started = False
+        self._deferred_error = None
+        self._uncertain_messages: list = []
 
     def add_group(self, commit_messages, _num_updated, _row_ids) -> None:
         self._pending_messages.extend(commit_messages)
         self._pending_groups += 1
-        if self._pending_groups >= self._max_groups_per_commit:
+        if (self._deferred_error is None
+                and self._pending_groups >= self._max_groups_per_commit):
             self._commit_pending()
 
     def finish(self) -> None:
-        self._commit_pending()
+        if self._deferred_error is None:
+            self._commit_pending()
+        if self._deferred_error is not None:
+            raise self._deferred_error
 
     def _commit_pending(self) -> None:
         if self._pending_groups == 0:
@@ -209,18 +214,33 @@ class _IncrementalUpdateCommitter:
             return
 
         if self._table_commit is None:
-            self._table_commit = (
-                self._table.new_stream_write_builder().new_commit()
-            )
+            try:
+                self._table_commit = (
+                    self._table.new_stream_write_builder().new_commit()
+                )
+            except Exception as error:
+                # No commit started; all messages remain safe to abort.
+                self._deferred_error = error
+                return
 
-        self._pending_commit_started = True
         group_count = self._pending_groups
-        self._table_commit.commit(
-            self._pending_messages, self._next_commit_identifier
-        )
+        commit_identifier = self._next_commit_identifier
+        try:
+            self._table_commit.commit(
+                self._pending_messages, commit_identifier
+            )
+        except Exception as error:
+            # Defer the error; this window's commit outcome is uncertain.
+            self._uncertain_messages.extend(self._pending_messages)
+            self._pending_messages = []
+            self._pending_groups = 0
+            self._deferred_error = error
+            return
+
+        # Later windows are disjoint by _FIRST_ROW_ID.
+        self._table_commit.ignore_row_id_conflict_for_commit(commit_identifier)
         self._pending_messages = []
         self._pending_groups = 0
-        self._pending_commit_started = False
         self._next_commit_identifier += 1
         logger.info(
             "Incrementally committed %d update_by_row_id file groups.",
@@ -228,11 +248,13 @@ class _IncrementalUpdateCommitter:
         )
 
     def abort_pending(self) -> None:
-        if not self._pending_messages or self._pending_commit_started:
+        if not self._pending_messages:
             return
 
         if self._table_commit is None:
             _abort_pending_update_messages(self._table, self._pending_messages)
+            self._pending_messages = []
+            self._pending_groups = 0
             return
 
         try:
@@ -243,6 +265,9 @@ class _IncrementalUpdateCommitter:
                 abort_error,
                 exc_info=abort_error,
             )
+        finally:
+            self._pending_messages = []
+            self._pending_groups = 0
 
     def close(self) -> None:
         if self._table_commit is None:

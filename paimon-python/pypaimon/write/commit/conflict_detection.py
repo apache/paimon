@@ -159,6 +159,10 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self._row_id_ignored_commits = set()
+        self._row_id_history_base_snapshot = None
+        self._row_id_history_cursor = None
+        self._row_id_external_snapshots = []
         self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
@@ -172,6 +176,44 @@ class ConflictDetection:
 
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
+
+    def set_row_id_check_from_snapshot(self, snapshot_id):
+        if self._row_id_check_from_snapshot == snapshot_id:
+            return
+        self._row_id_check_from_snapshot = snapshot_id
+        self._row_id_history_base_snapshot = None
+        self._row_id_history_cursor = None
+        self._row_id_external_snapshots = []
+
+    def ignore_row_id_commit(self, commit_user, commit_identifier):
+        """Exclude one known-disjoint commit from later checks."""
+        self._row_id_ignored_commits.add((commit_user, commit_identifier))
+
+    def _row_id_history_snapshots(self, latest_snapshot):
+        """Cache external history while skipping registered disjoint windows."""
+        base_snapshot = self._row_id_check_from_snapshot
+        if (self._row_id_history_base_snapshot != base_snapshot
+                or self._row_id_history_cursor is None
+                or latest_snapshot.id < self._row_id_history_cursor):
+            self._row_id_history_base_snapshot = base_snapshot
+            self._row_id_history_cursor = base_snapshot
+            self._row_id_external_snapshots = []
+
+        for snapshot_id in range(
+                self._row_id_history_cursor + 1,
+                latest_snapshot.id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                continue
+            identity = (
+                getattr(snapshot, "commit_user", None),
+                getattr(snapshot, "commit_identifier", None),
+            )
+            if identity not in self._row_id_ignored_commits:
+                self._row_id_external_snapshots.append(snapshot)
+
+        self._row_id_history_cursor = latest_snapshot.id
+        return self._row_id_external_snapshots
 
     @staticmethod
     def has_global_index_additions(index_entries=None):
@@ -576,13 +618,7 @@ class ConflictDetection:
                 delta_signatures.append(
                     (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
 
-        for snapshot_id in range(
-                self._row_id_check_from_snapshot + 1,
-                latest_snapshot.id + 1):
-            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot is None:
-                continue
-
+        for snapshot in self._row_id_history_snapshots(latest_snapshot):
             if snapshot.commit_kind == "COMPACT":
                 err = self._compact_conflicts_with_delta(
                     snapshot, delta_signatures, column_checker, commit_entries)

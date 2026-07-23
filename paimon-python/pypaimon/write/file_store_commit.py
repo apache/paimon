@@ -132,7 +132,9 @@ class FileStoreCommit:
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
                            if msg.check_from_snapshot != -1]
         if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+            self.conflict_detection.set_row_id_check_from_snapshot(
+                min(valid_snapshots)
+            )
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",

@@ -18,6 +18,7 @@
 import os
 import shutil
 import tempfile
+import threading
 import types
 import unittest
 import uuid
@@ -154,16 +155,56 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
         )
 
-        stats = update_by_row_id(
-            target,
-            ray.data.from_arrow(src).repartition(8),
-            self.catalog_options,
-            update_cols=["age"],
-            num_partitions=4,
-            max_groups_per_commit=3,
-        )
+        original_iter_batches = ray.data.Dataset.iter_batches
+        iter_batch_options = []
+        first_window_committed = threading.Event()
+        resume_iteration = threading.Event()
+        observed = {}
+
+        def pausing_iter_batches(dataset, *args, **kwargs):
+            iter_batch_options.append((
+                kwargs.get("batch_size"),
+                kwargs.get("prefetch_batches"),
+            ))
+            for batch_number, batch in enumerate(
+                    original_iter_batches(dataset, *args, **kwargs), 1):
+                yield batch
+                if batch_number == 3:
+                    first_window_committed.set()
+                    if not resume_iteration.wait(30):
+                        raise TimeoutError("timed out waiting to resume iteration")
+
+        def observe_first_window():
+            if not first_window_committed.wait(30):
+                observed["error"] = "first commit was not observed"
+            else:
+                observed["snapshot_id"] = (
+                    table.snapshot_manager().get_latest_snapshot().id
+                )
+            resume_iteration.set()
+
+        observer = threading.Thread(target=observe_first_window)
+        observer.start()
+
+        try:
+            with mock.patch.object(
+                    ray.data.Dataset, "iter_batches", pausing_iter_batches):
+                stats = update_by_row_id(
+                    target,
+                    ray.data.from_arrow(src).repartition(8),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=4,
+                    max_groups_per_commit=3,
+                )
+        finally:
+            resume_iteration.set()
+            observer.join(30)
 
         self.assertEqual({"num_updated": 8}, stats)
+        self.assertEqual([(1, 0)], iter_batch_options)
+        self.assertNotIn("error", observed)
+        self.assertEqual(base_snapshot_id + 1, observed["snapshot_id"])
         latest = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(base_snapshot_id + 3, latest.id)
         incremental_snapshots = [
@@ -187,10 +228,76 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         for chunk in chunks:
             self.assertEqual(0, got[chunk[1]])
 
+    def test_incremental_commit_failure_drains_later_groups(self):
+        import importlib
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        chunks = [[start, start + 1] for start in range(10, 50, 10)]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x", "x"], "age": [0, 0]},
+                schema=self.pa_schema,
+            ))
+
+        rid = self._rowid_by_id(target)
+        src = pa.table(
+            {
+                "_ROW_ID": [rid[chunk[0]] for chunk in chunks],
+                "age": [chunk[0] for chunk in chunks],
+            },
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        seen_groups = []
+        aborted = []
+        commit_calls = []
+        original_add_group = m._IncrementalUpdateCommitter.add_group
+        original_abort = StreamTableCommit.abort
+
+        def record_group(committer, messages, num_updated, row_ids):
+            seen_groups.append(list(messages))
+            return original_add_group(
+                committer, messages, num_updated, row_ids)
+
+        def fail_commit(_commit, _messages, commit_identifier):
+            commit_calls.append(commit_identifier)
+            raise RuntimeError("commit failed")
+
+        def record_abort(commit, messages):
+            aborted.append(list(messages))
+            return original_abort(commit, messages)
+
+        with mock.patch.object(
+                m._IncrementalUpdateCommitter, "add_group", record_group), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort):
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                update_by_row_id(
+                    target,
+                    ray.data.from_arrow(src).repartition(4),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=4,
+                    max_groups_per_commit=2,
+                )
+
+        self.assertEqual(4, len(seen_groups))
+        self.assertEqual([1], commit_calls)
+        self.assertEqual(
+            [[message for group in seen_groups[2:] for message in group]],
+            aborted,
+        )
+
     def test_incremental_committer_batches_complete_groups(self):
         import importlib
         m = importlib.import_module("pypaimon.ray.update_by_row_id")
-        recorder = {"commits": [], "aborts": [], "close_calls": 0}
+        recorder = {
+            "commits": [],
+            "ignored": [],
+            "aborts": [],
+            "close_calls": 0,
+        }
 
         class FakeCommit:
             def commit(self, msgs, commit_identifier):
@@ -198,6 +305,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
             def abort(self, msgs):
                 recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
 
             def close(self):
                 recorder["close_calls"] += 1
@@ -222,13 +332,14 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             (["group-1", "group-2"], 1),
             (["group-3"], 2),
         ], recorder["commits"])
+        self.assertEqual([1, 2], recorder["ignored"])
         self.assertEqual([], recorder["aborts"])
         self.assertEqual(1, recorder["close_calls"])
 
     def test_incremental_committer_aborts_only_uncommitted_groups(self):
         import importlib
         m = importlib.import_module("pypaimon.ray.update_by_row_id")
-        recorder = {"commits": [], "aborts": []}
+        recorder = {"commits": [], "ignored": [], "aborts": []}
 
         class FakeCommit:
             def commit(self, msgs, commit_identifier):
@@ -236,6 +347,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
             def abort(self, msgs):
                 recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
 
             def close(self):
                 pass
@@ -258,19 +372,24 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual([
             (["committed-1", "committed-2"], 1),
         ], recorder["commits"])
+        self.assertEqual([1], recorder["ignored"])
         self.assertEqual([["pending"]], recorder["aborts"])
 
-    def test_incremental_committer_does_not_abort_uncertain_commit(self):
+    def test_incremental_committer_drains_after_uncertain_commit(self):
         import importlib
         m = importlib.import_module("pypaimon.ray.update_by_row_id")
-        recorder = {"abort_calls": 0}
+        recorder = {"commit_calls": 0, "ignored": [], "aborts": []}
 
         class FakeCommit:
             def commit(self, msgs, commit_identifier):
+                recorder["commit_calls"] += 1
                 raise RuntimeError("commit outcome is uncertain")
 
             def abort(self, msgs):
-                recorder["abort_calls"] += 1
+                recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
 
             def close(self):
                 pass
@@ -283,13 +402,59 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             def new_stream_write_builder(self):
                 return FakeBuilder()
 
-        committer = m._IncrementalUpdateCommitter(FakeTable(), 1)
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["uncertain-1"], 1, [])
+        committer.add_group(["uncertain-2"], 1, [])
+        committer.add_group(["pending-1"], 1, [])
+        committer.add_group(["pending-2"], 1, [])
         with self.assertRaisesRegex(RuntimeError, "outcome is uncertain"):
-            committer.add_group(["possibly-committed"], 1, [])
+            committer.finish()
         committer.abort_pending()
         committer.close()
 
-        self.assertEqual(0, recorder["abort_calls"])
+        self.assertEqual(1, recorder["commit_calls"])
+        self.assertEqual([], recorder["ignored"])
+        self.assertEqual([["pending-1", "pending-2"]], recorder["aborts"])
+
+    def test_incremental_committer_aborts_all_after_new_commit_failure(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"aborts": [], "close_calls": 0}
+
+        class AbortCommit:
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def close(self):
+                recorder["close_calls"] += 1
+
+        class FailingBuilder:
+            def new_commit(self):
+                raise RuntimeError("new_commit failed")
+
+        class AbortBuilder:
+            def new_commit(self):
+                return AbortCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FailingBuilder()
+
+            def new_batch_write_builder(self):
+                return AbortBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        for group in ("group-1", "group-2", "group-3"):
+            committer.add_group([group], 1, [])
+        with self.assertRaisesRegex(RuntimeError, "new_commit failed"):
+            committer.finish()
+        committer.abort_pending()
+
+        self.assertEqual(
+            [["group-1", "group-2", "group-3"]],
+            recorder["aborts"],
+        )
+        self.assertEqual(1, recorder["close_calls"])
 
     def test_rejects_invalid_max_groups_per_commit(self):
         target = self._create()

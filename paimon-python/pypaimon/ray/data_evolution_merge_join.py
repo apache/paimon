@@ -606,7 +606,12 @@ def distributed_update_apply(
     all_msgs: list = []
     num_updated = 0
     action_row_ids = []
-    for batch in msgs_ds.iter_batches(batch_format="pyarrow"):
+    iter_batches_kwargs = {"batch_format": "pyarrow"}
+    if on_group_result is not None:
+        # Yield ready groups without waiting for batch fill or prefetch.
+        iter_batches_kwargs["batch_size"] = 1
+        iter_batches_kwargs["prefetch_batches"] = 0
+    for batch in msgs_ds.iter_batches(**iter_batches_kwargs):
         message_blobs = batch.column("msgs_blob").to_pylist()
         updated_counts = batch.column("n_updated").to_pylist()
         row_id_blobs = (
