@@ -442,6 +442,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         copyTableDefaultOptions(schema.options());
+        validateCreateTable(schema, false);
 
         switch (Options.fromMap(schema.options()).get(TYPE)) {
             case TABLE:
@@ -516,6 +517,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateCreateTable(newSchema, false);
         validateCustomTablePath(newSchema.options());
         copyTableDefaultOptions(newSchema.options());
+        validateCreateTable(newSchema, false);
 
         Table existing;
         try {

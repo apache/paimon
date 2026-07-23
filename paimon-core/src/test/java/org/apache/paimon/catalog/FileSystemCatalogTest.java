@@ -31,6 +31,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
@@ -66,6 +67,47 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .primaryKey("Pk1", "pk2", "pk3")
                         .build();
         catalog.createTable(identifier, schema, false);
+    }
+
+    @Test
+    public void testValidateFormatTableDefaultOptions() throws Exception {
+        String database = "format_table_default_validation_db";
+        catalog.createDatabase(database, false);
+        Identifier existing = Identifier.create(database, "existing_table");
+        catalog.createTable(
+                existing, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+        ((AbstractCatalog) DelegateCatalog.rootCatalog(catalog))
+                .tableDefaultOptions.put(CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), "0");
+        Schema createSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .build();
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create(database, "format_table"),
+                                        createSchema,
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("write.target-row-num-per-file should be at least 1.");
+
+        Schema tableReplaceSchema = Schema.newBuilder().column("id", DataTypes.INT()).build();
+        assertThatThrownBy(() -> catalog.replaceTable(existing, tableReplaceSchema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("write.target-row-num-per-file should be at least 1.");
+        assertThat(catalog.getTable(existing)).isNotNull();
+
+        Schema replaceSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .build();
+        assertThatThrownBy(() -> catalog.replaceTable(existing, replaceSchema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("write.target-row-num-per-file should be at least 1.");
+        assertThat(catalog.getTable(existing)).isNotNull();
     }
 
     @Test

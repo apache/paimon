@@ -183,6 +183,39 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testAbortAfterRollingByRowsDeletesBlobFiles() throws IOException {
+        CoreOptions options = new CoreOptions(new Options());
+        long hugeSize = 1024L * 1024 * 1024;
+        DedicatedFormatRollingFileWriter cappedWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        1L,
+                        SCHEMA,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(options),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, options));
+
+        cappedWriter.write(
+                GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        cappedWriter.abort();
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).count()).isZero();
+        }
+    }
+
+    @Test
     public void testDoesNotWriteRowSidecar() throws IOException {
         // Tests that: dedicated blob files do not create row-store sidecars.
         // Kills mutation: adding row sidecar writing to DedicatedFormatRollingFileWriter.

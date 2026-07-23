@@ -32,6 +32,7 @@ import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.loadTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
@@ -42,6 +43,19 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link CatalogUtils}. */
 class CatalogUtilsTest {
+
+    @Test
+    void testRejectNonPositiveTargetRows() {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(WRITE_TARGET_ROW_NUM_PER_FILE.key(), "0")
+                        .build();
+
+        assertThatThrownBy(() -> validateCreateTable(schema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("write.target-row-num-per-file should be at least 1.");
+    }
 
     @Test
     void testRejectEngineImplementationForCatalogManagedPartitionsOnCreate() {

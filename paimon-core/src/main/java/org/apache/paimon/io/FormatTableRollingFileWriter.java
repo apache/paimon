@@ -23,6 +23,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,31 +33,38 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-/**
- * Format table's writer to roll over to a new file if the current size exceed the target file size.
- */
+/** Format table's writer which rolls files by target size or target row count. */
 public class FormatTableRollingFileWriter implements AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableRollingFileWriter.class);
 
     private static final int CHECK_ROLLING_RECORD_CNT = 1000;
 
+    private final FileIO fileIO;
     private final Supplier<FormatTableSingleFileWriter> writerFactory;
     private final long targetFileSize;
+    private final long targetRowNumPerFile;
     private final List<FileWriterAbortExecutor> closedWriters;
     private final List<TwoPhaseOutputStream.Committer> committers;
 
     private FormatTableSingleFileWriter currentWriter = null;
     private long recordCount = 0;
+    private long currentFileRecordCount = 0;
     private boolean closed = false;
 
     public FormatTableRollingFileWriter(
             FileIO fileIO,
             FileFormat fileFormat,
             long targetFileSize,
+            long targetRowNumPerFile,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             String fileCompression) {
+        Preconditions.checkArgument(
+                targetRowNumPerFile > 0,
+                "targetRowNumPerFile must be positive, but is %s",
+                targetRowNumPerFile);
+        this.fileIO = fileIO;
         this.writerFactory =
                 () ->
                         new FormatTableSingleFileWriter(
@@ -65,6 +73,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
                                 pathFactory.newPath(),
                                 fileCompression);
         this.targetFileSize = targetFileSize;
+        this.targetRowNumPerFile = targetRowNumPerFile;
         this.closedWriters = new ArrayList<>();
         this.committers = new ArrayList<>();
     }
@@ -81,9 +90,11 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
 
             currentWriter.write(row);
             recordCount += 1;
+            currentFileRecordCount += 1;
             boolean needRolling =
-                    currentWriter.reachTargetSize(
-                            recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+                    currentFileRecordCount >= targetRowNumPerFile
+                            || currentWriter.reachTargetSize(
+                                    recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
             if (needRolling) {
                 closeCurrentWriter();
             }
@@ -109,15 +120,26 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
         }
 
         currentWriter = null;
+        currentFileRecordCount = 0;
     }
 
     public void abort() {
         if (currentWriter != null) {
             currentWriter.abort();
+            currentWriter = null;
         }
+        for (TwoPhaseOutputStream.Committer committer : committers) {
+            try {
+                committer.discard(fileIO);
+            } catch (Throwable e) {
+                LOG.warn("Exception occurs when discarding file {}.", committer.targetPath(), e);
+            }
+        }
+        committers.clear();
         for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
         }
+        closedWriters.clear();
     }
 
     public List<TwoPhaseOutputStream.Committer> committers() {

@@ -490,6 +490,7 @@ public class DedicatedFormatRollingFileWriter
         }
         blobWriter.close();
         List<DataFileMeta> results = blobWriter.result();
+        closedWriters.addAll(blobWriter.drainAbortExecutors());
         blobWriter = null;
         return results;
     }
@@ -501,6 +502,7 @@ public class DedicatedFormatRollingFileWriter
         }
         vectorStoreWriter.close();
         List<DataFileMeta> results = vectorStoreWriter.result();
+        closedWriters.addAll(vectorStoreWriter.writer().drainAbortExecutors());
         vectorStoreWriter = null;
         return results;
     }

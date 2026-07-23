@@ -159,6 +159,10 @@ public class CatalogUtils {
                 "The value of %s property should be %s.",
                 AUTO_CREATE.key(),
                 Boolean.FALSE);
+        checkArgument(
+                options.get(CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE) > 0,
+                "%s should be at least 1.",
+                CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key());
 
         TableType tableType = options.get(CoreOptions.TYPE);
         if (tableType.equals(TableType.FORMAT_TABLE)) {

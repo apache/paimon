@@ -452,6 +452,21 @@ def _validate_blob_fields(
             )
 
 
+def _validate_options(options: dict):
+    core_options = CoreOptions(Options(options))
+    target_row_num_per_file = core_options.write_target_row_num_per_file()
+    max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+    if target_row_num_per_file < 1:
+        raise ValueError(
+            f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} should be at least 1"
+        )
+    if target_row_num_per_file > max_value:
+        raise ValueError(
+            f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
+            f"should be at most {max_value}"
+        )
+
+
 def _contains_blob_type(data_type: DataType) -> bool:
     if is_blob_type(data_type):
         return True
@@ -642,6 +657,7 @@ class SchemaManager:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
+        _validate_options(new_schema.options)
         _validate_blob_fields(
             new_schema.fields,
             new_schema.options,

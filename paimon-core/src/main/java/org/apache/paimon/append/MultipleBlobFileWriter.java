@@ -26,6 +26,7 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
@@ -129,6 +130,14 @@ public class MultipleBlobFileWriter implements Closeable {
             results.addAll(blobWriter.result());
         }
         return results;
+    }
+
+    List<FileWriterAbortExecutor> drainAbortExecutors() {
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>();
+        for (BlobProjectedFileWriter blobWriter : blobWriters) {
+            abortExecutors.addAll(blobWriter.writer().drainAbortExecutors());
+        }
+        return abortExecutors;
     }
 
     private static class BlobProjectedFileWriter

@@ -572,6 +572,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
             tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            validateCreateTable(schema, dataTokenEnabled);
             // Defaults participate in the catalog-managed partition combination, so validate
             // the effective options rather than only the explicit ones.
             validateCatalogManagedFormatTablePartitions(
@@ -654,6 +655,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(identifier, "replaceTable");
         validateCreateTable(newSchema, dataTokenEnabled);
         tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+        validateCreateTable(newSchema, dataTokenEnabled);
         // Defaults participate in the catalog-managed partition combination, so validate the
         // effective options rather than only the explicit ones. Externality is not validated
         // client-side here: a round-tripped schema of an internal table may carry the synthetic

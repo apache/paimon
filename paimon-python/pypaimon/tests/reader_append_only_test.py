@@ -77,7 +77,8 @@ class AoReaderTest(unittest.TestCase):
             options={'write.target-row-num-per-file': '5'})
         self.catalog.create_table('default.test_write_target_row_num_per_file', schema, False)
         table = self.catalog.get_table('default.test_write_target_row_num_per_file')
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(
+                NotImplementedError, 'row-count based file rolling'):
             write_builder = table.new_batch_write_builder()
             table_write = write_builder.new_write()
             table_write.write_arrow(self.expected)

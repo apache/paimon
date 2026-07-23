@@ -379,6 +379,7 @@ public class JdbcCatalog extends AbstractCatalog {
         getDatabase(identifier.getDatabaseName());
 
         copyTableDefaultOptions(schema.options());
+        validateCreateTable(schema, false);
 
         TableType tableType = Options.fromMap(schema.options()).get(TYPE);
         switch (tableType) {

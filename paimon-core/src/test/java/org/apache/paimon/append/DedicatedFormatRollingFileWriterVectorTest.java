@@ -50,12 +50,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -146,6 +148,42 @@ public class DedicatedFormatRollingFileWriterVectorTest {
 
         assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(1).rowCount());
         assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(2).rowCount());
+    }
+
+    @Test
+    public void testAbortAfterRollingByRowsDeletesVectorFiles() throws IOException {
+        RowType schema =
+                RowType.builder()
+                        .field("f0", DataTypes.INT())
+                        .field("f1", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()))
+                        .build();
+        long hugeSize = 1024L * 1024 * 1024;
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        FileFormat.fromIdentifier("json", new Options()),
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        1L,
+                        schema,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        null);
+
+        writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[VECTOR_DIM])));
+        writer.abort();
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).count()).isZero();
+        }
     }
 
     @Test

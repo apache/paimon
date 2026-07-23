@@ -86,6 +86,78 @@ class RESTFormatTableTest(RESTBaseTest):
                 actual[col] = actual[col].astype(expected[col].dtype)
         pd.testing.assert_frame_equal(actual, expected)
 
+    def test_format_table_write_rolls_by_row_count(self):
+        pa_schema = pa.schema([("id", pa.int32())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "type": "format-table",
+                "file.format": "parquet",
+                "write.target-row-num-per-file": "2",
+            },
+        )
+        table_name = "default.format_table_row_count_rolling"
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.table({"id": [1, 2, 3, 4, 5]}))
+        commit_messages = table_write.prepare_commit()
+        table_commit.commit(commit_messages)
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        self.assertEqual(3, len(splits))
+        splits_by_name = {
+            split.data_path().rsplit("/", 1)[-1]: split
+            for split in splits
+        }
+        row_counts = [
+            read_builder.new_read().to_arrow([
+                splits_by_name[path.rsplit("/", 1)[-1]]
+            ]).num_rows
+            for path in commit_messages[0].written_paths
+        ]
+        self.assertEqual([2, 2, 1], row_counts)
+
+    def test_format_table_overwrite_new_partition_in_multiple_batches(self):
+        pa_schema = pa.schema([
+            ("id", pa.int32()),
+            ("pt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["pt"],
+            options={
+                "type": "format-table",
+                "file.format": "parquet",
+                "write.target-row-num-per-file": "2",
+            },
+        )
+        table_name = "default.format_table_overwrite_new_partition_batches"
+        self.rest_catalog.drop_table(table_name, True)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder().overwrite({"pt": 1})
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.table({"id": [1, 2], "pt": [1, 1]}))
+        table_write.write_arrow(pa.table({"id": [3, 4], "pt": [1, 1]}))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits()
+        ).sort_values(by="id")
+        self.assertEqual([1, 2, 3, 4], actual["id"].tolist())
+
     def test_format_table_text_read_write(self):
         pa_schema = pa.schema([("value", pa.string())])
         schema = Schema.from_pyarrow_schema(

@@ -168,6 +168,14 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         return results;
     }
 
+    /** Transfers ownership of abort executors for closed files to the caller. */
+    public List<FileWriterAbortExecutor> drainAbortExecutors() {
+        Preconditions.checkState(closed, "Cannot drain abort executors unless close all writers.");
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>(closedWriters);
+        closedWriters.clear();
+        return abortExecutors;
+    }
+
     @Override
     public void close() throws IOException {
         if (closed) {

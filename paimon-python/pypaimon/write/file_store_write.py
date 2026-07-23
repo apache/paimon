@@ -49,12 +49,6 @@ class FileStoreWrite:
         self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
-        # pypaimon has no row-count rolling yet; fail fast instead of silently ignoring the option.
-        row_cap = table.table_schema.options.get("write.target-row-num-per-file")
-        if row_cap is not None and str(row_cap).strip() not in ("", str(2 ** 63 - 1)):
-            raise NotImplementedError(
-                "write.target-row-num-per-file is set on this table but pypaimon writers do not support "
-                "row-count based file rolling yet; unset it or write with Java/Flink/Spark.")
         self.changelog_producer = self.options.changelog_producer()
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
@@ -62,9 +56,12 @@ class FileStoreWrite:
                               f"-s-{random.randint(0, 2 ** 31 - 2)}-w-"))
 
     def disable_rolling(self):
-        """Disable file rolling by setting target_file_size to max."""
+        """Disable size- and row-based file rolling."""
+        max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
         self.options.set(
-            CoreOptions.TARGET_FILE_SIZE, str(2 ** 63 - 1))
+            CoreOptions.TARGET_FILE_SIZE, str(max_value))
+        self.options.set(
+            CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE, str(max_value))
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
@@ -95,6 +92,19 @@ class FileStoreWrite:
         writer.write(data.to_batches()[0])
 
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
+        row_limit = options.write_target_row_num_per_file()
+        max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+        if row_limit < 1:
+            raise ValueError(
+                "write.target-row-num-per-file should be at least 1")
+        if row_limit > max_value:
+            raise ValueError(
+                f"write.target-row-num-per-file should be at most {max_value}")
+        if row_limit != max_value:
+            raise NotImplementedError(
+                "write.target-row-num-per-file is set on this table but pypaimon file-store writers do not support "
+                "row-count based file rolling yet; unset it or write with Java/Flink/Spark.")
+
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 

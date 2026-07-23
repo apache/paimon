@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 
 import pyarrow
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_commit_message import (
     FormatTableCommitMessage,
@@ -99,6 +100,22 @@ class FormatTableWrite:
         )
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
+        self._target_row_num_per_file = CoreOptions.from_dict(
+            table.options()
+        ).write_target_row_num_per_file()
+        max_target_row_num_per_file = (
+            CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+        )
+        if self._target_row_num_per_file < 1:
+            raise ValueError(
+                f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
+                "should be at least 1"
+            )
+        if self._target_row_num_per_file > max_target_row_num_per_file:
+            raise ValueError(
+                f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
+                f"should be at most {max_target_row_num_per_file}"
+            )
         self._data_file_prefix = "data-"
         self._suffix = {
             "parquet": ".parquet",
@@ -156,7 +173,6 @@ class FormatTableWrite:
         overwrite_this = (
             self._overwrite
             and dir_path not in self._overwritten_dirs
-            and self.table.file_io.exists(dir_path)
         )
         if overwrite_this:
             should_delete = (
@@ -167,12 +183,30 @@ class FormatTableWrite:
                 )
             )
             if should_delete:
-                from pypaimon.table.format.format_table_commit import (
-                    _delete_data_files_in_path,
-                )
-                _delete_data_files_in_path(self.table.file_io, dir_path)
+                if self.table.file_io.exists(dir_path):
+                    from pypaimon.table.format.format_table_commit import (
+                        _delete_data_files_in_path,
+                    )
+                    _delete_data_files_in_path(self.table.file_io, dir_path)
                 self._overwritten_dirs.add(dir_path)
         self.table.file_io.check_or_mkdirs(dir_path)
+
+        if data.num_rows <= self._target_row_num_per_file:
+            self._write_file(data, dir_path)
+            return
+
+        for offset in range(
+                0, data.num_rows, self._target_row_num_per_file):
+            self._write_file(
+                data.slice(offset, self._target_row_num_per_file),
+                dir_path,
+            )
+
+    def _write_file(
+        self,
+        data: pyarrow.RecordBatch,
+        dir_path: str,
+    ) -> None:
         file_name = f"{self._data_file_prefix}{uuid.uuid4().hex}{self._suffix}"
         path = f"{dir_path}/{file_name}"
 
