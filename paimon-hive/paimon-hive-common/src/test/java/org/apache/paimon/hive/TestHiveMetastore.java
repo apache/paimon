@@ -113,6 +113,7 @@ public class TestHiveMetastore {
     private HiveConf hiveConf;
     private ExecutorService executorService;
     private TServer server;
+    private int port;
     private HiveMetaStore.HMSHandler baseHandler;
 
     public void start(Configuration configuration, int port) {
@@ -145,6 +146,7 @@ public class TestHiveMetastore {
         try {
             TServerSocket socket = new TServerSocket(portNum);
             int port = socket.getServerSocket().getLocalPort();
+            this.port = port;
             this.hiveConf = initConf(conf, port);
             this.server = newThriftServer(socket, poolSize, hiveConf);
             this.executorService = Executors.newSingleThreadExecutor();
@@ -160,6 +162,11 @@ public class TestHiveMetastore {
         } catch (Exception e) {
             throw new RuntimeException("Cannot start TestHiveMetastore", e);
         }
+    }
+
+    /** The actual bound port, resolved even when started with port 0 (a free port). */
+    public int getPort() {
+        return port;
     }
 
     public void stop() throws Exception {

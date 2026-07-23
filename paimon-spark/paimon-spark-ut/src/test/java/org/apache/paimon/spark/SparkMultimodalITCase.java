@@ -41,12 +41,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkMultimodalITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9092;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        // Bind a free port (0) instead of a fixed one, which flakes when the port is taken.
+        testHiveMetastore.start(0);
     }
 
     @AfterAll
@@ -59,12 +59,12 @@ public class SparkMultimodalITCase {
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + testHiveMetastore.getPort())
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + testHiveMetastore.getPort())
                 .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
