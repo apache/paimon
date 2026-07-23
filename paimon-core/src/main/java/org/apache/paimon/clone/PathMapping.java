@@ -21,8 +21,12 @@ package org.apache.paimon.clone;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.StringUtils;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -255,24 +259,32 @@ public class PathMapping implements Serializable {
     }
 
     static boolean overlaps(String left, String right) {
-        return isSameOrDescendantForConflict(left, right)
-                || isSameOrDescendantForConflict(right, left);
+        return isSameOrDescendantForMappingPrefix(left, right)
+                || isSameOrDescendantForMappingPrefix(right, left);
     }
 
     private static boolean samePath(String left, String right) {
-        return isSameOrDescendantForConflict(left, right)
-                && isSameOrDescendantForConflict(right, left);
+        return isSameOrDescendantForMappingPrefix(left, right)
+                && isSameOrDescendantForMappingPrefix(right, left);
     }
 
     static boolean isSameOrDescendant(String path, String parent) {
-        return isSameOrDescendant(path, parent, false);
+        return isSameOrDescendant(path, parent, false, false);
     }
 
     static boolean isSameOrDescendantForConflict(String path, String parent) {
-        return isSameOrDescendant(path, parent, true);
+        return isSameOrDescendant(path, parent, true, false);
     }
 
-    private static boolean isSameOrDescendant(String path, String parent, boolean allowLocalAlias) {
+    private static boolean isSameOrDescendantForMappingPrefix(String path, String parent) {
+        return isSameOrDescendant(path, parent, true, true);
+    }
+
+    private static boolean isSameOrDescendant(
+            String path,
+            String parent,
+            boolean allowLocalAlias,
+            boolean resolveLocalSymbolicLinks) {
         URI pathUri = new Path(path).toUri();
         URI parentUri = new Path(parent).toUri();
         if (!(allowLocalAlias
@@ -284,12 +296,37 @@ public class PathMapping implements Serializable {
         String pathPart = pathUri.getPath();
         String parentPart = parentUri.getPath();
         if (allowLocalAlias && isLocalAbsolutePath(pathUri) && isLocalAbsolutePath(parentUri)) {
+            if (resolveLocalSymbolicLinks) {
+                pathPart = canonicalLocalPath(pathUri);
+                parentPart = canonicalLocalPath(parentUri);
+            }
             pathPart = pathPart.toLowerCase(Locale.ROOT);
             parentPart = parentPart.toLowerCase(Locale.ROOT);
         }
         return pathPart.equals(parentPart)
                 || (parentPart.endsWith("/") && pathPart.startsWith(parentPart))
                 || pathPart.startsWith(parentPart + "/");
+    }
+
+    private static String canonicalLocalPath(URI uri) {
+        try {
+            java.nio.file.Path localPath =
+                    uri.getScheme() == null ? Paths.get(uri.getPath()) : Paths.get(uri);
+            java.nio.file.Path existingAncestor = localPath;
+            while (existingAncestor != null
+                    && !Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS)) {
+                existingAncestor = existingAncestor.getParent();
+            }
+            checkArgument(
+                    existingAncestor != null,
+                    "Local path mapping prefix has no existing ancestor: %s",
+                    uri);
+            java.nio.file.Path suffix = existingAncestor.relativize(localPath);
+            return existingAncestor.toRealPath().resolve(suffix).normalize().toUri().getPath();
+        } catch (IOException e) {
+            throw new IllegalArgumentException(
+                    "Failed to resolve local path mapping prefix: " + uri, e);
+        }
     }
 
     private static boolean equalsIgnoreCase(String left, String right) {

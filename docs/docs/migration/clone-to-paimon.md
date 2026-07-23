@@ -63,7 +63,8 @@ Every reachable source path must match one `path_mapping`. The mapped source tab
 physical target root. `target_database` and `target_table` are optional logical identifiers and do
 not change that path or register the table. Mapping and source paths must use the same explicit
 filesystem scheme; for example, `file:/path` does not match `/path`. Local mappings must not use a
-URI authority and must use absolute paths. Local target collision checks are case-insensitive.
+URI authority and must use absolute paths. Local target collision checks are case-insensitive and
+resolve existing symbolic-link ancestors.
 
 The target table root and every mapped external data or index root used by the table must initially
 be absent or empty. The action writes the same ownership marker into each root. A failed clone may

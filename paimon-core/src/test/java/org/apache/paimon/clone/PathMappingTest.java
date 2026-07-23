@@ -19,7 +19,10 @@
 package org.apache.paimon.clone;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -29,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PathMapping}. */
 public class PathMappingTest {
+
+    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testLongestPrefixWins() {
@@ -281,6 +286,25 @@ public class PathMappingTest {
                                         Arrays.asList(
                                                 "/tmp/source-a=/tmp/CLONE",
                                                 "/tmp/source-b=/tmp/clone/data")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Target path mapping prefixes must not overlap");
+    }
+
+    @Test
+    public void testSymlinkedLocalTargetPrefixesCannotOverlap() throws IOException {
+        java.nio.file.Path realTarget = Files.createDirectories(tempDir.resolve("real-target"));
+        java.nio.file.Path alias = Files.createSymbolicLink(tempDir.resolve("alias"), realTarget);
+
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Arrays.asList(
+                                                tempDir.resolve("source-a")
+                                                        + "="
+                                                        + realTarget.resolve("table"),
+                                                tempDir.resolve("source-b")
+                                                        + "="
+                                                        + alias.resolve("table/data"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Target path mapping prefixes must not overlap");
     }
