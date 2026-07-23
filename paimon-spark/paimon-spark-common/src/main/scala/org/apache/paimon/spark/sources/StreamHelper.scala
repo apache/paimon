@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.{DataSplit, StreamDataTableScan}
+import org.apache.paimon.table.source.{DataSplit, QueryAuthSplit, Split, StreamDataTableScan}
 import org.apache.paimon.table.source.TableScan.Plan
 import org.apache.paimon.table.source.snapshot.StartingContext
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
@@ -34,7 +34,7 @@ import org.apache.spark.sql.types.StructType
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit)
+case class IndexedDataSplit(snapshotId: Long, index: Long, entry: Split, dataSplit: DataSplit)
 
 private[spark] trait StreamHelper {
 
@@ -122,16 +122,20 @@ private[spark] trait StreamHelper {
 
   /** Sort the [[DataSplit]] list and index them. */
   private def convertPlanToIndexedSplits(plan: Plan): Array[IndexedDataSplit] = {
-    val dataSplits =
-      plan.splits().asScala.collect { case dataSplit: DataSplit => dataSplit }.toArray
-    val snapshotId = dataSplits.head.snapshotId()
+    val dataSplits = plan
+      .splits()
+      .asScala
+      .map(split => (split, QueryAuthSplit.unwrap(split)))
+      .collect { case (entry, dataSplit: DataSplit) => (entry, dataSplit) }
+      .toArray
+    val snapshotId = dataSplits.head._2.snapshotId()
 
     dataSplits
-      .sortWith((ds1, ds2) => compareByPartitionAndBucket(ds1, ds2) < 0)
+      .sortWith((ds1, ds2) => compareByPartitionAndBucket(ds1._2, ds2._2) < 0)
       .zipWithIndex
       .map {
-        case (split, idx) =>
-          IndexedDataSplit(snapshotId, idx, split)
+        case ((entry, dataSplit), idx) =>
+          IndexedDataSplit(snapshotId, idx, entry, dataSplit)
       }
   }
 

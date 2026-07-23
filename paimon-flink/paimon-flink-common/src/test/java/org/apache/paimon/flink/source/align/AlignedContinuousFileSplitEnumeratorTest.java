@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.align;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.flink.source.FileSplitEnumeratorTestBase;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
@@ -34,6 +35,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -137,6 +139,35 @@ public class AlignedContinuousFileSplitEnumeratorTest
         assertThat(assignments).containsOnlyKeys(0, 1);
         assertThat(assignments.get(0).getAssignedSplits()).containsExactly(expectedSplits.get(1));
         assertThat(assignments.get(1).getAssignedSplits()).containsExactly(expectedSplits.get(2));
+    }
+
+    @Test
+    public void testQueryAuthSplitsAssignedBySnapshot() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(1);
+        FileStoreSourceSplit first =
+                queryAuthSplit(createSnapshotSplit(1, 0, Collections.emptyList()));
+        FileStoreSourceSplit second =
+                queryAuthSplit(createSnapshotSplit(1, 0, Collections.emptyList()));
+
+        final AlignedContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Arrays.asList(first, second))
+                        .build();
+
+        enumerator.handleSplitRequest(0, "test-host");
+        List<FileStoreSourceSplit> assignedSplits =
+                context.getSplitAssignments().get(0).getAssignedSplits();
+        assertThat(assignedSplits).containsExactly(first, second);
+        assertThat(assignedSplits)
+                .allSatisfy(split -> assertThat(split.split()).isInstanceOf(QueryAuthSplit.class));
+
+        context.getSplitAssignments().clear();
+        enumerator.addSplitsBack(assignedSplits, 0);
+        enumerator.handleSplitRequest(0, "test-host");
+        assertThat(context.getSplitAssignments().get(0).getAssignedSplits())
+                .containsExactly(first, second);
     }
 
     @Test
@@ -255,6 +286,15 @@ public class AlignedContinuousFileSplitEnumeratorTest
                     -1,
                     10);
         }
+    }
+
+    private static FileStoreSourceSplit queryAuthSplit(FileStoreSourceSplit sourceSplit) {
+        return new FileStoreSourceSplit(
+                sourceSplit.splitId(),
+                new QueryAuthSplit(
+                        sourceSplit.split(),
+                        new TableQueryAuthResult(null, Collections.singletonMap("f0", "mask"))),
+                sourceSplit.recordsToSkip());
     }
 
     @Override

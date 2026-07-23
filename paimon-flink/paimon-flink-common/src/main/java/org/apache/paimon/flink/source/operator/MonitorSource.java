@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
@@ -30,6 +31,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -314,9 +316,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                     }
                     return ChannelComputer.select(key.f1, numPartitions);
                 },
-                split -> {
-                    DataSplit dataSplit = (DataSplit) split;
-                    return Tuple2.of(dataSplit.partition(), dataSplit.bucket());
-                });
+                MonitorSource::splitKey);
+    }
+
+    static Tuple2<BinaryRow, Integer> splitKey(Split split) {
+        DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
+        return Tuple2.of(dataSplit.partition(), dataSplit.bucket());
     }
 }

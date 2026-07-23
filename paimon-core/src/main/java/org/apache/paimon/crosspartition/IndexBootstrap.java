@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,12 +42,12 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StartupMode.LATEST;
 import static org.apache.paimon.io.SplitsParallelReadUtil.parallelExecute;
@@ -80,11 +81,12 @@ public class IndexBootstrap implements Serializable {
                         .mapToInt(Integer::intValue)
                         .toArray();
 
-        // force using the latest scan mode
+        // Force using the latest scan mode and bypass query auth for this internal index read.
+        Options bootstrapOptions = new Options();
+        bootstrapOptions.set(SCAN_MODE, LATEST);
+        bootstrapOptions.set(QUERY_AUTH_ENABLED, false);
         ReadBuilder readBuilder =
-                table.copy(Collections.singletonMap(SCAN_MODE.key(), LATEST.toString()))
-                        .newReadBuilder()
-                        .withProjection(keyProjection);
+                table.copy(bootstrapOptions.toMap()).newReadBuilder().withProjection(keyProjection);
 
         DataTableScan tableScan = (DataTableScan) readBuilder.newScan();
         List<Split> splits =
@@ -119,7 +121,7 @@ public class IndexBootstrap implements Serializable {
                 options.pageSize(),
                 options.crossPartitionUpsertBootstrapParallelism(),
                 split -> {
-                    DataSplit dataSplit = ((DataSplit) split);
+                    DataSplit dataSplit = (DataSplit) split;
                     int bucket = dataSplit.bucket();
                     return partBucketConverter.toGenericRow(
                             new JoinedRow(dataSplit.partition(), GenericRow.of(bucket)));

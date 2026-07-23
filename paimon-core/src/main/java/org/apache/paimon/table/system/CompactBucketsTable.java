@@ -108,10 +108,15 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
 
     // if need to specify the database of a table, use this method
     public CompactBucketsTable(FileStoreTable wrapped, boolean isContinuous, String databaseName) {
-        this.wrapped = wrapped;
+        this.wrapped =
+                wrapped.coreOptions().queryAuthEnabled()
+                        ? wrapped.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.QUERY_AUTH_ENABLED.key(), "false"))
+                        : wrapped;
         this.isContinuous = isContinuous;
         this.databaseName = databaseName;
-        this.baseSchemaId = wrapped.schema().id();
+        this.baseSchemaId = this.wrapped.schema().id();
     }
 
     @Override

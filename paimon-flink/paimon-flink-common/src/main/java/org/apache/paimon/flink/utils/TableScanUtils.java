@@ -23,6 +23,8 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import java.util.HashMap;
@@ -67,8 +69,9 @@ public class TableScanUtils {
 
     /** Get snapshot id from {@link FileStoreSourceSplit}. */
     public static Optional<Long> getSnapshotId(FileStoreSourceSplit split) {
-        if (split.split() instanceof DataSplit) {
-            return Optional.of(((DataSplit) split.split()).snapshotId());
+        Split unwrappedSplit = QueryAuthSplit.unwrap(split.split());
+        if (unwrappedSplit instanceof DataSplit) {
+            return Optional.of(((DataSplit) unwrappedSplit).snapshotId());
         }
         return Optional.empty();
     }

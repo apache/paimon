@@ -19,26 +19,34 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -94,6 +102,26 @@ public class FileKeyRangesTableTest extends TableTestBase {
                             assertThat(row.getString(8)).isNotNull();
                             assertThat(row.getString(9)).isNotNull();
                         });
+    }
+
+    @Test
+    public void testReadQueryAuthSplits() throws Exception {
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(Collections.emptyList(), Collections.emptyMap());
+        List<Split> splits =
+                table.newScan().plan().splits().stream()
+                        .map(split -> new QueryAuthSplit(split, authResult))
+                        .collect(Collectors.toList());
+        FilesTable.FilesSplit filesSplit = Mockito.mock(FilesTable.FilesSplit.class);
+        Mockito.when(filesSplit.splits(Mockito.any(FileStoreTable.class))).thenReturn(splits);
+
+        List<String> paths = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileKeyRangesTable.newRead().createReader(filesSplit)) {
+            reader.forEachRemaining(row -> paths.add(row.getString(2).toString()));
+        }
+
+        assertThat(paths).hasSameSizeAs(read(fileKeyRangesTable));
     }
 
     @Test

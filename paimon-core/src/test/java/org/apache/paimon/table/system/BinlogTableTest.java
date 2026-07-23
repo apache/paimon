@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -27,6 +28,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -35,12 +38,18 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -48,6 +57,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link BinlogTable}. */
 public class BinlogTableTest extends TableTestBase {
+
+    private FileStoreTable dataTable;
 
     @Test
     public void testReadBinlogFromLatest() throws Exception {
@@ -58,6 +69,29 @@ public class BinlogTableTest extends TableTestBase {
         List<InternalRow> result = read(binlogTable);
         List<InternalRow> expectRow = getExpectedResult();
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
+    }
+
+    @Test
+    public void testReadQueryAuthSplits() throws Exception {
+        BinlogTable binlogTable = createBinlogTable("binlog_table_with_auth", false);
+        PredicateBuilder builder = new PredicateBuilder(dataTable.rowType());
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(
+                        Collections.singletonList(JsonSerdeUtil.toFlatJson(builder.equal(1, 2))),
+                        null);
+
+        ReadBuilder readBuilder = binlogTable.newReadBuilder();
+        TableRead read = readBuilder.newRead();
+        List<String> result = new ArrayList<>();
+        for (Split split : readBuilder.newScan().plan().splits()) {
+            try (RecordReader<InternalRow> reader =
+                    read.createReader(new QueryAuthSplit(split, authResult))) {
+                reader.forEachRemaining(
+                        row -> result.add(row.getString(0) + "-" + row.getArray(2).getInt(0)));
+            }
+        }
+
+        assertThat(result).containsExactly(RowKind.UPDATE_AFTER.shortString() + "-2");
     }
 
     @Test
@@ -121,10 +155,9 @@ public class BinlogTableTest extends TableTestBase {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(fileIO, tablePath), schemaBuilder.build());
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        dataTable = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
-        writeTestData(table);
+        writeTestData(dataTable);
 
         Identifier binlogTableId =
                 identifier(tableName + SYSTEM_TABLE_SPLITTER + BinlogTable.BINLOG);

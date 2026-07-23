@@ -25,6 +25,7 @@ import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BlobType;
@@ -219,9 +220,10 @@ public class FileStoreSourceSplitReader
         }
 
         // update metric when split changes
-        if (nextSplit.split() instanceof DataSplit) {
+        Split split = QueryAuthSplit.unwrap(nextSplit.split());
+        if (split instanceof DataSplit) {
             long eventTime =
-                    ((DataSplit) nextSplit.split())
+                    ((DataSplit) split)
                             .earliestFileCreationEpochMillis()
                             .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
             metrics.recordSnapshotUpdate(eventTime);

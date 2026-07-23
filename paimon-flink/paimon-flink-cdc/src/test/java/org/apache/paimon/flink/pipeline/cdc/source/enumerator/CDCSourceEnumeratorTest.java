@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.pipeline.cdc.source.enumerator;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -30,9 +31,12 @@ import org.apache.paimon.flink.source.FileSplitEnumeratorTestBase;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -61,6 +65,7 @@ import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.toCDCOption;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CDCSourceEnumerator}. */
 public class CDCSourceEnumeratorTest
@@ -319,6 +324,83 @@ public class CDCSourceEnumeratorTest
         assertThat(assignments).containsKey(0);
         assertThat(toDataSplits(assignments.get(0).getAssignedSplits()))
                 .containsExactly(splits.get(0), splits.get(1));
+    }
+
+    @Test
+    public void testQueryAuthSplitKeepsWrapperAndRejectsNonDataSplit() throws Exception {
+        Options options = new Options();
+        options.setString("warehouse", warehouseFolder.toAbsolutePath().toString());
+        Configuration cdcConfig = new Configuration();
+        cdcConfig.set(toCDCOption(CDCOptions.DATABASE), DATABASE);
+        CDCSourceEnumerator enumerator =
+                new CDCSourceEnumerator(
+                        getSplitEnumeratorContext(1),
+                        new org.apache.flink.configuration.Configuration(),
+                        1L,
+                        CatalogContext.create(options),
+                        cdcConfig,
+                        null);
+
+        Identifier identifier = Identifier.create(DATABASE, TABLE + 0);
+        FileStoreTable wrappedTable = (FileStoreTable) catalog.getTable(identifier);
+        FileStoreTable table =
+                new FallbackReadFileStoreTable(wrappedTable, wrappedTable, true) {
+                    @Override
+                    public Snapshot snapshot(long snapshotId) {
+                        return new Snapshot(
+                                0,
+                                snapshotId,
+                                7L,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                "user",
+                                0L,
+                                Snapshot.CommitKind.APPEND,
+                                0L,
+                                0L,
+                                0L,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null);
+                    }
+                };
+        DataSplit dataSplit = createDataSplit(5L, 0, Collections.emptyList());
+        QueryAuthSplit queryAuthSplit = new QueryAuthSplit(dataSplit, null);
+
+        TableAwareFileStoreSourceSplit result =
+                enumerator.toTableAwareSplit("split-1", queryAuthSplit, table, identifier, null);
+
+        assertThat(result.split()).isSameAs(queryAuthSplit);
+        assertThat(result.getSchemaId()).isEqualTo(7L);
+
+        IncrementalSplit incrementalSplit =
+                new IncrementalSplit(
+                        5L,
+                        row(0),
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        true);
+        assertThatThrownBy(
+                        () ->
+                                enumerator.toTableAwareSplit(
+                                        "split-2", incrementalSplit, table, identifier, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "CDC source expects DataSplit, but got "
+                                + IncrementalSplit.class.getName()
+                                + ".");
     }
 
     @Test

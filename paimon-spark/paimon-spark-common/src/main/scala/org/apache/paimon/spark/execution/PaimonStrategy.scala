@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlobalIndexResult}
 import org.apache.paimon.partition.PartitionPredicate
@@ -32,8 +33,8 @@ import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.read.VectorSearchResultUtils
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
-import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, ReadBuilder, VectorScan}
+import org.apache.paimon.table.{FileStoreTable, InnerTable, SpecialFields, Table}
+import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, QueryAuthSplit, ReadBuilder, VectorScan}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RoaringNavigableMap64
 
@@ -361,6 +362,7 @@ case class LateralVectorSearchExec(
   private def createSearchContext(
       rightProjection: UnsafeProjection,
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
+    val coreOptions = new CoreOptions(innerTable.options())
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(
@@ -399,10 +401,11 @@ case class LateralVectorSearchExec(
       .withLimit(limit)
       .withOptions(options.asJava)
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
+    pushQueryAuthFilter(coreOptions, (readFieldNames :+ columnName).distinct, vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
     val batchSize =
-      Math.max(1, new CoreOptions(innerTable.options()).vectorSearchLateralJoinBatchSize())
+      Math.max(1, coreOptions.vectorSearchLateralJoinBatchSize())
 
     LateralVectorSearchContext(
       readBuilder,
@@ -413,7 +416,8 @@ case class LateralVectorSearchExec(
       sparkRow,
       rowIdOrdinal = resultRowType.getFieldIndex(SpecialFields.ROW_ID.name()),
       metaColumnsOnly =
-        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)),
+        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)) &&
+          !coreOptions.queryAuthEnabled(),
       projectionInputOrdinals = vectorSearchOutput.map {
         attr =>
           if (attr.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN) {
@@ -448,6 +452,27 @@ case class LateralVectorSearchExec(
         vectorSearchBuilder.withFilter(dataFilter)
       }
     }
+  }
+
+  private def pushQueryAuthFilter(
+      coreOptions: CoreOptions,
+      authFieldNames: Seq[String],
+      vectorSearchBuilder: BatchVectorSearchBuilder): Unit = {
+    if (!coreOptions.queryAuthEnabled()) {
+      return
+    }
+
+    // Vector search applies its limit before physical readers enforce QueryAuthSplit. Push the row
+    // filter into candidate selection so unauthorized rows cannot consume the limit.
+    val table = innerTable.asInstanceOf[FileStoreTable]
+    val authResult = table
+      .catalogEnvironment()
+      .tableQueryAuth(coreOptions)
+      .auth(authFieldNames.asJava)
+    Option(authResult)
+      .flatMap(result => Option(result.extractPredicate()))
+      .flatMap(predicate => Option(TableQueryAuthResult.remapPredicate(predicate, table.rowType())))
+      .foreach(vectorSearchBuilder.withFilter)
   }
 
   private def convertSearchFilters(): Seq[Predicate] = {
@@ -613,7 +638,7 @@ case class LateralVectorSearchExec(
 
     scan.plan().splits().asScala.iterator.flatMap {
       split =>
-        val indexedSplit = split.asInstanceOf[IndexedSplit]
+        val indexedSplit = QueryAuthSplit.unwrap(split).asInstanceOf[IndexedSplit]
         val dataSplit = indexedSplit.dataSplit()
         val file = LateralVectorSearchPhysicalFile.from(dataSplit)
         val reader =

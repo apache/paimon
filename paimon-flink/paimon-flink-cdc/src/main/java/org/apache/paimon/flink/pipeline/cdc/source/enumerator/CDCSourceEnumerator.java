@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -315,8 +316,13 @@ public class CDCSourceEnumerator
             FileStoreTable table,
             Identifier identifier,
             @Nullable Long lastSchemaId) {
-        Preconditions.checkState(split instanceof DataSplit);
-        long snapshotId = ((DataSplit) split).snapshotId();
+        Split unwrappedSplit = QueryAuthSplit.unwrap(split);
+        Preconditions.checkState(
+                unwrappedSplit instanceof DataSplit,
+                "CDC source expects DataSplit, but got %s.",
+                unwrappedSplit == null ? "null" : unwrappedSplit.getClass().getName());
+        DataSplit dataSplit = (DataSplit) unwrappedSplit;
+        long snapshotId = dataSplit.snapshotId();
         long schemaId = table.snapshot(snapshotId).schemaId();
         return new TableAwareFileStoreSourceSplit(
                 splitId, split, 0, identifier, lastSchemaId, schemaId);

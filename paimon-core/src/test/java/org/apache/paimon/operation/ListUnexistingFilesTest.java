@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
@@ -32,14 +33,19 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.AdditionalAnswers;
+import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -90,6 +96,37 @@ public class ListUnexistingFilesTest {
             Map<Integer, Map<String, DataFileMeta>> result = operation.list(binaryRow.apply(i));
             assertThat(result.values().stream().mapToInt(Map::size).sum()).isEqualTo(numDeletes[i]);
         }
+    }
+
+    @Test
+    public void testListFilesDisablesQueryAuth() throws Exception {
+        int[] numDeletes = new int[1];
+        FileStoreTable table =
+                prepareRandomlyDeletedTable(
+                        tempDir.toString(), "mydb", "auth_t", -1, 1, numDeletes, false);
+        List<Split> rawSplits = table.newScan().plan().splits();
+        table = table.copy(Collections.singletonMap(CoreOptions.QUERY_AUTH_ENABLED.key(), "true"));
+
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(Collections.emptyList(), Collections.emptyMap());
+        DataTableScan authScan = Mockito.mock(DataTableScan.class);
+        Mockito.when(authScan.withLevelFilter(Mockito.any())).thenReturn(authScan);
+        Mockito.when(authScan.withPartitionFilter(Mockito.<List<BinaryRow>>any()))
+                .thenReturn(authScan);
+        Mockito.when(authScan.plan()).thenReturn(authResult.convertPlan(() -> rawSplits));
+
+        FileStoreTable authTable =
+                Mockito.mock(FileStoreTable.class, AdditionalAnswers.delegatesTo(table));
+        Mockito.when(authTable.newScan()).thenReturn(authScan);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, 0);
+        writer.complete();
+
+        Map<Integer, Map<String, DataFileMeta>> result =
+                new ListUnexistingFiles(authTable).list(partition);
+        assertThat(result.values().stream().mapToInt(Map::size).sum()).isEqualTo(numDeletes[0]);
     }
 
     public static FileStoreTable prepareRandomlyDeletedTable(

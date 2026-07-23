@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -29,6 +31,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -36,7 +39,9 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
@@ -44,6 +49,8 @@ import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -117,6 +124,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
     private DataTableScan newDeltaScan(Function<FileStoreTable, DataTableScan> scanCreator) {
         return scanCreator.apply(other());
+    }
+
+    static FileStoreTable withoutQueryAuth(FileStoreTable table) {
+        if (!table.coreOptions().queryAuthEnabled()) {
+            return table;
+        }
+        return table.copy(Collections.singletonMap(CoreOptions.QUERY_AUTH_ENABLED.key(), "false"));
     }
 
     @Override
@@ -210,6 +224,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final ChainGroupReadTable chainGroupReadTable;
         private final RecordComparator chainPartitionComparator;
         private final ChainPartitionProjector partitionProjector;
+        private final TableQueryAuth queryAuth;
+        @Nullable private RowType readType;
         private Predicate dataPredicate;
         private Filter<Integer> bucketFilter;
         protected boolean preloadTargetSnapshot = true;
@@ -219,7 +235,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             this(tableSchema, chainGroupReadTable, FileStoreTable::newScan);
         }
 
-        private ChainTableBatchScan(
+        @VisibleForTesting
+        ChainTableBatchScan(
                 TableSchema tableSchema,
                 ChainGroupReadTable chainGroupReadTable,
                 Function<FileStoreTable, DataTableScan> scanCreator) {
@@ -227,9 +244,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     chainGroupReadTable.wrapped,
                     chainGroupReadTable.other(),
                     tableSchema,
-                    scanCreator);
+                    physicalScanCreator(scanCreator));
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
+            this.queryAuth = chainGroupReadTable.catalogEnvironment().tableQueryAuth(this.options);
             this.partitionConverter =
                     new RowDataToObjectArrayConverter(tableSchema.logicalPartitionType());
             this.partitionComparator =
@@ -248,6 +266,19 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             partitionProjector.chainPartitionType().getFieldTypes());
         }
 
+        private static Function<FileStoreTable, DataTableScan> physicalScanCreator(
+                Function<FileStoreTable, DataTableScan> scanCreator) {
+            return table -> scanCreator.apply(ChainGroupReadTable.withoutQueryAuth(table));
+        }
+
+        @Override
+        public ChainTableBatchScan withReadType(@Nullable RowType readType) {
+            this.readType = readType;
+            mainScan.withReadType(readType);
+            fallbackScan.withReadType(readType);
+            return this;
+        }
+
         @Override
         public ChainTableBatchScan withFilter(Predicate predicate) {
             super.withFilter(predicate);
@@ -261,6 +292,29 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 tableSchema.partitionKeys());
                 dataPredicate =
                         pair.getRight().isEmpty() ? null : PredicateBuilder.and(pair.getRight());
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withLimit(int limit) {
+            // Query authorization is applied only after the physical chain inputs have been
+            // assembled. Pushing a limit into those raw inputs could exhaust the limit with rows
+            // which are later removed by authorization. ReadBuilderImpl applies the logical limit
+            // after query authorization instead.
+            if (!options.queryAuthEnabled()) {
+                super.withLimit(limit);
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withTopN(TopN topN) {
+            // Query authorization is applied only after the physical chain inputs have been
+            // assembled. Pushing TopN into those raw inputs could prune authorized rows when
+            // unauthorized rows rank higher. The engine applies the logical TopN after auth.
+            if (!options.queryAuthEnabled()) {
+                super.withTopN(topN);
             }
             return this;
         }
@@ -332,6 +386,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
          */
         @Override
         public Plan plan() {
+            TableQueryAuthResult queryAuthResult =
+                    queryAuth.auth(readType == null ? null : readType.getFieldNames());
             List<Split> splits = new ArrayList<>();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             Set<BinaryRow> snapshotPartitions = preloadTargetSnapshotSplits(splits);
@@ -359,6 +415,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 for (List<BinaryRow> deltaPartitionsInGroup : groupedDeltaPartitions.values()) {
 
                     // Sort delta by chain dimension ascending.
+                    // chainPartitionForCompare avoids copying BinaryRow in the comparator hot path.
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
@@ -430,18 +487,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             deltaScan.withPartitionFilter(selectedDeltaPartitions);
                         }
 
-                        List<DataSplit> deltaSubSplits =
-                                deltaScan.plan().splits().stream()
-                                        .map(s -> (DataSplit) s)
-                                        .collect(Collectors.toList());
-                        List<DataSplit> snapshotSubSplits = new ArrayList<>();
+                        List<Split> deltaSubSplits = deltaScan.plan().splits();
+                        List<Split> snapshotSubSplits = Collections.emptyList();
                         if (partitionPairs.getValue() != null) {
                             snapshotScan.withPartitionFilter(
                                     Collections.singletonList(partitionPairs.getValue()));
-                            snapshotSubSplits =
-                                    snapshotScan.plan().splits().stream()
-                                            .map(s -> (DataSplit) s)
-                                            .collect(Collectors.toList());
+                            snapshotSubSplits = snapshotScan.plan().splits();
                         }
                         splits.addAll(
                                 ChainTableUtils.buildChainSplits(
@@ -453,7 +504,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     }
                 }
             }
-            return new DataFilePlan<>(splits);
+            Plan plan = new DataFilePlan<>(splits);
+            return queryAuthResult == null ? plan : queryAuthResult.convertPlan(plan);
         }
 
         @Override
@@ -494,11 +546,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
 
             for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = (DataSplit) split;
+                DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                 HashMap<String, String> fileBucketPathMapping = new HashMap<>();
                 HashMap<String, String> fileBranchMapping = new HashMap<>();
                 for (DataFileMeta file : dataSplit.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
+                    fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
                     fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
                 }
                 splits.add(
@@ -525,6 +577,9 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
             if (bucketFilter != null) {
                 scan.withBucketFilter(bucketFilter);
+            }
+            if (readType != null) {
+                scan.withReadType(readType);
             }
             return scan;
         }
@@ -582,7 +637,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (split instanceof ChainSplit || split instanceof DataSplit) {
+            Split wrappedSplit = QueryAuthSplit.unwrap(split);
+            if (wrappedSplit instanceof ChainSplit || wrappedSplit instanceof DataSplit) {
                 return fallbackRead.createReader(split);
             }
             throw new IllegalArgumentException(

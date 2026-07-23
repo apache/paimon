@@ -28,6 +28,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -118,7 +119,7 @@ public class BinlogTable extends AuditLogTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            DataSplit dataSplit = (DataSplit) split;
+            DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
             // When sequence number is enabled, the underlying data layout is:
             // [_SEQUENCE_NUMBER, pk, pt, col1, ...]
             // We need to offset the field index to skip the sequence number field.

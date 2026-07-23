@@ -56,6 +56,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.CatalogManager;
+import org.apache.spark.sql.streaming.StreamingQuery;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -731,6 +732,203 @@ public class SparkCatalogWithRestTest {
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[3,c]]");
+    }
+
+    @Test
+    public void testRowFilterWithPartitionAndBucketMetadata() {
+        spark.sql(
+                "CREATE TABLE t_auth_metadata (id INT, name STRING, pt STRING) "
+                        + "PARTITIONED BY (pt) TBLPROPERTIES "
+                        + "('bucket'='2', 'bucket-key'='id', 'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_metadata VALUES "
+                        + "(1, 'blocked', 'p1'), (2, 'allowed', 'p2')");
+
+        Predicate idEq2Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_auth_metadata"),
+                Collections.singletonList(idEq2Predicate));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT id, __paimon_partition, __paimon_bucket "
+                                        + "FROM t_auth_metadata ORDER BY id")
+                        .collectAsList();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(0).getStruct(1).getString(0)).isEqualTo("p2");
+        assertThat(rows.get(0).getInt(2)).isBetween(0, 1);
+    }
+
+    @Test
+    public void testStreamingRowFilter() throws Exception {
+        spark.sql(
+                "CREATE TABLE t_stream_auth (id INT, name STRING) TBLPROPERTIES "
+                        + "('query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_stream_auth VALUES (1, 'blocked'), (2, 'allowed')");
+
+        Predicate idEq2Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_stream_auth"),
+                Collections.singletonList(idEq2Predicate));
+
+        StreamingQuery query =
+                spark.readStream()
+                        .format("paimon")
+                        .table("t_stream_auth")
+                        .writeStream()
+                        .format("memory")
+                        .option(
+                                "checkpointLocation",
+                                tempFile.resolve("stream-auth-checkpoint").toString())
+                        .queryName("stream_auth_result")
+                        .outputMode("append")
+                        .start();
+        try {
+            query.processAllAvailable();
+            assertThat(
+                            spark.sql("SELECT * FROM stream_auth_result ORDER BY id")
+                                    .collectAsList()
+                                    .toString())
+                    .isEqualTo("[[2,allowed]]");
+        } finally {
+            query.stop();
+        }
+    }
+
+    @Test
+    public void testLateralPrimaryKeyVectorSearchWithRowAndColumnAuth() {
+        spark.sql(
+                "CREATE TABLE t_auth_vector ("
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>, secret STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'primary-key'='id', "
+                        + "'bucket'='1', "
+                        + "'deletion-vectors.enabled'='true', "
+                        + "'vector-field'='embedding', "
+                        + "'field.embedding.vector-dim'='2', "
+                        + "'pk-vector.index.columns'='embedding', "
+                        + "'fields.embedding.pk-vector.index.type'='test-vector-ann', "
+                        + "'fields.embedding.pk-vector.distance.metric'='l2', "
+                        + "'test.vector.dimension'='2', "
+                        + "'test.vector.metric'='l2', "
+                        + "'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_vector VALUES "
+                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f), 's1'), "
+                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f), 's2')");
+
+        Predicate idEq1Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        Identifier identifier = Identifier.create("db2", "t_auth_vector");
+        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(idEq1Predicate));
+        restCatalogServer.addTableColumnAuth(
+                identifier, Arrays.asList("id", "embedding", "query_embedding"));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT q.id AS query_id, r.id AS result_id "
+                                        + "FROM t_auth_vector AS q, "
+                                        + "LATERAL (SELECT id FROM vector_search("
+                                        + "'t_auth_vector', 'embedding', q.query_embedding, 1)) AS r")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,1]]");
+    }
+
+    @Test
+    public void testLateralPrimaryKeyVectorSearchMetadataOnlyWithRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_auth_vector_metadata ("
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>, secret STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'primary-key'='id', "
+                        + "'bucket'='1', "
+                        + "'deletion-vectors.enabled'='true', "
+                        + "'vector-field'='embedding', "
+                        + "'field.embedding.vector-dim'='2', "
+                        + "'pk-vector.index.columns'='embedding', "
+                        + "'fields.embedding.pk-vector.index.type'='test-vector-ann', "
+                        + "'fields.embedding.pk-vector.distance.metric'='l2', "
+                        + "'test.vector.dimension'='2', "
+                        + "'test.vector.metric'='l2', "
+                        + "'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_vector_metadata VALUES "
+                        + "(1, array(5.0f, 0.0f), array(0.0f, 0.0f), 's1'), "
+                        + "(2, array(1.0f, 0.0f), array(0.0f, 0.0f), 's2')");
+
+        Predicate idEq1Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        Identifier identifier = Identifier.create("db2", "t_auth_vector_metadata");
+        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(idEq1Predicate));
+        restCatalogServer.addTableColumnAuth(
+                identifier, Arrays.asList("id", "embedding", "query_embedding"));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT q.id AS query_id, r._row_id AS row_id "
+                                        + "FROM t_auth_vector_metadata AS q, "
+                                        + "LATERAL (SELECT _row_id FROM vector_search("
+                                        + "'t_auth_vector_metadata', 'embedding', "
+                                        + "q.query_embedding, 1)) AS r")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,0]]");
+    }
+
+    @Test
+    public void testLateralPrimaryKeyVectorSearchWithAllowedRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_auth_vector_allowed ("
+                        + "id INT, embedding ARRAY<FLOAT>, query_embedding ARRAY<FLOAT>) "
+                        + "TBLPROPERTIES ("
+                        + "'primary-key'='id', "
+                        + "'bucket'='1', "
+                        + "'deletion-vectors.enabled'='true', "
+                        + "'vector-field'='embedding', "
+                        + "'field.embedding.vector-dim'='2', "
+                        + "'pk-vector.index.columns'='embedding', "
+                        + "'fields.embedding.pk-vector.index.type'='test-vector-ann', "
+                        + "'fields.embedding.pk-vector.distance.metric'='l2', "
+                        + "'test.vector.dimension'='2', "
+                        + "'test.vector.metric'='l2', "
+                        + "'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_auth_vector_allowed VALUES "
+                        + "(1, array(1.0f, 0.0f), array(0.0f, 0.0f)), "
+                        + "(2, array(5.0f, 0.0f), array(0.0f, 0.0f))");
+
+        Predicate idEq1Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_auth_vector_allowed"),
+                Collections.singletonList(idEq1Predicate));
+
+        List<Row> rows =
+                spark.sql(
+                                "SELECT q.id AS query_id, r.id AS result_id "
+                                        + "FROM t_auth_vector_allowed AS q, "
+                                        + "LATERAL (SELECT id FROM vector_search("
+                                        + "'t_auth_vector_allowed', 'embedding', "
+                                        + "q.query_embedding, 1)) AS r")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,1]]");
     }
 
     @Test

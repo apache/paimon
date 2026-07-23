@@ -129,6 +129,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             int[] joinKeyIndex,
             @Nullable Predicate predicate,
             @Nullable ShuffleStrategy strategy) {
+        if (table.coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Lookup join does not support query authorization.");
+        }
+
         if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
             TableScanUtils.streamingReadingValidate(table);
         }

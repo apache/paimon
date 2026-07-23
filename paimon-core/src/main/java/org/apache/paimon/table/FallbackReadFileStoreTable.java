@@ -564,8 +564,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             Set<BinaryRow> completePartitions =
                     new HashSet<>(newPartitionListingScan(true).listPartitions());
             for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = (DataSplit) split;
-                splits.add(toFallbackSplit(dataSplit, false));
+                splits.add(toFallbackSplit(split, false));
             }
 
             List<BinaryRow> remainingPartitions =
@@ -691,9 +690,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (split instanceof FallbackSplit) {
                 FallbackSplit fallbackSplit = (FallbackSplit) split;
+                Split wrappedSplit = fallbackSplit.wrapped();
                 if (fallbackSplit.isFallback()) {
                     try {
-                        return fallbackRead.createReader(fallbackSplit.wrapped());
+                        return fallbackRead.createReader(wrappedSplit);
                     } catch (Exception e) {
                         if (fallbackReadFailFast) {
                             if (e instanceof IOException) {
@@ -703,16 +703,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                                 throw (RuntimeException) e;
                             }
                             throw new IOException(
-                                    "Failed to read fallback branch split: "
-                                            + fallbackSplit.wrapped(),
-                                    e);
+                                    "Failed to read fallback branch split: " + wrappedSplit, e);
                         }
                         LOG.error(
                                 "Reading from supplemental branch has problems: {}",
-                                fallbackSplit.wrapped(),
+                                wrappedSplit,
                                 e);
                     }
                 }
+                return mainRead.createReader(wrappedSplit);
             }
             return mainRead.createReader(split);
         }

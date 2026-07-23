@@ -23,8 +23,9 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.spark.read.VariantExtractionInfo
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
@@ -93,12 +94,12 @@ case class PaimonScan(
 
   /** Extract the bucket number from the splits only if all splits have the same totalBuckets number. */
   private def extractBucketNumber(): Option[Int] = {
-    val splits = inputSplits
-    if (splits.exists(!_.isInstanceOf[DataSplit])) {
+    val dataSplits = inputSplits.map(SplitUtils.dataSplit)
+    if (dataSplits.exists(_.isEmpty)) {
       None
     } else {
       val deduplicated =
-        splits.map(s => Option(s.asInstanceOf[DataSplit].totalBuckets())).toSeq.distinct
+        dataSplits.map(s => Option(s.get.totalBuckets())).toSeq.distinct
 
       deduplicated match {
         case Seq(Some(num)) => Some(num)
@@ -136,14 +137,14 @@ case class PaimonScan(
 
     val allSplitsKeepOrdering = inputPartitions.toSeq
       .map(_.asInstanceOf[PaimonBucketedInputPartition])
-      .map(_.splits.asInstanceOf[Seq[DataSplit]])
+      .map(_.splits.map(SplitUtils.dataSplit))
       .forall {
         splits =>
           // Only support report ordering if all matches:
           // - one `Split` per InputPartition (TODO: Re-construct splits using minKey/maxKey)
           // - `Split` is not rawConvertible so that the merge read can happen
           // - `Split` only contains one data file so it always sorted even without merge read
-          splits.size < 2 && splits.forall {
+          splits.forall(_.isDefined) && splits.size < 2 && splits.flatten.forall {
             split => !split.rawConvertible() || split.dataFiles().size() < 2
           }
       }
@@ -164,16 +165,17 @@ case class PaimonScan(
   }
 
   override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
-    if (!shouldDoBucketedScan || splits.exists(!_.isInstanceOf[DataSplit])) {
+    val splitsWithMetadata = splits.map(split => (split, SplitUtils.dataSplit(split)))
+    if (!shouldDoBucketedScan || splitsWithMetadata.exists(_._2.isEmpty)) {
       return super.getInputPartitions(splits)
     }
 
-    splits
-      .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
+    splitsWithMetadata
+      .map { case (split, dataSplit) => (split, dataSplit.get) }
+      .groupBy(_._2.bucket())
       .map {
         case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
+          PaimonBucketedInputPartition(groupedSplits.map(_._1), bucket)
       }
       .toSeq
   }

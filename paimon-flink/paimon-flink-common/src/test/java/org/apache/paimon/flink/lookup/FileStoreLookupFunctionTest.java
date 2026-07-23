@@ -33,6 +33,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -137,6 +138,23 @@ public class FileStoreLookupFunctionTest {
             boolean refreshAsync,
             Integer fullLoadThreshold)
             throws Exception {
+        return createFileStoreTable(
+                isPartition,
+                dynamicPartition,
+                refreshAsync,
+                fullLoadThreshold,
+                false,
+                CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable createFileStoreTable(
+            boolean isPartition,
+            boolean dynamicPartition,
+            boolean refreshAsync,
+            Integer fullLoadThreshold,
+            boolean queryAuthEnabled,
+            CatalogEnvironment catalogEnvironment)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
@@ -151,11 +169,11 @@ public class FileStoreLookupFunctionTest {
         if (fullLoadThreshold != null) {
             conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD, fullLoadThreshold);
         }
+        if (queryAuthEnabled) {
+            conf.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+        }
 
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
-                        new String[] {"pt", "k", "v"});
+        RowType rowType = tableRowType();
         Schema schema =
                 new Schema(
                         rowType.getFields(),
@@ -164,8 +182,7 @@ public class FileStoreLookupFunctionTest {
                         conf.toMap(),
                         "");
         TableSchema tableSchema = schemaManager.createTable(schema);
-        return FileStoreTableFactory.create(
-                fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema, catalogEnvironment);
     }
 
     @AfterEach
@@ -217,6 +234,43 @@ public class FileStoreLookupFunctionTest {
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
+    }
+
+    @Test
+    public void testLookupRejectsQueryAuth() throws Exception {
+        table = createFileStoreTable(false, false, false, null, true, CatalogEnvironment.empty());
+
+        assertThatThrownBy(() -> createLookupFunction(table, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Lookup join does not support query authorization");
+    }
+
+    @Test
+    public void testPartialLookupRejectsQueryAuth() throws Exception {
+        table = createFileStoreTable(false, false, false, null, true, CatalogEnvironment.empty());
+
+        assertThatThrownBy(
+                        () ->
+                                PrimaryKeyPartialLookupTable.createLocalTable(
+                                        table,
+                                        new int[] {0, 1},
+                                        tempDir.resolve("local").toFile(),
+                                        Arrays.asList("pt", "k"),
+                                        Collections.emptySet()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support query authorization");
+        assertThatThrownBy(
+                        () ->
+                                PrimaryKeyPartialLookupTable.createRemoteTable(
+                                        table, new int[] {0, 1}, Arrays.asList("pt", "k")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support query authorization");
+    }
+
+    private RowType tableRowType() {
+        return RowType.of(
+                new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                new String[] {"pt", "k", "v"});
     }
 
     @Test

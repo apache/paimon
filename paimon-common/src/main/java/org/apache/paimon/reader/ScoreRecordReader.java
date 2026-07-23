@@ -18,9 +18,12 @@
 
 package org.apache.paimon.reader;
 
+import org.apache.paimon.utils.Filter;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.function.Function;
 
 /** A {@link RecordReader} whose records expose vector-search scores and row identifiers. */
 public interface ScoreRecordReader<T> extends RecordReader<T> {
@@ -28,4 +31,40 @@ public interface ScoreRecordReader<T> extends RecordReader<T> {
     @Nullable
     @Override
     ScoreRecordIterator<T> readBatch() throws IOException;
+
+    @Override
+    default <R> ScoreRecordReader<R> transform(Function<T, R> function) {
+        ScoreRecordReader<T> thisReader = this;
+        return new ScoreRecordReader<R>() {
+            @Nullable
+            @Override
+            public ScoreRecordIterator<R> readBatch() throws IOException {
+                ScoreRecordIterator<T> iterator = thisReader.readBatch();
+                return iterator == null ? null : iterator.transform(function);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
+
+    @Override
+    default ScoreRecordReader<T> filter(Filter<T> filter) {
+        ScoreRecordReader<T> thisReader = this;
+        return new ScoreRecordReader<T>() {
+            @Nullable
+            @Override
+            public ScoreRecordIterator<T> readBatch() throws IOException {
+                ScoreRecordIterator<T> iterator = thisReader.readBatch();
+                return iterator == null ? null : iterator.filter(filter);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
 }

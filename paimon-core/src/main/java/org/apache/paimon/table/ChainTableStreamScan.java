@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -33,11 +34,14 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.StartingContext;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
@@ -89,6 +93,11 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     /** Projector for splitting full partition into group and chain parts. */
     private final ChainPartitionProjector partitionProjector;
 
+    /** Query authorization for the logical chain table, applied after physical split assembly. */
+    private final TableQueryAuth queryAuth;
+
+    @Nullable private RowType readType;
+
     /** Comparator for chain partition keys only. */
     private final RecordComparator chainPartitionComparator;
 
@@ -131,7 +140,14 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         this.batchScan =
                 new ChainGroupReadTable.ChainTableBatchScan(
                         chainGroupReadTable.schema(), chainGroupReadTable);
-        this.deltaStreamScan = (DataTableStreamScan) chainGroupReadTable.other().newStreamScan();
+        this.deltaStreamScan =
+                (DataTableStreamScan)
+                        ChainGroupReadTable.withoutQueryAuth(chainGroupReadTable.other())
+                                .newStreamScan();
+        this.queryAuth =
+                chainGroupReadTable
+                        .catalogEnvironment()
+                        .tableQueryAuth(chainGroupReadTable.coreOptions());
 
         ChainTableUtils.validateChainTableForIncrementalRead(chainGroupReadTable);
 
@@ -160,6 +176,13 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
     @Override
     public TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult =
+                queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        TableScan.Plan plan = planWithoutQueryAuth();
+        return queryAuthResult == null ? plan : queryAuthResult.convertPlan(plan);
+    }
+
+    private TableScan.Plan planWithoutQueryAuth() {
         if (!startingDone) {
             return planStarting();
         }
@@ -238,7 +261,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         }
 
         // 1. Read delta branch data at the pinned snapshot, grouped by partition.
-        Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition;
+        Map<BinaryRow, List<Split>> deltaSplitsByPartition;
         if (deltaLatestId != null) {
             FileStoreTable pinnedDelta = deltaTable.copy(pinnedOptions(deltaLatestId));
             DataTableScan pinnedDeltaScan = pinnedDelta.newScan();
@@ -273,7 +296,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         // 3. Scan file splits for latest snapshot partitions only, at the pinned snapshot.
         //    Reuse the pinnedSnapshot from step 2 to avoid redundant copy operations.
         List<BinaryRow> latestPartitions = new ArrayList<>(latestChainPartitionPerGroup.values());
-        Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition;
+        Map<BinaryRow, List<Split>> snapshotSplitsByPartition;
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
             DataTableScan snapshotScan = pinnedSnapshot.newScan();
             snapshotScan.withPartitionFilter(latestPartitions);
@@ -327,18 +350,19 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private List<Split> buildLightweightStartingSplits(
             String snapshotBranch,
             String deltaBranch,
-            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
-            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<BinaryRow, List<Split>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<Split>> deltaSplitsByPartition,
             Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
-        for (Map.Entry<BinaryRow, List<DataSplit>> entry : snapshotSplitsByPartition.entrySet()) {
-            for (DataSplit ds : entry.getValue()) {
-                allSplits.add(ChainSplit.from(ds, snapshotBranch));
+        for (Map.Entry<BinaryRow, List<Split>> entry : snapshotSplitsByPartition.entrySet()) {
+            for (Split split : entry.getValue()) {
+                DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
+                allSplits.add(ChainSplit.from(dataSplit, snapshotBranch));
             }
         }
 
-        for (Map.Entry<BinaryRow, List<DataSplit>> entry : deltaSplitsByPartition.entrySet()) {
+        for (Map.Entry<BinaryRow, List<Split>> entry : deltaSplitsByPartition.entrySet()) {
             BinaryRow partition = entry.getKey();
             Object groupKey = toGroupKey(partition);
             BinaryRow latestPartition = latestChainPartitionPerGroup.get(groupKey);
@@ -350,8 +374,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                                     partitionProjector.extractChainPartition(partition),
                                     partitionProjector.extractChainPartition(latestPartition))
                             > 0) {
-                for (DataSplit ds : entry.getValue()) {
-                    allSplits.add(ChainSplit.from(ds, deltaBranch));
+                for (Split split : entry.getValue()) {
+                    DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
+                    allSplits.add(ChainSplit.from(dataSplit, deltaBranch));
                 }
             }
         }
@@ -368,15 +393,15 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private List<Split> buildMergedStartingSplits(
             String snapshotBranch,
             String deltaBranch,
-            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
-            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<BinaryRow, List<Split>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<Split>> deltaSplitsByPartition,
             Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
         // Pre-group delta splits and find the latest delta partition per group.
-        Map<Object, List<DataSplit>> deltaSplitsByGroup = new HashMap<>();
+        Map<Object, List<Split>> deltaSplitsByGroup = new HashMap<>();
         Map<Object, BinaryRow> latestDeltaPartitionPerGroup = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<DataSplit>> e : deltaSplitsByPartition.entrySet()) {
+        for (Map.Entry<BinaryRow, List<Split>> e : deltaSplitsByPartition.entrySet()) {
             BinaryRow deltaPartition = e.getKey();
             Object groupKey = toGroupKey(deltaPartition);
             deltaSplitsByGroup
@@ -397,7 +422,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         for (Map.Entry<Object, BinaryRow> entry : latestChainPartitionPerGroup.entrySet()) {
             Object groupKey = entry.getKey();
             BinaryRow snapshotPartition = entry.getValue();
-            List<DataSplit> snapshotSplits =
+            List<Split> snapshotSplits =
                     snapshotSplitsByPartition.getOrDefault(
                             snapshotPartition, Collections.emptyList());
 
@@ -411,15 +436,16 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                                                     snapshotPartition))
                                     > 0;
 
-            List<DataSplit> selectedDeltaSplits = new ArrayList<>();
+            List<Split> selectedDeltaSplits = new ArrayList<>();
             if (hasDeltaAfterSnapshot) {
-                for (DataSplit dataSplit : deltaSplitsByGroup.get(groupKey)) {
+                for (Split split : deltaSplitsByGroup.get(groupKey)) {
+                    DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
                     BinaryRow deltaPartition = dataSplit.partition();
                     if (chainPartitionComparator.compare(
                                     partitionProjector.extractChainPartition(deltaPartition),
                                     partitionProjector.extractChainPartition(snapshotPartition))
                             > 0) {
-                        selectedDeltaSplits.add(dataSplit);
+                        selectedDeltaSplits.add(split);
                     }
                 }
             }
@@ -437,7 +463,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
         // Delta-only groups: there is no snapshot anchor, so merge all delta partitions in the
         // group into the latest delta partition.
-        for (Map.Entry<Object, List<DataSplit>> entry : deltaSplitsByGroup.entrySet()) {
+        for (Map.Entry<Object, List<Split>> entry : deltaSplitsByGroup.entrySet()) {
             Object groupKey = entry.getKey();
             if (!latestChainPartitionPerGroup.containsKey(groupKey)) {
                 BinaryRow logicalPartition = latestDeltaPartitionPerGroup.get(groupKey);
@@ -477,11 +503,11 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     }
 
     /** Plans a scan and groups the resulting splits by partition. */
-    private static Map<BinaryRow, List<DataSplit>> groupByPartition(DataTableScan scan) {
-        Map<BinaryRow, List<DataSplit>> grouped = new LinkedHashMap<>();
-        for (Split s : scan.plan().splits()) {
-            DataSplit ds = (DataSplit) s;
-            grouped.computeIfAbsent(ds.partition(), k -> new ArrayList<>()).add(ds);
+    private static Map<BinaryRow, List<Split>> groupByPartition(DataTableScan scan) {
+        Map<BinaryRow, List<Split>> grouped = new LinkedHashMap<>();
+        for (Split split : scan.plan().splits()) {
+            DataSplit dataSplit = QueryAuthSplit.unwrapDataSplit(split);
+            grouped.computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>()).add(split);
         }
         return grouped;
     }
@@ -520,6 +546,14 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         predicates.add(predicate);
         batchScan.withFilter(predicate);
         deltaStreamScan.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        this.readType = readType;
+        batchScan.withReadType(readType);
+        deltaStreamScan.withReadType(readType);
         return this;
     }
 
@@ -579,6 +613,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshotId));
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "false");
         return options;
     }
 
@@ -595,6 +630,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         }
         if (bucketFilter != null) {
             scan.withBucketFilter(bucketFilter);
+        }
+        if (readType != null) {
+            scan.withReadType(readType);
         }
     }
 

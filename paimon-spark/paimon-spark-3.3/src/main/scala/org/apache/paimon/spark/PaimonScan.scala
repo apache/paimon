@@ -21,8 +21,9 @@ package org.apache.paimon.spark
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.read.VariantExtractionInfo
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.expressions._
 import org.apache.spark.sql.connector.read.SupportsReportPartitioning
@@ -82,12 +83,12 @@ case class PaimonScan(
 
   /** Extract the bucket number from the splits only if all splits have the same totalBuckets number. */
   private def extractBucketNumber(): Option[Int] = {
-    val splits = inputSplits
-    if (splits.exists(!_.isInstanceOf[DataSplit])) {
+    val dataSplits = inputSplits.map(SplitUtils.dataSplit)
+    if (dataSplits.exists(_.isEmpty)) {
       None
     } else {
       val deduplicated =
-        splits.map(s => Option(s.asInstanceOf[DataSplit].totalBuckets())).toSeq.distinct
+        dataSplits.map(s => Option(s.get.totalBuckets())).toSeq.distinct
 
       deduplicated match {
         case Seq(Some(num)) => Some(num)
@@ -108,16 +109,17 @@ case class PaimonScan(
   }
 
   override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
-    if (!shouldDoBucketedScan || splits.exists(!_.isInstanceOf[DataSplit])) {
+    val splitsWithMetadata = splits.map(split => (split, SplitUtils.dataSplit(split)))
+    if (!shouldDoBucketedScan || splitsWithMetadata.exists(_._2.isEmpty)) {
       return super.getInputPartitions(splits)
     }
 
-    splits
-      .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
+    splitsWithMetadata
+      .map { case (split, dataSplit) => (split, dataSplit.get) }
+      .groupBy(_._2.bucket())
       .map {
         case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
+          PaimonBucketedInputPartition(groupedSplits.map(_._1), bucket)
       }
       .toSeq
   }

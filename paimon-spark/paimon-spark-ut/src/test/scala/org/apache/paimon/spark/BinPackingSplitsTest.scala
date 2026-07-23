@@ -19,15 +19,17 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.manifest.FileSource
 import org.apache.paimon.spark.read.BinPackingSplits
-import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
+import org.apache.paimon.spark.util.SplitUtils
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, QueryAuthSplit, Split}
 
 import org.junit.jupiter.api.Assertions
 
-import java.util.{HashMap => JHashMap}
+import java.util.{Collections => JCollections, HashMap => JHashMap}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -66,6 +68,31 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
     val binPacking = BinPackingSplits(CoreOptions.fromMap(new JHashMap()))
     val reshuffled = binPacking.pack(dataSplits)
     Assertions.assertEquals(1, reshuffled.length)
+  }
+
+  test("Paimon: reshuffle query auth splits and retain auth") {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
+      val authResult =
+        new TableQueryAuthResult(JCollections.emptyList(), JCollections.emptyMap())
+      val splits = (0 until 5).map {
+        index =>
+          val dataSplit = newDataSplit(s"auth-$index", Seq(10L), rawConvertible = true)
+          new QueryAuthSplit(dataSplit, authResult): Split
+      }.toArray
+      val binPacking = BinPackingSplits(
+        CoreOptions.fromMap(
+          Map("source.split.open-file-cost" -> "0 B", "source.split.target-size" -> "1 MB").asJava))
+
+      val reshuffled = binPacking.pack(splits)
+
+      Assertions.assertEquals(1, reshuffled.length)
+      Assertions.assertEquals(1, reshuffled.head.splits.length)
+      val packed = reshuffled.head.splits.head
+      Assertions.assertTrue(packed.isInstanceOf[QueryAuthSplit])
+      Assertions.assertSame(authResult, packed.asInstanceOf[QueryAuthSplit].authResult())
+      Assertions.assertEquals(5, SplitUtils.dataFileCount(packed))
+      Assertions.assertEquals(50L, SplitUtils.splitSize(packed))
+    }
   }
 
   test("Paimon: pack data evolution splits by split granularity") {

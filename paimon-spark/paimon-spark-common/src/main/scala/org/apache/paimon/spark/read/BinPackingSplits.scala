@@ -25,7 +25,7 @@ import org.apache.paimon.spark.PaimonInputPartition
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit
 import org.apache.paimon.table.format.FormatDataSplit
-import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, QueryAuthSplit, Split}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -78,18 +78,22 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
   def pack(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackSplit => false
-      case split: DataSplit => split.rawConvertible() || coreOptions.dataEvolutionEnabled()
-      // FormatDataSplit is already packed with multiple files by target size in the core scan,
-      // so each split maps directly to one input partition here.
-      case _: FormatDataSplit => false
-      case _ => false
+      case split =>
+        SplitUtils.unwrapQueryAuth(split) match {
+          case dataSplit: DataSplit =>
+            dataSplit.rawConvertible() || coreOptions.dataEvolutionEnabled()
+          // FormatDataSplit is already packed with multiple files by target size in the core scan,
+          // so each split maps directly to one input partition here.
+          case _: FormatDataSplit => false
+          case _ => false
+        }
     }
     if (toReshuffle.nonEmpty) {
       val startTS = System.currentTimeMillis()
       val reshuffled = if (coreOptions.dataEvolutionEnabled()) {
-        packDataEvolutionSplit(toReshuffle.collect { case ds: DataSplit => ds })
+        packDataEvolutionSplit(toReshuffle)
       } else {
-        packDataSplit(toReshuffle.collect { case ds: DataSplit => ds })
+        packDataSplit(toReshuffle)
       }
       val all = reserved.map(PaimonInputPartition.apply) ++ reshuffled
       val duration = System.currentTimeMillis() - startTS
@@ -102,22 +106,23 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     }
   }
 
-  private def packDataSplit(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
-    val maxSplitBytes = computeMaxSplitBytes(splits)
+  private def packDataSplit(splits: Array[Split]): Array[PaimonInputPartition] = {
+    val maxSplitBytes = computeMaxSplitBytes(splits.map(SplitUtils.dataSplit(_).get))
 
     var currentSize = 0L
-    val currentSplits = new ArrayBuffer[DataSplit]
+    val currentSplits = new ArrayBuffer[Split]
     val partitions = new ArrayBuffer[PaimonInputPartition]
 
-    var currentSplit: Option[DataSplit] = None
+    var currentSplit: Option[(Split, DataSplit)] = None
     val currentDataFiles = new ArrayBuffer[DataFileMeta]
     val currentDeletionFiles = new ArrayBuffer[DeletionFile]
 
     def closeDataSplit(): Unit = {
       if (currentSplit.nonEmpty && currentDataFiles.nonEmpty) {
-        val newSplit =
-          copyDataSplit(currentSplit.get, currentDataFiles.toSeq, currentDeletionFiles.toSeq)
-        currentSplits += newSplit
+        val (sourceSplit, dataSplit) = currentSplit.get
+        val replacement =
+          copyDataSplit(dataSplit, currentDataFiles.toSeq, currentDeletionFiles.toSeq)
+        currentSplits += QueryAuthSplit.retainAuth(sourceSplit, replacement)
       }
       currentDataFiles.clear()
       currentDeletionFiles.clear()
@@ -134,13 +139,20 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
 
     splits.foreach {
       split =>
-        if (!currentSplit.exists(withSamePartitionAndBucket(_, split))) {
+        val dataSplit = SplitUtils.dataSplit(split).get
+        if (
+          !currentSplit.exists {
+            case (source, currentDataSplit) =>
+              withSamePartitionAndBucket(currentDataSplit, dataSplit) &&
+              withSameQueryAuth(source, split)
+          }
+        ) {
           // close and open another data split
           closeDataSplit()
-          currentSplit = Some(split)
+          currentSplit = Some((split, dataSplit))
         }
 
-        val ddFiles = dataFileAndDeletionFiles(split)
+        val ddFiles = dataFileAndDeletionFiles(dataSplit)
         ddFiles.foreach {
           case (dataFile, deletionFile) =>
             val size =
@@ -161,11 +173,11 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     partitions.toArray
   }
 
-  private def packDataEvolutionSplit(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
-    val maxSplitBytes = computeMaxSplitBytes(splits)
+  private def packDataEvolutionSplit(splits: Array[Split]): Array[PaimonInputPartition] = {
+    val maxSplitBytes = computeMaxSplitBytes(splits.map(SplitUtils.dataSplit(_).get))
 
     var currentSize = 0L
-    val currentSplits = new ArrayBuffer[DataSplit]
+    val currentSplits = new ArrayBuffer[Split]
     val partitions = new ArrayBuffer[PaimonInputPartition]
 
     def closeInputPartition(): Unit = {
@@ -178,7 +190,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
 
     splits.foreach {
       split =>
-        val ddFiles = dataFileAndDeletionFiles(split)
+        val ddFiles = dataFileAndDeletionFiles(SplitUtils.dataSplit(split).get)
         val size = ddFiles.map {
           case (dataFile, deletionFile) =>
             (dataFile.fileSize() * readRowSizeRatio).toLong + openCostInBytes + Option(deletionFile)
@@ -217,6 +229,16 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
 
   private def withSamePartitionAndBucket(split1: DataSplit, split2: DataSplit): Boolean = {
     split1.partition().equals(split2.partition()) && split1.bucket() == split2.bucket()
+  }
+
+  private def withSameQueryAuth(split1: Split, split2: Split): Boolean = {
+    (split1, split2) match {
+      case (auth1: QueryAuthSplit, auth2: QueryAuthSplit) =>
+        Option(auth1.authResult()).map(r => (r.filter(), r.columnMasking())) ==
+          Option(auth2.authResult()).map(r => (r.filter(), r.columnMasking()))
+      case (_: QueryAuthSplit, _) | (_, _: QueryAuthSplit) => false
+      case _ => true
+    }
   }
 
   private def dataFileAndDeletionFiles(split: DataSplit): Array[(DataFileMeta, DeletionFile)] = {

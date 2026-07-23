@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -39,6 +40,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -133,6 +135,42 @@ public class CDCSourceSplitReaderTest {
     }
 
     @Test
+    public void testQueryAuthSplitUpdatesFetchLagMetric() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
+        FileStoreSourceReaderMetrics metrics =
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup());
+        CDCSourceSplitReader reader =
+                createReader(
+                        new TestingTableRead(
+                                new SingleBatchRecordReader(new TrackingRecordIterator())),
+                        Collections.emptyList(),
+                        metrics);
+
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, kvs());
+        TableAwareFileStoreSourceSplit split = newSourceSplit("id1", row(1), 0, files);
+        assignSplit(
+                reader,
+                new TableAwareFileStoreSourceSplit(
+                        split.splitId(),
+                        new QueryAuthSplit(split.split(), new TableQueryAuthResult(null, null)),
+                        split.recordsToSkip(),
+                        split.getIdentifier(),
+                        split.getLastSchemaId(),
+                        split.getSchemaId(),
+                        split.schemaChangeEventsToSkip()));
+
+        RecordsWithSplitIds<RecordIterator<Event>> records = reader.fetch();
+        assertThat(metrics.getLatestFileCreationTime())
+                .isEqualTo(
+                        files.stream()
+                                .mapToLong(DataFileMeta::creationTimeEpochMillis)
+                                .min()
+                                .orElse(FileStoreSourceReaderMetrics.UNDEFINED));
+        records.recycle();
+        reader.close();
+    }
+
+    @Test
     public void testSplitReaderWakeupAble() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
         CDCSourceSplitReader reader = createReader(rw.createReadWithKey());
@@ -167,10 +205,17 @@ public class CDCSourceSplitReaderTest {
 
     private CDCSourceSplitReader createReader(
             TableRead tableRead, List<SchemaChangeEvent> schemaChangeEvents) {
-        return new TestCDCSourceSplitReader(
-                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+        return createReader(
                 tableRead,
-                schemaChangeEvents);
+                schemaChangeEvents,
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
+    }
+
+    private CDCSourceSplitReader createReader(
+            TableRead tableRead,
+            List<SchemaChangeEvent> schemaChangeEvents,
+            FileStoreSourceReaderMetrics metrics) {
+        return new TestCDCSourceSplitReader(metrics, tableRead, schemaChangeEvents);
     }
 
     private void innerTestOnce(int skip) throws Exception {
