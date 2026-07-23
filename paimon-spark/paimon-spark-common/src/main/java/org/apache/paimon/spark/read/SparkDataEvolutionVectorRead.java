@@ -214,7 +214,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
-                    ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+                    List<ScoredGlobalIndexResult> results = new ArrayList<>(group.size());
                     for (SerializedSplit serializedSplit : group) {
                         List<Range> rowRanges = deserializeRanges(serializedSplit.split);
                         ScoredGlobalIndexResult splitResult =
@@ -223,9 +223,10 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                                         deserializePreFilter(serializedSplit.preFilter),
                                         metric,
                                         vector);
-                        result = result.or(splitResult);
+                        results.add(splitResult);
                     }
-                    result = result.topK(limit);
+                    ScoredGlobalIndexResult result =
+                            ScoredGlobalIndexResult.merge(results).topK(limit);
                     if (result.results().isEmpty()) {
                         return null;
                     }
