@@ -65,6 +65,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -1174,13 +1175,64 @@ public class JdbcCatalog extends AbstractCatalog {
                 databaseName);
     }
 
-    // TODO: Implement actual paging and pattern filtering
     @Override
     public PagedList<String> listViewsPaged(
             String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
             throws DatabaseNotExistException {
-        CatalogUtils.validateNamePattern(this, viewNamePattern);
-        return new PagedList<>(listViews(databaseName), null);
+        if (CatalogUtils.isSystemDatabase(databaseName)) {
+            return new PagedList<>(Collections.emptyList(), null);
+        }
+
+        // Check if database exists
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        // CatalogUtils.validateNamePattern is intentionally NOT called here: this method supports
+        // pattern filtering directly via SQL LIKE. The catalog-wide supportsListByPattern flag
+        // remains false until other list methods (tables/databases) also gain pattern support, so
+        // that callers of those methods still get an explicit UnsupportedOperationException rather
+        // than silently unfiltered results. Unlike the default implementation, this override honors
+        // the pattern even though supportsListByPattern() is false.
+
+        // Per the Catalog contract, a null OR empty pattern means "no pattern": return all views.
+        boolean hasPattern = viewNamePattern != null && !viewNamePattern.isEmpty();
+        // pageToken is the last view name returned by the previous page (opaque to callers). The
+        // empty lower bound returns every view ordered by name.
+        String cursor = pageToken == null ? "" : pageToken;
+
+        String sql;
+        String[] args;
+        if (hasPattern) {
+            sql = JdbcUtils.LIST_VIEWS_PAGED_WITH_PATTERN_SQL;
+            args = new String[] {catalogKey, databaseName, viewNamePattern, cursor};
+        } else {
+            sql = JdbcUtils.LIST_VIEWS_PAGED_SQL;
+            args = new String[] {catalogKey, databaseName, cursor};
+        }
+
+        // Per the Catalog contract, maxResults == null OR 0 means "no paging": return all matching
+        // views, ordered, with no next page.
+        if (maxResults == null || maxResults == 0) {
+            List<String> views = fetch(row -> row.getString(JdbcUtils.VIEW_NAME), sql, args);
+            return new PagedList<>(views, null);
+        }
+
+        Preconditions.checkArgument(maxResults > 0, "maxResults must be positive when provided");
+        // Fetch one extra row to detect whether another page follows, without relying on a count.
+        List<String> views =
+                fetch(
+                        row -> row.getString(JdbcUtils.VIEW_NAME),
+                        sql + " LIMIT " + (maxResults + 1),
+                        args);
+        String nextPageToken = null;
+        if (views.size() > maxResults) {
+            // More pages remain. Drop the lookahead row and use the last returned name as the
+            // cursor for the next page.
+            views = new ArrayList<>(views.subList(0, maxResults));
+            nextPageToken = views.get(maxResults - 1);
+        }
+        return new PagedList<>(views, nextPageToken);
     }
 
     @Override
