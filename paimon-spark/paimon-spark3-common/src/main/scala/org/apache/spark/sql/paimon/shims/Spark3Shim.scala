@@ -38,6 +38,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference,
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.physical.Distribution
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
 // on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
@@ -227,6 +228,11 @@ class Spark3Shim extends SparkShim {
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef =
     MinorVersionShim.createCTERelationRef(cteId, resolved, output, isStreaming)
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      numPartitions: Int): Distribution =
+    MinorVersionShim.createClusteredDistribution(expressions, numPartitions)
 
   override def supportsHashAggregate(
       aggregateBufferAttributes: Seq[Attribute],

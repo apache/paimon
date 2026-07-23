@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 
 object MinorVersionShim {
 
@@ -28,6 +29,9 @@ object MinorVersionShim {
       resolved: Boolean,
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output)
+
+  def createClusteredDistribution(expressions: Seq[Expression], numPartitions: Int): Distribution =
+    ClusteredDistribution(expressions, Some(numPartitions))
 
   def createMergeIntoTable(
       targetTable: LogicalPlan,

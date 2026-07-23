@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.{PaimonRecordReaderIterator, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
+import org.apache.paimon.spark.catalyst.optimizer.RepartitionLateralVectorSearchInput
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.format.PaimonFormatTable
@@ -43,11 +44,15 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.optimizer.BuildRight
 import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAsSelect, DescribeRelation, DropPartitions, LogicalPlan, RepairTable, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.physical.{Distribution, UnspecifiedDistribution}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.{GlobalLimitExec, PaimonDescribeTableExec, SparkPlan, SparkStrategy, UnaryExecNode}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
@@ -308,6 +313,30 @@ case class LateralVectorSearchExec(
   override def children: Seq[SparkPlan] = Seq(child)
 
   override def output: Seq[Attribute] = child.output ++ projectOutput
+
+  // Statistics-based broadcast selection is only known after physical planning. Request a
+  // distribution here so EnsureRequirements can restore the streamed LIMIT side's parallelism.
+  override def requiredChildDistribution: Seq[Distribution] = {
+    if (hasUnrepartitionedGlobalLimit(child)) {
+      Seq(
+        SparkShimLoader.shim.createClusteredDistribution(
+          child.output,
+          RepartitionLateralVectorSearchInput.parallelism))
+    } else {
+      Seq(UnspecifiedDistribution)
+    }
+  }
+
+  private def hasUnrepartitionedGlobalLimit(plan: SparkPlan): Boolean = plan match {
+    case _: ShuffleExchangeLike => false
+    case _: GlobalLimitExec => true
+    case join: BroadcastHashJoinExec =>
+      hasUnrepartitionedGlobalLimit(if (join.buildSide == BuildRight) join.left else join.right)
+    case join: BroadcastNestedLoopJoinExec =>
+      hasUnrepartitionedGlobalLimit(if (join.buildSide == BuildRight) join.left else join.right)
+    case unary: UnaryExecNode => hasUnrepartitionedGlobalLimit(unary.child)
+    case _ => false
+  }
 
   @transient override lazy val producedAttributes: AttributeSet = {
     AttributeSet(vectorSearchOutput ++ output.filterNot(attr => inputSet.contains(attr)))

@@ -43,7 +43,7 @@ object RepartitionLateralVectorSearchInput extends Rule[LogicalPlan] {
     }
   }
 
-  private def parallelism: Int = {
+  private[spark] def parallelism: Int = {
     val value =
       OptionUtils
         .getOptionString(SparkConnectorOptions.VECTOR_SEARCH_LATERAL_JOIN_PARALLELISM)

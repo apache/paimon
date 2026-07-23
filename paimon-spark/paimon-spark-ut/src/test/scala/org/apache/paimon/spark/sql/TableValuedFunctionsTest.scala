@@ -22,15 +22,19 @@ import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.spark.catalyst.plans.logical.{LateralVectorSearch, PaimonTableValuedFunctions}
+import org.apache.paimon.spark.execution.LateralVectorSearchExec
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, Repartition}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
 
 import java.time.LocalDateTime
 import java.util.Collections
 
-class TableValuedFunctionsTest extends PaimonHiveTestBase {
+class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlanHelper {
 
   test("parse positive limit rejects overflowing long") {
     val longValue: Long = 4294967297L
@@ -249,6 +253,103 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       val repartition = lateralVectorSearch.left.asInstanceOf[Repartition]
       assert(repartition.shuffle, optimizedPlan.toString)
       assert(repartition.numPartitions == 16, optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search repartitions automatically broadcast join streamed limited input") {
+    Seq(false, true).foreach {
+      aqeEnabled =>
+        withSparkSQLConf(
+          "spark.sql.adaptive.enabled" -> aqeEnabled.toString,
+          "spark.sql.autoBroadcastJoinThreshold" -> "1024",
+          "spark.sql.adaptive.autoBroadcastJoinThreshold" -> "1024",
+          "spark.paimon.vector-search.lateral-join.parallelism" -> "4"
+        ) {
+          withTable("vector_search_source") {
+            createVectorSearchSource()
+
+            val result = spark.sql("""
+                                     |SELECT q.gid AS query_gid, r.gid AS result_gid
+                                     |FROM (
+                                     |  SELECT s.gid, s.embs
+                                     |  FROM (
+                                     |    SELECT id AS gid, array(1.0F, 2.0F, 3.0F) AS embs
+                                     |    FROM range(0, 10000, 1, 8)
+                                     |    LIMIT 1000
+                                     |  ) s
+                                     |  JOIN VALUES (0L) AS d(gid)
+                                     |  ON s.gid = d.gid
+                                     |) q,
+                                     |LATERAL (
+                                     |  SELECT gid
+                                     |  FROM vector_search(
+                                     |    'vector_search_source', 'embs', q.embs, 3)
+                                     |) AS r
+                                     |""".stripMargin)
+            val executedPlan = result.queryExecution.executedPlan
+            val broadcastJoin = collect(executedPlan) {
+              case join: BroadcastHashJoinExec => join
+            }.headOption.getOrElse(fail(executedPlan.toString))
+            val lateralVectorSearch = collect(executedPlan) {
+              case exec: LateralVectorSearchExec => exec
+            }.headOption.getOrElse(fail(executedPlan.toString))
+
+            withClue(s"AQE enabled: $aqeEnabled\n$executedPlan") {
+              assert(broadcastJoin.buildSide == BuildRight)
+              assert(lateralVectorSearch.child.outputPartitioning.numPartitions == 4)
+            }
+          }
+        }
+    }
+  }
+
+  test("lateral vector search preserves automatically broadcast join streamed parallelism") {
+    Seq(false, true).foreach {
+      aqeEnabled =>
+        withSparkSQLConf(
+          "spark.sql.adaptive.enabled" -> aqeEnabled.toString,
+          "spark.sql.autoBroadcastJoinThreshold" -> "1024",
+          "spark.sql.adaptive.autoBroadcastJoinThreshold" -> "1024",
+          "spark.paimon.vector-search.lateral-join.parallelism" -> "4"
+        ) {
+          withTable("vector_search_source") {
+            createVectorSearchSource()
+
+            val result = spark.sql("""
+                                     |SELECT q.gid AS query_gid, r.gid AS result_gid
+                                     |FROM (
+                                     |  SELECT d.gid, d.embs
+                                     |  FROM (
+                                     |    SELECT id AS gid
+                                     |    FROM range(0, 10, 1, 1)
+                                     |    LIMIT 10
+                                     |  ) s
+                                     |  JOIN (
+                                     |    SELECT id AS gid, array(1.0F, 2.0F, 3.0F) AS embs
+                                     |    FROM range(0, 10000, 1, 8)
+                                     |  ) d
+                                     |  ON s.gid = d.gid
+                                     |) q,
+                                     |LATERAL (
+                                     |  SELECT gid
+                                     |  FROM vector_search(
+                                     |    'vector_search_source', 'embs', q.embs, 3)
+                                     |) AS r
+                                     |""".stripMargin)
+            val executedPlan = result.queryExecution.executedPlan
+            val broadcastJoin = collect(executedPlan) {
+              case join: BroadcastHashJoinExec => join
+            }.headOption.getOrElse(fail(executedPlan.toString))
+            val lateralVectorSearch = collect(executedPlan) {
+              case exec: LateralVectorSearchExec => exec
+            }.headOption.getOrElse(fail(executedPlan.toString))
+
+            withClue(s"AQE enabled: $aqeEnabled\n$executedPlan") {
+              assert(broadcastJoin.buildSide == BuildLeft)
+              assert(lateralVectorSearch.child.outputPartitioning.numPartitions == 8)
+            }
+          }
+        }
     }
   }
 
