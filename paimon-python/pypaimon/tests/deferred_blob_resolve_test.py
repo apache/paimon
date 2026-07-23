@@ -321,6 +321,26 @@ class DeferredBlobResolveTest(unittest.TestCase):
         self.assertEqual([expected_payload], result.column("payload").to_pylist())
         self.assertEqual(_ROW_COUNT, counting_file_io.blobs_fetched)
 
+    def test_auth_only_defers_non_auth_payloads(self):
+        # An auth filter with no predicate/limit still defers scalar BLOBs, so payloads of
+        # the rows the auth filter drops are not read.
+        table = self._create_table("defer_auth_only")
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload", "score"])
+        splits = [
+            QueryAuthSplit(split, _RejectScoreOneAuthResult())
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        result = pa.Table.from_batches(
+            read_builder.new_read().to_arrow_batch_reader(
+                splits, blob_parallelism=4))
+
+        self.assertEqual(_ROW_COUNT - 1, result.num_rows)
+        self.assertEqual(_ROW_COUNT - 1, counting_file_io.blobs_fetched)
+
     def test_preserves_null_payloads_after_filtering(self):
         payloads = [
             None if index == 1 else bytes([index]) * 1024

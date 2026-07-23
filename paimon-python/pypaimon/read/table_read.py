@@ -897,9 +897,20 @@ class TableRead:
 
         filter_fn = auth_result.extract_row_filter()
         effective_limit = self.limit if limit is None else limit
+        auth_fields = (
+            self._auth_filter_field_names(auth_result, effective_read_type)
+            if filter_fn is not None else set()
+        )
+        # Embedding runs the auth filter before inline BLOB resolution; if it references an
+        # inline (descriptor/view) BLOB field, keep it outermost so it sees resolved bytes.
+        inline_blob_fields = (
+            self.table.options.blob_descriptor_fields()
+            | self.table.options.blob_view_fields()
+        )
         embed_filter = (
             filter_fn is not None
             and self.table.options.data_evolution_enabled()
+            and not (auth_fields & inline_blob_fields)
         )
         split_read = self._create_split_read(
             split,
@@ -908,10 +919,7 @@ class TableRead:
             limit=limit,
             push_down_limit=filter_fn is None or embed_filter,
             post_merge_filter=filter_fn if embed_filter else None,
-            eager_blob_fields=(
-                self._auth_filter_field_names(auth_result, effective_read_type)
-                if embed_filter else None
-            ),
+            eager_blob_fields=auth_fields if embed_filter else None,
         )
         reader = split_read.create_reader()
 

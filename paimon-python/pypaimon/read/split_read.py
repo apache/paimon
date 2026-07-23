@@ -88,8 +88,10 @@ NULL_FIELD_INDEX = -1
 
 def deferred_blob_field_names(table, read_fields: List[DataField],
                               predicate: Optional[Predicate],
-                              limit: Optional[int]) -> set:
-    if ((predicate is None and limit is None)
+                              limit: Optional[int],
+                              has_post_filter: bool = False) -> set:
+    # An auth filter also selects rows; defer past it too, like a predicate/limit.
+    if ((predicate is None and limit is None and not has_post_filter)
             or CoreOptions.blob_as_descriptor(table.options)
             or not table.options.read_defer_blob_resolve()):
         return set()
@@ -1086,6 +1088,7 @@ class DataEvolutionSplitRead(SplitRead):
             self.read_fields,
             self.predicate_for_reader,
             self.limit,
+            has_post_filter=self._post_merge_filter is not None,
         ) - self._eager_blob_fields
 
     def _create_raw_reader(self) -> RecordReader:
@@ -1200,17 +1203,16 @@ class DataEvolutionSplitRead(SplitRead):
         if not prescan_fields:
             return EmptyRecordBatchReader()
 
-        # When there's a normal field predicate, don't push down limit to prescan reader
-        # because the outer reader will apply predicate+limit filtering,
-        # while prescan reader would only apply limit without normal field predicate
-        # TODO support limit+predicate push down
+        # Skip limit push-down when the outer reader also selects rows (predicate or auth
+        # filter): prescan's first-N rows would differ from the outer set. TODO: push down.
+        skip_limit = self.predicate is not None or self._post_merge_filter is not None
         prescan_read = DataEvolutionSplitRead(
             table=self.table,
             predicate=self.predicate,
             read_type=prescan_fields,
             split=self.split,
             row_tracking_enabled=False,
-            limit=None if self.predicate else self.limit,
+            limit=None if skip_limit else self.limit,
         )
         prescan_read.row_ranges = self.row_ranges
         return prescan_read._create_raw_reader()
