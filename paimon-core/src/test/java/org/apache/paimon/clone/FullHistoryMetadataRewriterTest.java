@@ -280,7 +280,7 @@ public class FullHistoryMetadataRewriterTest {
                                                 target,
                                                 mapping,
                                                 FullHistoryCopyPlan.empty())
-                                        .validatePublishedCloneStreaming())
+                                        .validatePublishedClone())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Target file does not exist")
                 .hasMessageContaining(missingTarget.toString());
@@ -637,7 +637,7 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     @Test
-    public void testStreamingValidationRejectsTruncatedExtraFile() throws Exception {
+    public void testRetryRejectsTruncatedExtraFile() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("extra-file-source/table").toString());
         Path targetRoot = new Path(tempDir.resolve("extra-file-target/table").toString());
         String sourceExternal =
@@ -682,19 +682,21 @@ public class FullHistoryMetadataRewriterTest {
                         });
         assertThat(targetExtraFiles).hasSameSizeAs(sourceExtraFiles);
         Path truncated = targetExtraFiles.get(0);
+        PayloadStatCountingFileIO validationFileIO = new PayloadStatCountingFileIO(truncated);
+        FileStoreTable validationTarget =
+                FileStoreTableFactory.create(validationFileIO, targetRoot);
+        new FullHistoryCloneValidator(source, validationTarget, mapping)
+                .validatePublishedCloneStreaming();
+        assertThat(validationFileIO.payloadExistsCalls).isZero();
+        assertThat(validationFileIO.payloadSizeCalls).isZero();
+
         assertThat(fileIO.getFileSize(truncated)).isGreaterThan(1L);
         fileIO.writeFile(truncated, "x", true);
 
-        assertThatThrownBy(
-                        () ->
-                                new FullHistoryCloneValidator(
-                                                source,
-                                                target,
-                                                mapping,
-                                                FullHistoryCopyPlan.empty())
-                                        .validatePublishedCloneStreaming())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Target data files do not match");
+        assertThatThrownBy(() -> FullHistoryFileCopier.copy(fileIO, fileIO, payloadPlan, false))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("different size")
+                .hasMessageContaining(truncated.toString());
     }
 
     @Test
@@ -1493,5 +1495,32 @@ public class FullHistoryMetadataRewriterTest {
         Path schemaPath =
                 new Path(manager.schemaDirectory(), SchemaManager.SCHEMA_PREFIX + schema.id());
         assertThat(fileIO.tryToWriteAtomic(schemaPath, schema.toString())).isTrue();
+    }
+
+    private static class PayloadStatCountingFileIO extends LocalFileIO {
+
+        private final Path payload;
+        private int payloadExistsCalls;
+        private int payloadSizeCalls;
+
+        private PayloadStatCountingFileIO(Path payload) {
+            this.payload = payload;
+        }
+
+        @Override
+        public boolean exists(Path path) throws java.io.IOException {
+            if (payload.equals(path)) {
+                payloadExistsCalls++;
+            }
+            return super.exists(path);
+        }
+
+        @Override
+        public long getFileSize(Path path) throws java.io.IOException {
+            if (payload.equals(path)) {
+                payloadSizeCalls++;
+            }
+            return super.getFileSize(path);
+        }
     }
 }

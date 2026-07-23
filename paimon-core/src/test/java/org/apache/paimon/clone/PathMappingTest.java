@@ -234,6 +234,27 @@ public class PathMappingTest {
     }
 
     @Test
+    public void testLocalMappingRejectsAuthority() {
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Collections.singletonList(
+                                                "/tmp/source=//localhost/tmp/target")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Local path mapping prefix must not include authority")
+                .hasMessageContaining("//localhost/tmp/target");
+
+        assertThatThrownBy(
+                        () ->
+                                PathMapping.parse(
+                                        Collections.singletonList(
+                                                "file://localhost/tmp/source=/tmp/target")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Local path mapping prefix must not include authority")
+                .hasMessageContaining("file://localhost/tmp/source");
+    }
+
+    @Test
     public void testOverlappingSourceAndTargetPrefixesFail() {
         assertThatThrownBy(
                         () ->

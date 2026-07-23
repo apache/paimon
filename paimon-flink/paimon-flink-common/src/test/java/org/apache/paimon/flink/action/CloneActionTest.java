@@ -27,12 +27,15 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -80,6 +83,8 @@ public class CloneActionTest {
                         true);
 
         assertThatNoException().isThrownBy(action::build);
+        assertThat(action.env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE))
+                .isEqualTo(RuntimeExecutionMode.BATCH);
     }
 
     @Test

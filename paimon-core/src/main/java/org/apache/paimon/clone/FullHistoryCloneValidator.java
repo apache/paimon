@@ -102,8 +102,9 @@ public class FullHistoryCloneValidator {
         validateMetadata();
         validateAllStatisticsFiles();
 
-        // Scan planning materializes every live split. Visit the metadata graph directly and
-        // accumulate only fixed-size comparison digests instead of retaining every payload path.
+        // Copy tasks already verify each unique payload file. Here we only compare the references
+        // reachable from source and target metadata, without repeating remote payload stats for
+        // every branch occurrence.
         PayloadSummary expected = summarizePayload(sourceTable, true);
         PayloadSummary actual = summarizePayload(targetTable, false);
         checkState(
@@ -267,37 +268,9 @@ public class FullHistoryCloneValidator {
                                                                     path.toString(),
                                                                     mappingAnchor.toString()))
                                             : path;
-                            long summarizedSize = expectedSize;
-                            if (!rewrite) {
-                                long actualSize = validatePayloadFile(table, path, expectedSize);
-                                if (summarizedSize < 0) {
-                                    summarizedSize = actualSize;
-                                }
-                            } else if (summarizedSize < 0) {
-                                checkState(
-                                        table.fileIO().exists(path),
-                                        "Source file does not exist: %s",
-                                        path);
-                                summarizedSize = table.fileIO().getFileSize(path);
-                            }
-                            summary.add(kind, summarizedPath, summarizedSize);
+                            summary.add(kind, summarizedPath, expectedSize);
                         });
         return summary;
-    }
-
-    private long validatePayloadFile(FileStoreTable table, Path path, long expectedSize)
-            throws IOException {
-        checkState(table.fileIO().exists(path), "Target file does not exist: %s", path);
-        long actualSize = table.fileIO().getFileSize(path);
-        if (expectedSize >= 0) {
-            checkState(
-                    actualSize == expectedSize,
-                    "Target payload file %s has size %s but metadata records %s.",
-                    path,
-                    actualSize,
-                    expectedSize);
-        }
-        return actualSize;
     }
 
     private void validatePayloadFiles(FullHistoryFileSet targetFiles) throws IOException {

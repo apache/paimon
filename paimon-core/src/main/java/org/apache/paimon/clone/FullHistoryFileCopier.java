@@ -21,12 +21,17 @@ package org.apache.paimon.clone;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 
 import java.io.IOException;
 import java.io.OutputStream;
 
-/** Executes a full-history copy plan with explicit source and target {@link FileIO}s. */
+/**
+ * Executes a full-history copy plan with explicit source and target {@link FileIO}s.
+ *
+ * <p>Non-overwrite copies stream directly to clone-owned target paths. The clone protocol keeps
+ * those paths private until metadata validation succeeds and cleans incomplete files after a
+ * recoverable copy failure.
+ */
 public class FullHistoryFileCopier {
 
     private static final int COPY_BUFFER_SIZE = 1 << 20;
@@ -72,65 +77,47 @@ public class FullHistoryFileCopier {
                 copyBytes(input, output, expectedSize);
             }
         } else {
-            copyTwoPhase(sourceFileIO, targetFileIO, file, expectedSize);
+            copyToOwnedTarget(sourceFileIO, targetFileIO, file, expectedSize);
         }
 
-        if (overwrite) {
-            long targetSize = targetFileIO.getFileSize(file.target());
-            if (targetSize != expectedSize) {
-                throw new IOException(
-                        String.format(
-                                "Copied target file %s has unexpected size: expected %s, actual %s.",
-                                file.target(), expectedSize, targetSize));
-            }
+        long targetSize = targetFileIO.getFileSize(file.target());
+        if (targetSize != expectedSize) {
+            throw new IOException(
+                    String.format(
+                            "Copied target file %s has unexpected size: expected %s, actual %s.",
+                            file.target(), expectedSize, targetSize));
         }
     }
 
-    private static void copyTwoPhase(
+    private static void copyToOwnedTarget(
             FileIO sourceFileIO,
             FileIO targetFileIO,
             FullHistoryCopyPlan.FileCopy file,
             long expectedSize)
             throws IOException {
-        TwoPhaseOutputStream output = null;
-        TwoPhaseOutputStream.Committer committer = null;
-        boolean published = false;
+        boolean targetOpened = false;
         try (SeekableInputStream input = sourceFileIO.newInputStream(file.source())) {
-            output = targetFileIO.newTwoPhaseOutputStream(file.target(), false);
-            copyBytes(input, output, expectedSize);
-            committer = output.closeForCommit();
-            output = null;
-            committer.commit(targetFileIO);
-            published = true;
-            long targetSize = targetFileIO.getFileSize(file.target());
-            if (targetSize != expectedSize) {
-                throw new IOException(
-                        String.format(
-                                "Copied target file %s has unexpected size: expected %s, actual %s.",
-                                file.target(), expectedSize, targetSize));
+            try (PositionOutputStream output = targetFileIO.newOutputStream(file.target(), false)) {
+                targetOpened = true;
+                copyBytes(input, output, expectedSize);
             }
         } catch (Throwable failure) {
-            if (!published) {
-                discard(targetFileIO, output, committer, failure);
-            }
-            if (committer != null && failure instanceof IOException) {
-                try {
-                    if (targetFileIO.exists(file.target())
-                            && targetFileIO.getFileSize(file.target()) == expectedSize) {
+            try {
+                if (targetFileIO.exists(file.target())) {
+                    if (targetFileIO.getFileSize(file.target()) == expectedSize) {
                         return;
                     }
-                } catch (Throwable validationFailure) {
-                    failure.addSuppressed(validationFailure);
+                    if (targetOpened && !targetFileIO.delete(file.target(), false)) {
+                        failure.addSuppressed(
+                                new IOException(
+                                        "Failed to clean incomplete clone target "
+                                                + file.target()));
+                    }
                 }
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
             }
-            if (failure instanceof IOException) {
-                throw (IOException) failure;
-            } else if (failure instanceof RuntimeException) {
-                throw (RuntimeException) failure;
-            } else if (failure instanceof Error) {
-                throw (Error) failure;
-            }
-            throw new IOException(failure);
+            rethrow(failure);
         }
     }
 
@@ -153,25 +140,15 @@ public class FullHistoryFileCopier {
         }
     }
 
-    private static void discard(
-            FileIO targetFileIO,
-            TwoPhaseOutputStream output,
-            TwoPhaseOutputStream.Committer committer,
-            Throwable failure) {
-        if (committer == null && output != null) {
-            try {
-                committer = output.closeForCommit();
-            } catch (Throwable closeFailure) {
-                failure.addSuppressed(closeFailure);
-            }
+    private static void rethrow(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        } else if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        } else if (failure instanceof Error) {
+            throw (Error) failure;
         }
-        if (committer != null) {
-            try {
-                committer.discard(targetFileIO);
-            } catch (Throwable discardFailure) {
-                failure.addSuppressed(discardFailure);
-            }
-        }
+        throw new IOException(failure);
     }
 
     private FullHistoryFileCopier() {}

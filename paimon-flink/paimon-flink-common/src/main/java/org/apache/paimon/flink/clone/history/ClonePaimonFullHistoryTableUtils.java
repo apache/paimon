@@ -31,6 +31,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -75,6 +76,7 @@ public class ClonePaimonFullHistoryTableUtils {
                 excludedTables,
                 preferFileFormat,
                 metaOnly);
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
 
         Table table = sourceCatalog.getTable(Identifier.create(sourceDatabase, sourceTableName));
         checkArgument(
