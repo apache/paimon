@@ -365,7 +365,7 @@ class RayRangeJoinTest(unittest.TestCase):
                                 len(rjmod._bounded_ranges(wide, wide, 4)))
 
     def test_split_key_range_reads_stats(self):
-        # The planner reads a file's min/max for the range column from manifest stats.
+        # The planner reads a file's min/max for the range column from the parquet footer.
         loc = pa.schema([("k", pa.int64()), ("row_id", pa.int64())])
         self._table("default.rj_stats", loc, [
             pa.Table.from_pydict({"k": [10, 20, 15], "row_id": [1, 2, 3]}, schema=loc)])
@@ -414,7 +414,6 @@ class RayRangeJoinTest(unittest.TestCase):
                 num_ranges=num_ranges)
             got = sorted((r["k"], r["row_id"]) for r in ds.take_all())
             self.assertEqual(got, expected)
-
 
     def test_pk_nonkey_range_col_untrusted(self):
         # A PK table's non-PK column may be rewritten by merge (aggregation/partial-update)
@@ -465,6 +464,12 @@ class RayRangeJoinTest(unittest.TestCase):
         self._table("default.rj_ltz_b", ltz, [])
         with self.assertRaisesRegex(ValueError, "must not be"):
             range_join("default.rj_ltz_a", "default.rj_ltz_b", self.catalog_options, on="k")
+        # A nested SECOND key is rejected too (every key is validated, not just the range key).
+        multi = pa.schema([("k", pa.int64()), ("k2", pa.list_(pa.int64())), ("v", pa.string())])
+        self._table("default.rj_mk_a", multi, [])
+        self._table("default.rj_mk_b", multi, [])
+        with self.assertRaisesRegex(ValueError, "nested/complex"):
+            range_join("default.rj_mk_a", "default.rj_mk_b", self.catalog_options, on=["k", "k2"])
 
 
 if __name__ == "__main__":

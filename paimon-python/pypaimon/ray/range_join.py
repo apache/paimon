@@ -162,10 +162,14 @@ def _plan_ranged_splits(table_id, catalog_options, projection, range_col, partit
     if projection is not None:
         rb = rb.with_projection(projection)
     splits = list(rb.new_scan().plan().splits())
-    # Footer min/max bounds the key only if merge can't move it out of range: safe when
-    # append-only, or the key is a primary key (merge never rewrites PKs). Otherwise (an
-    # aggregated/updated value column) every split joins every range, clipped in memory.
-    if table.primary_keys and range_col not in table.primary_keys:
+    # Footer min/max bounds the key only if the read can't move it out of range. Untrust
+    # (join every range, clip in memory) when it can: (1) a PK table's non-PK key, which
+    # merge (aggregation/partial-update) may rewrite; (2) a key under auth column-masking,
+    # rewritten at read time so raw footer stats no longer bound it.
+    from pypaimon.read.query_auth_split import QueryAuthSplit
+    masked = any(isinstance(s, QueryAuthSplit) and s.auth_result.column_masking
+                 and range_col in s.auth_result.column_masking for s in splits)
+    if masked or (table.primary_keys and range_col not in table.primary_keys):
         return [(s, None, None) for s in splits], schema_id
     workers = min(16, (os.cpu_count() or 4) * 4, len(splits) or 1)
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -330,8 +334,14 @@ def range_join(
             "range_join key columns must have the same type on both sides; "
             f"mismatched (left, right, left type, right type): {type_mismatch}.")
 
-    # The range key is the first pair; reject up front (not inside a worker) the types
-    # that can't be range-partitioned safely.
+    # Reject unsupported key types up front (not inside a worker as ArrowInvalid). Every
+    # join key must be hashable; nested (ARRAY<>/MAP<>/ROW<>/...) and VARIANT are not.
+    for c in lkeys:
+        t = key_type(ltable, c).upper()
+        if "<" in t or t.startswith("VARIANT"):
+            raise ValueError(
+                f"range_join join key {c!r} must not be a nested/complex type; got {t}.")
+    # The range key (first pair) additionally must be range-partitionable.
     range_key_type = key_type(ltable, lkeys[0]).upper()
     reason = None
     if range_key_type.startswith(("FLOAT", "DOUBLE")):
@@ -340,8 +350,6 @@ def range_join(
     elif "LOCAL TIME ZONE" in range_key_type or "TIMESTAMP_LTZ" in range_key_type:
         # Footer stats decode to naive datetimes; a tz-aware column can't compare to them.
         reason = "TIMESTAMP WITH LOCAL TIME ZONE"
-    elif "<" in range_key_type:  # ARRAY<>/MAP<>/ROW<>/... -- not orderable/hashable here
-        reason = "a nested/complex type"
     if reason:
         raise ValueError(
             f"range_join range key {lkeys[0]!r} must not be {reason}; "
