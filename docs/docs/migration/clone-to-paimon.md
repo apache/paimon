@@ -62,7 +62,8 @@ clone \
 Every reachable source path must match one `path_mapping`. The mapped source table root is the
 physical target root. `target_database` and `target_table` are optional logical identifiers and do
 not change that path or register the table. Mapping and source paths must use the same explicit
-filesystem scheme; for example, `file:/path` does not match `/path`.
+filesystem scheme; for example, `file:/path` does not match `/path`. Local mappings must not use a
+URI authority.
 
 The target table root and every mapped external data or index root used by the table must initially
 be absent or empty. The action writes the same ownership marker into each root. A failed clone may
@@ -72,9 +73,12 @@ completed clone cannot be resumed. Run at most one full-history clone job for a 
 time; `clone_if_exists` is a failed-job resume protocol, not a concurrent execution protocol.
 
 Mapped external-data and external-index target locations must be dedicated to this clone and must
-not be changed while the initial run or a retry is active. Payload files are published through
-two-phase output so an interrupted transfer does not expose a partial target. Existing-file
-validation compares sizes, not checksums.
+not be changed while the initial run or a retry is active. Payload files are streamed directly into
+these owned roots to avoid an additional remote rename or object copy. Table metadata and
+`_SUCCESS` are published only after every copy task succeeds and the rewritten metadata is
+validated. Recoverable copy failures clean their incomplete target; an abrupt process termination
+may leave a conflicting-size file, which is rejected on resume. Existing-file validation compares
+sizes, not checksums.
 
 Full-history clone does not currently support blob descriptors or blob views, Iceberg compatibility
 metadata, filtered clone, format conversion, or metadata-only clone.

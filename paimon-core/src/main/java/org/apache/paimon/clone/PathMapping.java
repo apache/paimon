@@ -194,6 +194,11 @@ public class PathMapping implements Serializable {
         checkArgument(
                 uri.getUserInfo() == null, "Path mapping prefixes must not contain user info.");
         checkArgument(
+                !((uri.getScheme() == null || "file".equalsIgnoreCase(uri.getScheme()))
+                        && uri.getAuthority() != null),
+                "Local path mapping prefix must not include authority: %s",
+                normalized);
+        checkArgument(
                 uri.getScheme() == null
                         || "file".equalsIgnoreCase(uri.getScheme())
                         || uri.getAuthority() != null,
