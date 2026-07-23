@@ -185,18 +185,18 @@ class ConflictDetection:
         self.reset_row_id_history()
 
     def reset_row_id_history(self):
-        """Discard cached row-id conflict history."""
+        """Clear cached row-id history."""
         self._row_id_history_base_snapshot = None
         self._row_id_history_cursor = None
         self._row_id_history_cursor_identity = None
         self._row_id_external_snapshots = []
 
     def ignore_row_id_commit(self, commit_user, commit_identifier):
-        """Exclude one known-disjoint commit from later checks."""
+        """Skip a disjoint commit in later checks."""
         self._row_id_ignored_commits.add((commit_user, commit_identifier))
 
     def _row_id_history_snapshots(self, latest_snapshot):
-        """Cache external history while skipping registered disjoint windows."""
+        """Cache history except disjoint commits."""
         base_snapshot = self._row_id_check_from_snapshot
         reset_history = (
             self._row_id_history_base_snapshot != base_snapshot

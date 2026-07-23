@@ -219,7 +219,7 @@ class _IncrementalUpdateCommitter:
                     self._table.new_stream_write_builder().new_commit()
                 )
             except Exception as error:
-                # No commit started; all messages remain safe to abort.
+                # Safe to abort before commit starts.
                 self._deferred_error = error
                 return
 

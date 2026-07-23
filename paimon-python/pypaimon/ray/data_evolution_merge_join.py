@@ -608,7 +608,7 @@ def distributed_update_apply(
     action_row_ids = []
     iter_batches_kwargs = {"batch_format": "pyarrow"}
     if on_group_result is not None:
-        # Yield ready groups without waiting for batch fill or prefetch.
+        # Yield each group immediately.
         iter_batches_kwargs["batch_size"] = 1
         iter_batches_kwargs["prefetch_batches"] = 0
     for batch in msgs_ds.iter_batches(**iter_batches_kwargs):

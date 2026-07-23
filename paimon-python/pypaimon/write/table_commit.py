@@ -92,7 +92,7 @@ class TableCommit:
         self.file_store_commit.abort(commit_messages)
 
     def ignore_row_id_conflict_for_commit(self, commit_identifier: int) -> None:
-        """Exclude a known-disjoint commit from later row-id checks."""
+        """Skip a disjoint commit in later row-id checks."""
         self.file_store_commit.conflict_detection.ignore_row_id_commit(
             self.commit_user, commit_identifier
         )

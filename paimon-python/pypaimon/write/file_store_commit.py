@@ -56,7 +56,7 @@ class CommitResult:
 
 
 class CommitOutcomeUnknownError(RuntimeError):
-    """Raised when commit messages may already be in a snapshot."""
+    """The commit may already be visible."""
 
 
 class SuccessResult(CommitResult):
@@ -309,7 +309,6 @@ class FileStoreCommit:
                 latest_snapshot = self.snapshot_manager.get_latest_snapshot()
                 commit_entries = commit_entries_plan(latest_snapshot)
 
-                # Skip commits with no changes.
                 if not commit_entries and not index_deletes and not index_adds:
                     if outcome_unknown:
                         if self._is_commit_persisted(
