@@ -19,6 +19,7 @@
 package org.apache.paimon.fs.cache;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -32,6 +33,7 @@ import org.apache.paimon.utils.FileType;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
@@ -149,6 +151,13 @@ public class CachingFileIO implements FileIO {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return delegate.rename(src, dst);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        return delegate.createBlobPresignedUrl(tableRoot, descriptor, extension, validity);
     }
 
     @Override

@@ -19,6 +19,8 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.UriReader;
 
@@ -30,11 +32,16 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link Blob}. */
 public class BlobTest {
@@ -83,6 +90,39 @@ public class BlobTest {
         String uri = "http://example.com/file.txt";
         Blob blob = Blob.fromHttp(uri);
         assertThat(blob).isInstanceOf(BlobRef.class);
+    }
+
+    @Test
+    public void testToPresignedUrlDelegatesDescriptor() throws IOException {
+        BlobDescriptor descriptor =
+                new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 2, 4);
+        Blob blob = Blob.fromDescriptor(mock(UriReader.class), descriptor);
+        FileIO fileIO = mock(FileIO.class);
+        Path tableRoot = new Path("oss://bucket/table");
+        Duration validity = Duration.ofHours(1);
+        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "jpg", validity))
+                .thenReturn("https://example");
+
+        assertThat(blob.toPresignedUrl(fileIO, tableRoot, "jpg", validity))
+                .isEqualTo("https://example");
+        verify(fileIO).createBlobPresignedUrl(tableRoot, descriptor, "jpg", validity);
+    }
+
+    @Test
+    public void testInlineBlobCannotCreatePresignedUrl() {
+        FileIO fileIO = mock(FileIO.class);
+
+        assertThatThrownBy(
+                        () ->
+                                Blob.fromData(new byte[] {1})
+                                        .toPresignedUrl(
+                                                fileIO,
+                                                new Path("oss://bucket/table"),
+                                                "jpg",
+                                                Duration.ofHours(1)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("can not convert to descriptor");
+        verifyNoInteractions(fileIO);
     }
 
     @Test

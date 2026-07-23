@@ -723,7 +723,7 @@ public class SparkCatalog extends SparkBaseCatalog
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
         String[] namespace = ident.namespace();
         if (isSystemFunctionNamespace(namespace)) {
-            UnboundFunction func = PaimonFunctions.load(ident.name());
+            UnboundFunction func = PaimonFunctions.load(ident.name(), catalogName);
             if (func != null) {
                 return func;
             }

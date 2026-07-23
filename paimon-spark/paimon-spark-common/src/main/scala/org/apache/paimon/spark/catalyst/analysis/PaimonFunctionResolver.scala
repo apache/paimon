@@ -24,12 +24,13 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.UnresolvedFunction
-import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Cast, Expression, Literal}
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.UNRESOLVED_FUNCTION
-import org.apache.spark.sql.types.{LongType, StringType}
+import org.apache.spark.sql.connector.catalog.CatalogPlugin
+import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, LongType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
 case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan] {
@@ -40,6 +41,10 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
     plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+          case u: UnresolvedFunction
+              if isDescriptorToPresignedUrlFunction(u.nameParts) &&
+                u.arguments.forall(_.resolved) =>
+            resolveDescriptorToPresignedUrl(u)
           case u: UnresolvedFunction
               if isBlobViewFunction(u.nameParts) && u.arguments.forall(_.resolved) =>
             resolveBlobView(u)
@@ -73,6 +78,67 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
     ReplacePaimonFunctions.resolveBlobView(spark, tableName, fieldName, u.arguments(2))
   }
 
+  private def resolveDescriptorToPresignedUrl(u: UnresolvedFunction): Expression = {
+    val functionName = u.nameParts.last
+    if (u.arguments.length != 4) {
+      throw new UnsupportedOperationException(
+        s"Function '$functionName' requires 4 arguments " +
+          s"(sourceTable STRING, descriptor BINARY, extension STRING, " +
+          s"validity INTERVAL DAY TO SECOND), but found ${u.arguments.length}")
+    }
+
+    val sourceTable = literalString(u.arguments(0), "sourceTable")
+    if (sourceTable == null) {
+      throw new UnsupportedOperationException("sourceTable must not be null")
+    }
+
+    val descriptor = castNullable(u.arguments(1), BinaryType, "descriptor")
+    val extension = castNullable(u.arguments(2), StringType, "extension")
+    val intervalType = DayTimeIntervalType.DEFAULT
+    val validity = u.arguments(3).dataType match {
+      case _: DayTimeIntervalType => Cast(u.arguments(3), intervalType)
+      case NullType => Cast(u.arguments(3), intervalType)
+      case other =>
+        throw new UnsupportedOperationException(
+          s"validity must be INTERVAL DAY TO SECOND type, but found ${other.simpleString}")
+    }
+    val ignoreErrors =
+      functionName.equalsIgnoreCase(PaimonFunctions.TRY_DESCRIPTOR_TO_PRESIGNED_URL)
+
+    ReplacePaimonFunctions.resolveDescriptorToPresignedUrl(
+      spark,
+      functionCatalog(u.nameParts),
+      sourceTable,
+      descriptor,
+      extension,
+      validity,
+      ignoreErrors)
+  }
+
+  private def castNullable(
+      expression: Expression,
+      expectedType: DataType,
+      argumentName: String): Expression = {
+    expression.dataType match {
+      case NullType => Cast(expression, expectedType)
+      case actual if actual == expectedType => expression
+      case actual =>
+        throw new UnsupportedOperationException(
+          s"$argumentName must be ${expectedType.simpleString.toUpperCase} type, " +
+            s"but found ${actual.simpleString}")
+    }
+  }
+
+  private def functionCatalog(nameParts: Seq[String]): CatalogPlugin = {
+    nameParts.length match {
+      case 2 => catalogManager.currentCatalog
+      case 3 => catalogManager.catalog(nameParts.head)
+      case _ =>
+        throw new UnsupportedOperationException(
+          s"Invalid function identifier: ${nameParts.mkString(".")}")
+    }
+  }
+
   private def literalString(expr: Expression, argumentName: String): String = {
     if (!expr.isInstanceOf[Literal]) {
       throw new UnsupportedOperationException(s"$argumentName must be a literal")
@@ -92,6 +158,13 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
   private def isBlobViewFunction(nameParts: Seq[String]): Boolean = {
     nameParts.length >= 2 &&
     nameParts.last.equalsIgnoreCase(PaimonFunctions.BLOB_VIEW) &&
+    nameParts(nameParts.length - 2).equalsIgnoreCase(SYSTEM_DATABASE_NAME)
+  }
+
+  private def isDescriptorToPresignedUrlFunction(nameParts: Seq[String]): Boolean = {
+    nameParts.length >= 2 &&
+    (nameParts.last.equalsIgnoreCase(PaimonFunctions.DESCRIPTOR_TO_PRESIGNED_URL) ||
+      nameParts.last.equalsIgnoreCase(PaimonFunctions.TRY_DESCRIPTOR_TO_PRESIGNED_URL)) &&
     nameParts(nameParts.length - 2).equalsIgnoreCase(SYSTEM_DATABASE_NAME)
   }
 }

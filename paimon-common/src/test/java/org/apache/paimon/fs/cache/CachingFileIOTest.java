@@ -19,6 +19,7 @@
 package org.apache.paimon.fs.cache;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -31,11 +32,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link CachingFileIO} and {@link CachingSeekableInputStream}. */
 class CachingFileIOTest {
@@ -47,6 +52,27 @@ class CachingFileIOTest {
     @BeforeEach
     void setUp() {
         cacheDir = tempDir.resolve("cache").toString();
+    }
+
+    @Test
+    void testCreateBlobPresignedUrlDelegates() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(1024, 64),
+                        EnumSet.of(FileType.DATA),
+                        64);
+        Path tableRoot = new Path("oss://bucket/table");
+        BlobDescriptor descriptor =
+                new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 0, 1);
+        Duration validity = Duration.ofMinutes(5);
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+                .thenReturn("https://example");
+
+        assertThat(cachingIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+                .isEqualTo("https://example");
+        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, "png", validity);
     }
 
     private CachingFileIO newCachingFileIO(

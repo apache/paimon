@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
@@ -260,6 +261,13 @@ public interface FileIO extends Serializable, Closeable {
     default Optional<Path> unarchive(Path path, StorageType type) throws IOException {
         throw new UnsupportedOperationException(
                 getClass().getName() + " does not support unarchive.");
+    }
+
+    default String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support creating blob presigned URLs.");
     }
 
     /**

@@ -20,11 +20,13 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -105,6 +107,17 @@ public class ResolvingFileIO implements FileIO {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return wrap(() -> fileIO(src).rename(src, dst));
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        return wrap(
+                () ->
+                        fileIO(new Path(descriptor.uri()))
+                                .createBlobPresignedUrl(
+                                        tableRoot, descriptor, extension, validity));
     }
 
     @VisibleForTesting

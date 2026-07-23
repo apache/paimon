@@ -623,6 +623,38 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDescriptorToPresignedUrlBuiltInFunctions() {
+        assertThat(batchSql("SHOW FUNCTIONS IN sys"))
+                .contains(
+                        Row.of("descriptor_to_presigned_url"),
+                        Row.of("try_descriptor_to_presigned_url"));
+
+        assertThat(
+                        batchSql(
+                                "SELECT sys.descriptor_to_presigned_url("
+                                        + "'default.blob_table_descriptor', "
+                                        + "CAST(NULL AS BYTES), 'png', INTERVAL '1' HOUR)"))
+                .containsExactly(Row.of((Object) null));
+        assertThat(
+                        batchSql(
+                                "SELECT sys.try_descriptor_to_presigned_url("
+                                        + "'default.blob_table_descriptor', "
+                                        + "sys.path_to_descriptor('file:///tmp/blob'), "
+                                        + "'png', INTERVAL '1' HOUR)"))
+                .containsExactly(Row.of((Object) null));
+
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT sys.descriptor_to_presigned_url("
+                                                + "'default.blob_table_descriptor', "
+                                                + "sys.path_to_descriptor('file:///tmp/blob'), "
+                                                + "'png', INTERVAL '1' HOUR)"))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .hasStackTraceContaining("does not support creating blob presigned URLs");
+    }
+
+    @Test
     public void testWriteBlobViewWithBuiltInFunction() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE upstream_blob_view (id INT, name STRING, picture BYTES)"

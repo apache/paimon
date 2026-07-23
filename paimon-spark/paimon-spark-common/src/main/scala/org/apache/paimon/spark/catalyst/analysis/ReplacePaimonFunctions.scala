@@ -21,8 +21,9 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.{DataConverter, SparkTable, SparkTypeUtils, SparkUtils}
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
-import org.apache.paimon.spark.function.{BlobViewFieldIdSparkFunction, BlobViewSparkFunction}
+import org.apache.paimon.spark.function.{BlobViewFieldIdSparkFunction, BlobViewSparkFunction, DescriptorToPresignedUrlFunction, ResolvedDescriptorToPresignedUrlFunction}
 import org.apache.paimon.spark.utils.CatalogUtils
+import org.apache.paimon.table.DataTable
 import org.apache.paimon.types.DataTypeRoot
 import org.apache.paimon.utils.{InternalRowUtils, TypeUtils}
 
@@ -31,13 +32,58 @@ import org.apache.spark.sql.catalyst.expressions.{ApplyFunctionExpression, Cast,
 import org.apache.spark.sql.catalyst.expressions.objects.Invoke
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Identifier}
 import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
-import org.apache.spark.sql.types.{BinaryType, StringType}
+import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.JavaConverters._
 
 object ReplacePaimonFunctions {
+
+  def resolveDescriptorToPresignedUrl(
+      spark: SparkSession,
+      functionCatalog: CatalogPlugin,
+      sourceTable: String,
+      descriptor: Expression,
+      extension: Expression,
+      validity: Expression,
+      ignoreErrors: Boolean): Expression = {
+    if (!functionCatalog.isInstanceOf[SparkBaseCatalog]) {
+      throw new UnsupportedOperationException(s"$functionCatalog is not a Paimon catalog")
+    }
+
+    val parts = spark.sessionState.sqlParser.parseMultipartIdentifier(sourceTable)
+    val identifier = parts.length match {
+      case 2 => Identifier.of(Array(parts.head), parts(1))
+      case 3 =>
+        if (!parts.head.equalsIgnoreCase(functionCatalog.name())) {
+          throw new UnsupportedOperationException(
+            s"Source table catalog '${parts.head}' must match function catalog " +
+              s"'${functionCatalog.name()}'.")
+        }
+        Identifier.of(Array(parts(1)), parts(2))
+      case _ =>
+        throw new UnsupportedOperationException(
+          "sourceTable must be database.table or catalog.database.table")
+    }
+
+    val table = functionCatalog.asTableCatalog.loadTable(identifier)
+    if (!table.isInstanceOf[SparkTable]) {
+      throw new UnsupportedOperationException(s"$sourceTable is not a Paimon table")
+    }
+    val dataTable = table.asInstanceOf[SparkTable].table match {
+      case table: DataTable => table
+      case _ =>
+        throw new UnsupportedOperationException(s"$sourceTable is not a Paimon data table")
+    }
+    val fileIO = dataTable.fileIO()
+    fileIO.isObjectStore
+
+    ApplyFunctionExpression(
+      new ResolvedDescriptorToPresignedUrlFunction(fileIO, dataTable.location(), ignoreErrors),
+      Seq(descriptor, extension, validity))
+  }
 
   def resolveBlobView(
       spark: SparkSession,
@@ -82,6 +128,8 @@ object ReplacePaimonFunctions {
 
 /** A rule to replace Paimon functions with literal values. */
 case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan] {
+  private lazy val catalogManager = spark.sessionState.catalogManager
+
   private def replaceMaxPt(func: ApplyFunctionExpression): Expression = {
     assert(func.children.size == 1)
     assert(func.children.head.dataType == StringType)
@@ -138,6 +186,56 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
     ReplacePaimonFunctions.resolveBlobView(spark, tableName, fieldName, arguments(2))
   }
 
+  private def replaceDescriptorToPresignedUrl(
+      arguments: Seq[Expression],
+      function: DescriptorToPresignedUrlFunction): Expression = {
+    assert(arguments.size == 4)
+    val sourceTable = literalString(arguments(0), "sourceTable")
+    if (sourceTable == null) {
+      throw new UnsupportedOperationException("sourceTable must not be null")
+    }
+    if (arguments(0).dataType != StringType) {
+      throw new UnsupportedOperationException("sourceTable must be STRING type")
+    }
+
+    val descriptor = castNullable(arguments(1), BinaryType, "descriptor")
+    val extension = castNullable(arguments(2), StringType, "extension")
+    val intervalType = DayTimeIntervalType.DEFAULT
+    val validity = arguments(3).dataType match {
+      case _: DayTimeIntervalType => Cast(arguments(3), intervalType)
+      case NullType => Cast(arguments(3), intervalType)
+      case other =>
+        throw new UnsupportedOperationException(
+          s"validity must be INTERVAL DAY TO SECOND type, but found ${other.simpleString}")
+    }
+    val functionCatalog = Option(function.catalogName())
+      .map(catalogManager.catalog)
+      .getOrElse(catalogManager.currentCatalog)
+
+    ReplacePaimonFunctions.resolveDescriptorToPresignedUrl(
+      spark,
+      functionCatalog,
+      sourceTable,
+      descriptor,
+      extension,
+      validity,
+      function.ignoreErrors())
+  }
+
+  private def castNullable(
+      expression: Expression,
+      expectedType: DataType,
+      argumentName: String): Expression = {
+    expression.dataType match {
+      case NullType => Cast(expression, expectedType)
+      case actual if actual == expectedType => expression
+      case actual =>
+        throw new UnsupportedOperationException(
+          s"$argumentName must be ${expectedType.simpleString.toUpperCase} type, " +
+            s"but found ${actual.simpleString}")
+    }
+  }
+
   private def literalString(child: Expression, argumentName: String): String = {
     if (!child.isInstanceOf[Literal]) {
       throw new UnsupportedOperationException(s"$argumentName must be a literal")
@@ -158,6 +256,18 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
     }
   }
 
+  private def descriptorToPresignedUrlFunction(
+      invoke: Invoke): Option[DescriptorToPresignedUrlFunction] = {
+    if (invoke.functionName != "invoke" || !invoke.targetObject.foldable) {
+      None
+    } else {
+      invoke.targetObject.eval() match {
+        case function: DescriptorToPresignedUrlFunction => Some(function)
+        case _ => None
+      }
+    }
+  }
+
   override def apply(plan: LogicalPlan): LogicalPlan = {
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformAllExpressions {
@@ -169,8 +279,17 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
             if func.function.name() == PaimonFunctions.BLOB_VIEW &&
               func.function.canonicalName().startsWith("paimon") =>
           replaceBlobView(func.children)
+        case func: ApplyFunctionExpression
+            if func.function.isInstanceOf[DescriptorToPresignedUrlFunction] =>
+          replaceDescriptorToPresignedUrl(
+            func.children,
+            func.function.asInstanceOf[DescriptorToPresignedUrlFunction])
         case invoke: Invoke if isBlobViewInvoke(invoke) =>
           replaceBlobView(invoke.arguments)
+        case invoke: Invoke if descriptorToPresignedUrlFunction(invoke).isDefined =>
+          replaceDescriptorToPresignedUrl(
+            invoke.arguments,
+            descriptorToPresignedUrlFunction(invoke).get)
       }
     }
   }

@@ -20,6 +20,7 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.UriReader;
@@ -28,6 +29,7 @@ import org.apache.paimon.utils.UriReaderFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -43,6 +45,11 @@ public interface Blob {
     BlobDescriptor toDescriptor();
 
     SeekableInputStream newInputStream() throws IOException;
+
+    default String toPresignedUrl(
+            FileIO fileIO, Path tableRoot, String extension, Duration validity) throws IOException {
+        return fileIO.createBlobPresignedUrl(tableRoot, toDescriptor(), extension, validity);
+    }
 
     static Blob fromData(byte[] data) {
         return new BlobData(data);

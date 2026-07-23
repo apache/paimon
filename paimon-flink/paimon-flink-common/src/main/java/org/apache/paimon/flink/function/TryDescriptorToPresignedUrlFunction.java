@@ -18,24 +18,26 @@
 
 package org.apache.paimon.flink.function;
 
-import java.util.HashMap;
-import java.util.Map;
+import org.apache.paimon.catalog.Catalog;
 
-/** Paimon flink built in functions. */
-public class BuiltInFunctions {
+import java.time.Duration;
 
-    public static final Map<String, String> FUNCTIONS =
-            new HashMap<String, String>() {
-                {
-                    put("path_to_descriptor", PathToDescriptor.class.getName());
-                    put("descriptor_to_string", DescriptorToString.class.getName());
-                    put("blob_view", BlobViewFunction.class.getName());
-                    put(
-                            "descriptor_to_presigned_url",
-                            DescriptorToPresignedUrlFunction.class.getName());
-                    put(
-                            "try_descriptor_to_presigned_url",
-                            TryDescriptorToPresignedUrlFunction.class.getName());
-                }
-            };
+/** Tolerant variant of {@link DescriptorToPresignedUrlFunction}. */
+public class TryDescriptorToPresignedUrlFunction extends DescriptorToPresignedUrlFunction {
+
+    public TryDescriptorToPresignedUrlFunction() {}
+
+    TryDescriptorToPresignedUrlFunction(String catalogName, Catalog catalog) {
+        super(catalogName, catalog);
+    }
+
+    @Override
+    public String eval(
+            String tableName, byte[] descriptorBytes, String extension, Duration validity) {
+        try {
+            return super.eval(tableName, descriptorBytes, extension, validity);
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }
