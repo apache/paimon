@@ -524,6 +524,29 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(recorder["abort_calls"], 0)
         self.assertEqual(recorder["close_calls"], 1)
 
+    def test_chained_commit_failure_is_unwrapped_once(self):
+        import importlib
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        retry_error = ValueError("retry failed")
+        try:
+            raise RuntimeError("commit failed") from retry_error
+        except RuntimeError as commit_error:
+            chained_error = commit_error
+
+        reraise_calls = []
+
+        def reraise_once(error):
+            reraise_calls.append(error)
+            raise ValueError("retry failed") from None
+
+        with mock.patch.object(m, "_reraise_inner", side_effect=reraise_once):
+            with self.assertRaisesRegex(ValueError, "retry failed"):
+                self._run_with_fake_commit(commit_error=chained_error)
+
+        self.assertEqual(1, len(reraise_calls))
+        self.assertIs(chained_error, reraise_calls[0])
+
     def test_close_failure_after_success_warns_and_returns_stats(self):
         close_error = RuntimeError("close failed")
 

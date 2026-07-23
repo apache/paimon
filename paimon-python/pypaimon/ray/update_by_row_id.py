@@ -165,10 +165,7 @@ def update_by_row_id(
         msgs, num_updated, _ = distributed_update_apply(
             update_ds, table, update_cols, **apply_kwargs
         )
-        if incremental_committer is None:
-            if msgs:
-                _commit_update_messages(table, msgs)
-        else:
+        if incremental_committer is not None:
             incremental_committer.finish()
     except Exception as e:
         if incremental_committer is not None:
@@ -178,6 +175,8 @@ def update_by_row_id(
     finally:
         if incremental_committer is not None:
             incremental_committer.close()
+    if incremental_committer is None and msgs:
+        _commit_update_messages(table, msgs)
     return {"num_updated": num_updated}
 
 
