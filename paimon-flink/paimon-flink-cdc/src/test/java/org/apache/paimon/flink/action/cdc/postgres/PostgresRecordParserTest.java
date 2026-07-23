@@ -88,6 +88,44 @@ public class PostgresRecordParserTest {
                 .isEqualTo(DataTypes.BIGINT().nullable());
     }
 
+    /**
+     * Verifies that {@code io.debezium.time.Time} (int32, milliseconds-past-midnight) is mapped to
+     * {@code TIME(3)}, not {@code INT}.
+     *
+     * <p>PostgreSQL {@code time(n)} columns with {@code n <= 3} are encoded by Debezium (default
+     * adaptive mode) using the {@code io.debezium.time.Time} logical type (int32 millis-of-day).
+     * The JDBC schema path maps the same columns to {@code TIME(n)}, so without this fix the two
+     * paths disagree and the sync crashes with "Cannot convert field from TIME(3) to INT". This
+     * mirrors the int64 {@code Timestamp} fix from PR #8222.
+     */
+    @Test
+    public void testTimeMillisFieldMapsToTime3() throws Exception {
+        String json = debeziumJson("int32", "io.debezium.time.Time");
+        List<RichCdcMultiplexRecord> out = parse(json);
+
+        assertThat(out).isNotEmpty();
+        DataField field = findField(out.get(0), "ts_col");
+        assertThat(field.type())
+                .as("io.debezium.time.Time (int32) must map to TIME(3), not INT")
+                .isEqualTo(DataTypes.TIME(3).nullable());
+    }
+
+    /**
+     * Verifies that a plain int32 field (no logical type name) still maps to INT — i.e. the fix
+     * does not break the default fallthrough.
+     */
+    @Test
+    public void testPlainInt32FieldMapsToInt() throws Exception {
+        String json = debeziumJson("int32", null);
+        List<RichCdcMultiplexRecord> out = parse(json);
+
+        assertThat(out).isNotEmpty();
+        DataField field = findField(out.get(0), "ts_col");
+        assertThat(field.type())
+                .as("int32 with no logical type name must remain INT")
+                .isEqualTo(DataTypes.INT().nullable());
+    }
+
     // -------------------------------------------------------------------------
     // helpers
     // -------------------------------------------------------------------------
@@ -122,6 +160,15 @@ public class PostgresRecordParserTest {
      * ts_col} with the given logical type {@code schemaName} (may be null for a plain int64).
      */
     private static String debeziumJson(String schemaName) {
+        return debeziumJson("int64", schemaName);
+    }
+
+    /**
+     * Builds a minimal Debezium PostgreSQL CDC JSON event containing one column {@code ts_col} of
+     * the given primitive {@code type} and logical type {@code schemaName} (may be null for no
+     * logical type).
+     */
+    private static String debeziumJson(String type, String schemaName) {
         String nameField = schemaName == null ? "" : "\"name\":\"" + schemaName + "\",";
         return "{"
                 + "\"schema\":{"
@@ -133,7 +180,9 @@ public class PostgresRecordParserTest {
                 + "      \"field\":\"after\","
                 + "      \"fields\":["
                 + "        {\"type\":\"int32\",\"optional\":false,\"field\":\"id\"},"
-                + "        {\"type\":\"int64\",\"optional\":true,"
+                + "        {\"type\":\""
+                + type
+                + "\",\"optional\":true,"
                 + nameField
                 + "         \"field\":\"ts_col\"}"
                 + "      ]"
