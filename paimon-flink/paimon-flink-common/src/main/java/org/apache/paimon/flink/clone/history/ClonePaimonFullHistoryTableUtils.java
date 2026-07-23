@@ -117,7 +117,7 @@ public class ClonePaimonFullHistoryTableUtils {
                         .returns(copyType)
                         .name("Discover Full-History Clone Files")
                         .setParallelism(1)
-                        .keyBy(file -> file.target().toString())
+                        .keyBy(CopyFullHistoryFileOperator::copyKey)
                         .transform(
                                 "Copy Full-History Files",
                                 TypeInformation.of(Boolean.class),

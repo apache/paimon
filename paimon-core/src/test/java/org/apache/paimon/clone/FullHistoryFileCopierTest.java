@@ -20,6 +20,8 @@ package org.apache.paimon.clone;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
@@ -149,6 +151,63 @@ public class FullHistoryFileCopierTest {
         assertThat(targetFileIO.exists(target)).isFalse();
     }
 
+    @Test
+    public void testRuntimeFailureAfterCloseIsNotAcceptedAsSuccess() throws Exception {
+        java.nio.file.Path sourceDir = tempDir.resolve("close-failure-source");
+        java.nio.file.Path targetDir = tempDir.resolve("close-failure-target");
+        Path source = new Path(sourceDir.resolve("data/file.orc").toString());
+        Path target = new Path(targetDir.resolve("data/file.orc").toString());
+        sourceFileIO.writeFile(source, "content", false);
+        FullHistoryCopyPlan plan =
+                singleFilePlan(source, sourceDir.toString(), targetDir.toString());
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryFileCopier.copy(
+                                        sourceFileIO, new FailingAfterCloseFileIO(), plan, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Injected close failure");
+        assertThat(targetFileIO.exists(target)).isFalse();
+    }
+
+    @Test
+    public void testOpenFailureCleansCreatedTarget() throws Exception {
+        java.nio.file.Path sourceDir = tempDir.resolve("open-failure-source");
+        java.nio.file.Path targetDir = tempDir.resolve("open-failure-target");
+        Path source = new Path(sourceDir.resolve("data/file.orc").toString());
+        Path target = new Path(targetDir.resolve("data/file.orc").toString());
+        sourceFileIO.writeFile(source, "content", false);
+        FullHistoryCopyPlan plan =
+                singleFilePlan(source, sourceDir.toString(), targetDir.toString());
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryFileCopier.copy(
+                                        sourceFileIO, new FailingOpenFileIO(), plan, false))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("Injected open failure");
+        assertThat(targetFileIO.exists(target)).isFalse();
+    }
+
+    @Test
+    public void testKnownSizeDoesNotStatSource() throws Exception {
+        java.nio.file.Path sourceDir = tempDir.resolve("known-size-source");
+        java.nio.file.Path targetDir = tempDir.resolve("known-size-target");
+        Path source = new Path(sourceDir.resolve("data/file.orc").toString());
+        Path target = new Path(targetDir.resolve("data/file.orc").toString());
+        FileIO noStatSource = new NoStatFileIO();
+        noStatSource.writeFile(source, "content", false);
+
+        FullHistoryFileCopier.copyFile(
+                noStatSource,
+                targetFileIO,
+                new FullHistoryCopyPlan.FileCopy(
+                        source, target, FullHistoryCopyPlan.FileKind.DATA, 7L),
+                false);
+
+        assertThat(targetFileIO.readFileUtf8(target)).isEqualTo("content");
+    }
+
     private static class FailingReadFileIO extends LocalFileIO {
 
         @Override
@@ -186,6 +245,41 @@ public class FullHistoryFileCopierTest {
                 throws java.io.IOException {
             twoPhaseOutputStreamCalls++;
             throw new java.io.IOException("Two-phase output is not expected for clone payloads.");
+        }
+    }
+
+    private static class FailingAfterCloseFileIO extends LocalFileIO {
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws java.io.IOException {
+            return new PositionOutputStreamWrapper(super.newOutputStream(path, overwrite)) {
+                @Override
+                public void close() throws java.io.IOException {
+                    out.close();
+                    throw new IllegalStateException("Injected close failure.");
+                }
+            };
+        }
+    }
+
+    private static class FailingOpenFileIO extends LocalFileIO {
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws java.io.IOException {
+            try (PositionOutputStream output = super.newOutputStream(path, overwrite)) {
+                output.write(new byte[] {1});
+            }
+            throw new java.io.IOException("Injected open failure.");
+        }
+    }
+
+    private static class NoStatFileIO extends LocalFileIO {
+
+        @Override
+        public long getFileSize(Path path) {
+            throw new AssertionError("Known-size source must not be statted.");
         }
     }
 

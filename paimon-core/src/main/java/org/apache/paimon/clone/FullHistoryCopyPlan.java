@@ -89,7 +89,7 @@ public class FullHistoryCopyPlan implements Serializable {
                     !source.equals(target),
                     "Source and target file paths must be different: %s",
                     source);
-            Path previousSource = targetToSource.put(target.toString(), source);
+            Path previousSource = targetToSource.put(PathMapping.conflictKey(target), source);
             checkArgument(
                     previousSource == null || previousSource.equals(source),
                     "Found target path conflict: source paths %s and %s both map to %s",

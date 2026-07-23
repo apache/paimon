@@ -87,8 +87,9 @@ public class FullHistoryClonePlan implements Serializable {
         Path marker = new Path(root, FullHistoryCloneMarker.FILE_NAME);
         Path success = new Path(root, FullHistoryCloneMarker.SUCCESS_FILE_NAME);
         checkArgument(
-                !PathMapping.isSameOrDescendant(target.toString(), marker.toString())
-                        && !PathMapping.isSameOrDescendant(target.toString(), success.toString()),
+                !PathMapping.isSameOrDescendantForConflict(target.toString(), marker.toString())
+                        && !PathMapping.isSameOrDescendantForConflict(
+                                target.toString(), success.toString()),
                 "Payload target uses a reserved control namespace: %s",
                 target);
     }
