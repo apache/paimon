@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkDataEvolutionITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9092;
+    private static final int PORT = 9094;
 
     @BeforeAll
     public static void startMetastore() {
