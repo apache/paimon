@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.globalindex.GenericGlobalIndexBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -45,6 +46,11 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
     private static final String INDEX_TYPE = "lumina";
     private static final String LEGACY_INDEX_TYPE = "lumina-vector-ann";
+
+    @Override
+    protected Boolean sqlSyncMode() {
+        return true;
+    }
 
     @BeforeAll
     static void checkLuminaAvailable() {
@@ -539,6 +545,92 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
         List<String> newFileNames =
                 newEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
         assertThat(newFileNames).doesNotContainAnyElementsOf(oldFileNames);
+    }
+
+    @Test
+    public void testDataEvolutionUpdateRefreshesIndexAtomically() throws Exception {
+        sql(
+                "CREATE TABLE T_REFRESH (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+        String nullValues =
+                IntStream.range(0, 10)
+                        .mapToObj(i -> "(" + i + ", CAST(NULL AS ARRAY<FLOAT>))")
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_REFRESH VALUES " + nullValues + "," + vectorValues(10, 20, 3));
+
+        FileStoreTable table = paimonTable("T_REFRESH");
+        long firstDataSnapshotId = table.snapshotManager().latestSnapshot().id();
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_REFRESH', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + INDEX_TYPE
+                        + "')");
+
+        List<IndexManifestEntry> oldEntries = table.store().newIndexFileHandler().scan(INDEX_TYPE);
+        assertThat(oldEntries).isNotEmpty();
+        assertThat(oldEntries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(firstDataSnapshotId));
+        List<String> oldFileNames =
+                oldEntries.stream()
+                        .map(entry -> entry.indexFile().fileName())
+                        .collect(Collectors.toList());
+
+        sql("CREATE TABLE S_REFRESH (id INT, v ARRAY<FLOAT>)");
+        sql(
+                "INSERT INTO S_REFRESH VALUES "
+                        + "(1, ARRAY[CAST(0.0 AS FLOAT), CAST(1.0 AS FLOAT), "
+                        + "CAST(2.0 AS FLOAT)])");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_REFRESH', '', '', 'S_REFRESH', "
+                        + "'T_REFRESH._ROW_ID=S_REFRESH.id', 'v=S_REFRESH.v', 2)");
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE id = 1 AND v IS NOT NULL")).hasSize(1);
+
+        long updatedSnapshotId = table.snapshotManager().latestSnapshot().id();
+        assertThat(
+                        table.store().newIndexFileHandler().scan(INDEX_TYPE).stream()
+                                .map(entry -> entry.indexFile().fileName()))
+                .containsExactlyInAnyOrderElementsOf(oldFileNames);
+
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_REFRESH', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + INDEX_TYPE
+                        + "')");
+
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(updatedSnapshotId + 1);
+        List<IndexManifestEntry> refreshedEntries =
+                table.store().newIndexFileHandler().scan(INDEX_TYPE);
+        assertThat(refreshedEntries).isNotEmpty();
+        assertThat(
+                        refreshedEntries.stream()
+                                .map(entry -> entry.indexFile().fileName())
+                                .collect(Collectors.toList()))
+                .doesNotContainAnyElementsOf(oldFileNames);
+        assertThat(refreshedEntries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updatedSnapshotId));
     }
 
     // -- Helpers --

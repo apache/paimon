@@ -19,7 +19,10 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
@@ -33,6 +36,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link FullTextSearchProcedure}. */
 public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testDataEvolutionSourceMetaForGenericFullTextIndex() throws Exception {
+        sql(
+                "CREATE TABLE T_DE (id INT, content STRING) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        sql("INSERT INTO T_DE VALUES (1, 'apache paimon'), (2, 'lake format')");
+
+        FileStoreTable table = paimonTable("T_DE");
+        long scanSnapshotId = table.snapshotManager().latestSnapshot().id();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_DE', "
+                        + "index_column => 'content', "
+                        + "index_type => 'full-text')");
+
+        List<IndexManifestEntry> entries = table.store().newIndexFileHandler().scan("full-text");
+        assertThat(entries).isNotEmpty();
+        assertThat(entries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(scanSnapshotId));
+    }
 
     @Test
     public void testPrimaryKeyFullTextSearchWithScoreProjection() throws Exception {

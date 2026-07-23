@@ -912,7 +912,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange,
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -950,7 +951,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         new Range(0, documents.length - 1),
                         Collections.singletonList(textField),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        writer.finish());
+                        writer.finish(),
+                        null);
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
                                 1, new PrimaryKeyIndexSourceFile("data-file", documents.length))
@@ -1021,7 +1023,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange,
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

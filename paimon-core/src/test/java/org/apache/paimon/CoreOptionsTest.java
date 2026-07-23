@@ -108,6 +108,15 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testGlobalIndexIgnoreMissingDelete() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).globalIndexIgnoreMissingDelete()).isFalse();
+
+        conf.set(CoreOptions.GLOBAL_INDEX_IGNORE_MISSING_DELETE, true);
+        assertThat(new CoreOptions(conf).globalIndexIgnoreMissingDelete()).isTrue();
+    }
+
+    @Test
     public void testBlobSplitByFileSizeDefault() {
         Options conf = new Options();
         conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);
