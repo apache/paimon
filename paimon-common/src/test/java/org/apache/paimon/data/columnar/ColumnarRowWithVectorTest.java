@@ -48,6 +48,21 @@ public class ColumnarRowWithVectorTest {
     }
 
     @Test
+    public void testVectorReadAsArray() {
+        // VECTOR is exposed as ARRAY (e.g. Flink maps VECTOR -> ARRAY), so it is read via
+        // getArray; a vector is an array, so this must not throw a ClassCastException.
+        float[] values = new float[] {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+        VectorizedColumnBatch batch = makeColumnBatch(values, 2, null);
+
+        ColumnarRow row = new ColumnarRow(batch);
+        row.setRowId(0);
+        assertThat(row.getArray(0).toFloatArray()).isEqualTo(new float[] {1.0f, 2.0f, 3.0f});
+
+        row.setRowId(1);
+        assertThat(row.getArray(0).toFloatArray()).isEqualTo(new float[] {4.0f, 5.0f, 6.0f});
+    }
+
+    @Test
     public void testVectorNullable() {
         float[] values = new float[] {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
         boolean[] nulls = new boolean[] {true, false};
