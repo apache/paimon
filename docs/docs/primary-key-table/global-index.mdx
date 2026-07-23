@@ -338,8 +338,9 @@ on the driver.
 
 <TabItem value="flink-sql" label="Flink SQL">
 
-Flink exposes vector search as a procedure and returns JSON-serialized rows. Use `projection` to
-avoid reading columns which are not needed.
+Flink exposes vector search as a procedure and returns JSON-serialized rows ordered by score. Use
+`projection` to avoid reading columns which are not needed, and include
+`__paimon_search_score` when the similarity score is required.
 
 ```sql
 CALL sys.vector_search(
@@ -347,10 +348,34 @@ CALL sys.vector_search(
     vector_column => 'embedding',
     query_vector => '0.1,0.2,0.3',
     top_k => 10,
-    projection => 'id,status',
-    options => 'ivf.nprobe=32'
+    projection => 'id,status,__paimon_search_score',
+    options => 'ivf.nprobe=32',
+    `where` => 'status = ''active'''
 );
 ```
+
+The optional `where` predicate and `partitions` specs are applied before ANN search. An omitted or
+blank `partitions` value means no restriction. Otherwise, each semicolon-separated spec must be
+non-empty, include every partition key exactly once, and contain no duplicate keys. If `where` and
+`partitions` both contain partition conditions, their intersection is also used by the final row
+lookup.
+
+A `where` predicate on non-partition columns requires `deletion-vectors.enabled=true` and
+`deletion-vectors.merge-on-read=false`, because residual filtering must run against live rows before
+Top-K. A `first-row` table has deletion vectors disabled and therefore supports only partition
+predicates in `where`.
+
+The procedure resolves time travel once, normalizes `scan.mode` to `from-snapshot`, and pins both
+vector planning and final lookup to the resulting snapshot ID. A table with no snapshot returns an
+empty result. Setting
+`vector-search.distribute.enabled=true` as a table option or in `options` dispatches sufficiently
+large bucket groups to a bounded Flink job and merges their task-local candidates globally. Small
+bucket sets continue to use the local path. Distributed parallelism is capped by the Flink
+environment parallelism and `global-index.thread-num`.
+
+The Flink procedure currently rejects tables with `query-auth.enabled=true`. Authorization must
+participate in candidate Top-K planning; applying it only during final row lookup would produce an
+incorrect authorized Top-K.
 
 </TabItem>
 

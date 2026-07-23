@@ -318,7 +318,7 @@ SELECT * FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5)
 <TabItem value="flink-sql-procedure" label="Flink SQL (Procedure)">
 
 Unlike Spark's table-valued function, Flink uses a `CALL` procedure to perform vector search.
-The procedure returns JSON-serialized rows as strings.
+The procedure returns JSON-serialized rows as strings, ordered by score from highest to lowest.
 
 ```sql
 -- Search for top-5 nearest neighbors
@@ -335,9 +335,34 @@ CALL sys.vector_search(
     vector_column => 'embedding',
     query_vector => '1.0,2.0,3.0',
     top_k => 5,
-    projection => 'id,name'
+    projection => 'id,name,__paimon_search_score',
+    options => 'ivf.nprobe=32',
+    `where` => 'id > 100'
 );
 ```
+
+`where` is evaluated before Top-K. An omitted or blank `partitions` value means no partition
+restriction. A non-blank value accepts semicolon-separated complete partition specs; empty specs
+and duplicate keys within one spec are rejected. If both arguments contain partition conditions,
+their intersection is used for planning and final row lookup.
+
+The procedure resolves `scan.version`, snapshot, tag, watermark, or timestamp selection once,
+normalizes `scan.mode` to `from-snapshot`, and replaces the selector with the resulting immutable
+snapshot ID. Vector planning and row lookup therefore use the same snapshot; a table with no
+snapshot returns an empty result. Set
+`vector-search.distribute.enabled=true` as a table option or in the procedure's `options` argument
+to dispatch sufficiently large index-split or raw-row-range groups to a bounded Flink job. Small
+searches retain the local path. The distributed parallelism is capped by the Flink environment
+parallelism and `global-index.thread-num`.
+
+For a primary-key vector index, a `where` predicate on non-partition columns requires deletion
+vectors with merge-on-read disabled. A `first-row` table has deletion vectors disabled and can use
+only partition predicates. See [Primary-Key Global Index](../../primary-key-table/global-index).
+
+The Flink procedure currently rejects tables with `query-auth.enabled=true`. Applying authorization
+only while reading the final candidates could return fewer than `top_k` authorized rows, so the
+procedure fails before vector planning until authorization predicates can participate in candidate
+selection.
 
 </TabItem>
 
