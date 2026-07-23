@@ -35,7 +35,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +63,10 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
 
     private static ObjectMapper objMapper = new ObjectMapper();
 
-    String dateTimeRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}";
+    // now() generates a timestamp with millisecond precision. When the millisecond part is .000,
+    // LocalDateTime.toString() omits the fractional seconds entirely, so the decimal part is
+    // optional.
+    String dateTimeRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?";
 
     @Before
     public void setup() {
@@ -145,7 +147,6 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         }
     }
 
-    @Ignore // TODO unstable test
     @Test
     public void extractUpdateRecord() throws Exception {
         AliyunRecordParser parser =

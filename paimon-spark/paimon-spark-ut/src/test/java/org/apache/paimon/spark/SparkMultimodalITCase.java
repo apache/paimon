@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkMultimodalITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9092;
+    private static final int PORT = 9093;
 
     @BeforeAll
     public static void startMetastore() {
