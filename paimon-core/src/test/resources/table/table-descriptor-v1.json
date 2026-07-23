@@ -1,0 +1,34 @@
+{
+  "version" : 1,
+  "path" : "file:///tmp/warehouse/mydb.db/t",
+  "tableSchema" : {
+    "version" : 3,
+    "id" : 1,
+    "fields" : [ {
+      "id" : 0,
+      "name" : "id",
+      "type" : "INT NOT NULL"
+    }, {
+      "id" : 1,
+      "name" : "name",
+      "type" : "VARCHAR(100)"
+    }, {
+      "id" : 2,
+      "name" : "tags",
+      "type" : {
+        "type" : "ARRAY",
+        "element" : "INT"
+      }
+    } ],
+    "highestFieldId" : 2,
+    "partitionKeys" : [ ],
+    "primaryKeys" : [ "id" ],
+    "options" : {
+      "bucket" : "1"
+    },
+    "comment" : "canonical",
+    "timeMillis" : 1700000000000
+  },
+  "database" : "mydb",
+  "name" : "t"
+}
