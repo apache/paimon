@@ -311,9 +311,6 @@ class FileStoreCommit:
 
                 if not commit_entries and not index_deletes and not index_adds:
                     if outcome_unknown:
-                        if self._is_commit_persisted(
-                                commit_identifier, commit_kind):
-                            return
                         raise CommitOutcomeUnknownError(
                             "Atomic commit outcome is unknown."
                         ) from outcome_unknown_cause
@@ -376,9 +373,6 @@ class FileStoreCommit:
                         f"after {elapsed_ms} millis with {retry_count} retries, "
                         "there maybe exist commit conflicts between multiple jobs."
                     )
-                    if (outcome_unknown and self._is_commit_persisted(
-                            commit_identifier, commit_kind)):
-                        return
                     error_type = (
                         CommitOutcomeUnknownError
                         if outcome_unknown else RuntimeError
@@ -397,9 +391,6 @@ class FileStoreCommit:
                 raise
             except Exception as error:
                 if outcome_unknown:
-                    if self._is_commit_persisted(
-                            commit_identifier, commit_kind):
-                        return
                     raise CommitOutcomeUnknownError(str(error)) from (
                         outcome_unknown_cause or error
                     )
@@ -416,6 +407,10 @@ class FileStoreCommit:
                          index_adds=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
+            if retry_result is not None and retry_result.outcome_unknown:
+                raise CommitOutcomeUnknownError(
+                    "Atomic commit outcome is unknown."
+                ) from retry_result.exception
             return SuccessResult()
 
         unique_id = uuid.uuid4()
@@ -429,29 +424,32 @@ class FileStoreCommit:
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
         index_entries = (index_deletes or []) + (index_adds or [])
 
-        # Base entries for conflict detection. On retry, reuse the previous
-        # attempt's base + read only the incremental changes (mirrors Java).
+        # Reuse base entries and apply only new snapshot deltas.
         base_data_files = None
         if detect_conflicts and latest_snapshot is not None:
-            incremental = None
-            if (retry_result is not None
-                    and retry_result.latest_snapshot is not None
-                    and retry_result.base_data_files is not None):
-                incremental = self.commit_scanner.read_incremental_changes(
-                    retry_result.latest_snapshot,
-                    latest_snapshot,
-                    commit_entries,
-                    index_entries)
-            if incremental is not None:
-                base_data_files = list(retry_result.base_data_files)
-                if incremental:
-                    base_data_files.extend(incremental)
-                    base_data_files = FileEntry.merge_entries(base_data_files)
-            else:
-                # First attempt, or incremental could not be built (missing
-                # snapshot): scan the changed partitions in full.
-                base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
+            if self.conflict_detection.has_row_id_check_from_snapshot():
+                base_data_files = self.conflict_detection.read_row_id_base_entries(
                     latest_snapshot, commit_entries, index_entries)
+            else:
+                incremental = None
+                if (retry_result is not None
+                        and retry_result.latest_snapshot is not None
+                        and retry_result.base_data_files is not None):
+                    incremental = self.commit_scanner.read_incremental_changes(
+                        retry_result.latest_snapshot,
+                        latest_snapshot,
+                        commit_entries,
+                        index_entries)
+                if incremental is not None:
+                    base_data_files = list(retry_result.base_data_files)
+                    if incremental:
+                        base_data_files.extend(incremental)
+                        base_data_files = FileEntry.merge_entries(base_data_files)
+                else:
+                    base_data_files = (
+                        self.commit_scanner.read_all_entries_from_changed_partitions(
+                            latest_snapshot, commit_entries, index_entries)
+                    )
 
             conflict_exception = self.conflict_detection.check_conflicts(
                 latest_snapshot,
@@ -636,18 +634,6 @@ class FileStoreCommit:
                     )
                     return True
         return False
-
-    def _is_commit_persisted(self, commit_identifier, commit_kind) -> bool:
-        try:
-            snapshots = self.snapshot_manager.list_snapshots()
-            return any(
-                snapshot.commit_user == self.commit_user
-                and snapshot.commit_identifier == commit_identifier
-                and snapshot.commit_kind == commit_kind
-                for snapshot in snapshots
-            )
-        except Exception:
-            return False
 
     def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
         """Build a partition filter from the unique partitions present in commit_messages."""

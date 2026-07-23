@@ -152,7 +152,9 @@ def update_by_row_id(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return {"num_updated": 0}
     incremental_committer = (
-        _IncrementalUpdateCommitter(table, max_groups_per_commit)
+        _IncrementalUpdateCommitter(
+            table, max_groups_per_commit, base.id
+        )
         if max_groups_per_commit is not None else None
     )
     try:
@@ -183,15 +185,18 @@ def update_by_row_id(
 
 class _IncrementalUpdateCommitter:
 
-    def __init__(self, table, max_groups_per_commit: int):
+    def __init__(self, table, max_groups_per_commit: int,
+                 base_snapshot_id: Optional[int] = None):
         self._table = table
         self._max_groups_per_commit = max_groups_per_commit
+        self._base_snapshot_id = base_snapshot_id
         self._pending_messages: list = []
         self._pending_groups = 0
         self._table_commit = None
         self._next_commit_identifier = 1
         self._deferred_error = None
         self._uncertain_messages: list = []
+        self._last_committed_snapshot = None
 
     def add_group(self, commit_messages, _num_updated, _row_ids) -> None:
         self._pending_messages.extend(commit_messages)
@@ -203,6 +208,11 @@ class _IncrementalUpdateCommitter:
     def finish(self) -> None:
         if self._deferred_error is None:
             self._commit_pending()
+        if self._deferred_error is None:
+            try:
+                self._validate_committed_snapshot()
+            except Exception as error:
+                self._deferred_error = error
         if self._deferred_error is not None:
             raise self._deferred_error
 
@@ -226,6 +236,11 @@ class _IncrementalUpdateCommitter:
         group_count = self._pending_groups
         commit_identifier = self._next_commit_identifier
         try:
+            self._validate_committed_snapshot()
+        except Exception as error:
+            self._deferred_error = error
+            return
+        try:
             self._table_commit.commit(
                 self._pending_messages, commit_identifier
             )
@@ -242,9 +257,11 @@ class _IncrementalUpdateCommitter:
         self._pending_groups = 0
         self._next_commit_identifier += 1
         try:
+            self._record_committed_snapshot(commit_identifier)
             # Later windows are disjoint by _FIRST_ROW_ID.
             self._table_commit.ignore_row_id_conflict_for_commit(
                 commit_identifier)
+            self._validate_committed_snapshot()
         except Exception as error:
             self._uncertain_messages.extend(committed_messages)
             self._deferred_error = error
@@ -253,6 +270,47 @@ class _IncrementalUpdateCommitter:
             "Incrementally committed %d update_by_row_id file groups.",
             group_count,
         )
+
+    def _record_committed_snapshot(self, commit_identifier: int) -> None:
+        if self._base_snapshot_id is None:
+            return
+
+        self._validate_committed_snapshot()
+        snapshot_manager = self._table.snapshot_manager()
+        latest = snapshot_manager.get_latest_snapshot()
+        start_id = (
+            self._last_committed_snapshot.id + 1
+            if self._last_committed_snapshot is not None
+            else self._base_snapshot_id + 1
+        )
+        if latest is not None:
+            for snapshot_id in range(latest.id, start_id - 1, -1):
+                snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if (snapshot is not None
+                        and snapshot.commit_user == self._table_commit.commit_user
+                        and snapshot.commit_identifier == commit_identifier
+                        and snapshot.commit_kind == "APPEND"):
+                    self._last_committed_snapshot = snapshot
+                    return
+        raise RuntimeError(
+            "Incremental update_by_row_id snapshot is no longer in the "
+            "current lineage."
+        )
+
+    def _validate_committed_snapshot(self) -> None:
+        committed = self._last_committed_snapshot
+        if committed is None:
+            return
+
+        snapshot_manager = self._table.snapshot_manager()
+        latest = snapshot_manager.get_latest_snapshot()
+        current = snapshot_manager.get_snapshot_by_id(committed.id)
+        if (latest is None or latest.id < committed.id
+                or current != committed):
+            raise RuntimeError(
+                "Incremental update_by_row_id snapshot is no longer in the "
+                "current lineage."
+            )
 
     def abort_pending(self) -> None:
         if not self._pending_messages:

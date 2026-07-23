@@ -522,14 +522,27 @@ def _require_ray_join() -> None:
 
 def _reraise_inner(err: BaseException) -> None:
     """Unwrap Ray's RayTaskError so callers see the worker-side exception."""
+    try:
+        from ray.exceptions import RayTaskError
+    except ImportError:
+        raise err
+
+    if not isinstance(err, RayTaskError):
+        raise err
+
     inner = err
-    cause = getattr(err, "cause", None) or getattr(err, "__cause__", None)
-    while cause is not None:
+    seen = {id(err)}
+    cause = getattr(err, "cause", None)
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
         inner = cause
-        cause = getattr(inner, "cause", None) or getattr(inner, "__cause__", None)
+        cause = (
+            getattr(inner, "cause", None)
+            if isinstance(inner, RayTaskError) else None
+        )
     if inner is err:
         raise err
-    raise inner from err
+    raise inner from None
 
 
 def _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids) -> None:

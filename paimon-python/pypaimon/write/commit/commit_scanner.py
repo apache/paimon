@@ -150,6 +150,19 @@ class CommitScanner:
                     snapshot, commit_entries, partition_filter))
         return entries
 
+    def changed_partition_signature(self, entries, index_entries=None):
+        """Return the changed partitions used by conflict scans."""
+        if not self.table.partition_keys:
+            return None
+
+        changed_partitions = set()
+        for entry in entries or []:
+            changed_partitions.add(tuple(entry.partition.values))
+        for entry in index_entries or []:
+            if self._index_entry_changes_partition(entry):
+                changed_partitions.add(tuple(entry.partition.values))
+        return frozenset(changed_partitions) or None
+
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
         return self._build_partition_filter_from_changes(entries)
 
@@ -169,12 +182,8 @@ class CommitScanner:
         if not partition_keys:
             return None
 
-        changed_partitions = set()
-        for entry in entries or []:
-            changed_partitions.add(tuple(entry.partition.values))
-        for entry in index_entries or []:
-            if self._index_entry_changes_partition(entry):
-                changed_partitions.add(tuple(entry.partition.values))
+        changed_partitions = self.changed_partition_signature(
+            entries, index_entries)
 
         if not changed_partitions:
             return None

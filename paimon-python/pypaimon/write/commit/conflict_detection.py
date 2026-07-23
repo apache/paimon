@@ -164,6 +164,7 @@ class ConflictDetection:
         self._row_id_history_cursor = None
         self._row_id_history_cursor_identity = None
         self._row_id_external_snapshots = []
+        self._row_id_base_entries_cache = {}
         self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
@@ -190,10 +191,50 @@ class ConflictDetection:
         self._row_id_history_cursor = None
         self._row_id_history_cursor_identity = None
         self._row_id_external_snapshots = []
+        self._row_id_base_entries_cache = {}
 
     def ignore_row_id_commit(self, commit_user, commit_identifier):
         """Skip a disjoint commit in later checks."""
         self._row_id_ignored_commits.add((commit_user, commit_identifier))
+
+    def read_row_id_base_entries(self, latest_snapshot, commit_entries,
+                                 index_entries=None):
+        """Read or advance cached base entries for row-id checks."""
+        signature = self.commit_scanner.changed_partition_signature(
+            commit_entries, index_entries)
+        key = (self._row_id_check_from_snapshot, signature)
+        cached = self._row_id_base_entries_cache.get(key)
+        incremental = None
+
+        if cached is not None:
+            cursor, cursor_identity, base_entries = cached
+            if latest_snapshot.id >= cursor.id:
+                current_cursor = (
+                    latest_snapshot
+                    if latest_snapshot.id == cursor.id
+                    else self.snapshot_manager.get_snapshot_by_id(cursor.id)
+                )
+                if self._snapshot_identity(current_cursor) == cursor_identity:
+                    incremental = self.commit_scanner.read_incremental_changes(
+                        cursor, latest_snapshot, commit_entries, index_entries)
+
+        if incremental is None:
+            base_entries = (
+                self.commit_scanner.read_all_entries_from_changed_partitions(
+                    latest_snapshot, commit_entries, index_entries)
+            )
+        else:
+            base_entries = list(base_entries)
+            if incremental:
+                base_entries.extend(incremental)
+                base_entries = FileEntry.merge_entries(base_entries)
+
+        self._row_id_base_entries_cache[key] = (
+            latest_snapshot,
+            self._snapshot_identity(latest_snapshot),
+            list(base_entries),
+        )
+        return base_entries
 
     def _row_id_history_snapshots(self, latest_snapshot):
         """Cache history except disjoint commits."""

@@ -354,10 +354,91 @@ class _FakeCommitScanner:
         return self._raw_by_id.get(snapshot.id, self._by_id.get(snapshot.id, []))
 
 
+class _FakeBaseEntryScanner:
+
+    def __init__(self, full_entries, incremental_entries, signature=None):
+        self._full_entries = full_entries
+        self._incremental_entries = incremental_entries
+        self._signature = signature
+        self.full_calls = []
+        self.incremental_calls = []
+
+    def changed_partition_signature(self, _entries, _index_entries=None):
+        return self._signature
+
+    def read_all_entries_from_changed_partitions(
+            self, snapshot, _entries, _index_entries=None):
+        self.full_calls.append(snapshot.delta_manifest_list)
+        return list(self._full_entries[snapshot.delta_manifest_list])
+
+    def read_incremental_changes(
+            self, from_snapshot, to_snapshot, _entries, _index_entries=None):
+        self.incremental_calls.append((from_snapshot.id, to_snapshot.id))
+        result = []
+        for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
+            result.extend(self._incremental_entries.get(snapshot_id, []))
+        return result
+
+
 class _FakeTable:
 
     def __init__(self, schema_manager):
         self.schema_manager = schema_manager
+
+
+class TestRowIdBaseEntriesCache(unittest.TestCase):
+
+    def _make_detection(self, snapshots, scanner):
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=_FakeSnapshotManager(snapshots),
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=scanner,
+        )
+        detection.set_row_id_check_from_snapshot(1)
+        return detection
+
+    def test_advances_base_entries_with_snapshot_deltas(self):
+        base = _FakeSnapshot(1, "APPEND", delta_manifest_list="base")
+        latest = _FakeSnapshot(2, "APPEND", delta_manifest_list="latest")
+        base_entry = _make_entry("base.parquet")
+        added_entry = _make_entry("added.parquet")
+        scanner = _FakeBaseEntryScanner(
+            {"base": [base_entry]}, {2: [added_entry]})
+        detection = self._make_detection([base, latest], scanner)
+
+        self.assertEqual(
+            [base_entry], detection.read_row_id_base_entries(base, []))
+        self.assertEqual(
+            [base_entry, added_entry],
+            detection.read_row_id_base_entries(latest, []),
+        )
+
+        self.assertEqual(["base"], scanner.full_calls)
+        self.assertEqual([(1, 2)], scanner.incremental_calls)
+
+    def test_reused_cursor_id_rebuilds_base_entries(self):
+        original = _FakeSnapshot(2, "APPEND", delta_manifest_list="original")
+        replacement = _FakeSnapshot(
+            2, "APPEND", delta_manifest_list="replacement")
+        original_entry = _make_entry("original.parquet")
+        replacement_entry = _make_entry("replacement.parquet")
+        scanner = _FakeBaseEntryScanner({
+            "original": [original_entry],
+            "replacement": [replacement_entry],
+        }, {})
+        detection = self._make_detection([original], scanner)
+
+        self.assertEqual(
+            [original_entry], detection.read_row_id_base_entries(original, []))
+        self.assertEqual(
+            [replacement_entry],
+            detection.read_row_id_base_entries(replacement, []),
+        )
+
+        self.assertEqual(["original", "replacement"], scanner.full_calls)
+        self.assertEqual([], scanner.incremental_calls)
 
 
 class TestCheckRowIdFromSnapshot(unittest.TestCase):

@@ -132,6 +132,8 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
 
     def test_incrementally_commits_file_group_windows(self):
+        from pypaimon.write.commit.commit_scanner import CommitScanner
+
         target = self._create()
         chunks = [
             [group_start, group_start + 1]
@@ -160,6 +162,19 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         first_window_committed = threading.Event()
         resume_iteration = threading.Event()
         observed = {}
+        scan_counts = {"full": 0, "incremental": 0}
+        original_full_scan = (
+            CommitScanner.read_all_entries_from_changed_partitions
+        )
+        original_incremental_scan = CommitScanner.read_incremental_changes
+
+        def counting_full_scan(scanner, *args, **kwargs):
+            scan_counts["full"] += 1
+            return original_full_scan(scanner, *args, **kwargs)
+
+        def counting_incremental_scan(scanner, *args, **kwargs):
+            scan_counts["incremental"] += 1
+            return original_incremental_scan(scanner, *args, **kwargs)
 
         def pausing_iter_batches(dataset, *args, **kwargs):
             iter_batch_options.append((
@@ -189,14 +204,23 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         try:
             with mock.patch.object(
                     ray.data.Dataset, "iter_batches", pausing_iter_batches):
-                stats = update_by_row_id(
-                    target,
-                    ray.data.from_arrow(src).repartition(8),
-                    self.catalog_options,
-                    update_cols=["age"],
-                    num_partitions=4,
-                    max_groups_per_commit=3,
-                )
+                with mock.patch.object(
+                    CommitScanner,
+                    "read_all_entries_from_changed_partitions",
+                    counting_full_scan,
+                ), mock.patch.object(
+                    CommitScanner,
+                    "read_incremental_changes",
+                    counting_incremental_scan,
+                ):
+                    stats = update_by_row_id(
+                        target,
+                        ray.data.from_arrow(src).repartition(8),
+                        self.catalog_options,
+                        update_cols=["age"],
+                        num_partitions=4,
+                        max_groups_per_commit=3,
+                    )
         finally:
             resume_iteration.set()
             observer.join(30)
@@ -205,6 +229,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual([(1, 0)], iter_batch_options)
         self.assertNotIn("error", observed)
         self.assertEqual(base_snapshot_id + 1, observed["snapshot_id"])
+        self.assertEqual({"full": 1, "incremental": 2}, scan_counts)
         latest = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(base_snapshot_id + 3, latest.id)
         incremental_snapshots = [
@@ -416,7 +441,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with mock.patch.object(
                 StreamTableCommit, "commit", commit_then_rebuild_history):
             with self.assertRaisesRegex(
-                    RuntimeError, "updating the same file"):
+                    RuntimeError, "no longer in the current lineage"):
                 update_by_row_id(
                     target,
                     ray.data.from_arrow(source).repartition(3),
@@ -426,9 +451,84 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                     max_groups_per_commit=1,
                 )
 
-        self.assertEqual([1, 2, 3], commit_calls)
+        self.assertEqual([1, 2], commit_calls)
         self.assertEqual(
             [999, 999, 999],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_incremental_commit_fails_after_external_rollback(self):
+        target = self._create()
+        for row_id in range(1, 3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        source = pa.table(
+            {
+                "_ROW_ID": [row_ids[1], row_ids[2]],
+                "age": [100, 200],
+            },
+            schema=pa.schema([
+                ("_ROW_ID", pa.int64()),
+                ("age", pa.int32()),
+            ]),
+        )
+
+        original_iter_batches = ray.data.Dataset.iter_batches
+        first_window_committed = threading.Event()
+        resume_iteration = threading.Event()
+        rollback_error = []
+
+        def pausing_iter_batches(dataset, *args, **kwargs):
+            for batch_number, batch in enumerate(
+                    original_iter_batches(dataset, *args, **kwargs), 1):
+                yield batch
+                if batch_number == 1:
+                    first_window_committed.set()
+                    if not resume_iteration.wait(30):
+                        raise TimeoutError("timed out waiting for rollback")
+
+        def rollback_first_window():
+            try:
+                if not first_window_committed.wait(30):
+                    raise TimeoutError("first commit was not observed")
+                table.rollback_to(base_snapshot_id)
+            except Exception as error:
+                rollback_error.append(error)
+            finally:
+                resume_iteration.set()
+
+        rollback_thread = threading.Thread(target=rollback_first_window)
+        rollback_thread.start()
+        try:
+            with mock.patch.object(
+                    ray.data.Dataset, "iter_batches", pausing_iter_batches):
+                with self.assertRaisesRegex(
+                        RuntimeError, "no longer in the current lineage"):
+                    update_by_row_id(
+                        target,
+                        ray.data.from_arrow(source).repartition(2),
+                        self.catalog_options,
+                        update_cols=["age"],
+                        num_partitions=2,
+                        max_groups_per_commit=1,
+                    )
+        finally:
+            resume_iteration.set()
+            rollback_thread.join(30)
+
+        self.assertEqual([], rollback_error)
+        self.assertFalse(rollback_thread.is_alive())
+        self.assertEqual(
+            base_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [0, 0],
             self._read(target).sort_by("id")["age"].to_pylist(),
         )
 
@@ -750,28 +850,35 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(recorder["abort_calls"], 0)
         self.assertEqual(recorder["close_calls"], 1)
 
-    def test_chained_commit_failure_is_unwrapped_once(self):
-        import importlib
+    def test_driver_commit_failure_is_not_unwrapped(self):
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
 
-        m = importlib.import_module("pypaimon.ray.update_by_row_id")
         retry_error = ValueError("retry failed")
-        try:
-            raise RuntimeError("commit failed") from retry_error
-        except RuntimeError as commit_error:
-            chained_error = commit_error
+        for error_type in (RuntimeError, CommitOutcomeUnknownError):
+            try:
+                raise error_type("commit failed") from retry_error
+            except error_type as commit_error:
+                chained_error = commit_error
 
-        reraise_calls = []
-
-        def reraise_once(error):
-            reraise_calls.append(error)
-            raise ValueError("retry failed") from None
-
-        with mock.patch.object(m, "_reraise_inner", side_effect=reraise_once):
-            with self.assertRaisesRegex(ValueError, "retry failed"):
+            with self.assertRaises(error_type) as raised:
                 self._run_with_fake_commit(commit_error=chained_error)
 
-        self.assertEqual(1, len(reraise_calls))
-        self.assertIs(chained_error, reraise_calls[0])
+            self.assertIs(chained_error, raised.exception)
+            self.assertIs(retry_error, raised.exception.__cause__)
+
+    def test_ray_task_error_is_unwrapped(self):
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.ray.data_evolution_merge_into import _reraise_inner
+
+        worker_error = ValueError("worker failed")
+        ray_error = RayTaskError("worker", "trace", worker_error)
+
+        with self.assertRaises(ValueError) as raised:
+            _reraise_inner(ray_error)
+
+        self.assertIs(worker_error, raised.exception)
+        self.assertIsNone(raised.exception.__cause__)
 
     def test_close_failure_after_success_warns_and_returns_stats(self):
         close_error = RuntimeError("close failed")

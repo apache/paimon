@@ -33,6 +33,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
+from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
 
 
 class TestRESTCatalogCommitSnapshot(unittest.TestCase):
@@ -352,7 +353,7 @@ class TestRESTCommit(RESTBaseTest):
             raise RuntimeError("simulated")
 
         with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(CommitOutcomeUnknownError):
                 tc.commit(cm)
         tw.close()
         tc.close()
