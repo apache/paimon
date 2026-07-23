@@ -176,10 +176,12 @@ public class SchemaManagerTest {
 
         assertThatThrownBy(
                         () ->
-                                manager.commitChanges(
-                                        SchemaChange.setOption(
-                                                "fields.metrics.map.storage-layout",
-                                                "shared-shredding")))
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                "fields.metrics.map.storage-layout",
+                                                                "shared-shredding"))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(
                         "Cannot change map storage layout for field id 1 ('metrics' -> 'metrics') from 'default' to 'shared-shredding'.");
@@ -191,13 +193,16 @@ public class SchemaManagerTest {
 
         assertThatThrownBy(
                         () ->
-                                manager.commitChanges(
-                                        Arrays.asList(
-                                                SchemaChange.renameColumn(
-                                                        "metrics", "renamed_metrics"),
-                                                SchemaChange.setOption(
-                                                        "fields.renamed_metrics.map.storage-layout",
-                                                        "shared-shredding"))))
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.renameColumn(
+                                                                        "metrics",
+                                                                        "renamed_metrics"),
+                                                                SchemaChange.setOption(
+                                                                        "fields.renamed_metrics.map.storage-layout",
+                                                                        "shared-shredding")))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(
                         "Cannot change map storage layout for field id 1 ('metrics' -> 'renamed_metrics') from 'default' to 'shared-shredding'.");
