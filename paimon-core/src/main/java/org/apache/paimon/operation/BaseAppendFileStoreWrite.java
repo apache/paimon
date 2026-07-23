@@ -160,7 +160,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.targetFileSize(false),
                 options.blobTargetFileSize(),
                 options.vectorTargetFileSize(),
-                options.targetFileNumRows(),
+                options.targetRowNumPerFile(),
                 writeType,
                 writeCols,
                 restoredMaxSeqNumber,
@@ -313,7 +313,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 rowType.equals(writeType) ? null : writeType.getFieldNames(),
-                rowSidecarFileFormat());
+                rowSidecarFileFormat(),
+                Long.MAX_VALUE);
     }
 
     @Nullable

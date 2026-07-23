@@ -181,7 +181,7 @@ public class KeyValueFileReadWriteTest {
     @Test
     public void testMergeTreeCompactionIgnoresRowLimit() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.TARGET_FILE_NUM_ROWS, 2L);
+        options.set(CoreOptions.TARGET_ROW_NUM_PER_FILE, 2L);
         KeyValueFileWriterFactory writerFactory =
                 createWriterFactory(tempDir.toString(), "avro", options);
         List<KeyValue> content = gen.next().content;

@@ -41,7 +41,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final long targetFileNumRows;
+    private final long targetRowNumPerFile;
     private final List<FileWriterAbortExecutor> closedWriters;
     protected final List<R> results;
 
@@ -51,21 +51,16 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     private boolean closed = false;
 
     public RollingFileWriterImpl(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
-        this(writerFactory, targetFileSize, Long.MAX_VALUE);
-    }
-
-    public RollingFileWriterImpl(
             Supplier<? extends SingleFileWriter<T, R>> writerFactory,
             long targetFileSize,
-            long targetFileNumRows) {
+            long targetRowNumPerFile) {
         Preconditions.checkArgument(
-                targetFileNumRows > 0,
-                "targetFileNumRows must be positive, but is %s",
-                targetFileNumRows);
+                targetRowNumPerFile > 0,
+                "targetRowNumPerFile must be positive, but is %s",
+                targetRowNumPerFile);
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
-        this.targetFileNumRows = targetFileNumRows;
+        this.targetRowNumPerFile = targetRowNumPerFile;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
     }
@@ -76,7 +71,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentFileRecordCount >= targetFileNumRows
+        return currentFileRecordCount >= targetRowNumPerFile
                 || currentWriter.reachTargetSize(
                         forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }

@@ -138,7 +138,9 @@ public class MultipleBlobFileWriter implements Closeable {
                 Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> writerFactory,
                 long targetFileSize,
                 int[] projection) {
-            super(new RollingFileWriterImpl<>(writerFactory, targetFileSize), projection);
+            super(
+                    new RollingFileWriterImpl<>(writerFactory, targetFileSize, Long.MAX_VALUE),
+                    projection);
         }
     }
 }

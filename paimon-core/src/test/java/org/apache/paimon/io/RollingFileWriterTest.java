@@ -79,7 +79,7 @@ public class RollingFileWriterTest {
             String identifier,
             boolean statsDenseStore,
             long targetFileSize,
-            long targetFileNumRows) {
+            long targetRowNumPerFile) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriterImpl<>(
@@ -115,7 +115,7 @@ public class RollingFileWriterTest {
                                         false,
                                         null),
                         targetFileSize,
-                        targetFileNumRows);
+                        targetRowNumPerFile);
     }
 
     @ParameterizedTest
@@ -206,7 +206,8 @@ public class RollingFileWriterTest {
                         true,
                         false,
                         null,
-                        rowFormat);
+                        rowFormat,
+                        Long.MAX_VALUE);
 
         writer.write(GenericRow.of(1));
         writer.close();
@@ -256,7 +257,8 @@ public class RollingFileWriterTest {
                         true,
                         false,
                         null,
-                        rowFormat);
+                        rowFormat,
+                        Long.MAX_VALUE);
 
         writer.writeBundle(
                 new SingleUseBundleRecords(Arrays.asList(GenericRow.of(1), GenericRow.of(2))));

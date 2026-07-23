@@ -1682,16 +1682,16 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
-            <td><h5>target-file-num-rows</h5></td>
-            <td style="word-wrap: break-word;">9223372036854775807</td>
-            <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. Disabled by default.</td>
-        </tr>
-        <tr>
             <td><h5>target-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>target-row-num-per-file</h5></td>
+            <td style="word-wrap: break-word;">9223372036854775807</td>
+            <td>Long</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>type</h5></td>

@@ -172,7 +172,9 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             Iterator<IcebergManifestEntry> entries, long sequenceNumber, Content content) {
         RollingFileWriterImpl<IcebergManifestEntry, IcebergManifestFileMeta> writer =
                 new RollingFileWriterImpl<>(
-                        () -> createWriter(sequenceNumber, content), targetFileSize.getBytes());
+                        () -> createWriter(sequenceNumber, content),
+                        targetFileSize.getBytes(),
+                        Long.MAX_VALUE);
         try {
             writer.write(entries);
             writer.close();

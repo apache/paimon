@@ -103,6 +103,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -221,6 +222,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -286,6 +288,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize, // Different blob target size
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         new DataFilePathFactory(
                                 new Path(tempDir + "/blob-size-test"),
@@ -357,6 +360,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         new DataFilePathFactory(
                                 new Path(tempDir + "/bundle-blob-size-test"),
@@ -430,6 +434,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -510,6 +515,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -731,6 +737,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         customSchema, // Use custom schema
                         pathFactory,
                         () -> seqNumCounter,

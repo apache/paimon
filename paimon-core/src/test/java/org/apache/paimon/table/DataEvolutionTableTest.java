@@ -1133,7 +1133,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                 getTableDefault()
                         .copy(
                                 Collections.singletonMap(
-                                        CoreOptions.TARGET_FILE_NUM_ROWS.key(), "100"));
+                                        CoreOptions.TARGET_ROW_NUM_PER_FILE.key(), "100"));
         int count = 350;
         RowType wt0 = table.schema().logicalRowType().project(Arrays.asList("f0", "f1"));
         BatchWriteBuilder b0 = table.newBatchWriteBuilder();
@@ -1191,7 +1191,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                 getTableDefault()
                         .copy(
                                 Collections.singletonMap(
-                                        CoreOptions.TARGET_FILE_NUM_ROWS.key(), "100"));
+                                        CoreOptions.TARGET_ROW_NUM_PER_FILE.key(), "100"));
         RowType writeType = table.schema().logicalRowType().project(Arrays.asList("f0", "f1"));
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
