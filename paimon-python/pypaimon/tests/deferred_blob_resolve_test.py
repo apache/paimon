@@ -15,14 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.query_auth_split import QueryAuthSplit
 
 
 _ROW_COUNT = 10
@@ -46,6 +50,55 @@ class _BlobCountingFileIO:
         return getattr(self._inner, name)
 
 
+class _RejectScoreOneAuthResult:
+    column_masking = None
+    filter = [json.dumps({
+        "kind": "LEAF",
+        "transform": {
+            "name": "FIELD_REF",
+            "fieldRef": {"index": 2, "name": "score", "type": "INT"},
+        },
+        "function": "NOT_EQUAL",
+        "literals": [1],
+    })]
+
+    @staticmethod
+    def get_extra_fields_for_filter(read_fields, table_fields):
+        return []
+
+    @staticmethod
+    def extract_row_filter():
+        return lambda batch: pc.not_equal(batch.column("score"), 1)
+
+
+class _PayloadAuthResult:
+    column_masking = None
+
+    def __init__(self, expected_payload):
+        self._expected_payload = expected_payload
+        self.filter = [json.dumps({
+            "kind": "LEAF",
+            "transform": {
+                "name": "FIELD_REF",
+                "fieldRef": {
+                    "index": 1,
+                    "name": "payload",
+                    "type": "BYTES",
+                },
+            },
+            "function": "EQUAL",
+            "literals": [],
+        })]
+
+    @staticmethod
+    def get_extra_fields_for_filter(read_fields, table_fields):
+        return []
+
+    def extract_row_filter(self):
+        return lambda batch: pc.equal(
+            batch.column("payload"), self._expected_payload)
+
+
 class DeferredBlobResolveTest(unittest.TestCase):
 
     @classmethod
@@ -66,7 +119,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def _create_table(self, name, extra_options=None, payloads=None,
-                      partition_keys=None):
+                      partition_keys=None, sample_ids=None):
         options = dict(_TABLE_OPTIONS)
         options.update(extra_options or {})
         identifier = "default.%s" % name
@@ -83,8 +136,12 @@ class DeferredBlobResolveTest(unittest.TestCase):
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
         commit = write_builder.new_commit()
+        if sample_ids is None:
+            sample_ids = [
+                "sample_%d" % index for index in range(_ROW_COUNT)
+            ]
         writer.write_arrow(pa.table({
-            "sample_id": ["sample_%d" % index for index in range(_ROW_COUNT)],
+            "sample_id": sample_ids,
             "payload": (
                 payloads if payloads is not None else
                 [bytes([index]) * 1024 for index in range(_ROW_COUNT)]
@@ -159,11 +216,110 @@ class DeferredBlobResolveTest(unittest.TestCase):
         splits = table.new_read_builder().new_scan().plan().splits()
         read_builder = table.new_read_builder().with_limit(1)
 
-        result = read_builder.new_read().to_arrow(splits)
+        table_read = read_builder.new_read()
+        with patch.object(
+                table_read,
+                "_to_arrow_parallel",
+                side_effect=AssertionError("deferred LIMIT must run serially"),
+        ) as parallel_read:
+            result = table_read.to_arrow(splits, parallelism=4)
 
         self.assertGreater(len(splits), 1)
+        parallel_read.assert_not_called()
         self.assertEqual(1, result.num_rows)
         self.assertEqual(1, counting_file_io.blobs_fetched)
+
+    def test_limit_covering_all_rows_preserves_parallelism(self):
+        table = self._create_table(
+            "defer_limit_all_rows",
+            extra_options={"source.split.target-size": "1b"},
+            partition_keys=["sample_id"],
+        )
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        read_builder = table.new_read_builder().with_limit(_ROW_COUNT)
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+
+        with patch.object(
+                table_read,
+                "_to_arrow_parallel",
+                wraps=table_read._to_arrow_parallel,
+        ) as parallel_read:
+            result = table_read.to_arrow(splits, parallelism=4)
+
+        self.assertGreater(len(splits), 1)
+        parallel_read.assert_called_once()
+        self.assertEqual(_ROW_COUNT, result.num_rows)
+        self.assertEqual(_ROW_COUNT, counting_file_io.blobs_fetched)
+
+    def test_iterator_passes_remaining_limit_across_splits(self):
+        table = self._create_table(
+            "defer_iterator_limit_splits",
+            extra_options={"source.split.target-size": "1b"},
+            partition_keys=["sample_id"],
+            sample_ids=["a"] + ["b"] * (_ROW_COUNT - 1),
+        )
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload", "score"]
+        ).with_limit(2)
+        splits = read_builder.new_scan().plan().splits()
+
+        rows = list(read_builder.new_read().to_iterator(splits))
+
+        self.assertEqual(2, len(splits))
+        self.assertEqual(2, len(rows))
+        self.assertEqual(2, counting_file_io.blobs_fetched)
+
+    def test_iterator_applies_limit_after_auth_filter(self):
+        table = self._create_table(
+            "defer_iterator_auth_limit_splits",
+            extra_options={"source.split.target-size": "1b"},
+            partition_keys=["sample_id"],
+            sample_ids=["a"] + ["b"] * (_ROW_COUNT - 1),
+        )
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload", "score"]
+        ).with_limit(2)
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        auth_result = _RejectScoreOneAuthResult()
+        splits = [
+            QueryAuthSplit(split, auth_result)
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        scores = [
+            row.get_field(2)
+            for row in read_builder.new_read().to_iterator(splits)
+        ]
+
+        self.assertEqual([0, 2], scores)
+        self.assertEqual(2, counting_file_io.blobs_fetched)
+
+    def test_auth_blob_filter_keeps_eager_resolution(self):
+        table = self._create_table("defer_auth_blob_filter")
+        expected_payload = bytes([3]) * 1024
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload", "score"]
+        ).with_limit(1)
+        auth_result = _PayloadAuthResult(expected_payload)
+        splits = [
+            QueryAuthSplit(split, auth_result)
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        result = pa.Table.from_batches(
+            read_builder.new_read().to_arrow_batch_reader(
+                splits, blob_parallelism=4)
+        )
+
+        self.assertEqual([expected_payload], result.column("payload").to_pylist())
+        self.assertEqual(_ROW_COUNT, counting_file_io.blobs_fetched)
 
     def test_preserves_null_payloads_after_filtering(self):
         payloads = [

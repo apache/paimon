@@ -42,6 +42,7 @@ from pypaimon.read.reader.concat_batch_reader import (
     MergeAllBatchReader, DataEvolutionMergeReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
+from pypaimon.read.reader.auth_masking_reader import AuthFilterReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
 from pypaimon.read.reader.deferred_blob_resolve_reader import \
     DeferredBlobResolveReader
@@ -1028,7 +1029,9 @@ class DataEvolutionSplitRead(SplitRead):
             nested_name_paths: Optional[List[List[str]]] = None,
             limit: Optional[int] = None,
             outer_extract_name_paths: Optional[List[List[str]]] = None,
-            outer_flat_read_type: Optional[List[DataField]] = None):
+            outer_flat_read_type: Optional[List[DataField]] = None,
+            post_merge_filter=None,
+            eager_blob_fields=None):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1041,6 +1044,8 @@ class DataEvolutionSplitRead(SplitRead):
         )
         self.outer_extract_name_paths = outer_extract_name_paths
         self.outer_flat_read_type = outer_flat_read_type
+        self._post_merge_filter = post_merge_filter
+        self._eager_blob_fields = set(eager_blob_fields or [])
         self._deferred_blob_fields = self._deferred_blob_field_names()
 
     def _push_down_predicate(self) -> Optional[Predicate]:
@@ -1081,7 +1086,7 @@ class DataEvolutionSplitRead(SplitRead):
             self.read_fields,
             self.predicate_for_reader,
             self.limit,
-        )
+        ) - self._eager_blob_fields
 
     def _create_raw_reader(self) -> RecordReader:
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
@@ -1118,6 +1123,9 @@ class DataEvolutionSplitRead(SplitRead):
             )
         else:
             reader = merge_reader
+
+        if self._post_merge_filter is not None:
+            reader = AuthFilterReader(reader, self._post_merge_filter)
 
         if self.outer_extract_name_paths:
             if self.outer_flat_read_type is None:

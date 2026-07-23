@@ -101,6 +101,11 @@ class _BaseTorchIterDataset(IterableDataset):
         return row_dict
 
     def _worker_splits(self, worker_info) -> List[Split]:
+        if self.table_read.limit is not None:
+            if worker_info is None or worker_info.id == 0:
+                return self.splits
+            return []
+
         if worker_info is None:
             return self.splits
 
@@ -164,7 +169,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
         worker_info = torch.utils.data.get_worker_info()
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.prefetch_concurrency > 1:
+        if self.prefetch_concurrency > 1 and self.table_read.limit is None:
             for row in self._iter_rows(splits_to_process):
                 yield row
             return
@@ -288,7 +293,8 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         worker_id = worker_info.id if worker_info is not None else 0
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.max_buffer_input_splits == 1:
+        if (self.table_read.limit is not None
+                or self.max_buffer_input_splits == 1):
             rows = self._iter_ordered_rows(splits_to_process)
         else:
             rows = self._iter_interleaved_rows(splits_to_process)

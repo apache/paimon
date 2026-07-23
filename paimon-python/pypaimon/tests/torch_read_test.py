@@ -29,6 +29,20 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.table.file_store_table import FileStoreTable
 
 
+class _BlobCountingFileIO:
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.blobs_fetched = 0
+
+    def read_blobs_concurrent(self, blobs, parallelism):
+        self.blobs_fetched += sum(blob is not None for blob in blobs)
+        return self._inner.read_blobs_concurrent(blobs, parallelism)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 class TorchReadTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -142,6 +156,77 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(len(all_user_ids), 8, "Should read 8 rows with prefetch_concurrency")
         self.assertEqual(sorted_user_ids, expected_user_ids)
         self.assertEqual(sorted_behaviors, expected_behaviors)
+
+    def test_torch_streaming_limit_is_global_across_workers(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id'])
+        self.catalog.create_table(
+            'default.test_torch_streaming_global_limit', schema, False)
+        table = self.catalog.get_table(
+            'default.test_torch_streaming_global_limit')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder() \
+            .with_projection(['user_id']) \
+            .with_limit(3)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            prefetch_concurrency=4,
+        )
+
+        user_ids = self._collect_torch_user_ids(dataset, num_workers=2)
+
+        self.assertEqual(3, len(user_ids))
+        self.assertEqual(3, len(set(user_ids)))
+
+    def test_torch_streaming_limit_does_not_prefetch_blob_payloads(self):
+        pa_schema = pa.schema([
+            ('sample_id', pa.string()),
+            ('payload', pa.large_binary()),
+            ('score', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['sample_id'],
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'source.split.target-size': '1b',
+            },
+        )
+        self.catalog.create_table(
+            'default.test_torch_streaming_blob_limit', schema, False)
+        table = self.catalog.get_table(
+            'default.test_torch_streaming_blob_limit')
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(pa.table({
+            'sample_id': ['sample_%d' % index for index in range(10)],
+            'payload': [bytes([index]) * 1024 for index in range(10)],
+            'score': list(range(10)),
+        }, schema=pa_schema))
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        counting_file_io = _BlobCountingFileIO(table.file_io)
+        table.file_io = counting_file_io
+        read_builder = table.new_read_builder() \
+            .with_projection(['sample_id', 'payload', 'score']) \
+            .with_limit(2)
+        splits = read_builder.new_scan().plan().splits()
+
+        rows = list(read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            prefetch_concurrency=4,
+        ))
+
+        self.assertEqual(2, len(rows))
+        self.assertEqual(2, counting_file_io.blobs_fetched)
 
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""

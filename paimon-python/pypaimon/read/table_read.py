@@ -24,12 +24,14 @@ import pandas
 import pyarrow
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_json_parser import extract_referenced_fields
 from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.auth_masking_reader import (
     AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
     RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
@@ -133,7 +135,9 @@ class TableRead:
             for split in splits:
                 if limit is not None and count >= limit:
                     return
-                reader = self.__create_reader_for_split(split)
+                remaining = None if limit is None else limit - count
+                reader = self.__create_reader_for_split(
+                    split, limit=remaining)
                 try:
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
@@ -197,7 +201,9 @@ class TableRead:
                 order. Must be ``>= 1``. Note that with ``>= 2`` (or auto)
                 and a ``limit`` set, the returned rows are an arbitrary
                 subset of the requested size, since which splits fill the row
-                quota first is non-deterministic.
+                quota first is non-deterministic. Data-evolution reads with
+                deferred BLOB resolution run serially when a limit may discard
+                rows, so payloads are not materialized from discarded splits.
             blob_parallelism: number of threads for concurrent blob reads
                 within each batch. ``None`` or ``1`` (default) reads blobs
                 serially; ``>= 2`` uses a thread pool with ``pread`` for
@@ -341,9 +347,25 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
+        deferred_limit_may_prune = (
+            self.limit is not None
+            and self._deferred_blob_fields
+            and not self._limit_covers_all_splits(splits)
+        )
         return (effective >= 2 and len(splits) >= 2
-                and not (self.limit is not None
-                         and self._deferred_blob_fields))
+                and not deferred_limit_may_prune)
+
+    def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
+        """Return whether split metadata proves that LIMIT cannot drop rows."""
+        total_rows = 0
+        for split in splits:
+            merged_row_count = split.merged_row_count()
+            if merged_row_count is None:
+                return False
+            total_rows += merged_row_count
+            if total_rows > self.limit:
+                return False
+        return True
 
     def _to_arrow_parallel(
         self,
@@ -663,14 +685,29 @@ class TableRead:
             return dataset
 
     def _create_split_read(self, split: Split, blob_parallelism: int = 1,
-                           read_type=None, limit: Optional[int] = None) -> SplitRead:
-        sr = self._build_split_read(split, read_type, limit)
+                           read_type=None, limit: Optional[int] = None,
+                           push_down_limit: bool = True,
+                           post_merge_filter=None,
+                           eager_blob_fields=None) -> SplitRead:
+        sr = self._build_split_read(
+            split,
+            read_type,
+            limit,
+            push_down_limit,
+            post_merge_filter,
+            eager_blob_fields,
+        )
         sr._blob_parallelism = blob_parallelism
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,
-                          limit: Optional[int] = None) -> SplitRead:
-        effective_limit = self.limit if limit is None else limit
+                          limit: Optional[int] = None,
+                          push_down_limit: bool = True,
+                          post_merge_filter=None,
+                          eager_blob_fields=None) -> SplitRead:
+        effective_limit = (
+            self.limit if limit is None else limit
+        ) if push_down_limit else None
         effective_read_type = read_type if read_type is not None else self.read_type
         scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
         if self.table.is_primary_key_table and not split.raw_convertible:
@@ -742,6 +779,8 @@ class TableRead:
                 outer_flat_read_type=(
                     self.read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
+                post_merge_filter=post_merge_filter,
+                eager_blob_fields=eager_blob_fields,
             )
         else:
             inner_read_type = scan_read_type
@@ -856,19 +895,24 @@ class TableRead:
         if extra_fields:
             effective_read_type = read_fields + extra_fields
 
-        if limit is None:
-            split_read = self._create_split_read(
-                split,
-                blob_parallelism=blob_parallelism,
-                read_type=effective_read_type,
-            )
-        else:
-            split_read = self._create_split_read(
-                split,
-                blob_parallelism=blob_parallelism,
-                read_type=effective_read_type,
-                limit=limit,
-            )
+        filter_fn = auth_result.extract_row_filter()
+        effective_limit = self.limit if limit is None else limit
+        embed_filter = (
+            filter_fn is not None
+            and self.table.options.data_evolution_enabled()
+        )
+        split_read = self._create_split_read(
+            split,
+            blob_parallelism=blob_parallelism,
+            read_type=effective_read_type,
+            limit=limit,
+            push_down_limit=filter_fn is None or embed_filter,
+            post_merge_filter=filter_fn if embed_filter else None,
+            eager_blob_fields=(
+                self._auth_filter_field_names(auth_result, effective_read_type)
+                if embed_filter else None
+            ),
+        )
         reader = split_read.create_reader()
 
         needs_convert_back = False
@@ -877,9 +921,10 @@ class TableRead:
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
             needs_convert_back = True
 
-        filter_fn = auth_result.extract_row_filter()
-        if filter_fn:
+        if filter_fn and not embed_filter:
             reader = AuthFilterReader(reader, filter_fn)
+            if effective_limit is not None:
+                reader = LimitedRecordBatchReader(reader, effective_limit)
 
         if auth_result.column_masking:
             reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
@@ -892,6 +937,16 @@ class TableRead:
             reader = BatchToRecordReaderAdapter(reader)
 
         return reader
+
+    @staticmethod
+    def _auth_filter_field_names(auth_result, read_fields) -> set:
+        filters = getattr(auth_result, "filter", None)
+        if not filters:
+            return {field.name for field in read_fields}
+        names = set()
+        for filter_json in filters:
+            names.update(extract_referenced_fields(filter_json))
+        return names
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
