@@ -1033,7 +1033,8 @@ class DataEvolutionSplitRead(SplitRead):
             outer_extract_name_paths: Optional[List[List[str]]] = None,
             outer_flat_read_type: Optional[List[DataField]] = None,
             post_merge_filter=None,
-            eager_blob_fields=None):
+            eager_blob_fields=None,
+            post_filter_after_inline=False):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1047,6 +1048,8 @@ class DataEvolutionSplitRead(SplitRead):
         self.outer_extract_name_paths = outer_extract_name_paths
         self.outer_flat_read_type = outer_flat_read_type
         self._post_merge_filter = post_merge_filter
+        # Apply the auth filter after inline BLOB resolution, so scalar BLOBs still defer.
+        self._post_filter_after_inline = post_filter_after_inline
         self._eager_blob_fields = set(eager_blob_fields or [])
         self._deferred_blob_fields = self._deferred_blob_field_names()
 
@@ -1067,6 +1070,12 @@ class DataEvolutionSplitRead(SplitRead):
                 reader, self.table,
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names),
                 blob_parallelism=blob_parallelism)
+
+        if self._post_filter_after_inline:
+            if self._post_merge_filter is not None:
+                reader = AuthFilterReader(reader, self._post_merge_filter)
+            if self.limit is not None:
+                reader = LimitedRecordBatchReader(reader, self.limit)
 
         if self._deferred_blob_fields:
             blob_names = [
@@ -1127,7 +1136,7 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
-        if self._post_merge_filter is not None:
+        if self._post_merge_filter is not None and not self._post_filter_after_inline:
             reader = AuthFilterReader(reader, self._post_merge_filter)
 
         if self.outer_extract_name_paths:
@@ -1140,7 +1149,7 @@ class DataEvolutionSplitRead(SplitRead):
             reader = NestedLeafBatchReader(
                 reader, self.outer_extract_name_paths, self.outer_flat_read_type)
 
-        if self.limit is not None:
+        if self.limit is not None and not self._post_filter_after_inline:
             reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader

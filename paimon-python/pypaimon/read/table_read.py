@@ -688,7 +688,8 @@ class TableRead:
                            read_type=None, limit: Optional[int] = None,
                            push_down_limit: bool = True,
                            post_merge_filter=None,
-                           eager_blob_fields=None) -> SplitRead:
+                           eager_blob_fields=None,
+                           post_filter_after_inline: bool = False) -> SplitRead:
         sr = self._build_split_read(
             split,
             read_type,
@@ -696,6 +697,7 @@ class TableRead:
             push_down_limit,
             post_merge_filter,
             eager_blob_fields,
+            post_filter_after_inline,
         )
         sr._blob_parallelism = blob_parallelism
         return sr
@@ -704,7 +706,8 @@ class TableRead:
                           limit: Optional[int] = None,
                           push_down_limit: bool = True,
                           post_merge_filter=None,
-                          eager_blob_fields=None) -> SplitRead:
+                          eager_blob_fields=None,
+                          post_filter_after_inline: bool = False) -> SplitRead:
         effective_limit = (
             self.limit if limit is None else limit
         ) if push_down_limit else None
@@ -781,6 +784,7 @@ class TableRead:
                 limit=effective_limit,
                 post_merge_filter=post_merge_filter,
                 eager_blob_fields=eager_blob_fields,
+                post_filter_after_inline=post_filter_after_inline,
             )
         else:
             inner_read_type = scan_read_type
@@ -901,8 +905,6 @@ class TableRead:
             self._auth_filter_field_names(auth_result, effective_read_type)
             if filter_fn is not None else set()
         )
-        # Embedding runs the auth filter before inline BLOB resolution; if it references an
-        # inline (descriptor/view) BLOB field, keep it outermost so it sees resolved bytes.
         inline_blob_fields = (
             self.table.options.blob_descriptor_fields()
             | self.table.options.blob_view_fields()
@@ -910,8 +912,10 @@ class TableRead:
         embed_filter = (
             filter_fn is not None
             and self.table.options.data_evolution_enabled()
-            and not (auth_fields & inline_blob_fields)
         )
+        # If the auth filter references an inline BLOB, run it after inline resolution (in
+        # the split read) so it sees resolved payloads while scalar BLOBs still defer.
+        post_filter_after_inline = embed_filter and bool(auth_fields & inline_blob_fields)
         split_read = self._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
@@ -920,6 +924,7 @@ class TableRead:
             push_down_limit=filter_fn is None or embed_filter,
             post_merge_filter=filter_fn if embed_filter else None,
             eager_blob_fields=auth_fields if embed_filter else None,
+            post_filter_after_inline=post_filter_after_inline,
         )
         reader = split_read.create_reader()
 
