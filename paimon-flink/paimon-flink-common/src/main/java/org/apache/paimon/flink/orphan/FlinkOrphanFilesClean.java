@@ -37,6 +37,7 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -63,8 +64,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -74,6 +77,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
     protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
+
+    private static final String MISSING_MANIFEST_SENTINEL =
+            "__PAIMON_ORPHAN_CLEAN_MISSING_MANIFEST__";
 
     @Nullable protected final Integer parallelism;
 
@@ -143,48 +149,75 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         .name("branch-snapshot-deletion-result");
 
         // branch and manifest file
-        final OutputTag<Tuple2<String, String>> manifestOutputTag =
-                new OutputTag<Tuple2<String, String>>("manifest-output") {};
+        final OutputTag<Tuple3<String, String, Boolean>> manifestOutputTag =
+                new OutputTag<Tuple3<String, String, Boolean>>("manifest-output") {};
 
         SingleOutputStreamOperator<String> usedManifestFiles =
                 env.fromCollection(branches)
                         .name("branch-source")
                         .process(
-                                new ProcessFunction<String, Tuple2<String, String>>() {
+                                new ProcessFunction<String, Tuple3<String, String, Boolean>>() {
                                     @Override
                                     public void processElement(
                                             String branch,
-                                            ProcessFunction<String, Tuple2<String, String>>.Context
+                                            ProcessFunction<String, Tuple3<String, String, Boolean>>
+                                                            .Context
                                                     ctx,
-                                            Collector<Tuple2<String, String>> out)
+                                            Collector<Tuple3<String, String, Boolean>> out)
                                             throws Exception {
+                                        Set<Long> liveSnapshotIds =
+                                                Identifier.DEFAULT_MAIN_BRANCH.equals(branch)
+                                                        ? table.switchToBranch(branch)
+                                                                .snapshotManager()
+                                                                .safelyGetAllSnapshots().stream()
+                                                                .map(Snapshot::id)
+                                                                .collect(Collectors.toSet())
+                                                        : Collections.emptySet();
                                         for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
-                                            out.collect(new Tuple2<>(branch, snapshot.toJson()));
+                                            out.collect(
+                                                    new Tuple3<>(
+                                                            branch,
+                                                            snapshot.toJson(),
+                                                            liveSnapshotIds.contains(
+                                                                    snapshot.id())));
                                         }
                                     }
                                 })
                         .name("collect-snapshots")
                         .rebalance()
                         .process(
-                                new ProcessFunction<Tuple2<String, String>, String>() {
+                                new ProcessFunction<Tuple3<String, String, Boolean>, String>() {
 
                                     @Override
                                     public void processElement(
-                                            Tuple2<String, String> branchAndSnapshot,
-                                            ProcessFunction<Tuple2<String, String>, String>.Context
+                                            Tuple3<String, String, Boolean> branchAndSnapshot,
+                                            ProcessFunction<Tuple3<String, String, Boolean>, String>
+                                                            .Context
                                                     ctx,
                                             Collector<String> out)
                                             throws Exception {
                                         String branch = branchAndSnapshot.f0;
                                         Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
+                                        boolean liveOnMainBranch = branchAndSnapshot.f2;
                                         Consumer<String> manifestConsumer =
-                                                manifest -> {
-                                                    Tuple2<String, String> tuple2 =
-                                                            new Tuple2<>(branch, manifest);
-                                                    ctx.output(manifestOutputTag, tuple2);
-                                                };
+                                                manifest ->
+                                                        ctx.output(
+                                                                manifestOutputTag,
+                                                                new Tuple3<>(
+                                                                        branch,
+                                                                        manifest,
+                                                                        liveOnMainBranch));
+                                        AtomicBoolean missingManifest =
+                                                liveOnMainBranch ? new AtomicBoolean(false) : null;
                                         collectWithoutDataFile(
-                                                branch, snapshot, out::collect, manifestConsumer);
+                                                branch,
+                                                snapshot,
+                                                out::collect,
+                                                manifestConsumer,
+                                                missingManifest);
+                                        if (missingManifest != null && missingManifest.get()) {
+                                            out.collect(MISSING_MANIFEST_SENTINEL);
+                                        }
                                     }
                                 })
                         .name("collect-manifests");
@@ -192,39 +225,48 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         DataStream<String> usedFiles =
                 usedManifestFiles
                         .getSideOutput(manifestOutputTag)
-                        .keyBy(tuple2 -> tuple2.f0 + ":" + tuple2.f1)
+                        .keyBy(tuple3 -> tuple3.f0 + ":" + tuple3.f1)
                         .transform(
                                 "collect-used-files",
                                 STRING_TYPE_INFO,
-                                new BoundedOneInputOperator<Tuple2<String, String>, String>() {
+                                new BoundedOneInputOperator<
+                                        Tuple3<String, String, Boolean>, String>() {
 
-                                    private final Set<Tuple2<String, String>> manifests =
-                                            new HashSet<>();
+                                    private final Map<String, Tuple3<String, String, Boolean>>
+                                            manifests = new HashMap<>();
 
                                     @Override
                                     public void processElement(
-                                            StreamRecord<Tuple2<String, String>> element) {
-                                        manifests.add(element.getValue());
+                                            StreamRecord<Tuple3<String, String, Boolean>> element) {
+                                        Tuple3<String, String, Boolean> value = element.getValue();
+                                        manifests.merge(
+                                                value.f0 + ":" + value.f1,
+                                                value,
+                                                (a, b) -> new Tuple3<>(a.f0, a.f1, a.f2 || b.f2));
                                     }
 
                                     @Override
                                     public void endInput() throws IOException {
                                         Map<String, ManifestFile> branchManifests = new HashMap<>();
-                                        for (Tuple2<String, String> tuple2 : manifests) {
+                                        for (Tuple3<String, String, Boolean> tuple :
+                                                manifests.values()) {
                                             ManifestFile manifestFile =
                                                     branchManifests.computeIfAbsent(
-                                                            tuple2.f0,
+                                                            tuple.f0,
                                                             key ->
                                                                     table.switchToBranch(key)
                                                                             .store()
                                                                             .manifestFileFactory()
                                                                             .create());
+                                            AtomicBoolean manifestMissing =
+                                                    tuple.f2 ? new AtomicBoolean(false) : null;
                                             retryReadingFiles(
                                                             () ->
                                                                     manifestFile
                                                                             .readWithIOException(
-                                                                                    tuple2.f1),
-                                                            Collections.<ManifestEntry>emptyList())
+                                                                                    tuple.f1),
+                                                            Collections.<ManifestEntry>emptyList(),
+                                                            manifestMissing)
                                                     .forEach(
                                                             f -> {
                                                                 List<String> files =
@@ -237,6 +279,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                                         new StreamRecord<>(
                                                                                                 file)));
                                                             });
+                                            if (manifestMissing != null && manifestMissing.get()) {
+                                                output.collect(
+                                                        new StreamRecord<>(
+                                                                MISSING_MANIFEST_SENTINEL));
+                                            }
                                         }
                                     }
                                 });
@@ -369,6 +416,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     private long emittedFilesCount;
                                     private long emittedFilesLen;
 
+                                    private boolean abortDeletion;
+
                                     private final Set<String> used = new HashSet<>();
 
                                     @Override
@@ -385,6 +434,10 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 checkState(!buildEnd, "Should not build ended.");
                                                 LOG.info("Finish build phase.");
                                                 buildEnd = true;
+                                                if (abortDeletion) {
+                                                    LOG.warn(
+                                                            "Detected missing manifest, aborting clean.");
+                                                }
                                                 break;
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
@@ -404,13 +457,21 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void processElement1(StreamRecord<String> element) {
-                                        used.add(element.getValue());
+                                        String value = element.getValue();
+                                        if (MISSING_MANIFEST_SENTINEL.equals(value)) {
+                                            abortDeletion = true;
+                                            return;
+                                        }
+                                        used.add(value);
                                     }
 
                                     @Override
                                     public void processElement2(
                                             StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
+                                        if (abortDeletion) {
+                                            return;
+                                        }
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
                                         Path path = new Path(value);

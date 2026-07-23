@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -258,7 +259,8 @@ public abstract class OrphanFilesClean implements Serializable {
             String branch,
             Snapshot snapshot,
             Consumer<String> usedFileConsumer,
-            Consumer<String> manifestConsumer)
+            Consumer<String> manifestConsumer,
+            @Nullable AtomicBoolean missingManifest)
             throws IOException {
         Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer =
                 fileAndFlag -> {
@@ -267,44 +269,43 @@ public abstract class OrphanFilesClean implements Serializable {
                     }
                     usedFileConsumer.accept(fileAndFlag.getLeft());
                 };
-        collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileWithFlagConsumer);
+        collectWithoutDataFileWithManifestFlag(
+                branch, snapshot, usedFileWithFlagConsumer, missingManifest);
     }
 
     protected void collectWithoutDataFileWithManifestFlag(
             String branch,
             Snapshot snapshot,
-            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer)
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
+            @Nullable AtomicBoolean missingManifest)
             throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         ManifestList manifestList = branchTable.store().manifestListFactory().create();
         IndexFileHandler indexFileHandler = branchTable.store().newIndexFileHandler();
         List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
-        // changelog manifest
+        // collect changelog, delta and base manifest lists
+        List<String> manifestListNames = new ArrayList<>();
         if (snapshot.changelogManifestList() != null) {
-            usedFileWithFlagConsumer.accept(Pair.of(snapshot.changelogManifestList(), false));
-            manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () ->
-                                    manifestList.readWithIOException(
-                                            snapshot.changelogManifestList()),
-                            emptyList()));
+            manifestListNames.add(snapshot.changelogManifestList());
         }
-
-        // delta manifest
         if (snapshot.deltaManifestList() != null) {
-            usedFileWithFlagConsumer.accept(Pair.of(snapshot.deltaManifestList(), false));
-            manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () -> manifestList.readWithIOException(snapshot.deltaManifestList()),
-                            emptyList()));
+            manifestListNames.add(snapshot.deltaManifestList());
         }
+        manifestListNames.add(snapshot.baseManifestList());
 
-        // base manifest
-        usedFileWithFlagConsumer.accept(Pair.of(snapshot.baseManifestList(), false));
-        manifestFileMetas.addAll(
-                retryReadingFiles(
-                        () -> manifestList.readWithIOException(snapshot.baseManifestList()),
-                        emptyList()));
+        for (String manifestListName : manifestListNames) {
+            List<ManifestFileMeta> metas =
+                    retryReadingFiles(
+                            () -> manifestList.readWithIOException(manifestListName),
+                            emptyList(),
+                            missingManifest);
+            // A missing manifest list means we cannot determine all used files, so abort.
+            if (missingManifest != null && missingManifest.get()) {
+                return;
+            }
+            usedFileWithFlagConsumer.accept(Pair.of(manifestListName, false));
+            manifestFileMetas.addAll(metas);
+        }
 
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
@@ -314,14 +315,18 @@ public abstract class OrphanFilesClean implements Serializable {
         // index files
         String indexManifest = snapshot.indexManifest();
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
-            retryReadingFiles(
+            List<IndexManifestEntry> indexEntries =
+                    retryReadingFiles(
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
-                            Collections.<IndexManifestEntry>emptyList())
-                    .stream()
-                    .map(IndexManifestEntry::indexFile)
-                    .map(IndexFileMeta::fileName)
-                    .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
+                            Collections.<IndexManifestEntry>emptyList(),
+                            missingManifest);
+            if (missingManifest == null || !missingManifest.get()) {
+                usedFileWithFlagConsumer.accept(Pair.of(indexManifest, false));
+                indexEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .map(IndexFileMeta::fileName)
+                        .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
+            }
         }
 
         // statistic file
@@ -444,12 +449,24 @@ public abstract class OrphanFilesClean implements Serializable {
      */
     protected static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
             throws IOException {
+        return retryReadingFiles(reader, defaultValue, null);
+    }
+
+    protected static <T> T retryReadingFiles(
+            SupplierWithIOException<T> reader, T defaultValue, @Nullable AtomicBoolean fnfFallback)
+            throws IOException {
         int retryNumber = 0;
         IOException caught = null;
         while (retryNumber++ < READ_FILE_RETRY_NUM) {
             try {
                 return reader.get();
             } catch (FileNotFoundException e) {
+                if (fnfFallback != null) {
+                    fnfFallback.set(true);
+                    LOG.warn(
+                            "File not found while collecting used files, aborting orphan files clean.",
+                            e);
+                }
                 return defaultValue;
             } catch (IOException e) {
                 caught = e;
