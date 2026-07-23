@@ -311,6 +311,18 @@ public class CoreOptions implements Serializable {
                                     + "splits, which is lightweight but may not reflect cross-branch "
                                     + "deletes.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_KEY_RANGE_SPLIT_ENABLED =
+            key("chain-table.split.key-range-enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, a batch chain-table scan splits each bucket's snapshot and "
+                                    + "delta files into multiple splits by key range to improve read "
+                                    + "parallelism. Files with intersecting key ranges always stay in "
+                                    + "the same split so that all versions of a key across the "
+                                    + "snapshot and delta branches are merged together. Set to false "
+                                    + "to fall back to one split per bucket.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
@@ -4226,6 +4238,10 @@ public class CoreOptions implements Serializable {
 
     public boolean chainTableStreamingMergeSnapshot() {
         return options.get(CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT);
+    }
+
+    public boolean chainTableKeyRangeSplitEnabled() {
+        return options.get(CHAIN_TABLE_KEY_RANGE_SPLIT_ENABLED);
     }
 
     public boolean formatTableImplementationIsPaimon() {

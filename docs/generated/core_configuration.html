@@ -1362,6 +1362,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>After configuring this time, only the data files created after this time will be read. It is independent of snapshots, but it is imprecise filtering (depending on whether or not compaction occurs).</td>
         </tr>
         <tr>
+            <td><h5>chain-table.split.key-range-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, a batch chain-table scan splits each bucket's snapshot and delta files into multiple splits by key range to improve read parallelism. Files with intersecting key ranges always stay in the same split so that all versions of a key across the snapshot and delta branches are merged together. Set to false to fall back to one split per bucket.</td>
+        </tr>
+        <tr>
             <td><h5>scan.ignore-corrupt-files</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
