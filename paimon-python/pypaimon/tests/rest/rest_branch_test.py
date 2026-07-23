@@ -51,6 +51,20 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         self.rest_catalog.create_branch(identifier, "b1")
         self.assertEqual(self.rest_catalog.list_branches(identifier), ["b1"])
 
+    def test_branch_table_uses_branch_schema_manager(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_branch(identifier, "b1")
+        branch_identifier = Identifier(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch="b1",
+        )
+
+        table = self.rest_catalog.get_table(branch_identifier)
+
+        self.assertEqual(table.current_branch(), "b1")
+        self.assertEqual(table.schema_manager.branch, "b1")
+
     def test_create_branch_duplicate_raises(self):
         identifier = self._identifier()
         self.rest_catalog.create_branch(identifier, "b1")

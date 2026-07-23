@@ -97,7 +97,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     protected final List<DataField> specialFields;
 
     public AuditLogTable(FileStoreTable wrapped) {
-        this.wrapped = wrapped;
         this.specialFields = new ArrayList<>();
         specialFields.add(SpecialFields.ROW_KIND);
 
@@ -105,9 +104,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 CoreOptions.fromMap(wrapped.options()).tableReadSequenceNumberEnabled();
 
         if (includeSequenceNumber) {
-            this.wrapped.options().put(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true");
+            wrapped =
+                    wrapped.copyWithoutTimeTravel(
+                            Collections.singletonMap(
+                                    CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true"));
             specialFields.add(SpecialFields.SEQUENCE_NUMBER);
         }
+        this.wrapped = wrapped;
     }
 
     /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */

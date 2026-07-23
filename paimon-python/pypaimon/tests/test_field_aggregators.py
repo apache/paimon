@@ -46,8 +46,10 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldSumAgg,
     FieldListaggAgg,
     FieldNestedUpdateAgg,
+    FieldNestedPartialUpdateAgg,
     FieldCollectAgg,
     FieldMergeMapWithKeyTimeAgg,
+    FieldMergeMapAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
 from pypaimon.table.row.generic_row import GenericRow
@@ -1766,6 +1768,140 @@ class FieldNestedUpdateAggTest(unittest.TestCase):
         self.assertCountEqual(accumulator, [self.row(0, 0, "A", 1), ])
 
 
+class FieldNestedPartialUpdateAggTest(unittest.TestCase):
+    IDENTIFIER = "nested_partial_update"
+
+    DEFAULT_FIELDS = [
+        DataField(10, "k", AtomicType("INT")),
+        DataField(20, "v1", AtomicType("INT")),
+        DataField(30, "v2", AtomicType("STRING")),
+    ]
+
+    def _make_data_type(self, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return ArrayType(
+            True,
+            RowType(True, fields)
+        )
+
+    def _make(self, data_type, options: CoreOptions = None):
+        """Build an aggregator through the public registry path so we also
+        exercise the registered factory (including its type validation).
+        """
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        return create_field_aggregator(
+            data_type, "field0", self.IDENTIFIER, options=options
+        )
+
+    def row(self, *values, fields: List[DataField] = None):
+        if fields is None:
+            fields = self.DEFAULT_FIELDS
+        return GenericRow(list(values), fields)
+
+    def test_field_nested_partial_update_agg(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k",
+                    }
+                )
+            ),
+        )
+        self.assertIsInstance(agg, FieldNestedPartialUpdateAgg)
+
+        accumulator = None
+
+        current = self.row(0, 0, None)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        current = self.row(0, None, "A")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 0, "A")])
+
+        current = self.row(0, 1, "B")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "B")])
+
+        current = self.row(1, 2, "C")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(1, 2, "C"),
+        ])
+
+        current = self.row(None, 0, "D")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [
+            self.row(0, 1, "B"),
+            self.row(1, 2, "C"),
+            self.row(None, 0, "D"),
+        ])
+
+    def test_field_nested_partial_update_agg_with_nested_key_null_use_ignore_strategy(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k",
+                        "fields.field0.nested-key-null-strategy": "IGNORE",
+                    }
+                )
+            ),
+        )
+
+        accumulator = None
+
+        current = self.row(0, 0, None)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        current = self.row(None, None, "A_ignore")
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [self.row(0, 0, None)])
+
+        current = self.row(None, None, "FirstInput")
+        accumulator = agg.agg(None, [current])
+        self.assertCountEqual(accumulator, [])
+
+    def test_field_nested_partial_update_agg_with_nested_key_null_use_throw_error_strategy(self):
+        agg = self._make(
+            self._make_data_type(),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k",
+                        "fields.field0.nested-key-null-strategy": "ERROR",
+                    }
+                )
+            ),
+        )
+
+        accumulator = None
+
+        current = self.row(0, 0, None)
+        accumulator = agg.agg(accumulator, [current])
+        self.assertCountEqual(accumulator, [current])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(accumulator, [self.row(None, 0, "A")])
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Nested key contains null values. Primary key fields must not be null.",
+        ):
+            agg.agg(None, [self.row(None, None, "FirstInput")])
+
+
 class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
 
     DEFAULT_FIELDS = [
@@ -1918,6 +2054,56 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
                     "key1": self.row("A", "17682882903686900100"),
                 },
             )
+
+
+class FieldMergeMapAggTest(unittest.TestCase):
+
+    def _make(self, options: CoreOptions = None):
+        if options is None:
+            options = CoreOptions(Options.from_none())
+
+        return create_field_aggregator(
+            MapType(True, AtomicType("INT"), AtomicType("STRING")),
+            "field0", "merge_map", options=options
+        )
+
+    def test_field_merge_map_agg(self):
+        agg = self._make()
+        self.assertIsInstance(agg, FieldMergeMapAgg)
+
+        self.assertIsNone(agg.agg(None, None))
+        self.assertEqual(agg.agg({1: "A"}, None), {1: "A"})
+        self.assertEqual(agg.agg(None, {1: "A"}), {1: "A"})
+
+        acc = agg.agg(None, {1: "A"})
+        self.assertEqual(acc, {1: "A"})
+
+        acc = agg.agg(acc, {1: "A", 2: "B"})
+        self.assertEqual(acc, {1: "A", 2: "B"})
+
+        acc = agg.agg(acc, {1: "a", 3: "c"})
+        self.assertEqual(acc, {1: "a", 2: "B", 3: "c"})
+
+    def test_field_merge_map_agg_retract(self):
+        agg = self._make()
+
+        result = agg.retract(
+            {1: "A", 2: "B", 3: "C"},
+            {1: "A", 2: "A"},
+        )
+        self.assertEqual(result, {3: "C"})
+        self.assertEqual(agg.retract(None, {1: "A"}), None)
+        self.assertEqual(agg.retract(result, None), {3: "C"})
+        self.assertEqual(agg.retract(result, {}), {3: "C"})
+
+    def test_field_merge_map_agg_for_pyarrow(self):
+        agg = self._make()
+        acc = agg.agg(None, [{'key': 1, 'value': 'A'}])
+        acc = agg.agg(acc, [{'key': 1, 'value': 'a'}, {'key': 2, 'value': 'B'}])
+        self.assertEqual(acc, {1: "a", 2: "B"})
+
+        acc = agg.retract(acc, [{'key': 1, 'value': 'A'}, {'key': 3, 'value': 'C'}])
+        self.assertEqual(acc, {2: "B"})
 
 
 class RegistrationTest(unittest.TestCase):

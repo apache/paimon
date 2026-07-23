@@ -33,13 +33,14 @@ the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """
 
-from typing import Any, List, Dict, Optional, Tuple, Union
+from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
 
 # aggregator input type hints variables
@@ -60,8 +61,10 @@ NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
 NAME_NESTED_UPDATE = "nested_update"
+NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
 NAME_COLLECT = "collect"
 NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
+NAME_MERGE_MAP = "merge_map"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -731,6 +734,125 @@ class FieldNestedUpdateAgg(FieldAggregator):
         )
 
 
+class FieldNestedPartialUpdateAgg(FieldAggregator):
+    """
+    Used to partial update a field which representing a nested table.
+    The data type of nested table field is ARRAY<ROW>
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        field_type = _check_array_row(field_name, field_type)
+        super().__init__(name, field_type)
+
+        nested_type: RowType = field_type.element
+        self.nested_fields = len(nested_type.fields)
+
+        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
+        if not self.nested_key:
+            raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
+
+        self.key_projection = FieldProjection.from_fields(
+            [nested_type.get_field_index(name) for name in self.nested_key],
+            self.nested_key
+        )
+
+        self.nested_key_null_strategy = (
+            options.field_nested_update_agg_nested_key_null_strategy(field_name)
+        )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None:
+            return accumulator
+
+        rows: List[Record] = []
+        if accumulator is not None:
+            self._add_non_null_rows(accumulator, rows)
+        self._add_non_null_rows(input_field, rows)
+
+        row_map: Dict[Tuple[Any, ...], Record] = {}
+        for row in rows:
+            key = self.key_projection.apply(row)
+            if not self._apply_nested_key_null_strategy(key):
+                continue
+
+            to_update = row_map.get(key)
+            if to_update is None:
+                if isinstance(row, InternalRow):
+                    to_update = GenericRow([None] * self.nested_fields, row.fields)
+                elif isinstance(row, dict):
+                    to_update = {}.fromkeys(row.keys())
+                else:
+                    raise TypeError(
+                        "Unsupported row type '{}'. Expected InternalRow or dict.".format(
+                            type(row).__name__
+                        )
+                    )
+            self._partial_update(to_update, row)
+            row_map[key] = to_update
+
+        return list(row_map.values())
+
+    def _partial_update(self, to_update: Record, input_row: Record) -> None:
+        if isinstance(to_update, InternalRow) and isinstance(input_row, InternalRow):
+            for i in range(self.nested_fields):
+                value = input_row.get_field(i)
+                if value is not None:
+                    to_update.values[i] = value
+        elif isinstance(to_update, dict) and isinstance(input_row, dict):
+            for k, v in input_row.items():
+                if v is not None:
+                    to_update[k] = v
+        else:
+            raise TypeError(
+                "Unsupported row types: to_update={}, input_row={}. "
+                "Expected both to be either InternalRow or dict.".format(
+                    type(to_update).__name__,
+                    type(input_row).__name__,
+                )
+            )
+
+    def _add_non_null_rows(
+            self,
+            array: List[Record],
+            rows: List[Record],
+    ) -> None:
+        """Append non-null rows from array."""
+
+        for row in array:
+            if row is None:
+                continue
+            rows.append(row)
+
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
+        """Apply nested-key-null-strategy."""
+
+        if all(v is not None for v in key):
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
+            return False
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
+            raise ValueError(
+                "Nested key contains null values. "
+                "Primary key fields must not be null."
+            )
+
+        raise ValueError(
+            "Unsupported nested-key-null-strategy '{}'".format(
+                self.nested_key_null_strategy
+            )
+        )
+
+
 class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
     """
     Aggregator for merging MAP values with key and timestamp.
@@ -851,6 +973,96 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
         )
 
 
+class FieldMergeMapAgg(FieldAggregator):
+    """
+    Merge map values by combining all key-value pairs.
+
+    When the same key exists in both maps, the value from the input map
+    overwrites the value from the accumulator map.
+    """
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if not isinstance(field_type, MapType):
+            raise ValueError(
+                "Data type for merge map column must be 'MAP' but was '{}'".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        result = {}
+
+        self._put_to_map(result, accumulator)
+        self._put_to_map(result, input_field)
+
+        return result
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        # it's hard to mark the input is retracted without accumulator
+        if accumulator is None:
+            return None
+
+        # nothing to be retracted
+        if retract_field is None:
+            return accumulator
+
+        if len(retract_field) == 0:
+            return accumulator
+
+        retract_keys = self._get_keys(retract_field)
+        acc = {}
+        self._put_to_map(acc, accumulator)
+
+        result = {
+            key: value
+            for key, value in acc.items()
+            if key not in retract_keys
+        }
+
+        return result
+
+    def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        if isinstance(input_field, dict):
+            maps.update(input_field)
+        elif isinstance(input_field, list):
+            tmp_map = {}
+            for item in input_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+                tmp_map[item['key']] = item['value']
+
+            maps.update(tmp_map)
+        else:
+            raise TypeError(
+                "input_field must be dict or list[dict], got {}".format(type(input_field))
+            )
+
+    def _get_keys(self, retract_field: Any) -> Set[Any]:
+        keys = set()
+
+        if isinstance(retract_field, dict):
+            keys.update(retract_field.keys())
+
+        elif isinstance(retract_field, list):
+            for item in retract_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+
+                keys.add(item["key"])
+        else:
+            raise TypeError(
+                "retract_field must be dict or list[dict], got {}".format(type(retract_field))
+            )
+
+        return keys
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -928,8 +1140,14 @@ register_aggregator(
     NAME_NESTED_UPDATE, _build_field_options(FieldNestedUpdateAgg, NAME_NESTED_UPDATE)
 )
 register_aggregator(
+    NAME_NESTED_PARTIAL_UPDATE, _build_field_options(FieldNestedPartialUpdateAgg, NAME_NESTED_PARTIAL_UPDATE)
+)
+register_aggregator(
     NAME_COLLECT, _build_field_options(FieldCollectAgg, NAME_COLLECT)
 )
 register_aggregator(
     NAME_MERGE_MAP_WITH_KEYTIME, _build_field_options(FieldMergeMapWithKeyTimeAgg, NAME_MERGE_MAP_WITH_KEYTIME)
+)
+register_aggregator(
+    NAME_MERGE_MAP, _build_no_type_check(FieldMergeMapAgg, NAME_MERGE_MAP)
 )

@@ -525,7 +525,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
-     *     not set or empty. Currently, only prefix matching is supported.
+     *     not set or empty. Whether full LIKE semantics or only prefix matching is supported is
+     *     catalog-specific; the default implementation ignores the pattern.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -552,7 +553,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All view details will be
-     *     returned if not set or empty. Currently, only prefix matching is supported.
+     *     returned if not set or empty. Whether full LIKE semantics or only prefix matching is
+     *     supported is catalog-specific; the default implementation ignores the pattern.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
@@ -678,7 +680,10 @@ public interface Catalog extends AutoCloseable {
 
     /**
      * Whether this catalog supports name pattern filter when list objects paged. If not,
-     * corresponding methods will throw exception if name pattern provided.
+     * corresponding methods will throw exception if name pattern provided. This flag is a
+     * catalog-wide default consulted by the base implementations; a specific list method may still
+     * honor a pattern by overriding the method directly (in which case it need not rely on this
+     * flag).
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.

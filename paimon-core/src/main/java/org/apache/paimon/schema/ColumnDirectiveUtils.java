@@ -345,6 +345,25 @@ public final class ColumnDirectiveUtils {
                 }
             }
             options.remove(String.format("field.%s.vector-dim", fieldName));
+        } else if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_STORAGE_LAYOUT);
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS);
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY);
         }
     }
 
