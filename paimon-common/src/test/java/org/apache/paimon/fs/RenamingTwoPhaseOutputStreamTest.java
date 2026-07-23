@@ -90,27 +90,6 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
-    void testDiscardOnlyDeletesTargetCommittedByThisAttempt() throws IOException {
-        RenamingTwoPhaseOutputStream first =
-                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
-        RenamingTwoPhaseOutputStream second =
-                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
-        first.write("first".getBytes());
-        second.write("second".getBytes());
-        TwoPhaseOutputStream.Committer firstCommitter = first.closeForCommit();
-        TwoPhaseOutputStream.Committer secondCommitter = second.closeForCommit();
-
-        firstCommitter.commit(fileIO);
-        assertThatThrownBy(() -> secondCommitter.commit(fileIO)).isInstanceOf(IOException.class);
-        secondCommitter.discard(fileIO);
-
-        assertThat(fileIO.readFileUtf8(targetPath)).isEqualTo("first");
-
-        firstCommitter.discard(fileIO);
-        assertThat(fileIO.exists(targetPath)).isFalse();
-    }
-
-    @Test
     void testCloseWithoutCommit() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);

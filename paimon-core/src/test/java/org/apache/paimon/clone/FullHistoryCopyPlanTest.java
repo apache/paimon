@@ -155,6 +155,24 @@ public class FullHistoryCopyPlanTest {
     }
 
     @Test
+    public void testCaseOnlyLocalTargetFileConflictFails() {
+        FullHistoryFileSet.Builder builder = FullHistoryFileSet.builder();
+        builder.addDataFile(new Path("s3://source/table/data/File.orc"));
+        builder.addDataFile(new Path("s3://source/table/data/file.orc"));
+
+        assertThatThrownBy(
+                        () ->
+                                FullHistoryCopyPlan.buildPayload(
+                                        builder.build(),
+                                        PathMapping.parse(
+                                                Collections.singletonList(
+                                                        "s3://source/table=/tmp/target")),
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Found target path conflict");
+    }
+
+    @Test
     public void testFilesAreImmutable() {
         FullHistoryCopyPlan plan = FullHistoryCopyPlan.empty();
 

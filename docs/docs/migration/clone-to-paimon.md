@@ -63,7 +63,7 @@ Every reachable source path must match one `path_mapping`. The mapped source tab
 physical target root. `target_database` and `target_table` are optional logical identifiers and do
 not change that path or register the table. Mapping and source paths must use the same explicit
 filesystem scheme; for example, `file:/path` does not match `/path`. Local mappings must not use a
-URI authority.
+URI authority and must use absolute paths. Local target collision checks are case-insensitive.
 
 The target table root and every mapped external data or index root used by the table must initially
 be absent or empty. The action writes the same ownership marker into each root. A failed clone may
@@ -76,9 +76,9 @@ Mapped external-data and external-index target locations must be dedicated to th
 not be changed while the initial run or a retry is active. Payload files are streamed directly into
 these owned roots to avoid an additional remote rename or object copy. Table metadata and
 `_SUCCESS` are published only after every copy task succeeds and the rewritten metadata is
-validated. Recoverable copy failures clean their incomplete target; an abrupt process termination
-may leave a conflicting-size file, which is rejected on resume. Existing-file validation compares
-sizes, not checksums.
+validated. On a reported copy failure, the action attempts to remove the target created by that
+attempt. If cleanup or an abrupt process termination leaves a file, resume accepts the expected
+size and rejects a conflicting size. Existing-file validation compares sizes, not checksums.
 
 Full-history clone does not currently support blob descriptors or blob views, Iceberg compatibility
 metadata, filtered clone, format conversion, or metadata-only clone.
