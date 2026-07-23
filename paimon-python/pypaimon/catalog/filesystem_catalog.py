@@ -21,23 +21,22 @@ from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (
-    BranchAlreadyExistException,
-    BranchNotExistException,
-    DatabaseAlreadyExistException,
-    DatabaseNotExistException,
-    TableAlreadyExistException,
-    TableNotExistException,
-    TagAlreadyExistException,
-    TagNotExistException,
-)
+from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
+                                                BranchNotExistException,
+                                                DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException,
+                                                TagAlreadyExistException,
+                                                TagNotExistException)
 from pypaimon.catalog.database import Database
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import Identifier
-from pypaimon.common.time_utils import duration_to_iso8601, local_datetime_to_system_zone_millis
+from pypaimon.common.time_utils import (duration_to_iso8601,
+                                        local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
@@ -143,7 +142,8 @@ class FileSystemCatalog(Catalog):
         table_schema = self.get_table_schema(identifier)
 
         # Create catalog environment for filesystem catalog
-        from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
+        from pypaimon.catalog.filesystem_catalog_loader import \
+            FileSystemCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=identifier,
             uuid=None,
@@ -190,7 +190,11 @@ class FileSystemCatalog(Catalog):
 
     def get_table_schema(self, identifier: Identifier):
         table_path = self.get_table_path(identifier)
-        table_schema = SchemaManager(self.file_io, table_path).latest()
+        table_schema = SchemaManager(
+            self.file_io,
+            table_path,
+            branch=identifier.get_branch_name_or_default(),
+        ).latest()
         if table_schema is None:
             raise TableNotExistException(identifier)
         return table_schema
@@ -219,7 +223,11 @@ class FileSystemCatalog(Catalog):
             return
 
         table_path = self.get_table_path(identifier)
-        schema_manager = SchemaManager(self.file_io, table_path)
+        schema_manager = SchemaManager(
+            self.file_io,
+            table_path,
+            branch=identifier.get_branch_name_or_default(),
+        )
         try:
             schema_manager.commit_changes(changes)
         except Exception as e:
@@ -254,7 +262,7 @@ class FileSystemCatalog(Catalog):
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        
+
         # Check if table exists
         try:
             self.get_table(identifier)
@@ -262,7 +270,7 @@ class FileSystemCatalog(Catalog):
             if not ignore_if_not_exists:
                 raise
             return
-        
+
         # Delete the table directory
         table_path = self.get_table_path(identifier)
         self.file_io.delete(table_path, True)
@@ -286,9 +294,9 @@ class FileSystemCatalog(Catalog):
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
     ):
-        from pypaimon.api.api_response import Partition, PagedList
-        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.api.api_response import PagedList, Partition
         from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -345,6 +353,7 @@ class FileSystemCatalog(Catalog):
         # Apply pattern filter with proper regex escaping
         if partition_name_pattern:
             import re
+
             # Escape special regex chars except '*', then replace '*' with '.*'
             escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
             regex = re.compile(escaped_pattern)
