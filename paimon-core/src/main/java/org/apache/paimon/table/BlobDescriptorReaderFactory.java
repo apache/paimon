@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -49,14 +50,19 @@ public final class BlobDescriptorReaderFactory {
     }
 
     private static UriReaderFactory fromSourceTable(FileStoreTable table, String sourceTable) {
+        CatalogEnvironment catalogEnvironment = table.catalogEnvironment();
         CatalogLoader catalogLoader =
                 checkNotNull(
-                        table.catalogEnvironment().catalogLoader(),
+                        catalogEnvironment.catalogLoader(),
                         "Option '%s' is not supported for tables without a catalog loader, "
                                 + "including external tables in REST catalogs.",
                         BLOB_DESCRIPTOR_SOURCE_TABLE.key());
         Identifier sourceIdentifier = Identifier.fromString(sourceTable);
-        try (Catalog catalog = catalogLoader.load()) {
+        CatalogContext dependencyContext = catalogEnvironment.dependencyReadContext();
+        try (Catalog catalog =
+                dependencyContext == catalogEnvironment.catalogContext()
+                        ? catalogLoader.load()
+                        : CatalogFactory.createCatalog(dependencyContext)) {
             FileIO sourceFileIO = catalog.getTable(sourceIdentifier).fileIO();
             // Initialize lazy credentials before serializing FileIO to distributed workers.
             sourceFileIO.isObjectStore();
