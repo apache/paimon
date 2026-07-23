@@ -19,12 +19,13 @@
 
 The driver cuts the key space into ranges from each file's parquet-footer min/max (the
 manifest value stats are empty for pypaimon-written tables); each range is read and
-joined in its own Ray task, with no global shuffle. Works best when both sides are
-clustered by the first join key.
+joined in its own Ray task, with no global shuffle. Only beneficial when both sides are
+clustered by the first join key: a poorly clustered (wide) split overlaps many ranges and
+is read in each, so on unclustered input this can cost more than a shuffle.
 
-Correctness never depends on stats: a split whose min/max is missing joins every range.
-Such a split is read once per range, so the range count is capped to keep those re-reads
-under one extra full scan (all-no-stats collapses to a single range).
+Correctness never depends on stats: a split whose min/max is missing (or is wide) joins
+every range it overlaps and is clipped in memory. The range count is reduced until that
+total re-read stays within a couple of full scans (all-unknown collapses to one range).
 """
 
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,8 @@ from pypaimon.ray.join_common import (
 __all__ = ["range_join"]
 
 _MAX_RANGES = 512
+# Cap total re-read to this many full scans (see _bounded_ranges).
+_REREAD_BUDGET = 2
 
 
 def _parquet_col_range(metadata, col):
@@ -161,18 +164,32 @@ def _cut_points(ranged_sides, num_ranges):
     return cuts
 
 
-def _range_budget(l_ranged, r_ranged):
-    # Cap ranges so unknown-stats splits (read in every range) re-read <= one full scan.
-    total = unknown = 0
+def _split_rows(split):
+    return sum(f.row_count for f in split.files)
+
+
+def _total_reads(l_ranged, r_ranged, ranges):
+    """Rows physically read = each split's rows times the ranges it overlaps (each range
+    reads the whole split and clips). Counts unknown-stats and wide known splits alike."""
+    reads = 0
     for ranged in (l_ranged, r_ranged):
-        for split, lo, _ in ranged:
-            rows = sum(f.row_count for f in split.files)
-            total += rows
-            if lo is None:
-                unknown += rows
-    if unknown <= 0:
-        return _MAX_RANGES
-    return max(1, total // unknown)
+        for split, lo, hi in ranged:
+            spans = sum(1 for r_lo, r_hi in ranges if _overlaps(lo, hi, r_lo, r_hi))
+            reads += _split_rows(split) * spans
+    return reads
+
+
+def _bounded_ranges(l_ranged, r_ranged, num_ranges):
+    """Cut into ``num_ranges`` ranges, halving until total re-read <= _REREAD_BUDGET full
+    scans, so poorly clustered input can't cost far more than one scan."""
+    total_rows = sum(_split_rows(s)
+                     for ranged in (l_ranged, r_ranged) for s, _, _ in ranged)
+    budget = _REREAD_BUDGET * max(1, total_rows)
+    while True:
+        ranges = _ranges_from_cuts(_cut_points((l_ranged, r_ranged), num_ranges))
+        if num_ranges <= 1 or _total_reads(l_ranged, r_ranged, ranges) <= budget:
+            return ranges
+        num_ranges = max(1, num_ranges // 2)
 
 
 def _ranges_from_cuts(cuts):
@@ -315,10 +332,9 @@ def range_join(
         num_ranges = max(1, min(_MAX_RANGES, max(len(l_ranged), len(r_ranged))))
     elif num_ranges < 1:
         raise ValueError(f"num_ranges must be >= 1; got {num_ranges}.")
-    # An unknown-stats split is read in every range. Cap ranges so those re-reads add at
-    # most one extra full scan, else the fallback can cost more than a shuffle.
-    num_ranges = min(num_ranges, _range_budget(l_ranged, r_ranged))
-    ranges = _ranges_from_cuts(_cut_points((l_ranged, r_ranged), num_ranges))
+    # Reduce ranges until the total re-read (wide known splits + unknown-stats splits,
+    # both read in every range they overlap) stays bounded -- see _bounded_ranges.
+    ranges = _bounded_ranges(l_ranged, r_ranged, num_ranges)
 
     def _join_range(left_splits, right_splits, lo, hi):
         # No predicate pushdown: the range key may be schema-evolved (e.g. a file stored

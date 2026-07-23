@@ -338,15 +338,28 @@ class RayRangeJoinTest(unittest.TestCase):
             got = sorted((r["k"], r["val"]) for r in ds.take_all())
             self.assertEqual(got, [("100", "v100"), ("42", "v42"), ("5", "v5")])
 
-    def test_range_budget_caps_ranges_when_stats_missing(self):
+    def test_reread_budget_bounds_wide_and_unknown_splits(self):
         Split = collections.namedtuple("Split", "files")
         File = collections.namedtuple("File", "row_count")
-        known = [(Split([File(100)]), 0, 99)]      # 100 rows with stats
-        unknown = [(Split([File(100)]), None, None)]  # 100 rows without stats
-        # unknown == total/2 -> budget 2; all-known -> no cap; all-unknown -> 1.
-        self.assertEqual(rjmod._range_budget(known, unknown), 2)
-        self.assertEqual(rjmod._range_budget(known, known), rjmod._MAX_RANGES)
-        self.assertEqual(rjmod._range_budget(unknown, unknown), 1)
+
+        def rng(lo, hi, rows=100):
+            return (Split([File(rows)]), lo, hi)
+
+        # _total_reads = rows x ranges a split overlaps.
+        self.assertEqual(rjmod._total_reads([rng(0, 10)], [], [(None, 5), (5, None)]), 200)
+        # All-unknown collapses to a single range.
+        unknown = [(Split([File(100)]), None, None)]
+        self.assertEqual(len(rjmod._bounded_ranges(unknown, unknown, 8)), 1)
+        # Wide known splits (each overlaps many ranges) are bounded by the budget.
+        wide = [rng(0, 100), rng(0, 100), rng(0, 100), rng(0, 100)]
+        ranges = rjmod._bounded_ranges(wide, wide, 16)
+        budget = rjmod._REREAD_BUDGET * (8 * 100)
+        self.assertTrue(len(ranges) == 1
+                        or rjmod._total_reads(wide, wide, ranges) <= budget)
+        # Clustered (disjoint) splits keep at least as much parallelism as wide ones.
+        clustered = [rng(0, 9), rng(10, 19), rng(20, 29), rng(30, 39)]
+        self.assertGreaterEqual(len(rjmod._bounded_ranges(clustered, clustered, 4)),
+                                len(rjmod._bounded_ranges(wide, wide, 4)))
 
     def test_split_key_range_reads_stats(self):
         # The planner reads a file's min/max for the range column from manifest stats.
