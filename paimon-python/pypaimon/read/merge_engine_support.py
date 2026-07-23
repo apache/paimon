@@ -65,6 +65,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "listagg",
     "nested_update",
     "collect",
+    "product",
     "merge_map_with_keytime",
 ])
 _FIELDS_PREFIX = "fields."
