@@ -32,6 +32,7 @@
     <packaging>jar</packaging>
 
     <properties>
+        <fs.oss.sdk.version>3.13.2</fs.oss.sdk.version>
         <jindodata.version>6.9.1</jindodata.version>
     </properties>
 
@@ -52,8 +53,27 @@
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-oss</artifactId>
+            <artifactId>paimon-oss-impl</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>${fs.oss.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>org.jacoco.agent</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -127,7 +147,43 @@
             <groupId>commons-logging</groupId>
             <artifactId>commons-logging</artifactId>
             <version>1.1.3</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <configuration>
+                    <artifactSet>
+                        <includes combine.children="append">
+                            <include>org.apache.paimon:paimon-oss-impl</include>
+                            <include>com.aliyun.oss:aliyun-sdk-oss</include>
+                            <include>com.aliyun:*</include>
+                            <include>com.google.code.gson:gson</include>
+                            <include>commons-codec:commons-codec</include>
+                            <include>commons-logging:commons-logging</include>
+                            <include>io.opentracing:*</include>
+                            <include>javax.activation:javax.activation-api</include>
+                            <include>javax.xml.bind:jaxb-api</include>
+                            <include>org.apache.httpcomponents:*</include>
+                            <include>org.codehaus.jettison:jettison</include>
+                            <include>org.ini4j:ini4j</include>
+                            <include>org.jdom:jdom2</include>
+                            <include>stax:stax-api</include>
+                        </includes>
+                    </artifactSet>
+                    <filters>
+                        <filter>
+                            <artifact>org.apache.paimon:paimon-oss-impl</artifact>
+                            <includes>
+                                <include>org/apache/paimon/oss/OSSBlobPresigner.class</include>
+                            </includes>
+                        </filter>
+                    </filters>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
