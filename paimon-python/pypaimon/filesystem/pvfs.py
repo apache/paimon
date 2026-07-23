@@ -34,14 +34,13 @@ from readerwriterlock import rwlock
 from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import (CatalogOptions, OssOptions,
+                                            PVFSOptions)
+from pypaimon.common.user_agent import get_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import (
-    JINDO_AVAILABLE,
-    JINDO_OSSFS_AVAILABLE,
-    create_jindo_oss_filesystem,
-)
+    JINDO_AVAILABLE, JINDO_OSSFS_AVAILABLE, create_jindo_oss_filesystem)
 from pypaimon.schema.schema import Schema
 
 logger = logging.getLogger(__name__)
@@ -149,7 +148,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
+        if not options.contains(CatalogOptions.HTTP_USER_AGENT_HEADER):
+            options.set(
+                CatalogOptions.HTTP_USER_AGENT_HEADER,
+                get_user_agent("PythonPVFS"),
+            )
         self.options = options
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (

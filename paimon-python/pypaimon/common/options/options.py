@@ -39,9 +39,10 @@ class Options:
         Returns:
             The converted value according to the ConfigOption's type, or default if not found
         """
-        main_key = key.key()
-        if main_key in self.data:
-            raw_value = self.data[main_key]
+        for config_key in (key.key(),) + key.fallback_keys():
+            if config_key not in self.data:
+                continue
+            raw_value = self.data[config_key]
             if raw_value is not None:
                 return OptionsUtils.convert_value(raw_value, key.get_clazz())
 
@@ -51,7 +52,10 @@ class Options:
         self.data[key.key()] = OptionsUtils.convert_to_string(value)
 
     def contains(self, key: ConfigOption):
-        return key.key() in self.data
+        return any(
+            config_key in self.data
+            for config_key in (key.key(),) + key.fallback_keys()
+        )
 
     def contains_key(self, key: str) -> bool:
         """Check if the given key string exists in the options."""

@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+
 from setuptools import find_packages, setup
 
 VERSION = "1.5.dev"
