@@ -28,6 +28,8 @@ every range it overlaps and is clipped in memory. The range count is reduced unt
 total re-read stays within a couple of full scans (all-unknown collapses to one range).
 """
 
+import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 from pypaimon.ray.join_common import (
@@ -41,8 +43,10 @@ from pypaimon.ray.join_common import (
 
 __all__ = ["range_join"]
 
+_LOG = logging.getLogger(__name__)
+
 _MAX_RANGES = 512
-# Cap total re-read to this many full scans (see _bounded_ranges).
+# Cap total re-read to this many full scans of the read bytes (see _bounded_ranges).
 _REREAD_BUDGET = 2
 
 
@@ -72,27 +76,34 @@ def _footer_col_type(metadata, col):
         return None
 
 
-def _split_key_range(split, col, key_type, file_io):
-    """Min/max of ``col`` over the split's files, read from their parquet footers;
-    (None, None) when any file isn't parquet, lacks usable stats, or stored the key in a
-    different type than the current one (the split then joins every range). A different
-    type means schema evolution, and its footer bounds order differently (e.g. INT '10'
-    < '2' as a string), so they can't be trusted -- only same-type stats are used.
-    Manifest value stats are empty for pypaimon-written tables, so the footer is the
-    source of truth."""
+def _split_key_range(split, name_for_schema, key_type, file_io):
+    """Min/max of the range key over the split's parquet footers; (None, None) -> the
+    split joins every range. ``name_for_schema`` maps a file's schema id to the key's
+    physical name by field id, so a renamed/swapped column reads its own stats. Unknown
+    when the key is absent in that schema, its footer type differs from the current key
+    type (order-incompatible evolution), or stats are missing. Footer, not manifest:
+    pypaimon writes empty manifest stats."""
     import pyarrow.parquet as pq
     lo, hi = None, None
     for f in split.files:
+        col = name_for_schema(f.schema_id)
+        if col is None:
+            return None, None
         path = f.external_path if f.external_path else f.file_path
         if path is None or not path.endswith(".parquet"):
             return None, None
-        stream = file_io.new_input_stream(path)
         try:
-            metadata = pq.read_metadata(stream)
-        except Exception:
+            stream = file_io.new_input_stream(path)
+            try:
+                metadata = pq.read_metadata(stream)
+            finally:
+                stream.close()
+        except Exception as e:
+            # Footer read can fail (e.g. local-cache streams aren't seekable): degrade to
+            # unknown, but warn -- the fallback would otherwise be silent.
+            _LOG.warning("range_join: parquet footer read failed for %s (%s); treating "
+                         "its range as unknown", path, e)
             return None, None
-        finally:
-            stream.close()
         if _footer_col_type(metadata, col) != key_type:
             return None, None
         rng = _parquet_col_range(metadata, col)
@@ -121,20 +132,45 @@ def _plan_ranged_splits(table_id, catalog_options, projection, range_col, partit
     file_io = table.file_io
     key_type = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields).field(range_col).type
+
+    # Range key's physical name in a file's schema, by field id (rename/swap safe).
+    # Cached; current-schema files skip the schema load.
+    key_field_id = next(f.id for f in table.table_schema.fields if f.name == range_col)
+    name_cache, cache_lock = {schema_id: range_col}, threading.Lock()
+
+    def name_for_schema(sid):
+        with cache_lock:
+            if sid in name_cache:
+                return name_cache[sid]
+        try:
+            fields = table.schema_manager.get_schema(sid).fields
+            name = next((f.name for f in fields if f.id == key_field_id), None)
+        except Exception:
+            name = None
+        with cache_lock:
+            name_cache[sid] = name
+        return name
+
     rb = table.new_read_builder()
     if partitions:
         # Build the partition predicate before projection, so its field list still has
-        # the partition columns.
+        # the partition columns. None means the null partition (is_null, not = None).
         pb = rb.new_predicate_builder()
-        rb = rb.with_partition_filter(
-            PredicateBuilder.and_predicates([pb.equal(c, v) for c, v in partitions.items()]))
+        rb = rb.with_partition_filter(PredicateBuilder.and_predicates(
+            [pb.is_null(c) if v is None else pb.equal(c, v)
+             for c, v in partitions.items()]))
     if projection is not None:
         rb = rb.with_projection(projection)
     splits = list(rb.new_scan().plan().splits())
+    # Footer min/max bounds the key only if merge can't move it out of range: safe when
+    # append-only, or the key is a primary key (merge never rewrites PKs). Otherwise (an
+    # aggregated/updated value column) every split joins every range, clipped in memory.
+    if table.primary_keys and range_col not in table.primary_keys:
+        return [(s, None, None) for s in splits], schema_id
     workers = min(16, (os.cpu_count() or 4) * 4, len(splits) or 1)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         bounds = pool.map(
-            lambda s: _split_key_range(s, range_col, key_type, file_io), splits)
+            lambda s: _split_key_range(s, name_for_schema, key_type, file_io), splits)
     return [(s, lo, hi) for s, (lo, hi) in zip(splits, bounds)], schema_id
 
 
@@ -168,23 +204,28 @@ def _split_rows(split):
     return sum(f.row_count for f in split.files)
 
 
+def _split_bytes(split):
+    # Re-read cost is bytes, not rows: a wide-row split is cheap by rows, costly by I/O.
+    return sum(f.file_size for f in split.files)
+
+
 def _total_reads(l_ranged, r_ranged, ranges):
-    """Rows physically read = each split's rows times the ranges it overlaps (each range
+    """Bytes physically read = each split's bytes times the ranges it overlaps (each range
     reads the whole split and clips). Counts unknown-stats and wide known splits alike."""
     reads = 0
     for ranged in (l_ranged, r_ranged):
         for split, lo, hi in ranged:
             spans = sum(1 for r_lo, r_hi in ranges if _overlaps(lo, hi, r_lo, r_hi))
-            reads += _split_rows(split) * spans
+            reads += _split_bytes(split) * spans
     return reads
 
 
 def _bounded_ranges(l_ranged, r_ranged, num_ranges):
     """Cut into ``num_ranges`` ranges, halving until total re-read <= _REREAD_BUDGET full
-    scans, so poorly clustered input can't cost far more than one scan."""
-    total_rows = sum(_split_rows(s)
-                     for ranged in (l_ranged, r_ranged) for s, _, _ in ranged)
-    budget = _REREAD_BUDGET * max(1, total_rows)
+    scans of bytes, so poorly clustered input can't cost far more than one scan."""
+    total_bytes = sum(_split_bytes(s)
+                      for ranged in (l_ranged, r_ranged) for s, _, _ in ranged)
+    budget = _REREAD_BUDGET * max(1, total_bytes)
     while True:
         ranges = _ranges_from_cuts(_cut_points((l_ranged, r_ranged), num_ranges))
         if num_ranges <= 1 or _total_reads(l_ranged, r_ranged, ranges) <= budget:
@@ -266,6 +307,16 @@ def range_join(
     ltable = get_table(left, catalog_options, None, "range_join")
     rtable = get_table(right, catalog_options, None, "range_join")
 
+    # Partition filters must name partition columns, else they'd be silently ignored
+    # (a non-partition column) and read the whole table.
+    for name, tbl, parts in (("left_partitions", ltable, left_partitions),
+                             ("right_partitions", rtable, right_partitions)):
+        bad = sorted(set(parts) - set(tbl.partition_keys)) if parts else []
+        if bad:
+            raise ValueError(
+                f"range_join {name} keys {bad} are not partition columns; "
+                f"partition columns are {list(tbl.partition_keys)}.")
+
     missing = [c for c in lkeys if c not in ltable.field_dict] \
         + [c for c in rkeys if c not in rtable.field_dict]
     if missing:
@@ -329,11 +380,11 @@ def range_join(
         return _empty()
 
     if num_ranges is None:
-        num_ranges = max(1, min(_MAX_RANGES, max(len(l_ranged), len(r_ranged))))
-    elif num_ranges < 1:
-        raise ValueError(f"num_ranges must be >= 1; got {num_ranges}.")
-    # Reduce ranges until the total re-read (wide known splits + unknown-stats splits,
-    # both read in every range they overlap) stays bounded -- see _bounded_ranges.
+        num_ranges = max(len(l_ranged), len(r_ranged))
+    elif not isinstance(num_ranges, int) or num_ranges < 1:
+        raise ValueError(f"num_ranges must be an int >= 1; got {num_ranges!r}.")
+    num_ranges = max(1, min(_MAX_RANGES, num_ranges))  # cap tasks even when explicit
+    # Reduce ranges until total re-read stays bounded -- see _bounded_ranges.
     ranges = _bounded_ranges(l_ranged, r_ranged, num_ranges)
 
     def _join_range(left_splits, right_splits, lo, hi):

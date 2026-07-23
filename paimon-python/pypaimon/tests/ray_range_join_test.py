@@ -340,15 +340,18 @@ class RayRangeJoinTest(unittest.TestCase):
 
     def test_reread_budget_bounds_wide_and_unknown_splits(self):
         Split = collections.namedtuple("Split", "files")
-        File = collections.namedtuple("File", "row_count")
+        File = collections.namedtuple("File", "row_count file_size")
 
-        def rng(lo, hi, rows=100):
-            return (Split([File(rows)]), lo, hi)
+        def rng(lo, hi, rows=100, size=100):
+            return (Split([File(rows, size)]), lo, hi)
 
-        # _total_reads = rows x ranges a split overlaps.
+        # _total_reads = bytes x ranges a split overlaps.
         self.assertEqual(rjmod._total_reads([rng(0, 10)], [], [(None, 5), (5, None)]), 200)
+        # Budget is bytes, not rows: a wide split (few rows, large files) counts its bytes.
+        wide_row = [rng(0, 10, rows=1, size=1000)]
+        self.assertEqual(rjmod._total_reads(wide_row, [], [(None, 5), (5, None)]), 2000)
         # All-unknown collapses to a single range.
-        unknown = [(Split([File(100)]), None, None)]
+        unknown = [(Split([File(100, 100)]), None, None)]
         self.assertEqual(len(rjmod._bounded_ranges(unknown, unknown, 8)), 1)
         # Wide known splits (each overlaps many ranges) are bounded by the budget.
         wide = [rng(0, 100), rng(0, 100), rng(0, 100), rng(0, 100)]
@@ -411,6 +414,44 @@ class RayRangeJoinTest(unittest.TestCase):
                 num_ranges=num_ranges)
             got = sorted((r["k"], r["row_id"]) for r in ds.take_all())
             self.assertEqual(got, expected)
+
+
+    def test_pk_nonkey_range_col_untrusted(self):
+        # A PK table's non-PK column may be rewritten by merge (aggregation/partial-update)
+        # beyond the footer min/max, so its bounds are untrusted -> every split unknown.
+        schema = pa.schema([("id", pa.int64()), ("g", pa.int64())])
+        self._table("default.rj_agg", schema, [
+            pa.Table.from_pydict({"id": [1, 2], "g": [10, 20]}, schema=schema)],
+            primary_keys=["id"], options={"bucket": "1"})
+        ranged, _ = rjmod._plan_ranged_splits(
+            "default.rj_agg", self.catalog_options, None, "g")
+        self.assertTrue(ranged)
+        self.assertTrue(all(lo is None and hi is None for _, lo, hi in ranged))
+
+    def test_partition_key_validation(self):
+        loc = pa.schema([("k", pa.int64()), ("v", pa.string())])
+        self._table("default.rj_pv", loc, [
+            pa.Table.from_pydict({"k": [1], "v": ["a"]}, schema=loc)])
+        ins = pa.schema([("k", pa.int64())])
+        self._table("default.rj_pv_in", ins, [
+            pa.Table.from_pydict({"k": [1]}, schema=ins)])
+        with self.assertRaises(ValueError):  # not a partition column
+            range_join("default.rj_pv_in", "default.rj_pv", self.catalog_options,
+                       on="k", left_projection=["k"], right_projection=["k", "v"],
+                       right_partitions={"nope": "a"})
+
+    def test_num_ranges_validation(self):
+        loc = pa.schema([("k", pa.int64()), ("v", pa.string())])
+        self._table("default.rj_nr", loc, [
+            pa.Table.from_pydict({"k": [1, 2], "v": ["a", "b"]}, schema=loc)])
+        ins = pa.schema([("k", pa.int64())])
+        self._table("default.rj_nr_in", ins, [
+            pa.Table.from_pydict({"k": [1]}, schema=ins)])
+        for bad in (0, -1, "5", 2.0):
+            with self.assertRaises(ValueError):
+                range_join("default.rj_nr_in", "default.rj_nr", self.catalog_options,
+                           on="k", left_projection=["k"],
+                           right_projection=["k", "v"], num_ranges=bad)
 
 
 if __name__ == "__main__":
