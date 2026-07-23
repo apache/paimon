@@ -307,8 +307,7 @@ def range_join(
     ltable = get_table(left, catalog_options, None, "range_join")
     rtable = get_table(right, catalog_options, None, "range_join")
 
-    # Partition filters must name partition columns, else they'd be silently ignored
-    # (a non-partition column) and read the whole table.
+    # Partition filters must name partition columns, else they'd be silently ignored.
     for name, tbl, parts in (("left_partitions", ltable, left_partitions),
                              ("right_partitions", rtable, right_partitions)):
         bad = sorted(set(parts) - set(tbl.partition_keys)) if parts else []
@@ -331,20 +330,22 @@ def range_join(
             "range_join key columns must have the same type on both sides; "
             f"mismatched (left, right, left type, right type): {type_mismatch}.")
 
-    # The range key is the first pair; reject types that can't be range-partitioned safely.
+    # The range key is the first pair; reject up front (not inside a worker) the types
+    # that can't be range-partitioned safely.
     range_key_type = key_type(ltable, lkeys[0]).upper()
-    if range_key_type.startswith("FLOAT") or range_key_type.startswith("DOUBLE"):
-        # NaN compares false to every bound, so it would fall out of every range while
-        # pyarrow's hash join still matches NaN == NaN -> silently dropped matches.
+    reason = None
+    if range_key_type.startswith(("FLOAT", "DOUBLE")):
+        # NaN falls out of every range while the hash join still matches it -> drops rows.
+        reason = "FLOAT/DOUBLE"
+    elif "LOCAL TIME ZONE" in range_key_type or "TIMESTAMP_LTZ" in range_key_type:
+        # Footer stats decode to naive datetimes; a tz-aware column can't compare to them.
+        reason = "TIMESTAMP WITH LOCAL TIME ZONE"
+    elif "<" in range_key_type:  # ARRAY<>/MAP<>/ROW<>/... -- not orderable/hashable here
+        reason = "a nested/complex type"
+    if reason:
         raise ValueError(
-            f"range_join range key {lkeys[0]!r} must not be FLOAT/DOUBLE (NaN can't be "
-            "range-partitioned); use an integer/string/date key.")
-    if "LOCAL TIME ZONE" in range_key_type:
-        # Manifest stats decode to naive datetimes; a tz-aware Arrow column can't be
-        # compared against them. Not supported yet.
-        raise ValueError(
-            f"range_join range key {lkeys[0]!r} of type TIMESTAMP WITH LOCAL TIME ZONE "
-            "is not supported yet.")
+            f"range_join range key {lkeys[0]!r} must not be {reason}; "
+            "use an integer/string/date/timestamp key.")
 
     # The join keys must survive projection, or the local join has no key.
     if left_projection is not None and not set(lkeys) <= set(left_projection):

@@ -453,6 +453,19 @@ class RayRangeJoinTest(unittest.TestCase):
                            on="k", left_projection=["k"],
                            right_projection=["k", "v"], num_ranges=bad)
 
+    def test_rejects_unrangeable_key_types(self):
+        # Rejected at the driver (not inside a worker): nested and tz-aware keys.
+        arr = pa.schema([("k", pa.list_(pa.int64())), ("v", pa.string())])
+        self._table("default.rj_arr_a", arr, [])
+        self._table("default.rj_arr_b", arr, [])
+        with self.assertRaisesRegex(ValueError, "must not be"):
+            range_join("default.rj_arr_a", "default.rj_arr_b", self.catalog_options, on="k")
+        ltz = pa.schema([("k", pa.timestamp("us", tz="UTC")), ("v", pa.string())])
+        self._table("default.rj_ltz_a", ltz, [])
+        self._table("default.rj_ltz_b", ltz, [])
+        with self.assertRaisesRegex(ValueError, "must not be"):
+            range_join("default.rj_ltz_a", "default.rj_ltz_b", self.catalog_options, on="k")
+
 
 if __name__ == "__main__":
     unittest.main()
