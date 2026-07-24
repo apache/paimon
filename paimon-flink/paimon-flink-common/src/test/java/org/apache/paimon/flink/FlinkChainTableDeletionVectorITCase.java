@@ -328,10 +328,10 @@ public class FlinkChainTableDeletionVectorITCase extends FlinkChainTableITCaseBa
         //   Snapshot@20250808 (anchor): k=1(snap_1), k=2(snap_2), k=3(snap_3)
         //   Delta@20250809 (with anchor merge) changelog: delete k=1, update k=2 to
         // delta_2_updated, insert k=4
-        // Expected lookup matches: k=1(snap_1), k=2(delta_2_updated), k=3(snap_3), k=4(delta_4)
+        // Expected lookup matches: k=1(null), k=2(delta_2_updated), k=3(snap_3), k=4(delta_4)
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        "+I[1, 1, snap_1]",
+                        "+I[1, null, null]",
                         "+I[2, 2, delta_2_updated]",
                         "+I[3, 3, snap_3]",
                         "+I[4, 4, delta_4]");
