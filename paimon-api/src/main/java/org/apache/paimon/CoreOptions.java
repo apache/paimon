@@ -441,6 +441,17 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to automatically infer the shredding schema when writing Variant columns.");
 
+    public static final ConfigOption<VariantShreddingInferenceMode>
+            VARIANT_SHREDDING_INFERENCE_MODE =
+                    key("variant.shredding.inferenceMode")
+                            .enumType(VariantShreddingInferenceMode.class)
+                            .defaultValue(VariantShreddingInferenceMode.PER_FILE)
+                            .withDescription(
+                                    "The Variant shredding inference mode. PER_FILE infers each "
+                                            + "file independently. ADAPTIVE reuses bounded evidence "
+                                            + "within one rolling writer and samples a smaller "
+                                            + "prefix after the first file.");
+
     public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_WIDTH =
             key("variant.shredding.maxSchemaWidth")
                     .intType()
@@ -468,6 +479,23 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(4096)
                     .withDescription("Maximum number of rows to buffer for schema inference.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW =
+            key("variant.shredding.adaptive.maxInferBufferRow")
+                    .intType()
+                    .defaultValue(256)
+                    .withDescription(
+                            "Maximum number of prefix rows sampled after the first file in "
+                                    + "an adaptive Variant shredding inference session.");
+
+    public static final ConfigOption<Double> VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO =
+            key("variant.shredding.adaptive.retentionRatio")
+                    .doubleType()
+                    .defaultValue(0.05)
+                    .withDescription(
+                            "Minimum combined presence ratio for retaining a Variant path selected "
+                                    + "in the previous file. This must not exceed "
+                                    + "'variant.shredding.minFieldCardinalityRatio'.");
 
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
@@ -5402,6 +5430,33 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         MapSharedShreddingColumnPlacementPolicy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Inference mode for Variant shredding schemas. */
+    public enum VariantShreddingInferenceMode implements DescribedEnum {
+        PER_FILE("per-file", "Infer every file independently from its own prefix rows."),
+        ADAPTIVE(
+                "adaptive",
+                "Reuse bounded inference evidence within one rolling writer and correct it with "
+                        + "a smaller prefix from each subsequent file.");
+
+        private final String value;
+        private final String description;
+
+        VariantShreddingInferenceMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

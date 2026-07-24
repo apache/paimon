@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -54,28 +55,41 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             @Nullable FileFormat rowSidecarFormat,
             long targetFileRowNum) {
         super(
-                () -> {
-                    Path dataPath = pathFactory.newPath();
-                    Path rowSidecarPath =
-                            rowSidecarFormat == null
-                                    ? null
-                                    : new Path(dataPath.getParent(), dataPath.getName() + ".row");
-                    return new RowDataFileWriter(
-                            fileIO,
-                            RollingFileWriter.createFileWriterContext(
-                                    fileFormat, writeSchema, statsCollectors, fileCompression),
-                            dataPath,
-                            writeSchema,
-                            schemaId,
-                            seqNumCounterSupplier,
-                            fileIndexOptions,
-                            fileSource,
-                            asyncFileWrite,
-                            statsDenseStore,
-                            pathFactory.isExternalPath(),
-                            writeCols,
-                            rowSidecarFormat,
-                            rowSidecarPath);
+                new Supplier<RowDataFileWriter>() {
+
+                    private final FormatWriterFactory formatWriterFactory =
+                            fileFormat.createWriterFactory(writeSchema);
+
+                    @Override
+                    public RowDataFileWriter get() {
+                        Path dataPath = pathFactory.newPath();
+                        Path rowSidecarPath =
+                                rowSidecarFormat == null
+                                        ? null
+                                        : new Path(
+                                                dataPath.getParent(), dataPath.getName() + ".row");
+                        FileWriterContext writerContext =
+                                new FileWriterContext(
+                                        formatWriterFactory,
+                                        RollingFileWriter.createStatsProducer(
+                                                fileFormat, writeSchema, statsCollectors),
+                                        fileCompression);
+                        return new RowDataFileWriter(
+                                fileIO,
+                                writerContext,
+                                dataPath,
+                                writeSchema,
+                                schemaId,
+                                seqNumCounterSupplier,
+                                fileIndexOptions,
+                                fileSource,
+                                asyncFileWrite,
+                                statsDenseStore,
+                                pathFactory.isExternalPath(),
+                                writeCols,
+                                rowSidecarFormat,
+                                rowSidecarPath);
+                    }
                 },
                 targetFileSize,
                 targetFileRowNum);

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.shredding.ShreddingWritePlan;
 import org.apache.paimon.data.variant.InferVariantShreddingSchema;
+import org.apache.paimon.data.variant.VariantShreddingInferenceSession;
 import org.apache.paimon.data.variant.VariantShreddingWritePlan;
 import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
 import org.apache.paimon.options.Options;
@@ -30,6 +31,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -38,10 +42,25 @@ public class VariantShreddingWritePlanFactory implements ShreddingWritePlanFacto
 
     private final RowType rowType;
     private final Options options;
+    @Nullable private final VariantShreddingInferenceSession adaptiveSession;
+    @Nullable private ShreddingWritePlan pendingAdaptivePlan;
 
     public VariantShreddingWritePlanFactory(RowType rowType, Options options) {
         this.rowType = rowType;
         this.options = options;
+        if (isAdaptiveInference() && shouldInferWritePlan()) {
+            double admissionRatio =
+                    options.get(CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO);
+            this.adaptiveSession =
+                    new VariantShreddingInferenceSession(
+                            createInferrer(),
+                            options.get(
+                                    CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW),
+                            admissionRatio,
+                            options.get(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO));
+        } else {
+            this.adaptiveSession = null;
+        }
     }
 
     @Override
@@ -69,6 +88,9 @@ public class VariantShreddingWritePlanFactory implements ShreddingWritePlanFacto
 
     @Override
     public int inferBufferRowCount() {
+        if (adaptiveSession != null && adaptiveSession.hasPrior()) {
+            return options.get(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW);
+        }
         return options.get(CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW);
     }
 
@@ -79,12 +101,39 @@ public class VariantShreddingWritePlanFactory implements ShreddingWritePlanFacto
                     rowType, configuredShreddingSchema());
         }
 
-        RowType physicalRowType = createInferrer().inferSchema(sampleRows);
-        return new VariantShreddingWritePlan(rowType, physicalRowType);
+        RowType physicalRowType;
+        if (adaptiveSession == null) {
+            physicalRowType = createInferrer().inferSchema(sampleRows);
+        } else {
+            physicalRowType = adaptiveSession.inferSchema(sampleRows);
+        }
+        VariantShreddingWritePlan writePlan =
+                new VariantShreddingWritePlan(rowType, physicalRowType);
+        if (adaptiveSession != null) {
+            pendingAdaptivePlan = writePlan;
+        }
+        return writePlan;
+    }
+
+    @Override
+    public void onFileCompleted(ShreddingWritePlan writePlan) {
+        if (adaptiveSession == null) {
+            return;
+        }
+        Preconditions.checkState(
+                writePlan == pendingAdaptivePlan,
+                "Completed Variant write plan does not match the pending inference.");
+        adaptiveSession.commitPendingInference();
+        pendingAdaptivePlan = null;
     }
 
     private boolean hasConfiguredShreddingSchema() {
         return options.contains(CoreOptions.VARIANT_SHREDDING_SCHEMA);
+    }
+
+    private boolean isAdaptiveInference() {
+        return options.get(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE)
+                == CoreOptions.VariantShreddingInferenceMode.ADAPTIVE;
     }
 
     private RowType configuredShreddingSchema() {

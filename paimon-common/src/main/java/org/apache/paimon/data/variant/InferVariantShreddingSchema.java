@@ -29,6 +29,7 @@ import org.apache.paimon.types.VariantType;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,34 +61,164 @@ public class InferVariantShreddingSchema {
 
     /** Infer schema from a list of rows. */
     public RowType inferSchema(List<InternalRow> rows) {
+        return inferInitial(rows, Integer.MAX_VALUE).physicalRowType();
+    }
+
+    AdaptiveInferenceResult inferInitial(List<InternalRow> rows, int effectiveSampleSize) {
+        InferenceEvidence evidence = analyze(rows);
         MaxFields maxFields = new MaxFields(maxSchemaWidth);
         Map<List<Integer>, RowType> inferredSchemas = new HashMap<>();
+        Map<List<Integer>, DataType> selectedSchemas = new HashMap<>();
 
         for (List<Integer> path : pathsToVariant) {
-            int numNonNullValues = 0;
-            DataType simpleSchema = null;
-
-            for (InternalRow row : rows) {
-                Variant variant = getValueAtPath(schema, row, path);
-                if (variant != null) {
-                    numNonNullValues++;
-                    GenericVariant v = (GenericVariant) variant;
-                    DataType schemaOfRow = schemaOf(v, maxSchemaDepth);
-                    simpleSchema = mergeSchema(simpleSchema, schemaOfRow);
-                }
-            }
+            ColumnEvidence column = evidence.columns.get(path);
+            double numNonNullValues = column == null ? 0 : column.rootValueCount;
+            DataType simpleSchema = column == null ? null : column.observedSchema;
 
             // Don't infer a schema for fields that appear in less than minFieldCardinalityRatio
             int minCardinality = (int) Math.ceil(numNonNullValues * minFieldCardinalityRatio);
 
             DataType finalizedSchema =
                     finalizeSimpleSchema(simpleSchema, minCardinality, maxFields);
+            selectedSchemas.put(path, finalizedSchema);
             RowType shreddingSchema = PaimonShreddingUtils.variantShreddingSchema(finalizedSchema);
             inferredSchemas.put(path, shreddingSchema);
         }
 
         // Insert each inferred schema into the full schema
-        return updateSchema(schema, inferredSchemas, new ArrayList<>());
+        return new AdaptiveInferenceResult(
+                updateSchema(schema, inferredSchemas, new ArrayList<>()),
+                limitEvidence(evidence, effectiveSampleSize),
+                selectedSchemas);
+    }
+
+    InferenceEvidence analyze(List<InternalRow> rows) {
+        Map<List<Integer>, ColumnEvidence> columns = new HashMap<>();
+        for (List<Integer> path : pathsToVariant) {
+            double rootValueCount = 0;
+            DataType observedSchema = null;
+            for (InternalRow row : rows) {
+                Variant variant = getValueAtPath(schema, row, path);
+                if (variant != null) {
+                    rootValueCount++;
+                    observedSchema =
+                            mergeSchema(
+                                    observedSchema,
+                                    schemaOf((GenericVariant) variant, maxSchemaDepth));
+                }
+            }
+            columns.put(path, new ColumnEvidence(rootValueCount, observedSchema));
+        }
+        return new InferenceEvidence(columns);
+    }
+
+    AdaptiveInferenceResult inferAdaptive(
+            InferenceEvidence previousEvidence,
+            Map<List<Integer>, DataType> previousSelectedSchemas,
+            List<InternalRow> rows,
+            int effectiveSampleSize,
+            double admissionRatio,
+            double retentionRatio) {
+        InferenceEvidence currentEvidence = analyze(rows);
+        InferenceEvidence combinedEvidence =
+                combineEvidence(previousEvidence, currentEvidence, effectiveSampleSize);
+        MaxFields maxFields = new MaxFields(maxSchemaWidth);
+        Map<List<Integer>, RowType> shreddingSchemas = new HashMap<>();
+        Map<List<Integer>, DataType> selectedSchemas = new HashMap<>();
+
+        for (List<Integer> path : pathsToVariant) {
+            ColumnEvidence combined = combinedEvidence.columns.get(path);
+            ColumnEvidence current = currentEvidence.columns.get(path);
+            DataType previousSelected = previousSelectedSchemas.get(path);
+            DataType selected =
+                    finalizeAdaptiveSchema(
+                            combined == null ? null : combined.observedSchema,
+                            current == null ? null : current.observedSchema,
+                            previousSelected,
+                            combined == null ? 0 : combined.rootValueCount,
+                            admissionRatio,
+                            retentionRatio,
+                            maxFields);
+            selectedSchemas.put(path, selected);
+            shreddingSchemas.put(path, PaimonShreddingUtils.variantShreddingSchema(selected));
+        }
+
+        return new AdaptiveInferenceResult(
+                updateSchema(schema, shreddingSchemas, new ArrayList<>()),
+                combinedEvidence,
+                selectedSchemas);
+    }
+
+    private InferenceEvidence combineEvidence(
+            InferenceEvidence previous, InferenceEvidence current, int effectiveSampleSize) {
+        Map<List<Integer>, ColumnEvidence> columns = new HashMap<>();
+        for (List<Integer> path : pathsToVariant) {
+            ColumnEvidence previousColumn = previous == null ? null : previous.columns.get(path);
+            ColumnEvidence currentColumn = current.columns.get(path);
+            if (currentColumn == null || currentColumn.rootValueCount == 0) {
+                if (previousColumn != null) {
+                    columns.put(path, previousColumn);
+                } else {
+                    columns.put(path, new ColumnEvidence(0, null));
+                }
+                continue;
+            }
+
+            ColumnEvidence boundedPrevious = scaleToAtMost(previousColumn, effectiveSampleSize);
+            double rootValueCount =
+                    currentColumn.rootValueCount
+                            + (boundedPrevious == null ? 0 : boundedPrevious.rootValueCount);
+            DataType observedSchema =
+                    mergeSchema(
+                            boundedPrevious == null ? null : boundedPrevious.observedSchema,
+                            currentColumn.observedSchema);
+            columns.put(
+                    path,
+                    scaleToAtMost(
+                            new ColumnEvidence(rootValueCount, observedSchema),
+                            effectiveSampleSize));
+        }
+        return new InferenceEvidence(columns);
+    }
+
+    private InferenceEvidence limitEvidence(InferenceEvidence evidence, int effectiveSampleSize) {
+        Map<List<Integer>, ColumnEvidence> columns = new HashMap<>();
+        for (Map.Entry<List<Integer>, ColumnEvidence> entry : evidence.columns.entrySet()) {
+            columns.put(entry.getKey(), scaleToAtMost(entry.getValue(), effectiveSampleSize));
+        }
+        return new InferenceEvidence(columns);
+    }
+
+    private ColumnEvidence scaleToAtMost(ColumnEvidence evidence, int maxRootValueCount) {
+        if (evidence == null
+                || evidence.rootValueCount == 0
+                || evidence.rootValueCount <= maxRootValueCount) {
+            return evidence;
+        }
+        double scale = maxRootValueCount / evidence.rootValueCount;
+        return new ColumnEvidence(
+                maxRootValueCount, scaleFieldCounts(evidence.observedSchema, scale));
+    }
+
+    private DataType scaleFieldCounts(DataType dataType, double scale) {
+        if (dataType instanceof RowType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : ((RowType) dataType).getFields()) {
+                fields.add(
+                        new DataField(
+                                field.id(),
+                                field.name(),
+                                scaleFieldCounts(field.type(), scale),
+                                String.valueOf(getFieldCount(field) * scale)));
+            }
+            return new RowType(dataType.isNullable(), fields);
+        }
+        if (dataType instanceof ArrayType) {
+            ArrayType arrayType = (ArrayType) dataType;
+            return new ArrayType(
+                    arrayType.isNullable(), scaleFieldCounts(arrayType.getElementType(), scale));
+        }
+        return dataType;
     }
 
     /**
@@ -255,7 +386,7 @@ public class InferVariantShreddingSchema {
         }
     }
 
-    private long getFieldCount(DataField field) {
+    private double getFieldCount(DataField field) {
         // Read count from description field
         String desc = field.description();
         if (desc == null || desc.isEmpty()) {
@@ -264,7 +395,7 @@ public class InferVariantShreddingSchema {
                             "Field '%s' is missing count in description. This should not happen during schema inference.",
                             field.name()));
         }
-        return Long.parseLong(desc);
+        return Double.parseDouble(desc);
     }
 
     /** Merge two decimals with possibly different scales. */
@@ -338,8 +469,8 @@ public class InferVariantShreddingSchema {
 
             if (comp == 0) {
                 DataType dataType = mergeSchema(field1.type(), field2.type());
-                long c1 = getFieldCount(field1);
-                long c2 = getFieldCount(field2);
+                double c1 = getFieldCount(field1);
+                double c2 = getFieldCount(field2);
                 // Store count in description
                 DataField newField =
                         new DataField(nextFieldId++, f1Name, dataType, String.valueOf(c1 + c2));
@@ -347,14 +478,14 @@ public class InferVariantShreddingSchema {
                 f1Idx++;
                 f2Idx++;
             } else if (comp < 0) {
-                long count = getFieldCount(field1);
+                double count = getFieldCount(field1);
                 DataField newField =
                         new DataField(
                                 nextFieldId++, field1.name(), field1.type(), String.valueOf(count));
                 newFields.add(newField);
                 f1Idx++;
             } else {
-                long count = getFieldCount(field2);
+                double count = getFieldCount(field2);
                 DataField newField =
                         new DataField(
                                 nextFieldId++, field2.name(), field2.type(), String.valueOf(count));
@@ -365,7 +496,7 @@ public class InferVariantShreddingSchema {
 
         while (f1Idx < fields1.size() && newFields.size() < maxRowFieldSize) {
             DataField field1 = fields1.get(f1Idx);
-            long count = getFieldCount(field1);
+            double count = getFieldCount(field1);
             DataField newField =
                     new DataField(
                             nextFieldId++, field1.name(), field1.type(), String.valueOf(count));
@@ -375,7 +506,7 @@ public class InferVariantShreddingSchema {
 
         while (f2Idx < fields2.size() && newFields.size() < maxRowFieldSize) {
             DataField field2 = fields2.get(f2Idx);
-            long count = getFieldCount(field2);
+            double count = getFieldCount(field2);
             DataField newField =
                     new DataField(
                             nextFieldId++, field2.name(), field2.type(), String.valueOf(count));
@@ -420,12 +551,226 @@ public class InferVariantShreddingSchema {
         return new RowType(newFields);
     }
 
+    private DataType finalizeAdaptiveSchema(
+            DataType combined,
+            DataType current,
+            DataType previousSelected,
+            double rootValueCount,
+            double admissionRatio,
+            double retentionRatio,
+            MaxFields maxFields) {
+        maxFields.remaining--;
+        if (maxFields.remaining <= 0) {
+            return DataTypes.VARIANT();
+        }
+
+        if (current != null
+                && previousSelected != null
+                && !compatibleTypeFamilies(previousSelected, current)) {
+            combined = current;
+            previousSelected = null;
+        }
+        if (combined == null || combined instanceof VariantType) {
+            if (current != null && !(current instanceof VariantType)) {
+                combined = current;
+            } else if (previousSelected != null) {
+                combined = previousSelected;
+            } else {
+                return DataTypes.VARIANT();
+            }
+        }
+
+        if (combined instanceof RowType) {
+            RowType combinedRow = (RowType) combined;
+            RowType currentRow = current instanceof RowType ? (RowType) current : null;
+            RowType previousRow =
+                    previousSelected instanceof RowType ? (RowType) previousSelected : null;
+            List<DataField> candidates = new ArrayList<>();
+            for (DataField field : combinedRow.getFields()) {
+                DataField previousField = findField(previousRow, field.name());
+                double threshold = previousField == null ? admissionRatio : retentionRatio;
+                double ratio = rootValueCount == 0 ? 0 : getFieldCount(field) / rootValueCount;
+                if (ratio >= threshold) {
+                    candidates.add(field);
+                }
+            }
+            candidates.sort(
+                    Comparator.comparingDouble(
+                                    (DataField field) ->
+                                            rootValueCount == 0
+                                                    ? 0
+                                                    : getFieldCount(field) / rootValueCount)
+                            .reversed()
+                            .thenComparing(field -> findField(previousRow, field.name()) == null)
+                            .thenComparing(DataField::name));
+
+            List<DataField> selected = new ArrayList<>();
+            for (DataField field : candidates) {
+                if (maxFields.remaining <= 0) {
+                    break;
+                }
+                DataField currentField = findField(currentRow, field.name());
+                DataField previousField = findField(previousRow, field.name());
+                DataType selectedType =
+                        finalizeAdaptiveSchema(
+                                field.type(),
+                                currentField == null ? null : currentField.type(),
+                                previousField == null ? null : previousField.type(),
+                                rootValueCount,
+                                admissionRatio,
+                                retentionRatio,
+                                maxFields);
+                selected.add(new DataField(0, field.name(), selectedType));
+            }
+            selected.sort(Comparator.comparing(DataField::name));
+            List<DataField> fields = new ArrayList<>();
+            for (int i = 0; i < selected.size(); i++) {
+                DataField field = selected.get(i);
+                fields.add(new DataField(i, field.name(), field.type()));
+            }
+            return fields.isEmpty() ? DataTypes.VARIANT() : new RowType(fields);
+        }
+
+        if (combined instanceof ArrayType) {
+            ArrayType combinedArray = (ArrayType) combined;
+            DataType currentElement =
+                    current instanceof ArrayType ? ((ArrayType) current).getElementType() : null;
+            DataType previousElement =
+                    previousSelected instanceof ArrayType
+                            ? ((ArrayType) previousSelected).getElementType()
+                            : null;
+            return new ArrayType(
+                    finalizeAdaptiveSchema(
+                            combinedArray.getElementType(),
+                            currentElement,
+                            previousElement,
+                            rootValueCount,
+                            admissionRatio,
+                            retentionRatio,
+                            maxFields));
+        }
+
+        maxFields.remaining--;
+        return selectScalarType(combined, current, previousSelected);
+    }
+
+    private DataType selectScalarType(
+            DataType combined, DataType current, DataType previousSelected) {
+        if (current == null) {
+            return previousSelected == null ? combined : previousSelected;
+        }
+        if (previousSelected == null) {
+            return widenScalarType(current);
+        }
+
+        DataType merged = mergeScalarTypes(previousSelected, current);
+        return merged instanceof VariantType ? widenScalarType(current) : merged;
+    }
+
+    private boolean compatibleTypeFamilies(DataType previous, DataType current) {
+        if (previous instanceof RowType || current instanceof RowType) {
+            return previous instanceof RowType && current instanceof RowType;
+        }
+        if (previous instanceof ArrayType || current instanceof ArrayType) {
+            return previous instanceof ArrayType && current instanceof ArrayType;
+        }
+        return !(mergeScalarTypes(previous, current) instanceof VariantType);
+    }
+
+    private DataType mergeScalarTypes(DataType first, DataType second) {
+        if (first instanceof DecimalType && second instanceof DecimalType) {
+            return mergeDecimal((DecimalType) first, (DecimalType) second);
+        }
+        if (first instanceof DecimalType
+                && second.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BIGINT) {
+            return mergeDecimalWithLong((DecimalType) first);
+        }
+        if (first.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BIGINT
+                && second instanceof DecimalType) {
+            return mergeDecimalWithLong((DecimalType) second);
+        }
+        return first.equals(second) ? first : DataTypes.VARIANT();
+    }
+
+    private DataType widenScalarType(DataType dataType) {
+        if (dataType instanceof DecimalType) {
+            DecimalType decimalType = (DecimalType) dataType;
+            if (decimalType.getPrecision() <= 18 && decimalType.getScale() == 0) {
+                return DataTypes.BIGINT();
+            }
+            return decimalType.getPrecision() <= 18
+                    ? DataTypes.DECIMAL(18, decimalType.getScale())
+                    : DataTypes.DECIMAL(DecimalType.MAX_PRECISION, decimalType.getScale());
+        }
+        return dataType;
+    }
+
+    private DataField findField(RowType rowType, String fieldName) {
+        if (rowType == null) {
+            return null;
+        }
+        for (DataField field : rowType.getFields()) {
+            if (field.name().equals(fieldName)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
     /** Container for a mutable integer to track the total number of shredded fields. */
     private static class MaxFields {
         int remaining;
 
         MaxFields(int remaining) {
             this.remaining = remaining;
+        }
+    }
+
+    static final class InferenceEvidence {
+
+        private final Map<List<Integer>, ColumnEvidence> columns;
+
+        private InferenceEvidence(Map<List<Integer>, ColumnEvidence> columns) {
+            this.columns = columns;
+        }
+    }
+
+    private static final class ColumnEvidence {
+
+        private final double rootValueCount;
+        private final DataType observedSchema;
+
+        private ColumnEvidence(double rootValueCount, DataType observedSchema) {
+            this.rootValueCount = rootValueCount;
+            this.observedSchema = observedSchema;
+        }
+    }
+
+    static final class AdaptiveInferenceResult {
+
+        private final RowType physicalRowType;
+        private final InferenceEvidence evidence;
+        private final Map<List<Integer>, DataType> selectedSchemas;
+
+        private AdaptiveInferenceResult(
+                RowType physicalRowType,
+                InferenceEvidence evidence,
+                Map<List<Integer>, DataType> selectedSchemas) {
+            this.physicalRowType = physicalRowType;
+            this.evidence = evidence;
+            this.selectedSchemas = selectedSchemas;
+        }
+
+        RowType physicalRowType() {
+            return physicalRowType;
+        }
+
+        InferenceEvidence evidence() {
+            return evidence;
+        }
+
+        Map<List<Integer>, DataType> selectedSchemas() {
+            return selectedSchemas;
         }
     }
 

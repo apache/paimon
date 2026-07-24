@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,6 +44,7 @@ class ShreddingFormatWriterTest {
                 new ShreddingFormatWriter(
                         delegate,
                         new ThrowingMetadataFactory(failure),
+                        NoOpWritePlan.INSTANCE,
                         NoOpWritePlan.INSTANCE,
                         "none");
 
@@ -90,7 +92,7 @@ class ShreddingFormatWriterTest {
         }
     }
 
-    private enum NoOpWritePlan implements ShreddingWritePlan {
+    private enum NoOpWritePlan implements ShreddingWritePlan, ShreddingWritePlanFactory {
         INSTANCE;
 
         private final RowType rowType = new RowType(Collections.emptyList());
@@ -108,6 +110,26 @@ class ShreddingFormatWriterTest {
         @Override
         public InternalRow toPhysicalRow(InternalRow row) {
             return row;
+        }
+
+        @Override
+        public boolean shouldCreateWritePlan() {
+            return true;
+        }
+
+        @Override
+        public boolean shouldInferWritePlan() {
+            return false;
+        }
+
+        @Override
+        public int inferBufferRowCount() {
+            return 0;
+        }
+
+        @Override
+        public ShreddingWritePlan createWritePlan(List<InternalRow> sampleRows) {
+            return this;
         }
     }
 }

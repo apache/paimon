@@ -218,7 +218,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         assertThat(files.get(0).dataFile.fileSource()).hasValue(FileSource.COMPACT);
         MapSharedShreddingFieldMeta compactedMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
-        assertThat(compactedMeta.numColumns()).isEqualTo(2);
+        assertThat(compactedMeta.numColumns()).isEqualTo(64);
         assertThat(compactedMeta.maxRowWidth()).isEqualTo(4);
         assertThat(compactedMeta.nameToId()).containsOnlyKeys("a", "b", "c", "d", "e", "f", "g");
 
@@ -381,14 +381,21 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet"})
-    public void testInferColumnCountFromFirstRowOfEachFile(String format) throws Exception {
+    public void testAdaptColumnCountAcrossRollingFiles(String format) throws Exception {
         Table table = createTableWithBucket(format, 8, "1", "metrics");
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(
+                        SchemaChange.setOption(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2")),
+                false);
+        table = catalog.getTable(identifier(format));
 
         write(
                 table,
                 GenericRow.of(1, mapOf("a", 11L, "b", 12L)),
-                GenericRow.of(2, mapOf("c", 21L, "d", 22L, "e", 23L)));
-        write(table, GenericRow.of(3, mapOf("f", 31L)));
+                GenericRow.of(2, mapOf("c", 21L, "d", 22L, "e", 23L)),
+                GenericRow.of(3, mapOf("f", 31L)),
+                GenericRow.of(4, mapOf("g", 41L, "h", 42L)));
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
@@ -397,13 +404,13 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
         MapSharedShreddingFieldMeta firstFileMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
-        assertThat(firstFileMeta.numColumns()).isEqualTo(2);
+        assertThat(firstFileMeta.numColumns()).isEqualTo(8);
         assertThat(firstFileMeta.maxRowWidth()).isEqualTo(3);
 
         MapSharedShreddingFieldMeta secondFileMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(1), "metrics");
-        assertThat(secondFileMeta.numColumns()).isEqualTo(1);
-        assertThat(secondFileMeta.maxRowWidth()).isEqualTo(1);
+        assertThat(secondFileMeta.numColumns()).isEqualTo(3);
+        assertThat(secondFileMeta.maxRowWidth()).isEqualTo(2);
 
         Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
         for (InternalRow row : read(table)) {
@@ -413,7 +420,8 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         assertThat(actual)
                 .containsEntry(1, javaMapOf("a", 11L, "b", 12L))
                 .containsEntry(2, javaMapOf("c", 21L, "d", 22L, "e", 23L))
-                .containsEntry(3, javaMapOf("f", 31L));
+                .containsEntry(3, javaMapOf("f", 31L))
+                .containsEntry(4, javaMapOf("g", 41L, "h", 42L));
     }
 
     @ParameterizedTest
@@ -690,8 +698,8 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
     @ParameterizedTest
     @CsvSource({"orc,false", "orc,true", "parquet,false", "parquet,true"})
-    public void testPrimaryKeyInfersColumnCountPerFile(String format, boolean thinMode)
-            throws Exception {
+    public void testPrimaryKeyStartsNewRollingWriterWithMaxColumnCount(
+            String format, boolean thinMode) throws Exception {
         Table table = createPrimaryKeyTable(format, thinMode, 8);
 
         write(table, GenericRow.of(1, mapOf("a", 11L, "b", 12L)));
@@ -704,12 +712,12 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
         MapSharedShreddingFieldMeta firstFileMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(0), "metrics");
-        assertThat(firstFileMeta.numColumns()).isEqualTo(2);
+        assertThat(firstFileMeta.numColumns()).isEqualTo(8);
         assertThat(firstFileMeta.maxRowWidth()).isEqualTo(2);
 
         MapSharedShreddingFieldMeta secondFileMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(1), "metrics");
-        assertThat(secondFileMeta.numColumns()).isEqualTo(1);
+        assertThat(secondFileMeta.numColumns()).isEqualTo(8);
         assertThat(secondFileMeta.maxRowWidth()).isEqualTo(1);
 
         Map<Integer, Map<String, Long>> actual = new LinkedHashMap<>();
@@ -754,7 +762,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
         MapSharedShreddingFieldMeta metricsMeta =
                 readSharedShreddingFieldMeta(fileStoreTable, files.get(1), "metrics");
-        assertThat(metricsMeta.numColumns()).isEqualTo(1);
+        assertThat(metricsMeta.numColumns()).isEqualTo(3);
         assertThat(metricsMeta.maxRowWidth()).isEqualTo(1);
 
         Map<Integer, List<Map<String, Long>>> actual = new LinkedHashMap<>();
