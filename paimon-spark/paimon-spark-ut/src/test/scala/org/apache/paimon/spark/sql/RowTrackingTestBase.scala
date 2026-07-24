@@ -1223,6 +1223,18 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Row Tracking: query row_tracking system table with row id filter") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
+
+      checkAnswer(
+        sql("SELECT a, b, _ROW_ID FROM `t$row_tracking` WHERE _ROW_ID = 0"),
+        Seq(Row(1, 10, 0))
+      )
+    }
+  }
+
   test("Data Evolution: compact fields action") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT)")
