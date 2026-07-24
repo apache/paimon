@@ -24,9 +24,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -37,9 +43,12 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -766,5 +775,146 @@ public class ChainTableUtilsTest {
         assertThat(matched2).isNotNull();
         assertThat(getString(matched2, 0)).isEqualTo("20250809");
         assertThat(getString(matched2, 1)).isEqualTo("02");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithKeyRangeSplitting() {
+        // Single bucket. Snapshot files S1=[a,b], S2=[m,n]; delta files D1=[a,b] (overlaps S1),
+        // D2=[m,n] (overlaps S2). The two sections are key-disjoint, so they form two splits;
+        // within each section the overlapping snapshot and delta files must stay together so that
+        // all versions of a key are merged in the same split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        String snapBranch = "snap";
+        String deltaBranch = "delta";
+
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        // Small targetSplitSize so each section forms its own split.
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        snapBranch,
+                        deltaBranch,
+                        KEY_COMPARATOR,
+                        1L,
+                        1L);
+
+        assertThat(splits).hasSize(2);
+
+        List<Set<String>> groups =
+                splits.stream().map(ChainTableUtilsTest::fileNames).collect(Collectors.toList());
+        // Overlapping files are kept together: {S1,D1} and {S2,D2}, never mixed.
+        assertThat(groups)
+                .containsExactlyInAnyOrder(
+                        new HashSet<>(Arrays.asList("S1", "D1")),
+                        new HashSet<>(Arrays.asList("S2", "D2")));
+
+        // Branch tagging is preserved per file across the resulting splits.
+        ChainSplit s1Split =
+                splits.stream().filter(s -> fileNames(s).contains("S1")).findFirst().get();
+        assertThat(s1Split.fileBranchMapping().get("S1")).isEqualTo(snapBranch);
+        assertThat(s1Split.fileBranchMapping().get("D1")).isEqualTo(deltaBranch);
+        ChainSplit s2Split =
+                splits.stream().filter(s -> fileNames(s).contains("S2")).findFirst().get();
+        assertThat(s2Split.fileBranchMapping().get("S2")).isEqualTo(snapBranch);
+        assertThat(s2Split.fileBranchMapping().get("D2")).isEqualTo(deltaBranch);
+    }
+
+    @Test
+    public void testBuildChainSplitsKeyRangeSplittingLargeTargetKeepsOneSplit() {
+        // With a large targetSplitSize all key-disjoint sections are packed into a single split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        KEY_COMPARATOR,
+                        Long.MAX_VALUE,
+                        1L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "S2", "D1", "D2");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithoutKeyRangeSplitting() {
+        // A null keyComparator keeps the original one-split-per-bucket behavior (used by
+        // streaming).
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        null,
+                        0L,
+                        0L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "D1");
+    }
+
+    private static DataFileMeta makeFile(String name, String min, String max, long size) {
+        return DataFileMeta.create(
+                name,
+                size,
+                10L,
+                row(Lists.newArrayList(min)),
+                row(Lists.newArrayList(max)),
+                StatsTestUtils.newEmptySimpleStats(),
+                StatsTestUtils.newEmptySimpleStats(),
+                0L,
+                9L,
+                0L,
+                0,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(1000L),
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static DataSplit dataSplit(BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        return DataSplit.builder()
+                .withPartition(partition)
+                .withBucket(bucket)
+                .withBucketPath("bucket_" + bucket)
+                .withTotalBuckets(1)
+                .withDataFiles(files)
+                .build();
+    }
+
+    private static Set<String> fileNames(ChainSplit split) {
+        return split.dataFiles().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
     }
 }
