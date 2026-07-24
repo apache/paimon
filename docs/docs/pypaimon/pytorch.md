@@ -59,6 +59,24 @@ when it is false, it will read the full amount of data into memory.
 
 **`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
 
+## File Format Metadata Cache
+
+Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
+size limit with:
+
+```python
+table = table.copy({
+    "file-format.metadata-cache.max-size": "50 mb",
+})
+read_builder = table.new_read_builder()
+```
+
+The default limit is 50 MB; set it to `0 b` to bypass the cache. The cache is
+local to each process and benefits workers reused with
+`DataLoader(..., persistent_workers=True)`. The limit estimates retained metadata
+size, so actual memory usage may be higher. The cache assumes immutable Paimon
+data files.
+
 ## Shuffle
 
 PyPaimon supports streaming shuffle for PyTorch `IterableDataset`. The shuffle

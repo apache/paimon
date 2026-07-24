@@ -15,7 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict, List, Optional
+import os
+import threading
+from collections import OrderedDict
+from concurrent.futures import Future
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -34,6 +38,159 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 
 
+class _FilesystemIdentity:
+    def __init__(self, filesystem):
+        self.filesystem = filesystem
+
+    def __hash__(self):
+        return id(self.filesystem)
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _FilesystemIdentity)
+            and self.filesystem is other.filesystem
+        )
+
+
+class _FileFormatDatasetCache:
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self.estimated_size = 0
+        self._entries = OrderedDict()
+        self._loads = {}
+        self._lock = threading.Lock()
+
+    def get_or_load(self, key: Tuple[Any, str, str], loader: Callable[[], Any],
+                    size_estimator: Callable[[Any], Optional[int]]):
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None:
+                self._entries.move_to_end(key)
+                return entry[0]
+
+            future = self._loads.get(key)
+            if future is None:
+                future = Future()
+                self._loads[key] = future
+                should_load = True
+            else:
+                should_load = False
+
+        if not should_load:
+            return future.result()
+
+        try:
+            dataset = loader()
+            estimated_size = size_estimator(dataset)
+        except BaseException as exception:
+            future.set_exception(exception)
+            with self._lock:
+                self._loads.pop(key, None)
+            raise
+
+        with self._lock:
+            if estimated_size is not None:
+                estimated_size = max(1, estimated_size)
+                self._entries[key] = (dataset, estimated_size)
+                self.estimated_size += estimated_size
+                self._entries.move_to_end(key)
+                while self.estimated_size > self.max_size:
+                    _, (_, evicted_size) = self._entries.popitem(last=False)
+                    self.estimated_size -= evicted_size
+        future.set_result(dataset)
+        with self._lock:
+            self._loads.pop(key, None)
+        return dataset
+
+    def ensure_capacity(self, max_size: int):
+        with self._lock:
+            self.max_size = max(self.max_size, max_size)
+
+    def remove(self, key: Tuple[Any, str, str]):
+        with self._lock:
+            entry = self._entries.pop(key, None)
+            if entry is not None:
+                self.estimated_size -= entry[1]
+
+
+_FILE_FORMAT_DATASET_CACHE = None
+_FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+_FILE_FORMAT_DATASET_CACHE_PID = os.getpid()
+
+
+def _ensure_file_format_dataset_cache_process():
+    global _FILE_FORMAT_DATASET_CACHE
+    global _FILE_FORMAT_DATASET_CACHE_LOCK
+    global _FILE_FORMAT_DATASET_CACHE_PID
+    current_pid = os.getpid()
+    if current_pid != _FILE_FORMAT_DATASET_CACHE_PID:
+        _FILE_FORMAT_DATASET_CACHE = None
+        _FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+        _FILE_FORMAT_DATASET_CACHE_PID = current_pid
+
+
+def _file_format_dataset_cache(max_size: int) -> _FileFormatDatasetCache:
+    global _FILE_FORMAT_DATASET_CACHE
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        if _FILE_FORMAT_DATASET_CACHE is None:
+            _FILE_FORMAT_DATASET_CACHE = _FileFormatDatasetCache(max_size)
+        else:
+            _FILE_FORMAT_DATASET_CACHE.ensure_capacity(max_size)
+        return _FILE_FORMAT_DATASET_CACHE
+
+
+def _reset_file_format_dataset_cache():
+    global _FILE_FORMAT_DATASET_CACHE
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        _FILE_FORMAT_DATASET_CACHE = None
+
+
+def _remove_file_format_dataset_cache_entry(key: Tuple[Any, str, str]):
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        cache = _FILE_FORMAT_DATASET_CACHE
+    if cache is not None:
+        cache.remove(key)
+
+
+def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[int]:
+    try:
+        if file_format == 'parquet':
+            footer_size = 0
+            for fragment in dataset.get_fragments():
+                metadata = fragment.metadata
+                if metadata is not None:
+                    footer_size += int(metadata.serialized_size)
+            if footer_size > 0:
+                return footer_size
+        return int(dataset.schema.serialize().size)
+    except Exception:
+        return None
+
+
+def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
+                         cache_max_size: int):
+    file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+    filesystem = file_io.filesystem
+
+    def load():
+        return ds.dataset(
+            file_path_for_pyarrow, format=file_format, filesystem=filesystem)
+
+    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
+    if cache_max_size <= 0:
+        _remove_file_format_dataset_cache_entry(key)
+        return load()
+
+    return _file_format_dataset_cache(cache_max_size).get_or_load(
+        key,
+        load,
+        lambda dataset: _estimate_file_format_dataset_size(
+            dataset, file_format))
+
+
 class FormatPyArrowReader(RecordBatchReader):
     """
     A Format Reader that reads record batch from a Parquet or ORC file using PyArrow,
@@ -49,8 +206,12 @@ class FormatPyArrowReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  options: CoreOptions = None,
                  nested_name_paths: Optional[List[List[str]]] = None):
-        file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        cache_max_size = (
+            options.file_format_metadata_cache_max_size().get_bytes()
+            if options is not None else 50 * 1024 * 1024
+        )
+        self.dataset = _file_format_dataset(
+            file_io, file_format, file_path, cache_max_size)
         self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
