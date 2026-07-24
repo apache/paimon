@@ -29,6 +29,7 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendBatchTableScan;
@@ -179,6 +180,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public LocalTableQuery newLocalTableQuery() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public DataFileTableQuery newDataFileTableQuery() {
         throw new UnsupportedOperationException();
     }
 }

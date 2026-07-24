@@ -31,6 +31,7 @@ import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataTableScan;
@@ -191,6 +192,11 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public LocalTableQuery newLocalTableQuery() {
         return new LocalTableQuery(this);
+    }
+
+    @Override
+    public DataFileTableQuery newDataFileTableQuery() {
+        return new DataFileTableQuery(this);
     }
 
     @Override
