@@ -67,6 +67,79 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         cls.catalog.create_database('default', True)
 
+    def test_read_java_dynamic_bucket_hash_index(self):
+        table = self.catalog.get_table(
+            'default.dynamic_hash_java_to_python'
+        )
+        read_builder = table.new_read_builder()
+        initial = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(
+            {
+                'key1': ['hello-java'],
+                'key2': [42],
+                'value': ['java-old'],
+            },
+            initial.to_pydict(),
+        )
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['python-only', 'hello-java'],
+            'key2': pa.array([7, 42], type=pa.int64()),
+            'value': ['python-only', 'python-new'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        read_builder = table.new_read_builder()
+        result = table_sort_by(read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ), 'key1')
+        self.assertEqual(
+            {
+                'key1': ['hello-java', 'python-only'],
+                'key2': [42, 7],
+                'value': ['python-new', 'python-only'],
+            },
+            result.to_pydict(),
+        )
+
+    def test_py_write_dynamic_bucket_hash_index(self):
+        table_name = 'default.dynamic_hash_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([
+                pa.field('key1', pa.string()),
+                pa.field('key2', pa.int64()),
+                pa.field('value', pa.string()),
+            ]),
+            primary_keys=['key1', 'key2'],
+            options={
+                'bucket': '-1',
+                'dynamic-bucket.target-row-num': '1',
+                'file.format': 'parquet',
+            },
+        )
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['hello-java', 'python-only'],
+            'key2': pa.array([42, 7], type=pa.int64()),
+            'value': ['python-old', 'python-only'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
         pa_schema = pa.schema([

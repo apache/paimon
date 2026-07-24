@@ -34,6 +34,7 @@ class CommitMessage:
     index_adds: List['IndexManifestEntry'] = field(default_factory=list)
     index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
     changelog_files: List[DataFileMeta] = field(default_factory=list)
+    hash_index_base_snapshot: Optional[int] = None
 
     def is_empty(self):
         return (
