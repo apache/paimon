@@ -145,10 +145,22 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     protocol = PROTOCOL_NAME
 
+    @staticmethod
+    def _contains_user_agent(options: Options) -> bool:
+        if options.contains(CatalogOptions.HTTP_USER_AGENT_HEADER):
+            return True
+        header_prefix = RESTApi.HEADER_PREFIX
+        user_agent_header = RESTApi.USER_AGENT_HEADER.lower()
+        return any(
+            key.startswith(header_prefix)
+            and key[len(header_prefix):].lower() == user_agent_header
+            for key in options.to_map()
+        )
+
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        if not options.contains(CatalogOptions.HTTP_USER_AGENT_HEADER):
+        if not self._contains_user_agent(options):
             options.set(
                 CatalogOptions.HTTP_USER_AGENT_HEADER,
                 get_user_agent("PythonPVFS"),

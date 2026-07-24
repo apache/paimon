@@ -74,6 +74,18 @@ class UserAgentTest(unittest.TestCase):
             api.rest_auth_function.init_header["User-Agent"],
         )
 
+    def test_rest_api_preserves_case_insensitive_user_agent(self):
+        options = self._options()
+        options["header.user-agent"] = "custom-client/1.0"
+
+        api = RESTApi(options, config_required=False)
+
+        self.assertEqual(
+            "custom-client/1.0",
+            api.rest_auth_function.init_header["User-Agent"],
+        )
+        self.assertNotIn("user-agent", api.rest_auth_function.init_header)
+
     def test_rest_api_uses_legacy_configured_user_agent(self):
         options = self._options()
         options["header.HTTP_USER_AGENT"] = "legacy-client/1.0"
@@ -105,6 +117,19 @@ class UserAgentTest(unittest.TestCase):
             api.rest_auth_function.init_header,
         )
 
+    def test_canonical_user_agent_takes_precedence_over_other_casing(self):
+        options = self._options()
+        options["header.user-agent"] = "lowercase-client/1.0"
+        options[CatalogOptions.HTTP_USER_AGENT_HEADER.key()] = "custom-client/1.0"
+
+        api = RESTApi(options, config_required=False)
+
+        self.assertEqual(
+            "custom-client/1.0",
+            api.rest_auth_function.init_header["User-Agent"],
+        )
+        self.assertNotIn("user-agent", api.rest_auth_function.init_header)
+
     def test_pvfs_adds_client_name_to_default_user_agent(self):
         fs = PaimonVirtualFileSystem(
             self._options(), skip_instance_cache=True
@@ -124,6 +149,22 @@ class UserAgentTest(unittest.TestCase):
         self.assertEqual(
             "custom-client/1.0",
             fs.options.get(CatalogOptions.HTTP_USER_AGENT_HEADER),
+        )
+
+    def test_pvfs_preserves_case_insensitive_user_agent(self):
+        options = self._options()
+        options["header.user-agent"] = "custom-client/1.0"
+
+        fs = PaimonVirtualFileSystem(options, skip_instance_cache=True)
+
+        self.assertEqual(
+            "custom-client/1.0",
+            fs.options.to_map()["header.user-agent"],
+        )
+        self.assertFalse(
+            fs.options.contains_key(
+                CatalogOptions.HTTP_USER_AGENT_HEADER.key()
+            )
         )
 
     def test_pvfs_preserves_legacy_configured_user_agent(self):

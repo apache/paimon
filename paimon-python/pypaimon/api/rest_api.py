@@ -58,6 +58,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    USER_AGENT_HEADER = "User-Agent"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
@@ -85,7 +86,7 @@ class RESTApi:
         self.client = HttpClient(uri)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = self._extract_headers(options)
-        base_headers.setdefault("User-Agent", get_user_agent())
+        base_headers.setdefault(self.USER_AGENT_HEADER, get_user_agent())
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
@@ -113,7 +114,7 @@ class RESTApi:
 
     @classmethod
     def _extract_headers(cls, options: Options) -> Dict[str, str]:
-        """Extract configured headers and normalize User-Agent fallback keys."""
+        """Extract configured headers and normalize User-Agent keys."""
         headers = RESTUtil.extract_prefix_map(options, cls.HEADER_PREFIX)
         user_agent_option = CatalogOptions.HTTP_USER_AGENT_HEADER
 
@@ -123,9 +124,16 @@ class RESTApi:
             if fallback_key.startswith(cls.HEADER_PREFIX):
                 headers.pop(fallback_key[len(cls.HEADER_PREFIX):], None)
 
-        user_agent = options.get(user_agent_option)
+        user_agent = None
+        for header_name in list(headers):
+            if header_name.lower() == cls.USER_AGENT_HEADER.lower():
+                user_agent = headers.pop(header_name)
+
+        configured_user_agent = options.get(user_agent_option)
+        if configured_user_agent is not None:
+            user_agent = configured_user_agent
         if user_agent is not None:
-            headers["User-Agent"] = user_agent
+            headers[cls.USER_AGENT_HEADER] = user_agent
         return headers
 
     def __build_paged_query_params(
