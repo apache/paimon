@@ -126,7 +126,7 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
         ShreddingWritePlan writePlan = writePlanFactory.createWritePlan(collectAllRows());
         actualWriter =
                 ShreddingWritePlanWriterFactory.createWriterWithPlan(
-                        writerFactory, out, compression, writePlan);
+                        writerFactory, writePlanFactory, out, compression, writePlan);
         planFinalized = true;
 
         if (!bufferedBundles.isEmpty()) {

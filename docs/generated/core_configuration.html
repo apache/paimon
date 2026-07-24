@@ -1712,6 +1712,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
         </tr>
         <tr>
+            <td><h5>variant.shredding.adaptive.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>Maximum number of prefix rows sampled after the first file in an adaptive Variant shredding inference session.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.adaptive.retentionRatio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Minimum combined presence ratio for retaining a Variant path selected in the previous file. This must not exceed 'variant.shredding.minFieldCardinalityRatio'.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.inferenceMode</h5></td>
+            <td style="word-wrap: break-word;">per-file</td>
+            <td><p>Enum</p></td>
+            <td>The Variant shredding inference mode. PER_FILE infers each file independently. ADAPTIVE reuses bounded evidence within one rolling writer and samples a smaller prefix after the first file.<br /><br />Possible values:<ul><li>"per-file": Infer every file independently from its own prefix rows.</li><li>"adaptive": Reuse bounded inference evidence within one rolling writer and correct it with a smaller prefix from each subsequent file.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>variant.shredding.maxInferBufferRow</h5></td>
             <td style="word-wrap: break-word;">4096</td>
             <td>Integer</td>

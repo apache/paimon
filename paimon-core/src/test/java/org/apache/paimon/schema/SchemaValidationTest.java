@@ -121,6 +121,83 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testVariantShreddingInferenceOptions() {
+        Map<String, String> invalidColdSampleOptions = new HashMap<>();
+        invalidColdSampleOptions.put(CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW.key(), "0");
+        assertThatThrownBy(() -> validateTableSchemaExec(invalidColdSampleOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW.key()
+                                + " must be positive");
+
+        Map<String, String> invalidAdmissionOptions = new HashMap<>();
+        invalidAdmissionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key(), "1.1");
+        assertThatThrownBy(() -> validateTableSchemaExec(invalidAdmissionOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key()
+                                + " must be between 0 and 1");
+
+        Map<String, String> negativeAdmissionOptions = new HashMap<>();
+        negativeAdmissionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key(), "-0.1");
+        assertThatThrownBy(() -> validateTableSchemaExec(negativeAdmissionOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key()
+                                + " must be between 0 and 1");
+
+        Map<String, String> invalidWarmSampleOptions = new HashMap<>();
+        invalidWarmSampleOptions.put(
+                CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "adaptive");
+        invalidWarmSampleOptions.put(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key(), "0");
+        assertThatThrownBy(() -> validateTableSchemaExec(invalidWarmSampleOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key()
+                                + " must be positive");
+
+        Map<String, String> invalidRetentionOptions = new HashMap<>();
+        invalidRetentionOptions.put(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "adaptive");
+        invalidRetentionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key(), "0.2");
+        invalidRetentionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(), "0.3");
+        assertThatThrownBy(() -> validateTableSchemaExec(invalidRetentionOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key()
+                                + " must be between 0 and "
+                                + CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key());
+
+        Map<String, String> negativeRetentionOptions = new HashMap<>();
+        negativeRetentionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "adaptive");
+        negativeRetentionOptions.put(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(), "-0.1");
+        assertThatThrownBy(() -> validateTableSchemaExec(negativeRetentionOptions))
+                .hasMessageContaining(
+                        CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key()
+                                + " must be between 0 and "
+                                + CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key());
+
+        Map<String, String> perFileOptions = new HashMap<>();
+        perFileOptions.put(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "per-file");
+        perFileOptions.put(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key(), "0");
+        perFileOptions.put(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(), "2");
+        assertThatCode(() -> validateTableSchemaExec(perFileOptions)).doesNotThrowAnyException();
+
+        Map<String, String> validAdaptiveOptions = new HashMap<>();
+        validAdaptiveOptions.put(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "adaptive");
+        validAdaptiveOptions.put(CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW.key(), "10");
+        validAdaptiveOptions.put(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key(), "2");
+        validAdaptiveOptions.put(
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key(), "0.2");
+        validAdaptiveOptions.put(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(), "0.1");
+        assertThatCode(() -> validateTableSchemaExec(validAdaptiveOptions))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testFromSnapshotConflict() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));

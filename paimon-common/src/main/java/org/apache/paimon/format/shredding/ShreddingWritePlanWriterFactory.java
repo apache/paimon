@@ -55,6 +55,7 @@ public class ShreddingWritePlanWriterFactory implements FormatWriterFactory {
 
         return createWriterWithPlan(
                 delegate,
+                writePlanFactory,
                 out,
                 compression,
                 writePlanFactory.createWritePlan(Collections.emptyList()));
@@ -62,6 +63,7 @@ public class ShreddingWritePlanWriterFactory implements FormatWriterFactory {
 
     static FormatWriter createWriterWithPlan(
             SupportsShreddingWritePlan delegate,
+            ShreddingWritePlanFactory writePlanFactory,
             PositionOutputStream out,
             String compression,
             ShreddingWritePlan writePlan)
@@ -69,6 +71,7 @@ public class ShreddingWritePlanWriterFactory implements FormatWriterFactory {
         return new ShreddingFormatWriter(
                 delegate.createWithShreddingWritePlan(out, compression, writePlan),
                 delegate,
+                writePlanFactory,
                 writePlan,
                 compression);
     }

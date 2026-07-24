@@ -78,4 +78,12 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
         }
         return Collections.unmodifiableMap(metadata);
     }
+
+    Map<String, Integer> fileMaxRowWidths() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (String fieldName : converter.shreddingFieldNames()) {
+            result.put(fieldName, converter.buildFieldMeta(fieldName).maxRowWidth());
+        }
+        return result;
+    }
 }
