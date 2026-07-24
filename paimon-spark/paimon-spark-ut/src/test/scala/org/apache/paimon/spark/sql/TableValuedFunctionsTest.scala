@@ -22,15 +22,19 @@ import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.spark.catalyst.plans.logical.{LateralVectorSearch, PaimonTableValuedFunctions}
+import org.apache.paimon.spark.execution.LateralVectorSearchExec
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
-import org.apache.spark.sql.catalyst.plans.logical.Filter
+import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, Repartition}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
 
 import java.time.LocalDateTime
 import java.util.Collections
 
-class TableValuedFunctionsTest extends PaimonHiveTestBase {
+class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlanHelper {
 
   test("parse positive limit rejects overflowing long") {
     val longValue: Long = 4294967297L
@@ -40,6 +44,348 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       PaimonTableValuedFunctions.parsePositiveLimit(longValue)
     }
     assert(error.getMessage.contains("Limit must be no greater than"))
+  }
+
+  test("lateral vector search repartitions global limit input") {
+    withTable("vector_search_source") {
+      createVectorSearchSource()
+
+      val optimizedPlan = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM (
+               |  SELECT gid, embs
+               |  FROM vector_search_source
+               |  WHERE dt = '20260629'
+               |  LIMIT 1000
+               |) AS q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+      val repartitions = lateralVectorSearch.left.collect {
+        case repartition: Repartition => repartition
+      }
+
+      assert(repartitions.size == 1, optimizedPlan.toString)
+      assert(repartitions.head.shuffle, optimizedPlan.toString)
+      assert(repartitions.head.numPartitions == 16, optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search uses configured repartition parallelism") {
+    val parallelismKey = "spark.paimon.vector-search.lateral-join.parallelism"
+    spark.conf.set(parallelismKey, "4")
+    try {
+      withTable("vector_search_source") {
+        createVectorSearchSource()
+
+        val optimizedPlan = spark
+          .sql("""
+                 |SELECT q.gid AS query_gid, r.gid AS result_gid
+                 |FROM (
+                 |  SELECT gid, embs
+                 |  FROM vector_search_source
+                 |  LIMIT 1000
+                 |) AS q,
+                 |LATERAL (
+                 |  SELECT gid
+                 |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+                 |) AS r
+                 |""".stripMargin)
+          .queryExecution
+          .optimizedPlan
+
+        val repartition = optimizedPlan
+          .collectFirst { case lvs: LateralVectorSearch => lvs }
+          .flatMap(_.left.collectFirst { case repartition: Repartition => repartition })
+          .getOrElse(fail(optimizedPlan.toString))
+
+        assert(repartition.numPartitions == 4, optimizedPlan.toString)
+      }
+    } finally {
+      spark.conf.unset(parallelismKey)
+    }
+  }
+
+  test("lateral vector search repartitions above a limited repartition") {
+    withTable("vector_search_source") {
+      createVectorSearchSource()
+
+      val optimizedPlan = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM (
+               |  SELECT /*+ REPARTITION(4) */ gid, embs
+               |  FROM vector_search_source
+               |  LIMIT 1000
+               |) AS q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+      val repartitions = lateralVectorSearch.left.collect {
+        case repartition: Repartition => repartition
+      }
+
+      assert(lateralVectorSearch.left.isInstanceOf[Repartition], optimizedPlan.toString)
+      assert(repartitions.map(_.numPartitions) == Seq(16, 4), optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search preserves repartition above limit") {
+    withTable("vector_search_source") {
+      createVectorSearchSource()
+
+      val optimizedPlan = spark
+        .sql("""
+               |WITH q_limit AS (
+               |  SELECT gid, embs
+               |  FROM vector_search_source
+               |  LIMIT 1000
+               |),
+               |q AS (
+               |  SELECT /*+ REPARTITION(4) */ gid, embs
+               |  FROM q_limit
+               |)
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+      val repartitions = lateralVectorSearch.left.collect {
+        case repartition: Repartition => repartition
+      }
+
+      assert(repartitions.map(_.numPartitions) == Seq(4), optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search repartitions CTE limited input") {
+    withTable("vector_search_source") {
+      createVectorSearchSource()
+
+      val optimizedPlan = spark
+        .sql("""
+               |WITH q_limit AS (
+               |  SELECT gid, embs
+               |  FROM vector_search_source
+               |  LIMIT 1000
+               |),
+               |q AS (
+               |  SELECT gid, embs
+               |  FROM q_limit
+               |)
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+
+      assert(lateralVectorSearch.left.isInstanceOf[Repartition], optimizedPlan.toString)
+      val repartition = lateralVectorSearch.left.asInstanceOf[Repartition]
+      assert(repartition.shuffle, optimizedPlan.toString)
+      assert(repartition.numPartitions == 16, optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search repartitions broadcast join streamed limited input") {
+    withTable("vector_search_source", "vector_search_dimension") {
+      createVectorSearchSource()
+      spark.sql("CREATE TABLE vector_search_dimension (gid BIGINT) USING paimon")
+
+      val optimizedPlan = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM (
+               |  SELECT /*+ BROADCAST(d) */ s.gid, s.embs
+               |  FROM (
+               |    SELECT gid, embs
+               |    FROM vector_search_source
+               |    LIMIT 1000
+               |  ) s
+               |  JOIN vector_search_dimension d
+               |  ON s.gid = d.gid
+               |) q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+
+      assert(lateralVectorSearch.left.isInstanceOf[Repartition], optimizedPlan.toString)
+      val repartition = lateralVectorSearch.left.asInstanceOf[Repartition]
+      assert(repartition.shuffle, optimizedPlan.toString)
+      assert(repartition.numPartitions == 16, optimizedPlan.toString)
+    }
+  }
+
+  test("lateral vector search repartitions automatically broadcast join streamed limited input") {
+    Seq(false, true).foreach {
+      aqeEnabled =>
+        withSparkSQLConf(
+          "spark.sql.adaptive.enabled" -> aqeEnabled.toString,
+          "spark.sql.autoBroadcastJoinThreshold" -> "1024",
+          "spark.sql.adaptive.autoBroadcastJoinThreshold" -> "1024",
+          "spark.paimon.vector-search.lateral-join.parallelism" -> "4"
+        ) {
+          withTable("vector_search_source") {
+            createVectorSearchSource()
+
+            val result = spark.sql("""
+                                     |SELECT q.gid AS query_gid, r.gid AS result_gid
+                                     |FROM (
+                                     |  SELECT s.gid, s.embs
+                                     |  FROM (
+                                     |    SELECT id AS gid, array(1.0F, 2.0F, 3.0F) AS embs
+                                     |    FROM range(0, 10000, 1, 8)
+                                     |    LIMIT 1000
+                                     |  ) s
+                                     |  JOIN VALUES (0L) AS d(gid)
+                                     |  ON s.gid = d.gid
+                                     |) q,
+                                     |LATERAL (
+                                     |  SELECT gid
+                                     |  FROM vector_search(
+                                     |    'vector_search_source', 'embs', q.embs, 3)
+                                     |) AS r
+                                     |""".stripMargin)
+            val executedPlan = result.queryExecution.executedPlan
+            val broadcastJoin = collect(executedPlan) {
+              case join: BroadcastHashJoinExec => join
+            }.headOption.getOrElse(fail(executedPlan.toString))
+            val lateralVectorSearch = collect(executedPlan) {
+              case exec: LateralVectorSearchExec => exec
+            }.headOption.getOrElse(fail(executedPlan.toString))
+
+            withClue(s"AQE enabled: $aqeEnabled\n$executedPlan") {
+              assert(broadcastJoin.buildSide == BuildRight)
+              assert(lateralVectorSearch.child.outputPartitioning.numPartitions == 4)
+            }
+          }
+        }
+    }
+  }
+
+  test("lateral vector search preserves automatically broadcast join streamed parallelism") {
+    Seq(false, true).foreach {
+      aqeEnabled =>
+        withSparkSQLConf(
+          "spark.sql.adaptive.enabled" -> aqeEnabled.toString,
+          "spark.sql.autoBroadcastJoinThreshold" -> "1024",
+          "spark.sql.adaptive.autoBroadcastJoinThreshold" -> "1024",
+          "spark.paimon.vector-search.lateral-join.parallelism" -> "4"
+        ) {
+          withTable("vector_search_source") {
+            createVectorSearchSource()
+
+            val result = spark.sql("""
+                                     |SELECT q.gid AS query_gid, r.gid AS result_gid
+                                     |FROM (
+                                     |  SELECT d.gid, d.embs
+                                     |  FROM (
+                                     |    SELECT id AS gid
+                                     |    FROM range(0, 10, 1, 1)
+                                     |    LIMIT 10
+                                     |  ) s
+                                     |  JOIN (
+                                     |    SELECT id AS gid, array(1.0F, 2.0F, 3.0F) AS embs
+                                     |    FROM range(0, 10000, 1, 8)
+                                     |  ) d
+                                     |  ON s.gid = d.gid
+                                     |) q,
+                                     |LATERAL (
+                                     |  SELECT gid
+                                     |  FROM vector_search(
+                                     |    'vector_search_source', 'embs', q.embs, 3)
+                                     |) AS r
+                                     |""".stripMargin)
+            val executedPlan = result.queryExecution.executedPlan
+            val broadcastJoin = collect(executedPlan) {
+              case join: BroadcastHashJoinExec => join
+            }.headOption.getOrElse(fail(executedPlan.toString))
+            val lateralVectorSearch = collect(executedPlan) {
+              case exec: LateralVectorSearchExec => exec
+            }.headOption.getOrElse(fail(executedPlan.toString))
+
+            withClue(s"AQE enabled: $aqeEnabled\n$executedPlan") {
+              assert(broadcastJoin.buildSide == BuildLeft)
+              assert(lateralVectorSearch.child.outputPartitioning.numPartitions == 8)
+            }
+          }
+        }
+    }
+  }
+
+  test("lateral vector search repartitions coalesced limited input") {
+    withTable("vector_search_source") {
+      createVectorSearchSource()
+
+      val optimizedPlan = spark
+        .sql("""
+               |WITH q_limit AS (
+               |  SELECT gid, embs
+               |  FROM vector_search_source
+               |  LIMIT 1000
+               |)
+               |SELECT q.gid AS query_gid, r.gid AS result_gid
+               |FROM (
+               |  SELECT /*+ COALESCE(16) */ gid, embs
+               |  FROM q_limit
+               |) q,
+               |LATERAL (
+               |  SELECT gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 3)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+
+      val lateralVectorSearch = optimizedPlan
+        .collectFirst { case lvs: LateralVectorSearch => lvs }
+        .getOrElse(fail(optimizedPlan.toString))
+
+      assert(lateralVectorSearch.left.isInstanceOf[Repartition], optimizedPlan.toString)
+      val repartition = lateralVectorSearch.left.asInstanceOf[Repartition]
+      assert(repartition.shuffle, optimizedPlan.toString)
+      assert(repartition.numPartitions == 16, optimizedPlan.toString)
+    }
   }
 
   test("lateral vector search preserves subquery alias qualifiers") {
@@ -540,6 +886,20 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       .format("paimon")
       .option("incremental-between", s"$start,$end")
       .table(tableIdent)
+  }
+
+  private def createVectorSearchSource(): Unit = {
+    spark.sql("""
+                |CREATE TABLE vector_search_source (gid BIGINT, embs ARRAY<FLOAT>, dt STRING)
+                |USING paimon
+                |TBLPROPERTIES (
+                |  'vector.file.format' = 'lance',
+                |  'vector-field' = 'embs',
+                |  'field.embs.vector-dim' = '3',
+                |  'row-tracking.enabled' = 'true',
+                |  'data-evolution.enabled' = 'true')
+                |PARTITIONED BY (dt)
+                |""".stripMargin)
   }
 
   private def utcMills(timestamp: String) =
