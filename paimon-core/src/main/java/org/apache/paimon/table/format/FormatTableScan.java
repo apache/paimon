@@ -252,9 +252,6 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private void warnMissingPartition(LinkedHashMap<String, String> spec, Path path) {
-        // A registered partition without a directory reads as empty, matching Hive (e.g. ADD
-        // PARTITION before the first INSERT). Warn so a directory removed behind the catalog's back
-        // stays discoverable.
         LOG.warn(
                 "Partition '{}' of format table {} is registered in the catalog but its directory "
                         + "'{}' does not exist; treating the partition as empty. If the directory "
