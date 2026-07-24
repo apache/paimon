@@ -54,6 +54,8 @@ import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +75,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.function.Function;
 
 import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
 import static org.apache.paimon.format.text.TextLineReader.isDefaultDelimiter;
@@ -83,6 +88,11 @@ import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 public class FormatTableScan implements InnerTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
+
+    private static final int LIST_POOL_MAX_THREADS = 1000;
+    private static final ThreadPoolExecutor LIST_POOL =
+            ThreadPoolUtils.createCachedThreadPool(
+                    LIST_POOL_MAX_THREADS, "FORMAT-TABLE-LIST-THREAD-POOL");
 
     final FormatTable table;
     final CoreOptions coreOptions;
@@ -185,31 +195,13 @@ public class FormatTableScan implements InnerTableScan {
             try {
                 FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
-                    for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
-                        LinkedHashMap<String, String> partitionSpec = pair.getKey();
-                        BinaryRow partitionRow = toPartitionRow(partitionSpec);
-                        if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            try {
+                    if (partitionManager != null) {
+                        splits.addAll(listPartitionFilesInParallel(fileIO, findPartitions()));
+                    } else {
+                        for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
+                            BinaryRow partitionRow = toPartitionRow(pair.getKey());
+                            if (partitionFilter == null || partitionFilter.test(partitionRow)) {
                                 splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
-                            } catch (FileNotFoundException e) {
-                                if (partitionManager == null) {
-                                    throw e;
-                                }
-                                // A registered partition without a directory reads as empty,
-                                // matching Hive (e.g. ADD PARTITION before the first INSERT).
-                                // Warn so a directory removed behind the catalog's back stays
-                                // discoverable.
-                                LOG.warn(
-                                        "Partition '{}' of format table {} is registered in "
-                                                + "the catalog but its directory '{}' does not "
-                                                + "exist; treating the partition as empty. If the "
-                                                + "directory was removed on purpose, drop the "
-                                                + "partition or repair the metadata, e.g. with "
-                                                + "MSCK REPAIR TABLE.",
-                                        PartitionPathUtils.generatePartitionName(
-                                                partitionSpec, false),
-                                        table.fullName(),
-                                        pair.getValue());
                             }
                         }
                     }
@@ -225,6 +217,49 @@ public class FormatTableScan implements InnerTableScan {
             }
             return splits;
         }
+    }
+
+    private List<Split> listPartitionFilesInParallel(
+            FileIO fileIO, List<Pair<LinkedHashMap<String, String>, Path>> partitions) {
+        List<Split> splits = new ArrayList<>();
+        if (partitions.isEmpty()) {
+            return splits;
+        }
+        Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
+                pair -> {
+                    BinaryRow partitionRow = toPartitionRow(pair.getKey());
+                    if (partitionFilter != null && !partitionFilter.test(partitionRow)) {
+                        return Collections.emptyList();
+                    }
+                    try {
+                        return createSplits(fileIO, pair.getValue(), partitionRow);
+                    } catch (FileNotFoundException e) {
+                        warnMissingPartition(pair.getKey(), pair.getValue());
+                        return Collections.emptyList();
+                    } catch (IOException e) {
+                        throw new RuntimeException(
+                                "Failed to list files for partition " + pair.getValue(), e);
+                    }
+                };
+        int parallelism = coreOptions.formatTableScanListParallelism();
+        ExecutorService executor =
+                parallelism >= LIST_POOL_MAX_THREADS
+                        ? LIST_POOL
+                        : new SemaphoredDelegatingExecutor(LIST_POOL, parallelism, false);
+        ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, lister, partitions)
+                .forEachRemaining(splits::add);
+        return splits;
+    }
+
+    private void warnMissingPartition(LinkedHashMap<String, String> spec, Path path) {
+        LOG.warn(
+                "Partition '{}' of format table {} is registered in the catalog but its directory "
+                        + "'{}' does not exist; treating the partition as empty. If the directory "
+                        + "was removed on purpose, drop the partition or repair the metadata, e.g. "
+                        + "with MSCK REPAIR TABLE.",
+                PartitionPathUtils.generatePartitionName(spec, false),
+                table.fullName(),
+                path);
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
