@@ -214,6 +214,25 @@ public class FormatReaderMappingTest {
     }
 
     @Test
+    public void testMapSelectedKeysUsesDataFieldNameAfterRename() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(
+                        2, "old_attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()));
+        DataField expectedField = selectedKeysField(2, "new_attrs", DataTypes.BIGINT());
+
+        DataField readField =
+                invokeDataFields(
+                                Collections.singletonList(dataField),
+                                Collections.singletonList(expectedField))
+                        .get(0);
+
+        Assertions.assertThat(readField.name()).isEqualTo("old_attrs");
+        Assertions.assertThat(readField.description()).isEqualTo(expectedField.description());
+        Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
+                .isTrue();
+    }
+
+    @Test
     public void testRejectMapSelectedKeysValuePartialProjection() {
         RowType tableValueType =
                 DataTypes.ROW(

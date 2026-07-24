@@ -250,6 +250,43 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet"})
+    public void testReadSelectedKeysAfterRenameColumn(String format) throws Exception {
+        Table table = createTable(format, 1, "metrics");
+        write(
+                table,
+                GenericRow.of(1, mapOf("key1", 10L, "key2", 20L)),
+                GenericRow.of(2, mapOf("key2", 30L)));
+
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(SchemaChange.renameColumn("metrics", "renamed_metrics")),
+                false);
+        table = catalog.getTable(identifier(format));
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(selectedKeysReadType("renamed_metrics"));
+        Map<Integer, List<Long>> actual = new LinkedHashMap<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        InternalRow selectedKeys = row.getRow(1, 3);
+                        actual.put(
+                                row.getInt(0),
+                                Arrays.asList(
+                                        selectedKeys.isNullAt(0) ? null : selectedKeys.getLong(0),
+                                        selectedKeys.isNullAt(1) ? null : selectedKeys.getLong(1),
+                                        selectedKeys.isNullAt(2) ? null : selectedKeys.getLong(2)));
+                    });
+        }
+
+        assertThat(actual)
+                .containsEntry(1, Arrays.asList(10L, 20L, null))
+                .containsEntry(2, Arrays.asList(null, 30L, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
     public void testAppendOnlyTableReadWriteWithTwoMapFields(String format) throws Exception {
         Table table = createTable(format, "metrics", "labels");
 
@@ -1392,6 +1429,10 @@ public class MapSharedShreddingTableTest extends TableTestBase {
     }
 
     private RowType selectedKeysReadType() {
+        return selectedKeysReadType("metrics");
+    }
+
+    private RowType selectedKeysReadType(String fieldName) {
         RowType selectedKeysType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "0", DataTypes.BIGINT()),
@@ -1400,7 +1441,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return DataTypes.ROW(
                 DataTypes.FIELD(0, "id", DataTypes.INT()),
                 MapSelectedKeysMetadataUtils.withSelectedKeys(
-                        DataTypes.FIELD(1, "metrics", selectedKeysType),
+                        DataTypes.FIELD(1, fieldName, selectedKeysType),
                         selectedKeysType,
                         Arrays.asList("key1", "key2", "missing")));
     }
