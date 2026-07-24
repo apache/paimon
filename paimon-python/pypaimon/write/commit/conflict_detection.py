@@ -159,6 +159,12 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self._row_id_ignored_commits = set()
+        self._row_id_history_base_snapshot = None
+        self._row_id_history_cursor = None
+        self._row_id_history_cursor_identity = None
+        self._row_id_external_snapshots = []
+        self._row_id_base_entries_cache = {}
         self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
@@ -172,6 +178,125 @@ class ConflictDetection:
 
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
+
+    def set_row_id_check_from_snapshot(self, snapshot_id):
+        if self._row_id_check_from_snapshot == snapshot_id:
+            return
+        self._row_id_check_from_snapshot = snapshot_id
+        self.reset_row_id_history()
+
+    def reset_row_id_history(self):
+        """Clear cached row-id history."""
+        self._row_id_history_base_snapshot = None
+        self._row_id_history_cursor = None
+        self._row_id_history_cursor_identity = None
+        self._row_id_external_snapshots = []
+        self._row_id_base_entries_cache = {}
+
+    def ignore_row_id_commit(self, commit_user, commit_identifier):
+        """Skip a disjoint commit in later checks."""
+        self._row_id_ignored_commits.add((commit_user, commit_identifier))
+
+    def read_row_id_base_entries(self, latest_snapshot, commit_entries,
+                                 index_entries=None):
+        """Read or advance cached base entries for row-id checks."""
+        signature = self.commit_scanner.changed_partition_signature(
+            commit_entries, index_entries)
+        key = (self._row_id_check_from_snapshot, signature)
+        cached = self._row_id_base_entries_cache.get(key)
+        incremental = None
+
+        if cached is not None:
+            cursor, cursor_identity, base_entries = cached
+            if latest_snapshot.id >= cursor.id:
+                current_cursor = (
+                    latest_snapshot
+                    if latest_snapshot.id == cursor.id
+                    else self.snapshot_manager.get_snapshot_by_id(cursor.id)
+                )
+                if self._snapshot_identity(current_cursor) == cursor_identity:
+                    incremental = self.commit_scanner.read_incremental_changes(
+                        cursor, latest_snapshot, commit_entries, index_entries)
+
+        if incremental is None:
+            base_entries = (
+                self.commit_scanner.read_all_entries_from_changed_partitions(
+                    latest_snapshot, commit_entries, index_entries)
+            )
+        else:
+            base_entries = list(base_entries)
+            if incremental:
+                base_entries.extend(incremental)
+                base_entries = FileEntry.merge_entries(base_entries)
+
+        self._row_id_base_entries_cache[key] = (
+            latest_snapshot,
+            self._snapshot_identity(latest_snapshot),
+            list(base_entries),
+        )
+        return base_entries
+
+    def _row_id_history_snapshots(self, latest_snapshot):
+        """Cache history except disjoint commits."""
+        base_snapshot = self._row_id_check_from_snapshot
+        reset_history = (
+            self._row_id_history_base_snapshot != base_snapshot
+            or self._row_id_history_cursor is None
+            or latest_snapshot.id < self._row_id_history_cursor
+        )
+        if not reset_history:
+            cursor_snapshot = (
+                latest_snapshot
+                if latest_snapshot.id == self._row_id_history_cursor
+                else self.snapshot_manager.get_snapshot_by_id(
+                    self._row_id_history_cursor)
+            )
+            reset_history = (
+                self._snapshot_identity(cursor_snapshot)
+                != self._row_id_history_cursor_identity
+            )
+
+        if reset_history:
+            self._row_id_history_base_snapshot = base_snapshot
+            self._row_id_history_cursor = base_snapshot
+            self._row_id_history_cursor_identity = None
+            self._row_id_external_snapshots = []
+
+        # Snapshot files below the cursor are immutable. A rollback replaces the
+        # whole tail, including the cursor, whose identity check above resets cache.
+        for snapshot_id in range(
+                self._row_id_history_cursor + 1,
+                latest_snapshot.id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                continue
+            identity = (
+                getattr(snapshot, "commit_user", None),
+                getattr(snapshot, "commit_identifier", None),
+            )
+            if identity not in self._row_id_ignored_commits:
+                self._row_id_external_snapshots.append(snapshot)
+
+        self._row_id_history_cursor = latest_snapshot.id
+        self._row_id_history_cursor_identity = self._snapshot_identity(
+            latest_snapshot)
+        return self._row_id_external_snapshots
+
+    @staticmethod
+    def _snapshot_identity(snapshot):
+        if snapshot is None:
+            return None
+        return (
+            snapshot.id,
+            getattr(snapshot, "commit_user", None),
+            getattr(snapshot, "commit_identifier", None),
+            getattr(snapshot, "commit_kind", None),
+            getattr(snapshot, "time_millis", None),
+            getattr(snapshot, "base_manifest_list", None),
+            getattr(snapshot, "delta_manifest_list", None),
+            getattr(snapshot, "changelog_manifest_list", None),
+            getattr(snapshot, "index_manifest", None),
+        )
 
     @staticmethod
     def has_global_index_additions(index_entries=None):
@@ -576,13 +701,7 @@ class ConflictDetection:
                 delta_signatures.append(
                     (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
 
-        for snapshot_id in range(
-                self._row_id_check_from_snapshot + 1,
-                latest_snapshot.id + 1):
-            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot is None:
-                continue
-
+        for snapshot in self._row_id_history_snapshots(latest_snapshot):
             if snapshot.commit_kind == "COMPACT":
                 err = self._compact_conflicts_with_delta(
                     snapshot, delta_signatures, column_checker, commit_entries)

@@ -55,6 +55,10 @@ class CommitResult:
         raise NotImplementedError
 
 
+class CommitOutcomeUnknownError(RuntimeError):
+    """The commit may already be visible."""
+
+
 class SuccessResult(CommitResult):
     """Result indicating successful commit."""
 
@@ -65,9 +69,11 @@ class SuccessResult(CommitResult):
 class RetryResult(CommitResult):
 
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
-                 base_data_files: Optional[List[ManifestEntry]] = None):
+                 base_data_files: Optional[List[ManifestEntry]] = None,
+                 outcome_unknown: bool = False):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
+        self.outcome_unknown = outcome_unknown
         # Base entries as of latest_snapshot, carried so the next attempt reuses
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
@@ -132,7 +138,9 @@ class FileStoreCommit:
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
                            if msg.check_from_snapshot != -1]
         if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+            self.conflict_detection.set_row_id_check_from_snapshot(
+                min(valid_snapshots)
+            )
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -293,73 +301,110 @@ class FileStoreCommit:
 
         retry_count = 0
         retry_result = None
+        outcome_unknown = False
+        outcome_unknown_cause = None
         start_time_ms = int(time.time() * 1000)
         while True:
-            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            commit_entries = commit_entries_plan(latest_snapshot)
+            try:
+                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+                # A successful attempt whose response was lost can make an
+                # overwrite/truncate retry plan empty. Resolve it before replanning.
+                if (outcome_unknown
+                        and self._is_duplicate_commit(
+                            retry_result,
+                            latest_snapshot,
+                            commit_identifier,
+                            commit_kind)):
+                    break
 
-            # No entries to commit (e.g. drop_partitions with no matching data): skip commit
-            # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
-            if not commit_entries and not index_deletes and not index_adds:
-                break
+                commit_entries = commit_entries_plan(latest_snapshot)
 
-            result = self._try_commit_once(
-                retry_result=retry_result,
-                commit_kind=commit_kind,
-                commit_entries=commit_entries,
-                changelog_entries=changelog_entries or [],
-                commit_identifier=commit_identifier,
-                latest_snapshot=latest_snapshot,
-                detect_conflicts=detect_conflicts,
-                allow_rollback=allow_rollback,
-                index_deletes=index_deletes,
-                index_adds=index_adds,
-            )
+                if not commit_entries and not index_deletes and not index_adds:
+                    if outcome_unknown:
+                        raise CommitOutcomeUnknownError(
+                            "Atomic commit outcome is unknown."
+                        ) from outcome_unknown_cause
+                    break
 
-            if result.is_success():
-                commit_duration_ms = int(time.time() * 1000) - start_time_ms
-                if commit_kind == "OVERWRITE":
-                    logger.info(
-                        "Finished overwrite to table %s, duration %d ms",
-                        self.table.identifier,
-                        commit_duration_ms,
-                    )
-                else:
-                    logger.info(
-                        "Finished commit to table %s, duration %d ms",
-                        self.table.identifier,
-                        commit_duration_ms,
-                    )
-                break
-
-            retry_result = result
-
-            elapsed_ms = int(time.time() * 1000) - start_time_ms
-            if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
-                if commit_kind == "OVERWRITE":
-                    logger.info(
-                        "Finished (Uncertain of success) overwrite to table %s, duration %d ms",
-                        self.table.identifier,
-                        elapsed_ms,
-                    )
-                else:
-                    logger.info(
-                        "Finished (Uncertain of success) commit to table %s, duration %d ms",
-                        self.table.identifier,
-                        elapsed_ms,
-                    )
-                error_msg = (
-                    f"Commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
-                    f"after {elapsed_ms} millis with {retry_count} retries, "
-                    f"there maybe exist commit conflicts between multiple jobs."
+                result = self._try_commit_once(
+                    retry_result=retry_result,
+                    commit_kind=commit_kind,
+                    commit_entries=commit_entries,
+                    changelog_entries=changelog_entries or [],
+                    commit_identifier=commit_identifier,
+                    latest_snapshot=latest_snapshot,
+                    detect_conflicts=detect_conflicts,
+                    allow_rollback=allow_rollback,
+                    index_deletes=index_deletes,
+                    index_adds=index_adds,
                 )
-                if retry_result.exception:
-                    raise RuntimeError(error_msg) from retry_result.exception
-                else:
-                    raise RuntimeError(error_msg)
 
-            self._commit_retry_wait(retry_count)
-            retry_count += 1
+                if result.is_success():
+                    commit_duration_ms = int(time.time() * 1000) - start_time_ms
+                    if commit_kind == "OVERWRITE":
+                        logger.info(
+                            "Finished overwrite to table %s, duration %d ms",
+                            self.table.identifier,
+                            commit_duration_ms,
+                        )
+                    else:
+                        logger.info(
+                            "Finished commit to table %s, duration %d ms",
+                            self.table.identifier,
+                            commit_duration_ms,
+                        )
+                    break
+
+                retry_result = result
+                outcome_unknown = outcome_unknown or result.outcome_unknown
+                if result.outcome_unknown and outcome_unknown_cause is None:
+                    outcome_unknown_cause = result.exception
+
+                elapsed_ms = int(time.time() * 1000) - start_time_ms
+                if (elapsed_ms > self.commit_timeout
+                        or retry_count >= self.commit_max_retries):
+                    if commit_kind == "OVERWRITE":
+                        logger.info(
+                            "Finished (Uncertain of success) overwrite to "
+                            "table %s, duration %d ms",
+                            self.table.identifier,
+                            elapsed_ms,
+                        )
+                    else:
+                        logger.info(
+                            "Finished (Uncertain of success) commit to table "
+                            "%s, duration %d ms",
+                            self.table.identifier,
+                            elapsed_ms,
+                        )
+                    error_msg = (
+                        f"Commit failed "
+                        f"{latest_snapshot.id + 1 if latest_snapshot else 1} "
+                        f"after {elapsed_ms} millis with {retry_count} retries, "
+                        "there maybe exist commit conflicts between multiple jobs."
+                    )
+                    error_type = (
+                        CommitOutcomeUnknownError
+                        if outcome_unknown else RuntimeError
+                    )
+                    error_cause = (
+                        outcome_unknown_cause
+                        if outcome_unknown else retry_result.exception
+                    )
+                    if error_cause:
+                        raise error_type(error_msg) from error_cause
+                    raise error_type(error_msg)
+
+                self._commit_retry_wait(retry_count)
+                retry_count += 1
+            except CommitOutcomeUnknownError:
+                raise
+            except Exception as error:
+                if outcome_unknown:
+                    raise CommitOutcomeUnknownError(str(error)) from (
+                        outcome_unknown_cause or error
+                    )
+                raise
 
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry],
@@ -385,29 +430,32 @@ class FileStoreCommit:
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
         index_entries = (index_deletes or []) + (index_adds or [])
 
-        # Base entries for conflict detection. On retry, reuse the previous
-        # attempt's base + read only the incremental changes (mirrors Java).
+        # Reuse base entries and apply only new snapshot deltas.
         base_data_files = None
         if detect_conflicts and latest_snapshot is not None:
-            incremental = None
-            if (retry_result is not None
-                    and retry_result.latest_snapshot is not None
-                    and retry_result.base_data_files is not None):
-                incremental = self.commit_scanner.read_incremental_changes(
-                    retry_result.latest_snapshot,
-                    latest_snapshot,
-                    commit_entries,
-                    index_entries)
-            if incremental is not None:
-                base_data_files = list(retry_result.base_data_files)
-                if incremental:
-                    base_data_files.extend(incremental)
-                    base_data_files = FileEntry.merge_entries(base_data_files)
-            else:
-                # First attempt, or incremental could not be built (missing
-                # snapshot): scan the changed partitions in full.
-                base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
+            if self.conflict_detection.has_row_id_check_from_snapshot():
+                base_data_files = self.conflict_detection.read_row_id_base_entries(
                     latest_snapshot, commit_entries, index_entries)
+            else:
+                incremental = None
+                if (retry_result is not None
+                        and retry_result.latest_snapshot is not None
+                        and retry_result.base_data_files is not None):
+                    incremental = self.commit_scanner.read_incremental_changes(
+                        retry_result.latest_snapshot,
+                        latest_snapshot,
+                        commit_entries,
+                        index_entries)
+                if incremental is not None:
+                    base_data_files = list(retry_result.base_data_files)
+                    if incremental:
+                        base_data_files.extend(incremental)
+                        base_data_files = FileEntry.merge_entries(base_data_files)
+                else:
+                    base_data_files = (
+                        self.commit_scanner.read_all_entries_from_changed_partitions(
+                            latest_snapshot, commit_entries, index_entries)
+                    )
 
             conflict_exception = self.conflict_detection.check_conflicts(
                 latest_snapshot,
@@ -422,6 +470,7 @@ class FileStoreCommit:
                     if self.rollback.try_to_rollback(latest_snapshot):
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
+                        self.conflict_detection.reset_row_id_history()
                         return RetryResult(None, conflict_exception)
                 raise conflict_exception
 
@@ -537,7 +586,12 @@ class FileStoreCommit:
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)
-            return RetryResult(latest_snapshot, e, base_data_files=base_data_files)
+            return RetryResult(
+                latest_snapshot,
+                e,
+                base_data_files=base_data_files,
+                outcome_unknown=True,
+            )
 
         logger.info(
             "Successfully commit snapshot %d to table %s by user %s "
@@ -555,8 +609,13 @@ class FileStoreCommit:
                 commit_entries=commit_entries,
                 identifier=commit_identifier,
             )
-            for callback in self.commit_callbacks:
-                callback.call(context)
+            try:
+                for callback in self.commit_callbacks:
+                    callback.call(context)
+            except Exception as error:
+                raise CommitOutcomeUnknownError(
+                    "Snapshot committed, but a commit callback failed."
+                ) from error
 
         return SuccessResult()
 

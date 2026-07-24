@@ -37,6 +37,7 @@ from pypaimon.ray.data_evolution_merge_into import (
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
 from pypaimon.schema.data_types import is_blob_file_field
+from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
 
 __all__ = ["update_by_row_id"]
 
@@ -56,6 +57,7 @@ def update_by_row_id(
     update_cols: List[str],
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    max_groups_per_commit: Optional[int] = None,
 ) -> Dict[str, int]:
     """Update ``update_cols`` of a data-evolution table by ``_ROW_ID``.
 
@@ -64,6 +66,14 @@ def update_by_row_id(
     routed to the data file owning its row id and only those files are rewritten --
     the target is never fully read and there is no join against it. Requires
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
+
+    By default all file groups are committed atomically after every worker
+    finishes. Set ``max_groups_per_commit`` to incrementally commit each completed
+    window of target file groups. Incremental mode can leave earlier windows
+    committed if a later window fails. The table may therefore be partially
+    updated; callers must reconcile the result or rerun the intended update.
+    Concurrent snapshot expiration can also invalidate a committed-window
+    lineage check; the operation then stops with earlier windows still visible.
 
     Returns ``{"num_updated": <rows>}``.
     """
@@ -74,6 +84,11 @@ def update_by_row_id(
     _require_ray_join()
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
+    if max_groups_per_commit is not None:
+        if (isinstance(max_groups_per_commit, bool)
+                or not isinstance(max_groups_per_commit, int)
+                or max_groups_per_commit <= 0):
+            raise ValueError("max_groups_per_commit must be a positive integer.")
     update_cols = list(dict.fromkeys(update_cols))  # de-dup, keep order
     num_partitions = _resolve_num_partitions(num_partitions)
 
@@ -139,20 +154,228 @@ def update_by_row_id(
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return {"num_updated": 0}
-    try:
-        msgs, num_updated, _ = distributed_update_apply(
-            update_ds, table, update_cols,
-            num_partitions=num_partitions,
-            ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
+    incremental_committer = (
+        _IncrementalUpdateCommitter(
+            table, max_groups_per_commit, base.id
         )
+        if max_groups_per_commit is not None else None
+    )
+    try:
+        apply_kwargs = {
+            "num_partitions": num_partitions,
+            "ray_remote_args": ray_remote_args,
+            "base_snapshot_id": base.id,
+        }
+        if incremental_committer is not None:
+            apply_kwargs["on_group_result"] = incremental_committer.add_group
+        msgs, num_updated, _ = distributed_update_apply(
+            update_ds, table, update_cols, **apply_kwargs
+        )
+        if incremental_committer is not None:
+            incremental_committer.finish()
     except Exception as e:
-        _reraise_inner(e)
-        raise  # _reraise_inner always raises; keeps msgs/num_updated defined for linters
-
-    if msgs:
+        if incremental_committer is not None:
+            incremental_committer.abort_pending()
+        try:
+            _reraise_inner(e)
+        except Exception as worker_error:
+            deferred_error = (
+                incremental_committer._deferred_error
+                if incremental_committer is not None else None
+            )
+            # A commit error can be deferred while the remaining Ray groups drain.
+            # Preserve that earlier failure if a later worker fails, but do not
+            # chain an error to itself when finish() raised the deferred error.
+            if (deferred_error is not None
+                    and deferred_error is not worker_error):
+                if deferred_error.__cause__ is not None:
+                    # Python has only one explicit cause. Keep the original commit
+                    # cause and report the later update failure separately.
+                    logger.warning(
+                        "A later update error occurred after an earlier incremental "
+                        "commit error; preserving the original commit error: %s",
+                        worker_error,
+                        exc_info=(
+                            type(worker_error),
+                            worker_error,
+                            worker_error.__traceback__,
+                        ),
+                    )
+                    raise deferred_error
+                raise deferred_error from worker_error
+            raise
+    finally:
+        if incremental_committer is not None:
+            incremental_committer.close()
+    if incremental_committer is None and msgs:
         _commit_update_messages(table, msgs)
     return {"num_updated": num_updated}
+
+
+class _IncrementalUpdateCommitter:
+
+    def __init__(self, table, max_groups_per_commit: int,
+                 base_snapshot_id: Optional[int] = None):
+        self._table = table
+        self._max_groups_per_commit = max_groups_per_commit
+        self._base_snapshot_id = base_snapshot_id
+        self._pending_messages: list = []
+        self._pending_groups = 0
+        self._table_commit = None
+        self._next_commit_identifier = 1
+        self._deferred_error = None
+        # Never abort messages whose commit outcome is unknown: their files may
+        # already be referenced by a snapshot. If not, orphan cleanup reclaims them.
+        self._uncertain_messages: list = []
+        self._last_committed_snapshot = None
+
+    def add_group(self, commit_messages, _num_updated, _row_ids) -> None:
+        self._pending_messages.extend(commit_messages)
+        self._pending_groups += 1
+        if (self._deferred_error is None
+                and self._pending_groups >= self._max_groups_per_commit):
+            self._commit_pending()
+
+    def finish(self) -> None:
+        if self._deferred_error is None:
+            self._commit_pending()
+        if self._deferred_error is None:
+            try:
+                self._validate_committed_snapshot()
+            except Exception as error:
+                self._deferred_error = error
+        if self._deferred_error is not None:
+            raise self._deferred_error
+
+    def _commit_pending(self) -> None:
+        if self._pending_groups == 0:
+            return
+        if not self._pending_messages:
+            self._pending_groups = 0
+            return
+
+        if self._table_commit is None:
+            try:
+                self._table_commit = (
+                    self._table.new_stream_write_builder().new_commit()
+                )
+            except Exception as error:
+                # Safe to abort before commit starts.
+                self._deferred_error = error
+                return
+
+        group_count = self._pending_groups
+        commit_identifier = self._next_commit_identifier
+        try:
+            self._validate_committed_snapshot()
+        except Exception as error:
+            self._deferred_error = error
+            return
+        try:
+            self._table_commit.commit(
+                self._pending_messages, commit_identifier
+            )
+        except Exception as error:
+            if isinstance(error, CommitOutcomeUnknownError):
+                self._uncertain_messages.extend(self._pending_messages)
+                self._pending_messages = []
+                self._pending_groups = 0
+            self._deferred_error = error
+            return
+
+        committed_messages = self._pending_messages
+        self._pending_messages = []
+        self._pending_groups = 0
+        self._next_commit_identifier += 1
+        try:
+            self._record_committed_snapshot(commit_identifier)
+            # Later windows are disjoint by _FIRST_ROW_ID.
+            self._table_commit.ignore_row_id_conflict_for_commit(
+                commit_identifier)
+            self._validate_committed_snapshot()
+        except Exception as error:
+            self._uncertain_messages.extend(committed_messages)
+            self._deferred_error = error
+            return
+        logger.info(
+            "Incrementally committed %d update_by_row_id file groups.",
+            group_count,
+        )
+
+    def _record_committed_snapshot(self, commit_identifier: int) -> None:
+        if self._base_snapshot_id is None:
+            return
+
+        self._validate_committed_snapshot()
+        snapshot_manager = self._table.snapshot_manager()
+        latest = snapshot_manager.get_latest_snapshot()
+        start_id = (
+            self._last_committed_snapshot.id + 1
+            if self._last_committed_snapshot is not None
+            else self._base_snapshot_id + 1
+        )
+        if latest is not None:
+            for snapshot_id in range(latest.id, start_id - 1, -1):
+                snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if (snapshot is not None
+                        and snapshot.commit_user == self._table_commit.commit_user
+                        and snapshot.commit_identifier == commit_identifier
+                        and snapshot.commit_kind == "APPEND"):
+                    self._last_committed_snapshot = snapshot
+                    return
+        raise RuntimeError(
+            "Incremental update_by_row_id snapshot is no longer in the "
+            "current lineage."
+        )
+
+    def _validate_committed_snapshot(self) -> None:
+        committed = self._last_committed_snapshot
+        if committed is None:
+            return
+
+        snapshot_manager = self._table.snapshot_manager()
+        latest = snapshot_manager.get_latest_snapshot()
+        current = snapshot_manager.get_snapshot_by_id(committed.id)
+        if (latest is None or latest.id < committed.id
+                or current != committed):
+            raise RuntimeError(
+                "Incremental update_by_row_id snapshot is no longer in the "
+                "current lineage."
+            )
+
+    def abort_pending(self) -> None:
+        if not self._pending_messages:
+            return
+
+        if self._table_commit is None:
+            _abort_pending_update_messages(self._table, self._pending_messages)
+            self._pending_messages = []
+            self._pending_groups = 0
+            return
+
+        try:
+            self._table_commit.abort(self._pending_messages)
+        except Exception as abort_error:
+            logger.warning(
+                "Failed to abort pending incremental update_by_row_id messages: %s",
+                abort_error,
+                exc_info=abort_error,
+            )
+        finally:
+            self._pending_messages = []
+            self._pending_groups = 0
+
+    def close(self) -> None:
+        if self._table_commit is None:
+            return
+        try:
+            self._table_commit.close()
+        except Exception as close_error:
+            logger.warning(
+                "Failed to close incremental update_by_row_id commit: %s",
+                close_error,
+                exc_info=close_error,
+            )
 
 
 def _commit_update_messages(table, commit_messages) -> None:

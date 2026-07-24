@@ -18,6 +18,7 @@
 import os
 import shutil
 import tempfile
+import threading
 import types
 import unittest
 import uuid
@@ -130,6 +131,800 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(got[21], 999)
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
 
+    def test_incrementally_commits_file_group_windows(self):
+        from pypaimon.write.commit.commit_scanner import CommitScanner
+
+        target = self._create()
+        chunks = [
+            [group_start, group_start + 1]
+            for group_start in range(10, 90, 10)
+        ]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x"] * len(chunk), "age": [0] * len(chunk)},
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        rid = self._rowid_by_id(target)
+        updated_ids = [chunk[0] for chunk in chunks]
+        src = pa.table(
+            {
+                "_ROW_ID": [rid[row_id] for row_id in updated_ids],
+                "age": updated_ids,
+            },
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+
+        original_iter_batches = ray.data.Dataset.iter_batches
+        iter_batch_options = []
+        first_window_committed = threading.Event()
+        resume_iteration = threading.Event()
+        observed = {}
+        scan_counts = {"full": 0, "incremental": 0}
+        original_full_scan = (
+            CommitScanner.read_all_entries_from_changed_partitions
+        )
+        original_incremental_scan = CommitScanner.read_incremental_changes
+
+        def counting_full_scan(scanner, *args, **kwargs):
+            scan_counts["full"] += 1
+            return original_full_scan(scanner, *args, **kwargs)
+
+        def counting_incremental_scan(scanner, *args, **kwargs):
+            scan_counts["incremental"] += 1
+            return original_incremental_scan(scanner, *args, **kwargs)
+
+        def pausing_iter_batches(dataset, *args, **kwargs):
+            iter_batch_options.append((
+                kwargs.get("batch_size"),
+                kwargs.get("prefetch_batches"),
+            ))
+            for batch_number, batch in enumerate(
+                    original_iter_batches(dataset, *args, **kwargs), 1):
+                yield batch
+                if batch_number == 3:
+                    first_window_committed.set()
+                    if not resume_iteration.wait(30):
+                        raise TimeoutError("timed out waiting to resume iteration")
+
+        def observe_first_window():
+            if not first_window_committed.wait(30):
+                observed["error"] = "first commit was not observed"
+            else:
+                observed["snapshot_id"] = (
+                    table.snapshot_manager().get_latest_snapshot().id
+                )
+            resume_iteration.set()
+
+        observer = threading.Thread(target=observe_first_window)
+        observer.start()
+
+        try:
+            with mock.patch.object(
+                    ray.data.Dataset, "iter_batches", pausing_iter_batches):
+                with mock.patch.object(
+                    CommitScanner,
+                    "read_all_entries_from_changed_partitions",
+                    counting_full_scan,
+                ), mock.patch.object(
+                    CommitScanner,
+                    "read_incremental_changes",
+                    counting_incremental_scan,
+                ):
+                    stats = update_by_row_id(
+                        target,
+                        ray.data.from_arrow(src).repartition(8),
+                        self.catalog_options,
+                        update_cols=["age"],
+                        num_partitions=4,
+                        max_groups_per_commit=3,
+                    )
+        finally:
+            resume_iteration.set()
+            observer.join(30)
+
+        self.assertEqual({"num_updated": 8}, stats)
+        self.assertEqual([(1, 0)], iter_batch_options)
+        self.assertNotIn("error", observed)
+        self.assertEqual(base_snapshot_id + 1, observed["snapshot_id"])
+        self.assertEqual({"full": 1, "incremental": 2}, scan_counts)
+        latest = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(base_snapshot_id + 3, latest.id)
+        incremental_snapshots = [
+            table.snapshot_manager().get_snapshot_by_id(base_snapshot_id + offset)
+            for offset in range(1, 4)
+        ]
+        self.assertEqual(1, len({
+            snapshot.commit_user for snapshot in incremental_snapshots
+        }))
+        self.assertEqual(
+            [1, 2, 3],
+            [snapshot.commit_identifier for snapshot in incremental_snapshots],
+        )
+
+        back = self._read(target).sort_by("id").to_pydict()
+        got = dict(zip(back["id"], back["age"]))
+        self.assertEqual(
+            {row_id: row_id for row_id in updated_ids},
+            {row_id: got[row_id] for row_id in updated_ids},
+        )
+        for chunk in chunks:
+            self.assertEqual(0, got[chunk[1]])
+
+    def test_incremental_commit_failure_drains_later_groups(self):
+        import importlib
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        chunks = [[start, start + 1] for start in range(10, 50, 10)]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x", "x"], "age": [0, 0]},
+                schema=self.pa_schema,
+            ))
+
+        rid = self._rowid_by_id(target)
+        src = pa.table(
+            {
+                "_ROW_ID": [rid[chunk[0]] for chunk in chunks],
+                "age": [chunk[0] for chunk in chunks],
+            },
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        seen_groups = []
+        aborted = []
+        commit_calls = []
+        retry_error = ValueError("commit retry failed")
+        commit_error = CommitOutcomeUnknownError("commit failed")
+        original_add_group = m._IncrementalUpdateCommitter.add_group
+        original_abort = StreamTableCommit.abort
+
+        def record_group(committer, messages, num_updated, row_ids):
+            seen_groups.append(list(messages))
+            return original_add_group(
+                committer, messages, num_updated, row_ids)
+
+        def fail_commit(_commit, _messages, commit_identifier):
+            commit_calls.append(commit_identifier)
+            raise commit_error from retry_error
+
+        def record_abort(commit, messages):
+            aborted.append(list(messages))
+            return original_abort(commit, messages)
+
+        with mock.patch.object(
+                m._IncrementalUpdateCommitter, "add_group", record_group), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort):
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
+                update_by_row_id(
+                    target,
+                    ray.data.from_arrow(src).repartition(4),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=4,
+                    max_groups_per_commit=2,
+                )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(retry_error, raised.exception.__cause__)
+        self.assertEqual(4, len(seen_groups))
+        self.assertEqual([1], commit_calls)
+        self.assertEqual(
+            [[message for group in seen_groups[2:] for message in group]],
+            aborted,
+        )
+
+    def test_incremental_commit_error_precedes_later_worker_failure(self):
+        import importlib
+
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["x"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        src = pa.table(
+            {"_ROW_ID": [0], "age": [1]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        commit_error = CommitOutcomeUnknownError("commit outcome is uncertain")
+        worker_error = ValueError("worker failed")
+        aborted = []
+        close_calls = []
+
+        def fail_commit(_commit, _messages, _commit_identifier):
+            raise commit_error
+
+        def record_abort(_commit, messages):
+            aborted.append(list(messages))
+
+        def record_close(_commit):
+            close_calls.append(True)
+
+        def fail_after_commit(_update_ds, _table, _update_cols, **kwargs):
+            on_group_result = kwargs["on_group_result"]
+            on_group_result(["uncertain-1"], 1, [])
+            on_group_result(["uncertain-2"], 1, [])
+            on_group_result(["pending"], 1, [])
+            raise RayTaskError("worker", "trace", worker_error)
+
+        with mock.patch.object(
+                m, "distributed_update_apply", fail_after_commit), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort), \
+                mock.patch.object(StreamTableCommit, "close", record_close):
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=2,
+                )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(worker_error, raised.exception.__cause__)
+        self.assertEqual([["pending"]], aborted)
+        self.assertEqual([True], close_calls)
+
+    def test_incremental_commit_preserves_cause_before_worker_failure(self):
+        import importlib
+
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["x"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        src = pa.table(
+            {"_ROW_ID": [0], "age": [1]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        commit_cause = ValueError("commit retry failed")
+        commit_error = CommitOutcomeUnknownError("commit outcome is uncertain")
+        worker_error = ValueError("worker failed")
+        aborted = []
+        close_calls = []
+
+        def fail_commit(_commit, _messages, _commit_identifier):
+            raise commit_error from commit_cause
+
+        def record_abort(_commit, messages):
+            aborted.append(list(messages))
+
+        def record_close(_commit):
+            close_calls.append(True)
+
+        def fail_after_commit(_update_ds, _table, _update_cols, **kwargs):
+            on_group_result = kwargs["on_group_result"]
+            on_group_result(["uncertain-1"], 1, [])
+            on_group_result(["uncertain-2"], 1, [])
+            on_group_result(["pending"], 1, [])
+            raise RayTaskError("worker", "trace", worker_error)
+
+        with mock.patch.object(
+                m, "distributed_update_apply", fail_after_commit), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort), \
+                mock.patch.object(StreamTableCommit, "close", record_close), \
+                self.assertLogs(
+                    "pypaimon.ray.update_by_row_id", level="WARNING") as logs:
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=2,
+                )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(commit_cause, raised.exception.__cause__)
+        self.assertIs(worker_error, raised.exception.__context__)
+        self.assertIn(
+            "preserving the original commit error: worker failed",
+            "\n".join(logs.output),
+        )
+        self.assertEqual([["pending"]], aborted)
+        self.assertEqual([True], close_calls)
+
+    def test_incremental_conflict_aborts_output_files(self):
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_commit import StreamTableCommit
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        table = self.catalog.get_table(target)
+        row_id = self._rowid_by_id(target)[1]
+        update_schema = pa.schema([
+            ("_ROW_ID", pa.int64()),
+            ("age", pa.int32()),
+        ])
+        source = pa.table(
+            {"_ROW_ID": [row_id], "age": [300]},
+            schema=update_schema,
+        )
+        output_paths = []
+        original_commit = StreamTableCommit.commit
+
+        def commit_after_concurrent_update(
+                stream_commit, messages, commit_identifier):
+            output_paths.extend(
+                file.file_path
+                for message in messages
+                for file in message.new_files
+            )
+            updater = TableUpdateByRowId(
+                table, "concurrent", BATCH_COMMIT_IDENTIFIER)
+            concurrent_messages = updater.update_columns(
+                pa.table(
+                    {"_ROW_ID": [row_id], "age": [999]},
+                    schema=update_schema,
+                ),
+                ["age"],
+            )
+            concurrent_commit = table.new_batch_write_builder().new_commit()
+            try:
+                concurrent_commit.commit(concurrent_messages)
+            finally:
+                concurrent_commit.close()
+            return original_commit(
+                stream_commit, messages, commit_identifier)
+
+        with mock.patch.object(
+                StreamTableCommit, "commit", commit_after_concurrent_update):
+            with self.assertRaisesRegex(
+                    RuntimeError, "updating the same file"):
+                update_by_row_id(
+                    target,
+                    ray.data.from_arrow(source),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=1,
+                )
+
+        self.assertTrue(output_paths)
+        self.assertTrue(all(
+            not table.file_io.exists(path) for path in output_paths
+        ))
+        self.assertEqual([999], self._read(target)["age"].to_pylist())
+
+    def test_rollback_reused_snapshot_id_detects_conflict(self):
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_commit import StreamTableCommit
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        target = self._create()
+        for row_id in range(1, 4):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        update_schema = pa.schema([
+            ("_ROW_ID", pa.int64()),
+            ("age", pa.int32()),
+        ])
+        source = pa.table(
+            {
+                "_ROW_ID": [row_ids[row_id] for row_id in range(1, 4)],
+                "age": [100, 200, 300],
+            },
+            schema=update_schema,
+        )
+        original_commit = StreamTableCommit.commit
+        commit_calls = []
+
+        def commit_then_rebuild_history(
+                stream_commit, messages, commit_identifier):
+            commit_calls.append(commit_identifier)
+            result = original_commit(
+                stream_commit, messages, commit_identifier)
+            if commit_identifier == 2:
+                table.rollback_to(base_snapshot_id)
+                updater = TableUpdateByRowId(
+                    table, "concurrent", BATCH_COMMIT_IDENTIFIER)
+                concurrent_messages = updater.update_columns(
+                    pa.table(
+                        {
+                            "_ROW_ID": [
+                                row_ids[row_id] for row_id in range(1, 4)
+                            ],
+                            "age": [999, 999, 999],
+                        },
+                        schema=update_schema,
+                    ),
+                    ["age"],
+                )
+                concurrent_commit = (
+                    table.new_batch_write_builder().new_commit()
+                )
+                try:
+                    concurrent_commit.commit(concurrent_messages)
+                finally:
+                    concurrent_commit.close()
+            return result
+
+        with mock.patch.object(
+                StreamTableCommit, "commit", commit_then_rebuild_history):
+            with self.assertRaisesRegex(
+                    RuntimeError, "no longer in the current lineage"):
+                update_by_row_id(
+                    target,
+                    ray.data.from_arrow(source).repartition(3),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=3,
+                    max_groups_per_commit=1,
+                )
+
+        self.assertEqual([1, 2], commit_calls)
+        self.assertEqual(
+            [999, 999, 999],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_incremental_commit_fails_after_external_rollback(self):
+        target = self._create()
+        for row_id in range(1, 3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        source = pa.table(
+            {
+                "_ROW_ID": [row_ids[1], row_ids[2]],
+                "age": [100, 200],
+            },
+            schema=pa.schema([
+                ("_ROW_ID", pa.int64()),
+                ("age", pa.int32()),
+            ]),
+        )
+
+        original_iter_batches = ray.data.Dataset.iter_batches
+        first_window_committed = threading.Event()
+        resume_iteration = threading.Event()
+        rollback_error = []
+
+        def pausing_iter_batches(dataset, *args, **kwargs):
+            for batch_number, batch in enumerate(
+                    original_iter_batches(dataset, *args, **kwargs), 1):
+                yield batch
+                if batch_number == 1:
+                    first_window_committed.set()
+                    if not resume_iteration.wait(30):
+                        raise TimeoutError("timed out waiting for rollback")
+
+        def rollback_first_window():
+            try:
+                if not first_window_committed.wait(30):
+                    raise TimeoutError("first commit was not observed")
+                table.rollback_to(base_snapshot_id)
+            except Exception as error:
+                rollback_error.append(error)
+            finally:
+                resume_iteration.set()
+
+        rollback_thread = threading.Thread(target=rollback_first_window)
+        rollback_thread.start()
+        try:
+            with mock.patch.object(
+                    ray.data.Dataset, "iter_batches", pausing_iter_batches):
+                with self.assertRaisesRegex(
+                        RuntimeError, "no longer in the current lineage"):
+                    update_by_row_id(
+                        target,
+                        ray.data.from_arrow(source).repartition(2),
+                        self.catalog_options,
+                        update_cols=["age"],
+                        num_partitions=2,
+                        max_groups_per_commit=1,
+                    )
+        finally:
+            resume_iteration.set()
+            rollback_thread.join(30)
+
+        self.assertEqual([], rollback_error)
+        self.assertFalse(rollback_thread.is_alive())
+        self.assertEqual(
+            base_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_incremental_committer_batches_complete_groups(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {
+            "commits": [],
+            "ignored": [],
+            "aborts": [],
+            "close_calls": 0,
+        }
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commits"].append((list(msgs), commit_identifier))
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
+
+            def close(self):
+                recorder["close_calls"] += 1
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["group-1"], 1, [])
+        self.assertEqual([], recorder["commits"])
+        committer.add_group(["group-2"], 1, [])
+        committer.add_group(["group-3"], 1, [])
+        committer.finish()
+        committer.close()
+
+        self.assertEqual([
+            (["group-1", "group-2"], 1),
+            (["group-3"], 2),
+        ], recorder["commits"])
+        self.assertEqual([1, 2], recorder["ignored"])
+        self.assertEqual([], recorder["aborts"])
+        self.assertEqual(1, recorder["close_calls"])
+
+    def test_incremental_committer_aborts_only_uncommitted_groups(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commits": [], "ignored": [], "aborts": []}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commits"].append((list(msgs), commit_identifier))
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["committed-1"], 1, [])
+        committer.add_group(["committed-2"], 1, [])
+        committer.add_group(["pending"], 1, [])
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual([
+            (["committed-1", "committed-2"], 1),
+        ], recorder["commits"])
+        self.assertEqual([1], recorder["ignored"])
+        self.assertEqual([["pending"]], recorder["aborts"])
+
+    def test_incremental_committer_drains_after_uncertain_commit(self):
+        import importlib
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commit_calls": 0, "ignored": [], "aborts": []}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commit_calls"] += 1
+                raise CommitOutcomeUnknownError(
+                    "commit outcome is uncertain")
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                recorder["ignored"].append(commit_identifier)
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        committer.add_group(["uncertain-1"], 1, [])
+        committer.add_group(["uncertain-2"], 1, [])
+        committer.add_group(["pending-1"], 1, [])
+        committer.add_group(["pending-2"], 1, [])
+        with self.assertRaisesRegex(RuntimeError, "outcome is uncertain"):
+            committer.finish()
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual(1, recorder["commit_calls"])
+        self.assertEqual([], recorder["ignored"])
+        self.assertEqual([["pending-1", "pending-2"]], recorder["aborts"])
+
+    def test_incremental_committer_aborts_deterministic_failure(self):
+        import importlib
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commit_calls": 0, "aborts": []}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commit_calls"] += 1
+                raise RuntimeError("conflict")
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        for group in ("failed-1", "failed-2", "pending-1", "pending-2"):
+            committer.add_group([group], 1, [])
+        with self.assertRaisesRegex(RuntimeError, "conflict"):
+            committer.finish()
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual(1, recorder["commit_calls"])
+        self.assertEqual([[
+            "failed-1", "failed-2", "pending-1", "pending-2"
+        ]], recorder["aborts"])
+
+    def test_incremental_committer_protects_committed_window(self):
+        import importlib
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"commits": [], "aborts": []}
+
+        class FakeCommit:
+            def commit(self, msgs, commit_identifier):
+                recorder["commits"].append(list(msgs))
+
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def ignore_row_id_conflict_for_commit(self, commit_identifier):
+                raise RuntimeError("ignore failed")
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        for group in ("committed-1", "committed-2", "pending-1", "pending-2"):
+            committer.add_group([group], 1, [])
+        with self.assertRaisesRegex(RuntimeError, "ignore failed"):
+            committer.finish()
+        committer.abort_pending()
+        committer.close()
+
+        self.assertEqual([[
+            "committed-1", "committed-2"
+        ]], recorder["commits"])
+        self.assertEqual([[
+            "pending-1", "pending-2"
+        ]], recorder["aborts"])
+
+    def test_incremental_committer_aborts_all_after_new_commit_failure(self):
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        recorder = {"aborts": [], "close_calls": 0}
+
+        class AbortCommit:
+            def abort(self, msgs):
+                recorder["aborts"].append(list(msgs))
+
+            def close(self):
+                recorder["close_calls"] += 1
+
+        class FailingBuilder:
+            def new_commit(self):
+                raise RuntimeError("new_commit failed")
+
+        class AbortBuilder:
+            def new_commit(self):
+                return AbortCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FailingBuilder()
+
+            def new_batch_write_builder(self):
+                return AbortBuilder()
+
+        committer = m._IncrementalUpdateCommitter(FakeTable(), 2)
+        for group in ("group-1", "group-2", "group-3"):
+            committer.add_group([group], 1, [])
+        with self.assertRaisesRegex(RuntimeError, "new_commit failed"):
+            committer.finish()
+        committer.abort_pending()
+
+        self.assertEqual(
+            [["group-1", "group-2", "group-3"]],
+            recorder["aborts"],
+        )
+        self.assertEqual(1, recorder["close_calls"])
+
+    def test_rejects_invalid_max_groups_per_commit(self):
+        target = self._create()
+        src = pa.table({"_ROW_ID": pa.array([], pa.int64()),
+                        "age": pa.array([], pa.int32())})
+        for value in (0, -1, True, 1.5):
+            with self.assertRaisesRegex(
+                    ValueError, "max_groups_per_commit must be a positive integer"):
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=value,
+                )
+
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
         # which uses it for commit-time conflict detection against concurrent writers.
@@ -182,6 +977,36 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(recorder["commit_calls"], 1)
         self.assertEqual(recorder["abort_calls"], 0)
         self.assertEqual(recorder["close_calls"], 1)
+
+    def test_driver_commit_failure_is_not_unwrapped(self):
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+
+        retry_error = ValueError("retry failed")
+        for error_type in (RuntimeError, CommitOutcomeUnknownError):
+            try:
+                raise error_type("commit failed") from retry_error
+            except error_type as commit_error:
+                chained_error = commit_error
+
+            with self.assertRaises(error_type) as raised:
+                self._run_with_fake_commit(commit_error=chained_error)
+
+            self.assertIs(chained_error, raised.exception)
+            self.assertIs(retry_error, raised.exception.__cause__)
+
+    def test_ray_task_error_is_unwrapped(self):
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.ray.data_evolution_merge_into import _reraise_inner
+
+        worker_error = ValueError("worker failed")
+        ray_error = RayTaskError("worker", "trace", worker_error)
+
+        with self.assertRaises(ValueError) as raised:
+            _reraise_inner(ray_error)
+
+        self.assertIs(worker_error, raised.exception)
+        self.assertIsNone(raised.exception.__cause__)
 
     def test_close_failure_after_success_warns_and_returns_stats(self):
         close_error = RuntimeError("close failed")

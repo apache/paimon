@@ -134,8 +134,9 @@ class CommitScanner:
                                  index_entries=None) -> Optional[List[ManifestEntry]]:
         """Delta entries (incl. DELETEs) in ``(from_snapshot, to_snapshot]``,
         changed-partition filtered, so a retry can reuse the prior base and read
-        only the changes since. Returns None on a missing snapshot (caller then
-        full-scans). Mirrors Java ``CommitScanner#readIncrementalChanges``.
+        only the changes since. Returns None on a missing or OVERWRITE snapshot
+        (caller then full-scans). An OVERWRITE may replace the base manifest
+        without fully describing the replacement in its delta manifest.
         """
         snapshot_manager = self.table.snapshot_manager()
         partition_filter = self._build_partition_filter_from_changes(
@@ -143,12 +144,25 @@ class CommitScanner:
         entries = []
         for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
             snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot is None:
+            if snapshot is None or snapshot.commit_kind == "OVERWRITE":
                 return None
             entries.extend(
                 self.read_incremental_raw_entries_from_changed_partitions(
                     snapshot, commit_entries, partition_filter))
         return entries
+
+    def changed_partition_signature(self, entries, index_entries=None):
+        """Return the changed partitions used by conflict scans."""
+        if not self.table.partition_keys:
+            return None
+
+        changed_partitions = set()
+        for entry in entries or []:
+            changed_partitions.add(tuple(entry.partition.values))
+        for entry in index_entries or []:
+            if self._index_entry_changes_partition(entry):
+                changed_partitions.add(tuple(entry.partition.values))
+        return frozenset(changed_partitions) or None
 
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
         return self._build_partition_filter_from_changes(entries)
@@ -169,12 +183,8 @@ class CommitScanner:
         if not partition_keys:
             return None
 
-        changed_partitions = set()
-        for entry in entries or []:
-            changed_partitions.add(tuple(entry.partition.values))
-        for entry in index_entries or []:
-            if self._index_entry_changes_partition(entry):
-                changed_partitions.add(tuple(entry.partition.values))
+        changed_partitions = self.changed_partition_signature(
+            entries, index_entries)
 
         if not changed_partitions:
             return None

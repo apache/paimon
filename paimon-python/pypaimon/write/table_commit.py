@@ -91,6 +91,12 @@ class TableCommit:
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)
 
+    def ignore_row_id_conflict_for_commit(self, commit_identifier: int) -> None:
+        """Skip a disjoint commit in later row-id checks."""
+        self.file_store_commit.conflict_detection.ignore_row_id_commit(
+            self.commit_user, commit_identifier
+        )
+
     def close(self):
         self.file_store_commit.close()
 

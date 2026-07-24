@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
+from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
 
 
 class RecordingCallback(CommitCallback):
@@ -166,6 +167,31 @@ class CommitCallbackTest(unittest.TestCase):
 
         self.assertEqual(0, len(callback.contexts))
 
+        table_write.close()
+        table_commit.close()
+
+    def test_callback_failure_keeps_committed_snapshot(self):
+        class FailingCallback(CommitCallback):
+            def call(self, context):
+                raise RuntimeError("callback failed")
+
+        table = self._create_table('test_callback_failure')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_commit.add_commit_callback(FailingCallback())
+        table_write.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['a'],
+            'dt': ['p1'],
+        }, schema=self.pa_schema))
+
+        with self.assertRaisesRegex(
+                CommitOutcomeUnknownError, "callback failed"):
+            table_commit.commit(table_write.prepare_commit())
+
+        self.assertEqual(
+            1, table.snapshot_manager().get_latest_snapshot().id)
         table_write.close()
         table_commit.close()
 
