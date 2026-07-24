@@ -23,12 +23,14 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.clone.CloneFileFormatUtils;
 import org.apache.paimon.flink.clone.CloneHiveTableUtils;
 import org.apache.paimon.flink.clone.ClonePaimonTableUtils;
+import org.apache.paimon.flink.clone.history.ClonePaimonFullHistoryTableUtils;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Clone source table to target table. */
@@ -48,6 +50,8 @@ public class CloneAction extends ActionBase {
     @Nullable private final List<String> excludedTables;
     @Nullable private final String preferFileFormat;
     private final String cloneFrom;
+    private final String cloneMode;
+    @Nullable private final List<String> pathMappings;
     private final boolean metaOnly;
     private final boolean cloneIfExists;
 
@@ -66,9 +70,60 @@ public class CloneAction extends ActionBase {
             String cloneFrom,
             boolean metaOnly,
             boolean cloneIfExists) {
+        this(
+                sourceDatabase,
+                sourceTableName,
+                sourceCatalogConfig,
+                targetDatabase,
+                targetTableName,
+                targetCatalogConfig,
+                parallelism,
+                whereSql,
+                includedTables,
+                excludedTables,
+                preferFileFormat,
+                cloneFrom,
+                "logical",
+                null,
+                metaOnly,
+                cloneIfExists);
+    }
+
+    public CloneAction(
+            String sourceDatabase,
+            String sourceTableName,
+            Map<String, String> sourceCatalogConfig,
+            String targetDatabase,
+            String targetTableName,
+            Map<String, String> targetCatalogConfig,
+            @Nullable Integer parallelism,
+            @Nullable String whereSql,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat,
+            String cloneFrom,
+            String cloneMode,
+            @Nullable List<String> pathMappings,
+            boolean metaOnly,
+            boolean cloneIfExists) {
         super(sourceCatalogConfig);
 
-        if (cloneFrom.equalsIgnoreCase("hive")) {
+        String normalizedCloneFrom =
+                StringUtils.isNullOrWhitespaceOnly(cloneFrom)
+                        ? "hive"
+                        : cloneFrom.trim().toLowerCase(Locale.ROOT);
+        String normalizedCloneMode =
+                StringUtils.isNullOrWhitespaceOnly(cloneMode)
+                        ? "logical"
+                        : cloneMode.trim().toLowerCase(Locale.ROOT);
+        if (!"paimon".equals(normalizedCloneFrom) && !"logical".equals(normalizedCloneMode)) {
+            throw new UnsupportedOperationException(
+                    "clone_mode="
+                            + normalizedCloneMode
+                            + " is only supported when clone_from=paimon.");
+        }
+
+        if (normalizedCloneFrom.equals("hive")) {
             Catalog sourceCatalog = catalog;
             if (sourceCatalog instanceof CachingCatalog) {
                 sourceCatalog = ((CachingCatalog) sourceCatalog).wrapped();
@@ -96,8 +151,10 @@ public class CloneAction extends ActionBase {
         this.preferFileFormat =
                 StringUtils.isNullOrWhitespaceOnly(preferFileFormat)
                         ? preferFileFormat
-                        : preferFileFormat.toLowerCase();
-        this.cloneFrom = cloneFrom;
+                        : preferFileFormat.toLowerCase(Locale.ROOT);
+        this.cloneFrom = normalizedCloneFrom;
+        this.cloneMode = normalizedCloneMode;
+        this.pathMappings = pathMappings;
         this.metaOnly = metaOnly;
         this.cloneIfExists = cloneIfExists;
     }
@@ -124,23 +181,51 @@ public class CloneAction extends ActionBase {
                         cloneIfExists);
                 break;
             case "paimon":
-                ClonePaimonTableUtils.build(
-                        env,
-                        catalog,
-                        sourceDatabase,
-                        sourceTableName,
-                        sourceCatalogConfig,
-                        targetDatabase,
-                        targetTableName,
-                        targetCatalogConfig,
-                        parallelism,
-                        whereSql,
-                        includedTables,
-                        excludedTables,
-                        preferFileFormat,
-                        metaOnly,
-                        cloneIfExists);
+                switch (cloneMode) {
+                    case "logical":
+                        ClonePaimonTableUtils.build(
+                                env,
+                                catalog,
+                                sourceDatabase,
+                                sourceTableName,
+                                sourceCatalogConfig,
+                                targetDatabase,
+                                targetTableName,
+                                targetCatalogConfig,
+                                parallelism,
+                                whereSql,
+                                includedTables,
+                                excludedTables,
+                                preferFileFormat,
+                                metaOnly,
+                                cloneIfExists);
+                        break;
+                    case "full-history":
+                        ClonePaimonFullHistoryTableUtils.build(
+                                env,
+                                catalog,
+                                sourceDatabase,
+                                sourceTableName,
+                                sourceCatalogConfig,
+                                targetDatabase,
+                                targetTableName,
+                                targetCatalogConfig,
+                                parallelism,
+                                whereSql,
+                                includedTables,
+                                excludedTables,
+                                preferFileFormat,
+                                pathMappings,
+                                metaOnly,
+                                cloneIfExists);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported Paimon clone_mode: " + cloneMode);
+                }
                 break;
+            default:
+                throw new UnsupportedOperationException("Unsupported clone_from: " + cloneFrom);
         }
     }
 
