@@ -59,6 +59,10 @@ when it is false, it will read the full amount of data into memory.
 
 **`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
 
+When the read builder has a `LIMIT`, streaming reads use one DataLoader worker
+and disable split prefetch fan-out. This preserves one global remaining-row
+quota and avoids materializing BLOB payloads beyond the limit.
+
 ## Shuffle
 
 PyPaimon supports streaming shuffle for PyTorch `IterableDataset`. The shuffle

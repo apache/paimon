@@ -42,7 +42,10 @@ from pypaimon.read.reader.concat_batch_reader import (
     MergeAllBatchReader, DataEvolutionMergeReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
+from pypaimon.read.reader.auth_masking_reader import AuthFilterReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+from pypaimon.read.reader.deferred_blob_resolve_reader import \
+    DeferredBlobResolveReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch, VectorBunch
@@ -81,6 +84,33 @@ from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
 NULL_FIELD_INDEX = -1
+
+
+def deferred_blob_field_names(table, read_fields: List[DataField],
+                              predicate: Optional[Predicate],
+                              limit: Optional[int],
+                              has_post_filter: bool = False) -> set:
+    # An auth filter also selects rows; defer past it too, like a predicate/limit.
+    if ((predicate is None and limit is None and not has_post_filter)
+            or CoreOptions.blob_as_descriptor(table.options)
+            or not table.options.read_defer_blob_resolve()):
+        return set()
+
+    inline_fields = (
+        CoreOptions.blob_descriptor_fields(table.options)
+        | CoreOptions.blob_view_fields(table.options)
+    )
+    predicate_fields = (
+        predicate_field_names(predicate) if predicate is not None else set()
+    )
+    return {
+        read_fields[index].name
+        for index in blob_field_indices(read_fields)
+        if read_fields[index].name not in inline_fields
+        and read_fields[index].name not in predicate_fields
+    }
+
+
 ROW_SIDECAR_FORMAT = CoreOptions.FILE_FORMAT_ROW
 
 _COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
@@ -283,7 +313,7 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
-            blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+            blob_as_descriptor = self._read_blob_as_descriptor(read_file_fields)
             blob_parallelism = self._blob_parallelism
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
@@ -418,6 +448,12 @@ class SplitRead(ABC):
             reader = ShardBatchReader(reader, shard_range[0], shard_range[1])
 
         return reader
+
+    def _read_blob_as_descriptor(self, field_names: List[str]) -> bool:
+        if CoreOptions.blob_as_descriptor(self.table.options):
+            return True
+        deferred_fields = getattr(self, '_deferred_blob_fields', set())
+        return any(field_name in deferred_fields for field_name in field_names)
 
     @staticmethod
     def _row_sidecar_file_name(file: DataFileMeta) -> Optional[str]:
@@ -995,7 +1031,10 @@ class DataEvolutionSplitRead(SplitRead):
             nested_name_paths: Optional[List[List[str]]] = None,
             limit: Optional[int] = None,
             outer_extract_name_paths: Optional[List[List[str]]] = None,
-            outer_flat_read_type: Optional[List[DataField]] = None):
+            outer_flat_read_type: Optional[List[DataField]] = None,
+            post_merge_filter=None,
+            eager_blob_fields=None,
+            post_filter_after_inline=False):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1008,6 +1047,11 @@ class DataEvolutionSplitRead(SplitRead):
         )
         self.outer_extract_name_paths = outer_extract_name_paths
         self.outer_flat_read_type = outer_flat_read_type
+        self._post_merge_filter = post_merge_filter
+        # Apply the auth filter after inline BLOB resolution, so scalar BLOBs still defer.
+        self._post_filter_after_inline = post_filter_after_inline
+        self._eager_blob_fields = set(eager_blob_fields or [])
+        self._deferred_blob_fields = self._deferred_blob_field_names()
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate
@@ -1027,7 +1071,34 @@ class DataEvolutionSplitRead(SplitRead):
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names),
                 blob_parallelism=blob_parallelism)
 
+        if self._post_filter_after_inline:
+            if self._post_merge_filter is not None:
+                reader = AuthFilterReader(reader, self._post_merge_filter)
+            if self.limit is not None:
+                reader = LimitedRecordBatchReader(reader, self.limit)
+
+        if self._deferred_blob_fields:
+            blob_names = [
+                field.name for field in self.read_fields
+                if field.name in self._deferred_blob_fields
+            ]
+            reader = DeferredBlobResolveReader(
+                reader,
+                self.table.file_io,
+                blob_names,
+                blob_parallelism=self._blob_parallelism,
+            )
+
         return reader
+
+    def _deferred_blob_field_names(self) -> set:
+        return deferred_blob_field_names(
+            self.table,
+            self.read_fields,
+            self.predicate_for_reader,
+            self.limit,
+            has_post_filter=self._post_merge_filter is not None,
+        ) - self._eager_blob_fields
 
     def _create_raw_reader(self) -> RecordReader:
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
@@ -1065,6 +1136,9 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
+        if self._post_merge_filter is not None and not self._post_filter_after_inline:
+            reader = AuthFilterReader(reader, self._post_merge_filter)
+
         if self.outer_extract_name_paths:
             if self.outer_flat_read_type is None:
                 raise ValueError(
@@ -1075,7 +1149,7 @@ class DataEvolutionSplitRead(SplitRead):
             reader = NestedLeafBatchReader(
                 reader, self.outer_extract_name_paths, self.outer_flat_read_type)
 
-        if self.limit is not None:
+        if self.limit is not None and not self._post_filter_after_inline:
             reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader
@@ -1138,17 +1212,16 @@ class DataEvolutionSplitRead(SplitRead):
         if not prescan_fields:
             return EmptyRecordBatchReader()
 
-        # When there's a normal field predicate, don't push down limit to prescan reader
-        # because the outer reader will apply predicate+limit filtering,
-        # while prescan reader would only apply limit without normal field predicate
-        # TODO support limit+predicate push down
+        # Skip limit push-down when the outer reader also selects rows (predicate or auth
+        # filter): prescan's first-N rows would differ from the outer set. TODO: push down.
+        skip_limit = self.predicate is not None or self._post_merge_filter is not None
         prescan_read = DataEvolutionSplitRead(
             table=self.table,
             predicate=self.predicate,
             read_type=prescan_fields,
             split=self.split,
             row_tracking_enabled=False,
-            limit=None if self.predicate else self.limit,
+            limit=None if skip_limit else self.limit,
         )
         prescan_read.row_ranges = self.row_ranges
         return prescan_read._create_raw_reader()
@@ -1297,7 +1370,7 @@ class DataEvolutionSplitRead(SplitRead):
                             [read_fields[0]]
                         ).field(0).type,
                         self.row_ranges,
-                        CoreOptions.blob_as_descriptor(self.table.options),
+                        self._read_blob_as_descriptor([read_fields[0].name]),
                         deletion_vector=deletion_vector,
                         batch_size=batch_size,
                         blob_parallelism=self._blob_parallelism,
@@ -1352,7 +1425,7 @@ class DataEvolutionSplitRead(SplitRead):
             read_fields,
             self.read_fields,
             None,
-            CoreOptions.blob_as_descriptor(self.table.options),
+            self._read_blob_as_descriptor(read_fields),
             batch_size=self.table.options.read_batch_size(),
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
