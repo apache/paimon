@@ -161,16 +161,22 @@ class RayDatasource(Datasource):
                 table, predicate, read_type, limit=limit,
                 nested_name_paths=nested_name_paths)
 
-            batch_reader = worker_table_read.to_arrow_batch_reader(splits)
+            batch_reader = worker_table_read.to_arrow_batch_reader(
+                splits, parallelism=1)
             has_data = False
-            for batch in iter(batch_reader.read_next_batch, None):
-                if batch.num_rows == 0:
-                    continue
-                has_data = True
-                table = pyarrow.Table.from_batches([batch])
-                if table.schema != schema:
-                    table = table.cast(schema)
-                yield table
+            try:
+                for batch in iter(batch_reader.read_next_batch, None):
+                    if batch.num_rows == 0:
+                        continue
+                    has_data = True
+                    table = pyarrow.Table.from_batches([batch])
+                    if table.schema != schema:
+                        table = table.cast(schema)
+                    yield table
+            finally:
+                close_reader = getattr(batch_reader, "close", None)
+                if close_reader is not None:
+                    close_reader()
 
             if not has_data:
                 yield pyarrow.Table.from_arrays(

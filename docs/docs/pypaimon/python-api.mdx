@@ -471,6 +471,14 @@ for batch in table_read.to_arrow_batch_reader(splits):
 # f1: ["a","b","c"]
 ```
 
+Multiple splits are read concurrently according to `parallelism` or
+`read.parallelism` while batches are streamed in split order. Pass
+`parallelism=1` to force serial reading. Streaming reads use at most 16 split
+workers process-wide and keep a two-window lookahead. Each lookahead split can
+retain two queued batches, while each active worker can hold one additional
+batch. Reads with a `LIMIT` remain serial so speculative later-split failures
+cannot change the result.
+
 ### Read Python Iterator
 
 You can read the data row by row into a native Python iterator.
