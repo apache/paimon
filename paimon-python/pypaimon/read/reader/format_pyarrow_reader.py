@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -30,7 +30,8 @@ from pypaimon.data.variant_shredding import (
     is_shredded_variant,
 )
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import (AtomicType, DataField,
+                                        PyarrowFieldParser)
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -48,7 +49,9 @@ class FormatPyArrowReader(RecordBatchReader):
                  read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  options: CoreOptions = None,
-                 nested_name_paths: Optional[List[List[str]]] = None):
+                 nested_name_paths: Optional[List[List[str]]] = None,
+                 predicate_field_names: Optional[Set[str]] = None):
+        self._predicate_field_names = predicate_field_names or set()
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
         self._file_format = file_format
@@ -93,69 +96,140 @@ class FormatPyArrowReader(RecordBatchReader):
             for f, path in zip(read_fields, nested_name_paths):
                 if f.name in existing_set:
                     columns_dict[f.name] = ds.field(*path)
-            self.reader = self.dataset.scanner(
-                columns=columns_dict,
-                filter=push_down_predicate,
-                batch_size=batch_size
-            ).to_reader()
+            self._scan_columns = columns_dict
         else:
             # Only pass existing fields to PyArrow scanner to avoid errors
-            self.reader = self.dataset.scanner(
-                columns=self.existing_fields,
-                filter=push_down_predicate,
-                batch_size=batch_size
-            ).to_reader()
+            self._scan_columns = self.existing_fields
+        self._scan_filter = push_down_predicate
+        self._scan_batch_size = batch_size
 
         self._output_schema = (
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
 
-    def read_arrow_batch(self) -> Optional[RecordBatch]:
-        try:
-            batch = self.reader.read_next_batch()
+        # Read projected VARIANT columns in bounded batches.
+        self._parquet_file = None
+        if (self._file_format == 'parquet'
+                and not has_nested_path
+                and self._has_projected_variant()):
+            import pyarrow.parquet as pq
+            # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
+            self._parquet_file = pq.ParquetFile(
+                file_io.filesystem.open_input_file(file_path_for_pyarrow))
+        if self._parquet_file is not None:
+            self._raw_batches = self._iter_row_group_batches()
+        else:
+            reader = self.dataset.scanner(
+                columns=self._scan_columns,
+                filter=self._scan_filter,
+                batch_size=self._scan_batch_size,
+            ).to_reader()
+            self._raw_batches = self._iter_reader_batches(reader)
 
-            if self._file_format == 'orc' and self._output_schema is not None:
-                batch = self._cast_orc_time_columns(batch)
+    def _has_projected_variant(self) -> bool:
+        return any(
+            f.name in self.existing_fields
+            and isinstance(f.type, AtomicType)
+            and f.type.type == 'VARIANT'
+            for f in self.read_fields)
 
-            if self._shredded_schemas:
-                batch = self._assemble_shredded_variants(batch)
+    @staticmethod
+    def _iter_reader_batches(reader):
+        while True:
+            try:
+                yield reader.read_next_batch()
+            except StopIteration:
+                return
 
-            if not self.missing_fields:
-                return batch
+    def _iter_row_group_batches(self):
+        columns = self._row_group_read_columns()
+        for row_group in self._surviving_row_group_ids():
+            for batch in self._parquet_file.iter_batches(
+                    row_groups=[row_group],
+                    columns=columns,
+                    batch_size=self._scan_batch_size):
+                if self._scan_filter is None:
+                    yield batch
+                    continue
+                table = ds.dataset(
+                    pa.Table.from_batches([batch])
+                ).scanner(filter=self._scan_filter).to_table()
+                if self.existing_fields:
+                    table = table.select(self.existing_fields)
+                for out in table.to_batches():
+                    if out.num_rows:
+                        yield out
 
-            def _type_for_missing(name: str) -> pa.DataType:
-                if self._output_schema is not None:
-                    idx = self._output_schema.get_field_index(name)
-                    if idx >= 0:
-                        return self._output_schema.field(idx).type
-                return pa.null()
-
-            missing_columns = [
-                pa.nulls(batch.num_rows, type=_type_for_missing(name))
-                for name in self.missing_fields
-            ]
-
-            # Reconstruct the batch with all fields in the correct order
-            all_columns = []
-            out_fields = []
-            for field_name in self._read_field_names:
-                if field_name in self.existing_fields:
-                    # Get the column from the existing batch
-                    column_idx = self.existing_fields.index(field_name)
-                    all_columns.append(batch.column(column_idx))
-                    out_fields.append(batch.schema.field(column_idx))
-                else:
-                    # Get the column from missing fields
-                    column_idx = self.missing_fields.index(field_name)
-                    col_type = _type_for_missing(field_name)
-                    all_columns.append(missing_columns[column_idx])
-                    nullable = not SpecialFields.is_system_field(field_name)
-                    out_fields.append(pa.field(field_name, col_type, nullable=nullable))
-            # Create a new RecordBatch with all columns
-            return pa.RecordBatch.from_arrays(all_columns, schema=pa.schema(out_fields))
-
-        except StopIteration:
+    def _row_group_read_columns(self):
+        if not self.existing_fields:
             return None
+        columns = list(self.existing_fields)
+        if self._scan_filter is not None:
+            file_names = set(self.dataset.schema.names)
+            for name in self._predicate_field_names:
+                if name in file_names and name not in columns:
+                    columns.append(name)
+        return columns
+
+    def _surviving_row_group_ids(self):
+        total = self._parquet_file.num_row_groups
+        if self._scan_filter is None:
+            return range(total)
+        try:
+            ids = set()
+            for fragment in self.dataset.get_fragments(
+                    filter=self._scan_filter):
+                for row_group in fragment.split_by_row_group(
+                        self._scan_filter):
+                    ids.update(info.id for info in row_group.row_groups)
+            return sorted(ids)
+        except Exception:
+            return range(total)
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        batch = next(self._raw_batches, None)
+        if batch is None:
+            return None
+        return self._post_process_batch(batch)
+
+    def _post_process_batch(self, batch: RecordBatch) -> RecordBatch:
+        if self._file_format == 'orc' and self._output_schema is not None:
+            batch = self._cast_orc_time_columns(batch)
+
+        if self._shredded_schemas:
+            batch = self._assemble_shredded_variants(batch)
+
+        if not self.missing_fields:
+            return batch
+
+        def _type_for_missing(name: str) -> pa.DataType:
+            if self._output_schema is not None:
+                idx = self._output_schema.get_field_index(name)
+                if idx >= 0:
+                    return self._output_schema.field(idx).type
+            return pa.null()
+
+        missing_columns = [
+            pa.nulls(batch.num_rows, type=_type_for_missing(name))
+            for name in self.missing_fields
+        ]
+
+        all_columns = []
+        out_fields = []
+        for field_name in self._read_field_names:
+            if field_name in self.existing_fields:
+                column_idx = self.existing_fields.index(field_name)
+                all_columns.append(batch.column(column_idx))
+                out_fields.append(batch.schema.field(column_idx))
+            else:
+                column_idx = self.missing_fields.index(field_name)
+                col_type = _type_for_missing(field_name)
+                all_columns.append(missing_columns[column_idx])
+                nullable = not SpecialFields.is_system_field(field_name)
+                out_fields.append(
+                    pa.field(field_name, col_type, nullable=nullable))
+        return pa.RecordBatch.from_arrays(
+            all_columns, schema=pa.schema(out_fields))
 
     def _assemble_shredded_variants(self, batch: pa.RecordBatch) -> pa.RecordBatch:
         """Replace shredded VARIANT columns with standard struct<value, metadata>."""
@@ -197,8 +271,12 @@ class FormatPyArrowReader(RecordBatchReader):
         return batch
 
     def close(self):
-        if self.reader is not None:
-            self.reader = None
+        self._raw_batches = None
+        if self._parquet_file is not None:
+            close = getattr(self._parquet_file, 'close', None)
+            if close is not None:
+                close()
+            self._parquet_file = None
 
 
 def _path_exists_in_arrow_schema(schema: pa.Schema, path: List[str]) -> bool:
