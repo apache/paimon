@@ -63,6 +63,27 @@ class ManifestsTableTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def _write_two_partitions(self):
+        fields = [
+            DataField.from_dict({"id": 0, "name": "id", "type": "INT"}),
+            DataField.from_dict({"id": 1, "name": "pt", "type": "INT"}),
+            DataField.from_dict({"id": 2, "name": "dt", "type": "STRING"}),
+        ]
+        self.catalog.create_table(
+            "db.p", Schema(fields=fields, partition_keys=["pt", "dt"]), False)
+        table = self.catalog.get_table("db.p")
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(pa.table({
+            "id": pa.array([1, 2], type=pa.int32()),
+            "pt": pa.array([1, 2], type=pa.int32()),
+            "dt": ["2024-01-01", "2024-01-02"],
+        }))
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
     def test_manifests_table_loaded_via_catalog(self):
         table = self.catalog.get_table("db.t$manifests")
         self.assertIsInstance(table, ManifestsTable)
@@ -100,12 +121,25 @@ class ManifestsTableTest(unittest.TestCase):
         for n_added in arrow_table.column("num_added_files").to_pylist():
             self.assertGreaterEqual(n_added, 0)
 
-        # min/max_partition_stats are placeholders until the partition
-        # cast-to-string helper lands; pin the placeholder contract.
-        for value in arrow_table.column("min_partition_stats").to_pylist():
-            self.assertIsNone(value)
-        for value in arrow_table.column("max_partition_stats").to_pylist():
-            self.assertIsNone(value)
+    def test_partition_stats_of_unpartitioned_table(self):
+        self._write_one_commit()
+        arrow_table = _read(self.catalog.get_table("db.t$manifests"))
+
+        # an empty partition row renders as "{}", the same as in Java
+        self.assertEqual(["{}"] * arrow_table.num_rows,
+                         arrow_table.column("min_partition_stats").to_pylist())
+        self.assertEqual(["{}"] * arrow_table.num_rows,
+                         arrow_table.column("max_partition_stats").to_pylist())
+
+    def test_partition_stats_span_the_written_partitions(self):
+        self._write_two_partitions()
+        arrow_table = _read(self.catalog.get_table("db.p$manifests"))
+        self.assertEqual(1, arrow_table.num_rows)
+
+        self.assertEqual(["{1, 2024-01-01}"],
+                         arrow_table.column("min_partition_stats").to_pylist())
+        self.assertEqual(["{2, 2024-01-02}"],
+                         arrow_table.column("max_partition_stats").to_pylist())
 
 
 if __name__ == "__main__":
