@@ -365,6 +365,55 @@ class TestRESTCommit(RESTBaseTest):
         self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
         self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
 
+    def test_lost_commit_response_resolves_duplicate_as_success(self):
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        opts = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'commit.max-retries': '1',
+            'commit.min-retry-wait': '1ms',
+            'commit.max-retry-wait': '1ms',
+            'commit.timeout': '10s',
+        }
+        schema = Schema.from_pyarrow_schema(pa_schema, options=opts)
+        table_name = 'default.test_duplicate_commit_success'
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c']}, schema=pa_schema)
+        table_write.write_arrow(data)
+        commit_messages = table_write.prepare_commit()
+
+        real_commit = table_commit.file_store_commit.snapshot_commit.commit
+        commit_calls = []
+
+        def commit_then_lose_response(snapshot, statistics):
+            commit_calls.append(snapshot.id)
+            real_commit(snapshot, statistics)
+            raise RuntimeError("simulated lost response")
+
+        with patch.object(
+                table_commit.file_store_commit.snapshot_commit,
+                'commit',
+                side_effect=commit_then_lose_response):
+            table_commit.commit(commit_messages)
+
+        table_write.close()
+        table_commit.close()
+
+        self.assertEqual([1], commit_calls)
+        self.assertEqual(1, table.snapshot_manager().get_latest_snapshot().id)
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
+
 
 if __name__ == '__main__':
     unittest.main()

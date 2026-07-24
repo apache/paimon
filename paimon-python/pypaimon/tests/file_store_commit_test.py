@@ -28,6 +28,7 @@ from pypaimon.write.file_store_commit import (
     CommitOutcomeUnknownError,
     FileStoreCommit,
     RetryResult,
+    SuccessResult,
 )
 
 
@@ -550,25 +551,53 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertIs(atomic_error, raised.exception.__cause__)
 
-    def test_unknown_duplicate_remains_unknown(
+    def test_unknown_duplicate_resolves_to_success(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         file_store_commit = self._create_file_store_commit()
         atomic_error = RuntimeError("response lost")
         retry_result = RetryResult(
             None, atomic_error, outcome_unknown=True)
-        file_store_commit._is_duplicate_commit = Mock(return_value=True)
+        latest_snapshot = Mock(
+            id=1,
+            commit_user="test_user",
+            commit_identifier=1,
+            commit_kind="APPEND",
+        )
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            latest_snapshot
+        )
 
-        with self.assertRaises(CommitOutcomeUnknownError) as raised:
-            file_store_commit._try_commit_once(
-                retry_result=retry_result,
-                commit_kind="APPEND",
-                commit_entries=[Mock()],
-                changelog_entries=[],
-                commit_identifier=1,
-                latest_snapshot=Mock(),
-            )
+        result = file_store_commit._try_commit_once(
+            retry_result=retry_result,
+            commit_kind="APPEND",
+            commit_entries=[Mock()],
+            changelog_entries=[],
+            commit_identifier=1,
+            latest_snapshot=latest_snapshot,
+        )
 
-        self.assertIs(atomic_error, raised.exception.__cause__)
+        self.assertTrue(result.is_success())
+
+    def test_unknown_retry_resolves_when_duplicate_is_found(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 1000
+        file_store_commit._commit_retry_wait = Mock()
+        file_store_commit.snapshot_manager.get_latest_snapshot.side_effect = [
+            None,
+            Mock(id=1),
+        ]
+        atomic_error = RuntimeError("response lost")
+        file_store_commit._try_commit_once = Mock(side_effect=[
+            RetryResult(None, atomic_error, outcome_unknown=True),
+            SuccessResult(),
+        ])
+
+        file_store_commit._try_commit(
+            "APPEND", 1, lambda _snapshot: [Mock()])
+
+        self.assertEqual(2, file_store_commit._try_commit_once.call_count)
 
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):

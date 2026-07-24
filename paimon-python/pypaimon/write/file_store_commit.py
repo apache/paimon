@@ -407,10 +407,6 @@ class FileStoreCommit:
                          index_adds=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
-            if retry_result is not None and retry_result.outcome_unknown:
-                raise CommitOutcomeUnknownError(
-                    "Atomic commit outcome is unknown."
-                ) from retry_result.exception
             return SuccessResult()
 
         unique_id = uuid.uuid4()
