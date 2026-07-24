@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
@@ -163,6 +164,72 @@ public class IndexManifestFileHandlerTest {
     }
 
     @Test
+    public void testMissingGlobalIndexDeleteRejectedByDefault() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifest =
+                indexManifestFile.writeIndexFiles(
+                        null, Arrays.asList(previous), BucketMode.BUCKET_UNAWARE, false);
+        IndexManifestEntry missing = globalIndexEntry("missing-index", 100, 199, 1);
+
+        assertThatThrownBy(
+                        () ->
+                                indexManifestFile.writeIndexFiles(
+                                        manifest,
+                                        Arrays.asList(missing.toDeleteEntry()),
+                                        BucketMode.BUCKET_UNAWARE,
+                                        false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Trying to delete global index file missing-index which does not exist.");
+    }
+
+    @Test
+    public void testMissingGlobalIndexDeleteCanBeIgnoredExplicitly() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifest =
+                indexManifestFile.writeIndexFiles(
+                        null, Arrays.asList(previous), BucketMode.BUCKET_UNAWARE, false);
+        IndexManifestEntry missing = globalIndexEntry("missing-index", 100, 199, 1);
+
+        String ignored =
+                indexManifestFile.writeIndexFiles(
+                        manifest,
+                        Arrays.asList(missing.toDeleteEntry()),
+                        BucketMode.BUCKET_UNAWARE,
+                        true);
+
+        assertThat(indexManifestFile.read(ignored)).containsExactly(previous);
+    }
+
+    @Test
+    public void testDataEvolutionSourceMetaDoesNotDisableRangeValidation() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = dataEvolutionIndexEntry("old-index", 0, 99, 1, 1);
+        String manifest = handler.write(null, Arrays.asList(previous));
+        IndexManifestEntry replacement = dataEvolutionIndexEntry("new-index", 0, 99, 1, 2);
+
+        assertThatThrownBy(() -> handler.write(manifest, Arrays.asList(replacement)))
+                .hasMessageContaining("overlapping row range");
+
+        String replaced =
+                handler.write(manifest, Arrays.asList(previous.toDeleteEntry(), replacement));
+        assertThat(indexManifestFile.read(replaced)).containsExactly(replacement);
+    }
+
+    @Test
     public void testGlobalIndexOverlappingRangeAllowedForDifferentFieldId() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
@@ -280,6 +347,31 @@ public class IndexManifestFileHandlerTest {
                         1L,
                         1L,
                         new GlobalIndexMeta(0, 1, 1, null, null, new byte[] {1}),
+                        null));
+    }
+
+    private IndexManifestEntry dataEvolutionIndexEntry(
+            String fileName,
+            long rowRangeStart,
+            long rowRangeEnd,
+            int indexFieldId,
+            long scanSnapshotId) {
+        return new IndexManifestEntry(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                new IndexFileMeta(
+                        "lumina",
+                        fileName,
+                        1L,
+                        rowRangeEnd - rowRangeStart + 1,
+                        new GlobalIndexMeta(
+                                rowRangeStart,
+                                rowRangeEnd,
+                                indexFieldId,
+                                null,
+                                null,
+                                new DataEvolutionIndexSourceMeta(scanSnapshotId).serialize()),
                         null));
     }
 }

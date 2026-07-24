@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.PojoDataFileMeta;
@@ -94,7 +95,14 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO, indexPathFactory, coreOptions, range, fields, "test-type", entries);
+                        fileIO,
+                        indexPathFactory,
+                        coreOptions,
+                        range,
+                        fields,
+                        "test-type",
+                        entries,
+                        null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -115,11 +123,37 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO, indexPathFactory, coreOptions, range, fields, "test-type", entries);
+                        fileIO,
+                        indexPathFactory,
+                        coreOptions,
+                        range,
+                        fields,
+                        "test-type",
+                        entries,
+                        null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
         assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isNull();
+    }
+
+    @Test
+    void testToIndexFileMetasWithSourceMeta() throws IOException {
+        DataField field = new DataField(1, "vec", new ArrayType(new FloatType()));
+        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(7L).serialize();
+
+        List<IndexFileMeta> metas =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        fileIO,
+                        indexPathFactory,
+                        coreOptions,
+                        new Range(0, 9),
+                        Collections.singletonList(field),
+                        "lumina",
+                        createDummyResultEntries(),
+                        sourceMeta);
+
+        assertThat(metas.get(0).globalIndexMeta().sourceMeta()).containsExactly(sourceMeta);
     }
 
     // Test: 3 columns (title + vec + id), primary column title is indexFieldId, rest in
@@ -136,7 +170,14 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO, indexPathFactory, coreOptions, range, fields, "test-type", entries);
+                        fileIO,
+                        indexPathFactory,
+                        coreOptions,
+                        range,
+                        fields,
+                        "test-type",
+                        entries,
+                        null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);

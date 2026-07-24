@@ -18,23 +18,31 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +54,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -170,6 +179,28 @@ class GenericIndexTopoBuilderTest {
                 GenericIndexTopoBuilder.computeShardTasks(table, Collections.emptyList(), 100);
 
         assertThat(tasks).isEmpty();
+    }
+
+    @Test
+    void testRejectsIndexWorkWithoutScanSnapshot() {
+        GenericGlobalIndexBuilder indexBuilder = mock(GenericGlobalIndexBuilder.class);
+        when(indexBuilder.scan())
+                .thenReturn(Collections.singletonList(createEntry(BinaryRow.EMPTY_ROW, 0L, 1)));
+        when(indexBuilder.deletedIndexEntries()).thenReturn(Collections.emptyList());
+        when(indexBuilder.scanSnapshot()).thenReturn(null);
+
+        assertThatThrownBy(
+                        () ->
+                                GenericIndexTopoBuilder.buildIndex(
+                                        StreamExecutionEnvironment.getExecutionEnvironment(),
+                                        () -> indexBuilder,
+                                        table,
+                                        "id",
+                                        "test-index",
+                                        null,
+                                        new Options()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("index work without a scan snapshot");
     }
 
     @Test
@@ -478,10 +509,13 @@ class GenericIndexTopoBuilderTest {
     }
 
     @Test
-    void testAppendFilterOldFilesBeforeNewFiles() {
-        // Typical append: write file0[0,99](schema1), file1[100,199](schema1),
-        // then file2[200,299](schema0) arrives (old schema).
-        // Boundary = 200, keep files with firstRowId < 200.
+    void testAppendIncludesFilesAfterOldSchemaBoundary() throws Exception {
+        // The first file uses a schema from before "vec" was added. It must not prevent later
+        // files written with the new schema from participating in index topology construction.
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 0L, 100, 0L));
+        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 100L, 100, 1L));
+
         SchemaManager schemaManager = mock(SchemaManager.class);
         TableSchema oldSchema = mock(TableSchema.class);
         TableSchema newSchema = mock(TableSchema.class);
@@ -489,21 +523,34 @@ class GenericIndexTopoBuilderTest {
         when(schemaManager.schema(1L)).thenReturn(newSchema);
         when(oldSchema.fieldNames()).thenReturn(Arrays.asList("id", "name"));
         when(newSchema.fieldNames()).thenReturn(Arrays.asList("id", "name", "vec"));
+        when(table.schemaManager()).thenReturn(schemaManager);
 
-        List<ManifestEntry> entries = new ArrayList<>();
-        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 0L, 100, 1L));
-        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 100L, 100, 1L));
-        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 200L, 100, 0L));
+        GenericGlobalIndexBuilder indexBuilder = mock(GenericGlobalIndexBuilder.class);
+        when(indexBuilder.scan()).thenReturn(entries);
+        when(indexBuilder.deletedIndexEntries()).thenReturn(Collections.emptyList());
+        Snapshot scanSnapshot = mock(Snapshot.class);
+        when(scanSnapshot.id()).thenReturn(1L);
+        when(indexBuilder.scanSnapshot()).thenReturn(scanSnapshot);
 
-        List<ManifestEntry> result =
-                GlobalIndexBuilderUtils.filterEntriesBefore(
-                        entries,
-                        GlobalIndexBuilderUtils.findMinNonIndexableRowId(
-                                schemaManager, entries, Collections.singletonList("vec")));
+        RowType rowType = RowType.of(new DataType[] {DataTypes.STRING()}, new String[] {"vec"});
+        when(table.rowType()).thenReturn(rowType);
+        when(table.options()).thenReturn(Collections.emptyMap());
+        CoreOptions coreOptions = mock(CoreOptions.class);
+        when(coreOptions.dataEvolutionEnabled()).thenReturn(false);
+        when(table.coreOptions()).thenReturn(coreOptions);
+        when(table.newReadBuilder()).thenReturn(mock(ReadBuilder.class));
 
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).file().nonNullFirstRowId()).isEqualTo(0L);
-        assertThat(result.get(1).file().nonNullFirstRowId()).isEqualTo(100L);
+        assertThat(
+                        GenericIndexTopoBuilder.buildIndex(
+                                StreamExecutionEnvironment.getExecutionEnvironment(),
+                                () -> indexBuilder,
+                                table,
+                                "vec",
+                                TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                                null,
+                                new Options(),
+                                99L))
+                .isTrue();
     }
 
     // -- Helpers --

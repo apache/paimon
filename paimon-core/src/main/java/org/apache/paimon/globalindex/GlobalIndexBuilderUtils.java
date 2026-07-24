@@ -31,7 +31,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
@@ -47,7 +46,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +68,15 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries)
             throws IOException {
         return toIndexFileMetas(
-                fileIO, indexPathFactory, options, range, indexFieldId, null, indexType, entries);
+                fileIO,
+                indexPathFactory,
+                options,
+                range,
+                indexFieldId,
+                null,
+                indexType,
+                entries,
+                null);
     }
 
     /**
@@ -86,21 +92,19 @@ public class GlobalIndexBuilderUtils {
             Range range,
             List<DataField> fields,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            @Nullable byte[] sourceMeta)
             throws IOException {
-        // The first column is the primary index column and is stored as indexFieldId; the
-        // remaining columns (if any) go into extraFieldIds.
-        int indexFieldId = fields.get(0).id();
-        int[] extraFieldIds = extraFieldIds(fields);
         return toIndexFileMetas(
                 fileIO,
                 indexPathFactory,
                 options,
                 range,
-                indexFieldId,
-                extraFieldIds,
+                fields.get(0).id(),
+                extraFieldIds(fields),
                 indexType,
-                entries);
+                entries,
+                sourceMeta);
     }
 
     public static List<Range> unindexedRowRanges(
@@ -349,7 +353,8 @@ public class GlobalIndexBuilderUtils {
             int indexFieldId,
             @Nullable int[] extraFieldIds,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            @Nullable byte[] sourceMeta)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
@@ -357,7 +362,12 @@ public class GlobalIndexBuilderUtils {
             long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(
-                            range.from, range.to, indexFieldId, extraFieldIds, entry.meta());
+                            range.from,
+                            range.to,
+                            indexFieldId,
+                            extraFieldIds,
+                            entry.meta(),
+                            sourceMeta);
 
             Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;
@@ -397,68 +407,16 @@ public class GlobalIndexBuilderUtils {
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
     }
 
-    /**
-     * Find the minimum firstRowId among files whose schema does not contain all index columns.
-     * Files at or beyond this rowId cannot be indexed because the column was added later via ALTER
-     * TABLE.
-     *
-     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the columns
-     */
-    public static long findMinNonIndexableRowId(
-            SchemaManager schemaManager, List<ManifestEntry> entries, List<String> indexColumns) {
-        Map<Long, Boolean> schemaContainsColumns = new HashMap<>();
-        long minRowId = Long.MAX_VALUE;
-        long minSchemaId = -1;
-        for (ManifestEntry entry : entries) {
-            long sid = entry.file().schemaId();
-            boolean contains =
-                    schemaContainsColumns.computeIfAbsent(
-                            sid,
-                            id -> schemaManager.schema(id).fieldNames().containsAll(indexColumns));
-            if (!contains && entry.file().firstRowId() != null) {
-                long rowId = entry.file().nonNullFirstRowId();
-                if (rowId < minRowId) {
-                    minRowId = rowId;
-                    minSchemaId = sid;
-                }
-            }
-        }
-        if (minRowId != Long.MAX_VALUE) {
-            List<String> schemaFields = schemaManager.schema(minSchemaId).fieldNames();
-            List<String> missingColumns = new ArrayList<>();
-            for (String col : indexColumns) {
-                if (!schemaFields.contains(col)) {
-                    missingColumns.add(col);
-                }
-            }
-            LOG.info(
-                    "Found non-indexable files: schemaId={} missing columns {}, boundaryRowId={}.",
-                    minSchemaId,
-                    missingColumns,
-                    minRowId);
-        }
-        return minRowId;
-    }
-
-    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
-    public static List<ManifestEntry> filterEntriesBefore(
-            List<ManifestEntry> entries, long boundaryRowId) {
-        if (boundaryRowId == Long.MAX_VALUE) {
-            return entries;
-        }
-        List<ManifestEntry> result = new ArrayList<>();
-        for (ManifestEntry entry : entries) {
-            if (entry.file().firstRowId() != null
-                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
-                result.add(entry);
-            }
-        }
-        LOG.info(
-                "Filtered {} files to {} indexable files (boundaryRowId={}).",
-                entries.size(),
-                result.size(),
-                boundaryRowId);
-        return result;
+    /** Whether a global index should be refreshed automatically for data-evolution updates. */
+    public static boolean shouldRefreshDataEvolutionIndex(
+            FileStoreTable table,
+            String indexType,
+            DataField indexField,
+            List<DataField> extraFields,
+            Options options) {
+        return table.coreOptions().dataEvolutionEnabled()
+                && GlobalIndexer.create(indexType, indexField, extraFields, options)
+                        instanceof VectorGlobalIndexer;
     }
 
     private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {

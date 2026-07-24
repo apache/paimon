@@ -30,11 +30,13 @@ import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -74,15 +76,15 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createShardIndexedSplits;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.filterEntriesBefore;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.findMinNonIndexableRowId;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.rowRangesAfter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.shouldRefreshDataEvolutionIndex;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
 import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
 import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
 import static org.apache.paimon.io.DataIncrement.indexIncrement;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Builds a Flink topology for creating generic (non-btree) global indexes with parallelism. Each
@@ -304,6 +306,13 @@ public class GenericIndexTopoBuilder {
 
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
+        Snapshot scanSnapshot = indexBuilder.scanSnapshot();
+        if (scanSnapshot == null) {
+            checkState(
+                    entries.isEmpty() && deletedIndexEntries.isEmpty(),
+                    "Global index builder returned index work without a scan snapshot.");
+            return false;
+        }
 
         return buildTopology(
                 env,
@@ -315,7 +324,7 @@ public class GenericIndexTopoBuilder {
                 entries,
                 deletedIndexEntries,
                 partitionPredicate,
-                indexBuilder.scanSnapshot(),
+                scanSnapshot,
                 maxIndexedRowId,
                 autoIncremental);
     }
@@ -336,7 +345,7 @@ public class GenericIndexTopoBuilder {
             List<ManifestEntry> entries,
             List<IndexManifestEntry> deletedIndexEntries,
             PartitionPredicate partitionPredicate,
-            @Nullable Snapshot scanSnapshot,
+            Snapshot scanSnapshot,
             long maxIndexedRowId,
             boolean autoIncremental)
             throws Exception {
@@ -354,10 +363,6 @@ public class GenericIndexTopoBuilder {
                 indexType,
                 indexColumns);
 
-        long minNonIndexableRowId =
-                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumns);
-        entries = filterEntriesBefore(entries, minNonIndexableRowId);
-
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
         List<DataField> extraFields =
@@ -371,22 +376,50 @@ public class GenericIndexTopoBuilder {
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
+        boolean refreshDataEvolutionIndex =
+                shouldRefreshDataEvolutionIndex(
+                        table, indexType, indexField, extraFields, mergedOptions);
+        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(scanSnapshot.id()).serialize();
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
+        deletedIndexEntries = new ArrayList<>(deletedIndexEntries);
         List<Range> rowRangesToBuild = null;
         if (deletedIndexEntries.isEmpty()) {
             if (autoIncremental) {
-                Snapshot snapshot =
-                        scanSnapshot == null
-                                ? table.snapshotManager().latestSnapshot()
-                                : scanSnapshot;
                 rowRangesToBuild =
-                        unindexedRowRanges(
-                                table, snapshot, indexType, indexedFields, partitionPredicate);
+                        new ArrayList<>(
+                                unindexedRowRanges(
+                                        table,
+                                        scanSnapshot,
+                                        indexType,
+                                        indexedFields,
+                                        partitionPredicate));
+                if (refreshDataEvolutionIndex) {
+                    List<IndexManifestEntry> currentIndexes =
+                            table.store().newIndexFileHandler().scan(scanSnapshot, indexType)
+                                    .stream()
+                                    .filter(
+                                            entry ->
+                                                    partitionPredicate == null
+                                                            || partitionPredicate.test(
+                                                                    entry.partition()))
+                                    .collect(Collectors.toList());
+                    List<IndexManifestEntry> indexesToRefresh =
+                            DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                                    table.schemaManager(), entries, currentIndexes, indexedFields);
+                    deletedIndexEntries.addAll(indexesToRefresh);
+                    for (IndexManifestEntry index : indexesToRefresh) {
+                        rowRangesToBuild.add(index.indexFile().globalIndexMeta().rowRange());
+                    }
+                    rowRangesToBuild = Range.sortAndMergeOverlap(rowRangesToBuild, true);
+                    LOG.info(
+                            "Selected {} data-evolution index files for refresh.",
+                            indexesToRefresh.size());
+                }
                 LOG.info("Automatically selected unindexed row ranges: {}.", rowRangesToBuild);
             } else if (maxIndexedRowId != NO_MAX_INDEXED_ROW_ID) {
                 rowRangesToBuild = rowRangesAfter(maxIndexedRowId);
@@ -441,7 +474,8 @@ public class GenericIndexTopoBuilder {
                                         indexField,
                                         extraFields,
                                         projectedRowType,
-                                        mergedOptions))
+                                        mergedOptions,
+                                        sourceMeta))
                         .setParallelism(parallelism);
 
         if (!deletedIndexEntries.isEmpty()) {
@@ -531,6 +565,7 @@ public class GenericIndexTopoBuilder {
         private final List<DataField> extraFields;
         private final RowType projectedRowType;
         private final Options mergedOptions;
+        private final @Nullable byte[] sourceMeta;
 
         private transient TableRead tableRead;
         private transient List<DataField> indexedFields;
@@ -546,7 +581,8 @@ public class GenericIndexTopoBuilder {
                 DataField indexField,
                 List<DataField> extraFields,
                 RowType projectedRowType,
-                Options mergedOptions) {
+                Options mergedOptions,
+                @Nullable byte[] sourceMeta) {
             this.readBuilder = readBuilder;
             this.table = table;
             this.indexType = indexType;
@@ -554,6 +590,7 @@ public class GenericIndexTopoBuilder {
             this.extraFields = extraFields;
             this.projectedRowType = projectedRowType;
             this.mergedOptions = mergedOptions;
+            this.sourceMeta = sourceMeta;
         }
 
         @Override
@@ -678,7 +715,8 @@ public class GenericIndexTopoBuilder {
                                 shardRange,
                                 indexedFields,
                                 indexType,
-                                resultEntries);
+                                resultEntries,
+                                sourceMeta);
                 output.collect(
                         new StreamRecord<>(
                                 new Committable(
@@ -702,7 +740,8 @@ public class GenericIndexTopoBuilder {
             Range rowRange,
             List<DataField> indexFields,
             String indexType,
-            List<ResultEntry> resultEntries)
+            List<ResultEntry> resultEntries,
+            @Nullable byte[] sourceMeta)
             throws IOException {
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
@@ -712,7 +751,8 @@ public class GenericIndexTopoBuilder {
                         rowRange,
                         indexFields,
                         indexType,
-                        resultEntries);
+                        resultEntries,
+                        sourceMeta);
         return new CommitMessageImpl(
                 partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement());
     }

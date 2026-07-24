@@ -19,10 +19,14 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -33,6 +37,24 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Util class for data evolution. */
 public class DataEvolutionUtils {
+
+    /**
+     * Table field ids physically present in a file, resolved through the schema used to write it.
+     */
+    public static Set<Integer> fileFieldIds(
+            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
+        TableSchema schema = scanTableSchema.apply(file.schemaId());
+        List<String> writeCols = file.writeCols();
+        Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
+        Set<Integer> ids = new HashSet<>();
+        for (DataField field : schema.fields()) {
+            // writeCols may also contain physical row-tracking fields outside the table schema.
+            if (writeColNames == null || writeColNames.contains(field.name())) {
+                ids.add(field.id());
+            }
+        }
+        return ids;
+    }
 
     /**
      * Retrieve the anchor file of a row range group. Always the oldest normal file. Files are

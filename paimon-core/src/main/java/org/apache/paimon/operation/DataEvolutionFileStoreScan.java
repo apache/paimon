@@ -62,6 +62,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -251,24 +252,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
         return fileFieldIdsCache.computeIfAbsent(
                 Pair.of(entry.file().schemaId(), entry.file().writeCols()),
-                pair -> computeFileFieldIds(this::scanTableSchema, entry.file()));
-    }
-
-    /**
-     * Field ids of the columns physically present in {@code file}, resolved through the file's own
-     * schema (i.e. the schema the file was written under). Field id, not field name, is the stable
-     * identity across schemas — necessary so a renamed column matches an old file written under the
-     * pre-rename name.
-     */
-    @VisibleForTesting
-    static Set<Integer> computeFileFieldIds(
-            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        Set<Integer> ids = new HashSet<>();
-        for (DataField f :
-                scanTableSchema.apply(file.schemaId()).project(file.writeCols()).fields()) {
-            ids.add(f.id());
-        }
-        return ids;
+                pair -> fileFieldIds(this::scanTableSchema, entry.file()));
     }
 
     /** TODO: Optimize implementation of this method. */
@@ -283,9 +267,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                                 entry ->
                                         isBlobFile(entry.file().fileName())
                                                 || isVectorStoreFile(entry.file().fileName()))
-                        .flatMap(
-                                entry ->
-                                        computeFileFieldIds(scanTableSchema, entry.file()).stream())
+                        .flatMap(entry -> fileFieldIds(scanTableSchema, entry.file()).stream())
                         .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
         metas =

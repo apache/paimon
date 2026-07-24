@@ -857,7 +857,8 @@ public class DataEvolutionRowIdReassigner {
                             rewrittenRange.to,
                             globalIndex.indexFieldId(),
                             globalIndex.extraFieldIds(),
-                            globalIndex.indexMeta());
+                            globalIndex.indexMeta(),
+                            globalIndex.sourceMeta());
             IndexFileMeta newIndexFile =
                     new IndexFileMeta(
                             indexFile.indexType(),
