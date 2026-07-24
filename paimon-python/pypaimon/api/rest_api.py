@@ -16,9 +16,8 @@
 # under the License.
 
 import logging
-from typing import Callable, Dict, List, Optional, Union
-
 import re
+from typing import Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
@@ -48,9 +47,10 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.common.identifier import Identifier
+from pypaimon.common.user_agent import get_user_agent
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -58,6 +58,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    USER_AGENT_HEADER = "User-Agent"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
@@ -84,7 +85,8 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
-        base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+        base_headers = self._extract_headers(options)
+        base_headers.setdefault(self.USER_AGENT_HEADER, get_user_agent())
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
@@ -103,12 +105,36 @@ class RESTApi:
             )
             options = config_response.merge(options)
             base_headers.update(
-                RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+                self._extract_headers(options)
             )
 
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
+
+    @classmethod
+    def _extract_headers(cls, options: Options) -> Dict[str, str]:
+        """Extract configured headers and normalize User-Agent keys."""
+        headers = RESTUtil.extract_prefix_map(options, cls.HEADER_PREFIX)
+        user_agent_option = CatalogOptions.HTTP_USER_AGENT_HEADER
+
+        # Prefix extraction treats legacy keys as literal header names. Remove them and
+        # resolve the value through ConfigOption so the canonical key takes precedence.
+        for fallback_key in user_agent_option.fallback_keys():
+            if fallback_key.startswith(cls.HEADER_PREFIX):
+                headers.pop(fallback_key[len(cls.HEADER_PREFIX):], None)
+
+        user_agent = None
+        for header_name in list(headers):
+            if header_name.lower() == cls.USER_AGENT_HEADER.lower():
+                user_agent = headers.pop(header_name)
+
+        configured_user_agent = options.get(user_agent_option)
+        if configured_user_agent is not None:
+            user_agent = configured_user_agent
+        if user_agent is not None:
+            headers[cls.USER_AGENT_HEADER] = user_agent
+        return headers
 
     def __build_paged_query_params(
             self,

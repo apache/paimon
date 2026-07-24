@@ -104,8 +104,13 @@ class CatalogOptions:
         "'openapi' (for DlfNext/2026-01-18). "
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
-    HTTP_USER_AGENT_HEADER = ConfigOptions.key(
-        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+    HTTP_USER_AGENT_HEADER = (
+        ConfigOptions.key("header.User-Agent")
+        .string_type()
+        .no_default_value()
+        .with_fallback_keys("header.HTTP_USER_AGENT")
+        .with_description("The user agent of http client connecting to REST Catalog server.")
+    )
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
     RESOLVING_FILE_IO_ENABLED = (

@@ -15,8 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, Any, Type, Union, Generic, TypeVar
 from dataclasses import dataclass
+from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,8 @@ class ConfigOption(Generic[T]):
                  key: str,
                  clazz: Type,
                  description: Optional[Description] = None,
-                 default_value: Any = None):
+                 default_value: Any = None,
+                 fallback_keys: Tuple[str, ...] = ()):
         """
         Creates a new config option with fallback keys.
 
@@ -75,6 +76,7 @@ class ConfigOption(Generic[T]):
             clazz: Type of the ConfigOption value
             description: Description for that option
             default_value: The default value for this option
+            fallback_keys: Alternative keys checked when the main key is absent
         """
         if not key:
             raise ValueError("Key must not be null.")
@@ -83,6 +85,7 @@ class ConfigOption(Generic[T]):
         self._clazz = clazz
         self._description = description or self.EMPTY_DESCRIPTION
         self._default_value = default_value
+        self._fallback_keys = tuple(fallback_keys)
 
     def key(self) -> str:
         """Gets the configuration key."""
@@ -104,6 +107,20 @@ class ConfigOption(Generic[T]):
         """Returns the default value, or None if there is no default value."""
         return self._default_value
 
+    def with_fallback_keys(self, *fallback_keys: str) -> 'ConfigOption':
+        """Returns a copy which checks the given keys if the main key is absent."""
+        return ConfigOption(
+            key=self._key,
+            clazz=self._clazz,
+            description=self._description,
+            default_value=self._default_value,
+            fallback_keys=tuple(fallback_keys) + self._fallback_keys,
+        )
+
+    def fallback_keys(self) -> Tuple[str, ...]:
+        """Returns fallback keys in lookup order."""
+        return self._fallback_keys
+
     def with_description(self, description: Union[str, Description]) -> 'ConfigOption':
         """
         Creates a new config option, using this option's key and default value, and adding the given
@@ -123,6 +140,7 @@ class ConfigOption(Generic[T]):
             clazz=self._clazz,
             description=desc,
             default_value=self._default_value,
+            fallback_keys=self._fallback_keys,
         )
 
     def __eq__(self, other) -> bool:
@@ -131,12 +149,16 @@ class ConfigOption(Generic[T]):
             return False
 
         return (self._key == other._key and
-                self._default_value == other._default_value)
+                self._default_value == other._default_value and
+                self._fallback_keys == other._fallback_keys)
 
     def __hash__(self) -> int:
         """Calculate hash code."""
-        return hash((self._key, self._default_value))
+        return hash((self._key, self._default_value, self._fallback_keys))
 
     def __str__(self) -> str:
         """String representation of the config option."""
-        return f"key: '{self._key}'; default_value: {self._default_value}"
+        return (
+            f"key: '{self._key}'; default_value: {self._default_value}; "
+            f"fallback_keys: {self._fallback_keys}"
+        )
