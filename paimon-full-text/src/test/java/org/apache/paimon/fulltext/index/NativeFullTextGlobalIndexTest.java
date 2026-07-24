@@ -40,7 +40,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -51,15 +50,9 @@ import java.util.UUID;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test for {@link NativeFullTextGlobalIndexWriter} and {@link NativeFullTextGlobalIndexReader}. */
 public class NativeFullTextGlobalIndexTest {
-
-    private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
-    }
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -68,7 +61,6 @@ public class NativeFullTextGlobalIndexTest {
 
     @BeforeEach
     public void setup() {
-        assumeTrue(isNativeAvailable(), "Native full-text library not available, skipping tests");
         fileIO = new LocalFileIO();
         indexPath = new Path(tempDir.toString());
     }

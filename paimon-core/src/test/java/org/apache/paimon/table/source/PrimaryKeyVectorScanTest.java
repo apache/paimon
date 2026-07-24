@@ -95,7 +95,7 @@ class PrimaryKeyVectorScanTest {
         when(reader.indexFileHandler()).thenReturn(indexFileHandler);
         configureBatchScan(table, reader, snapshot);
 
-        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
+        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null, null).scan();
 
         verify(reader).onlyReadRealBuckets();
     }

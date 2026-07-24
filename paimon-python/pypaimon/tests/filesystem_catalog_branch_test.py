@@ -36,6 +36,8 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 TableNotExistException,
                                                 TagNotExistException)
 from pypaimon.common.identifier import Identifier
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 
 
 class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
@@ -76,6 +78,24 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
     def test_create_branch_without_from_tag(self):
         self.catalog.create_branch(self.identifier, "b1")
         self.assertEqual(self.catalog.list_branches(self.identifier), ["b1"])
+
+    def test_alter_table_isolated_to_branch(self):
+        self.catalog.create_branch(self.identifier, "b1")
+        branch_identifier = Identifier(
+            self.identifier.get_database_name(),
+            self.identifier.get_table_name(),
+            branch="b1",
+        )
+
+        self.catalog.alter_table(
+            branch_identifier,
+            [SchemaChange.add_column("branch_col", AtomicType("STRING"))],
+        )
+
+        self.assertNotIn(
+            "branch_col", self.catalog.get_table(self.identifier).field_names)
+        self.assertIn(
+            "branch_col", self.catalog.get_table(branch_identifier).field_names)
 
     def test_create_branch_duplicate_raises(self):
         self.catalog.create_branch(self.identifier, "b1")

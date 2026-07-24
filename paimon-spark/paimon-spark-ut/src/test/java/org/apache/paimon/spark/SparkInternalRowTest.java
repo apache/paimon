@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -28,13 +29,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.data.SparkInternalRow;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils;
-import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +46,7 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.AbstractMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
@@ -56,6 +58,7 @@ import scala.collection.JavaConverters;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link SparkInternalRow}. */
 public class SparkInternalRowTest {
@@ -146,7 +149,8 @@ public class SparkInternalRowTest {
         Files.write(blobFile, bytes);
         byte[] descriptor =
                 new BlobDescriptor(blobFile.toUri().toString(), 0, bytes.length).serialize();
-        StructType schema = new StructType().add("blob", DataTypes.BinaryType);
+        StructType schema =
+                new StructType().add("blob", org.apache.spark.sql.types.DataTypes.BinaryType);
 
         SparkInternalRowWrapper wrapper =
                 SparkInternalRowWrapper.fromUriReaderFactory(
@@ -157,6 +161,21 @@ public class SparkInternalRowTest {
                         .replace(new GenericInternalRow(new Object[] {descriptor}));
 
         assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testMapBlobRejectsNullKey() {
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(null, Blob.fromData(new byte[] {1}));
+
+        assertThatThrownBy(
+                        () ->
+                                DataConverter.fromPaimon(
+                                        new GenericMap(map),
+                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Spark MAP<X, BLOB> does not support null keys.");
     }
 
     private String sparkRowToString(org.apache.spark.sql.Row row) {

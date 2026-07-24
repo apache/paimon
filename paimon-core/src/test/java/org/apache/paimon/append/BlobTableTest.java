@@ -27,12 +27,15 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
@@ -78,6 +81,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -247,6 +251,111 @@ public class BlobTableTest extends TableTestBase {
         InternalArray third = actual.get(2);
         assertThat(third.size()).isEqualTo(1);
         assertThat(third.getBlob(0).toData()).isEqualTo(blob2);
+    }
+
+    @Test
+    public void testMapBlobField() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] empty = new byte[0];
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(
+                                0,
+                                blobMap(
+                                        "a",
+                                        new BlobData(blob0),
+                                        "b",
+                                        null,
+                                        "c",
+                                        new BlobData(empty))),
+                        GenericRow.of(1, null),
+                        GenericRow.of(2, blobMap())));
+
+        FileStoreTable table = getTableDefault();
+        List<DataFileMeta> filesMetas =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
+                DataEvolutionSplitRead.splitFieldBunches(filesMetas, file -> table.rowType());
+        assertThat(fieldGroups.size()).isEqualTo(2);
+        assertThat(countFilesWithSuffix(table.fileIO(), table.location(), ".blob")).isEqualTo(1);
+        assertMapBlobRows(blob0, null);
+
+        byte[] updated = "updated".getBytes();
+        RowType blobWriteType = table.schema().logicalRowType().project("f1");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobMapPlaceholder.INSTANCE));
+            write.write(GenericRow.of(blobMap("updated", new BlobData(updated))));
+            write.write(GenericRow.of(BlobMapPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+        assertMapBlobRows(blob0, updated);
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, true, false, table.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.stream().anyMatch(task -> task.type() == BLOB)).isTrue();
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+        assertMapBlobRows(blob0, updated);
+    }
+
+    private void assertMapBlobRows(byte[] blob0, byte[] updated) throws Exception {
+        Map<Integer, InternalMap> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getMap(1)));
+
+        assertThat(actual.size()).isEqualTo(3);
+        Map<String, byte[]> first = blobMapData(actual.get(0));
+        assertThat(new ArrayList<>(first.keySet())).isEqualTo(Arrays.asList("a", "b", "c"));
+        assertThat(first.get("a")).isEqualTo(blob0);
+        assertThat(first.get("b")).isNull();
+        assertThat(first.get("c")).isEmpty();
+
+        if (updated == null) {
+            assertThat(actual.get(1)).isNull();
+        } else {
+            assertThat(blobMapData(actual.get(1)).get("updated")).isEqualTo(updated);
+        }
+        assertThat(actual.get(2).size()).isZero();
+    }
+
+    private static GenericMap blobMap(Object... keyValues) {
+        Map<BinaryString, Blob> values = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            values.put(BinaryString.fromString((String) keyValues[i]), (Blob) keyValues[i + 1]);
+        }
+        return new GenericMap(values);
+    }
+
+    private static Map<String, byte[]> blobMapData(InternalMap map) {
+        Map<String, byte[]> result = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(
+                    keys.getString(i).toString(),
+                    values.isNullAt(i) ? null : values.getBlob(i).toData());
+        }
+        return result;
     }
 
     @Test
@@ -618,7 +727,7 @@ public class BlobTableTest extends TableTestBase {
                 .hasRootCauseMessage(
                         "Field 'f1' in '"
                                 + optionKey
-                                + "' must be a BLOB field in table schema. ARRAY<BLOB> is only supported by '"
+                                + "' must be a BLOB field in table schema. ARRAY<BLOB> and MAP<X, BLOB> are only supported by '"
                                 + CoreOptions.BLOB_FIELD.key()
                                 + "'.");
     }

@@ -24,6 +24,7 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -453,6 +454,18 @@ public abstract class DelegateCatalog implements Catalog {
             String partitionNamePattern)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByFilterPaged(
+                identifier, predicate, maxResults, pageToken, partitionNamePattern);
     }
 
     @Override

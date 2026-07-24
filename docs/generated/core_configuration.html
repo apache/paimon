@@ -768,7 +768,7 @@ under the License.
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
-            <td>Defines the action to take when an update modifies columns that are covered by a global index.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li></ul></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.enabled</h5></td>

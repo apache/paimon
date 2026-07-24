@@ -359,5 +359,10 @@ done
 
 # collect checks according to the options
 collect_checks
+
+if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"; then
+    python -m pip install 'paimon-ftindex==0.1.0' || exit 1
+fi
+
 # run checks
 check_stage

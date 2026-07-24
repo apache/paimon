@@ -2504,7 +2504,8 @@ public class CoreOptions implements Serializable {
                             .enumType(GlobalIndexColumnUpdateAction.class)
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
-                                    "Defines the action to take when an update modifies columns that are covered by a global index.");
+                                    "Defines the action to take when an update modifies columns that are covered by a global index. "
+                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
 
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
@@ -5406,7 +5407,10 @@ public class CoreOptions implements Serializable {
         THROW_ERROR,
 
         /** Drop all global index entries for the whole partitions affected by the update. */
-        DROP_PARTITION_INDEX
+        DROP_PARTITION_INDEX,
+
+        /** Leave existing global index entries unchanged when indexed columns are updated. */
+        IGNORE
     }
 
     /** Search mode for global index queries. */

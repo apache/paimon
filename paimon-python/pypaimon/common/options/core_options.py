@@ -90,6 +90,7 @@ class StartupMode(str, Enum):
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+    IGNORE = "IGNORE"
 
 
 class GlobalIndexSearchMode(str, Enum):
@@ -787,7 +788,8 @@ class CoreOptions:
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
         .with_description(
             "Defines the action to take when an update modifies columns that "
-            "are covered by a global index."
+            "are covered by a global index. IGNORE leaves existing index files "
+            "unchanged and may make the index stale."
         )
     )
 

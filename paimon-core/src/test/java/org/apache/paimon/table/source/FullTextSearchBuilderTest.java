@@ -747,7 +747,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testOrdinaryFullTextScanSkipsSourceBackedPrimaryKeyArchive() throws Exception {
+    public void testDataEvolutionFullTextScanReadsSourceBackedIndex() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
 
@@ -755,14 +755,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         writeDocuments(table, documents);
         buildAndCommitSourceBackedIndex(table, documents);
 
-        FullTextScan.Plan plan =
+        FullTextSearchBuilder searchBuilder =
                 table.newFullTextSearchBuilder()
                         .withQuery(TEXT_FIELD_NAME, matchQuery("Paimon"))
-                        .withLimit(2)
-                        .newFullTextScan()
-                        .scan();
+                        .withLimit(2);
+        FullTextScan.Plan plan = searchBuilder.newFullTextScan().scan();
 
-        assertThat(plan.splits()).isEmpty();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(searchBuilder.executeLocal().results().toRangeList())
+                .containsExactly(new Range(0, 0));
     }
 
     @Test
