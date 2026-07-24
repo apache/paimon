@@ -41,7 +41,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
   override val table: FileStoreTable = {
     val writeOptions = Map(
       CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
-      CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key() -> Long.MaxValue.toString)
+      CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
     paimonTable.copy(writeOptions.asJava)
   }
 

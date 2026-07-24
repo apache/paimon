@@ -93,7 +93,7 @@ class RESTFormatTableTest(RESTBaseTest):
             options={
                 "type": "format-table",
                 "file.format": "parquet",
-                "write.target-row-num-per-file": "2",
+                "target-file-row-num": "2",
             },
         )
         table_name = "default.format_table_row_count_rolling"
@@ -135,7 +135,7 @@ class RESTFormatTableTest(RESTBaseTest):
             options={
                 "type": "format-table",
                 "file.format": "parquet",
-                "write.target-row-num-per-file": "2",
+                "target-file-row-num": "2",
             },
         )
         table_name = "default.format_table_overwrite_new_partition_batches"

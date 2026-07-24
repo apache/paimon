@@ -262,9 +262,9 @@ class TestOptionValidation(unittest.TestCase):
             options=options or {},
         )
 
-    def test_create_rejects_invalid_target_rows_per_file(self):
-        key = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()
-        max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+    def test_create_rejects_invalid_target_file_row_num(self):
+        key = CoreOptions.TARGET_FILE_ROW_NUM.key()
+        max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
         manager = SchemaManager(self.file_io, self.table_path)
 
         invalid_values = [
@@ -276,9 +276,9 @@ class TestOptionValidation(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, f"{key} {message}"):
                     manager.create_table(self._schema({key: value}))
 
-    def test_alter_rejects_invalid_target_rows_per_file(self):
-        key = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()
-        max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+    def test_alter_rejects_invalid_target_file_row_num(self):
+        key = CoreOptions.TARGET_FILE_ROW_NUM.key()
+        max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
         manager = SchemaManager(self.file_io, self.table_path)
         manager.create_table(self._schema())
 

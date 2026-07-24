@@ -140,7 +140,7 @@ public class FormatTableFileWriter {
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
-                options.writeTargetRowNumPerFile(),
+                options.targetFileRowNum(),
                 pathFactory.createDataFilePathFactory(parent, null),
                 writeRowType,
                 options.formatTableFileCompression());

@@ -63,7 +63,7 @@ public abstract class DataEvolutionCompactTask {
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "99999 G");
         // Data evolution requires a single output file, so the row limit must not roll it either.
         options.put(
-                CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), String.valueOf(Long.MAX_VALUE));
+                CoreOptions.TARGET_FILE_ROW_NUM.key(), String.valueOf(Long.MAX_VALUE));
         return Collections.unmodifiableMap(options);
     }
 

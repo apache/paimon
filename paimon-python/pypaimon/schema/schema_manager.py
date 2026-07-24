@@ -454,15 +454,15 @@ def _validate_blob_fields(
 
 def _validate_options(options: dict):
     core_options = CoreOptions(Options(options))
-    target_row_num_per_file = core_options.write_target_row_num_per_file()
-    max_value = CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
-    if target_row_num_per_file < 1:
+    target_file_row_num = core_options.target_file_row_num()
+    max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
+    if target_file_row_num < 1:
         raise ValueError(
-            f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} should be at least 1"
+            f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} should be at least 1"
         )
-    if target_row_num_per_file > max_value:
+    if target_file_row_num > max_value:
         raise ValueError(
-            f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
+            f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
             f"should be at most {max_value}"
         )
 

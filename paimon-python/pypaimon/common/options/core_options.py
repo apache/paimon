@@ -390,8 +390,8 @@ class CoreOptions:
         .with_description("The target file size for data files.")
     )
 
-    WRITE_TARGET_ROW_NUM_PER_FILE: ConfigOption[int] = (
-        ConfigOptions.key("write.target-row-num-per-file")
+    TARGET_FILE_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("target-file-row-num")
         .long_type()
         .default_value((1 << 63) - 1)
         .with_description(
@@ -1128,8 +1128,8 @@ class CoreOptions:
                                     128 if has_primary_key else 256) if default is None else MemorySize.parse(
                                     default)).get_bytes()
 
-    def write_target_row_num_per_file(self):
-        return self.options.get(CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE)
+    def target_file_row_num(self):
+        return self.options.get(CoreOptions.TARGET_FILE_ROW_NUM)
 
     def blob_target_file_size(self, default=None):
         """

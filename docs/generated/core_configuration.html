@@ -1682,6 +1682,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
+            <td><h5>target-file-row-num</h5></td>
+            <td style="word-wrap: break-word;">9223372036854775807</td>
+            <td>Long</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon file-store writers do not support this option and fail fast when it is enabled. Disabled by default.</td>
+        </tr>
+        <tr>
             <td><h5>target-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
@@ -1836,12 +1842,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">scan</td>
             <td><p>Enum</p></td>
             <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>write.target-row-num-per-file</h5></td>
-            <td style="word-wrap: break-word;">9223372036854775807</td>
-            <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon file-store writers do not support this option and fail fast when it is enabled. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>

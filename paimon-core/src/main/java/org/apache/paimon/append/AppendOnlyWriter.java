@@ -77,7 +77,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final long targetFileSize;
     private final long blobTargetFileSize;
     private final long vectorTargetFileSize;
-    private final long targetRowNumPerFile;
+    private final long targetFileRowNum;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -113,7 +113,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             long targetFileSize,
             long blobTargetFileSize,
             long vectorTargetFileSize,
-            long targetRowNumPerFile,
+            long targetFileRowNum,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -141,7 +141,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
         this.vectorTargetFileSize = vectorTargetFileSize;
-        this.targetRowNumPerFile = targetRowNumPerFile;
+        this.targetFileRowNum = targetFileRowNum;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -328,7 +328,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     targetFileSize,
                     blobTargetFileSize,
                     vectorTargetFileSize,
-                    targetRowNumPerFile,
+                    targetFileRowNum,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
@@ -355,7 +355,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 statsDenseStore,
                 writeCols,
                 rowSidecarFileFormat,
-                targetRowNumPerFile);
+                targetFileRowNum);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

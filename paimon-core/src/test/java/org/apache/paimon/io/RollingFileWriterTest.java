@@ -79,7 +79,7 @@ public class RollingFileWriterTest {
             String identifier,
             boolean statsDenseStore,
             long targetFileSize,
-            long targetRowNumPerFile) {
+            long targetFileRowNum) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriterImpl<>(
@@ -115,7 +115,7 @@ public class RollingFileWriterTest {
                                         false,
                                         null),
                         targetFileSize,
-                        targetRowNumPerFile);
+                        targetFileRowNum);
     }
 
     @ParameterizedTest

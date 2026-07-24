@@ -100,21 +100,21 @@ class FormatTableWrite:
         )
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
-        self._target_row_num_per_file = CoreOptions.from_dict(
+        self._target_file_row_num = CoreOptions.from_dict(
             table.options()
-        ).write_target_row_num_per_file()
-        max_target_row_num_per_file = (
-            CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.default_value()
+        ).target_file_row_num()
+        max_target_file_row_num = (
+            CoreOptions.TARGET_FILE_ROW_NUM.default_value()
         )
-        if self._target_row_num_per_file < 1:
+        if self._target_file_row_num < 1:
             raise ValueError(
-                f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
+                f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
                 "should be at least 1"
             )
-        if self._target_row_num_per_file > max_target_row_num_per_file:
+        if self._target_file_row_num > max_target_file_row_num:
             raise ValueError(
-                f"{CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key()} "
-                f"should be at most {max_target_row_num_per_file}"
+                f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
+                f"should be at most {max_target_file_row_num}"
             )
         self._data_file_prefix = "data-"
         self._suffix = {
@@ -191,14 +191,14 @@ class FormatTableWrite:
                 self._overwritten_dirs.add(dir_path)
         self.table.file_io.check_or_mkdirs(dir_path)
 
-        if data.num_rows <= self._target_row_num_per_file:
+        if data.num_rows <= self._target_file_row_num:
             self._write_file(data, dir_path)
             return
 
         for offset in range(
-                0, data.num_rows, self._target_row_num_per_file):
+                0, data.num_rows, self._target_file_row_num):
             self._write_file(
-                data.slice(offset, self._target_row_num_per_file),
+                data.slice(offset, self._target_file_row_num),
                 dir_path,
             )
 

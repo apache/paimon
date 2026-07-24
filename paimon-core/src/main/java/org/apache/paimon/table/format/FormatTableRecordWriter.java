@@ -38,14 +38,14 @@ public class FormatTableRecordWriter implements AutoCloseable {
     private final String fileCompression;
     private final FileFormat fileFormat;
     private final long targetFileSize;
-    private final long targetRowNumPerFile;
+    private final long targetFileRowNum;
     private FormatTableRollingFileWriter writer;
 
     public FormatTableRecordWriter(
             FileIO fileIO,
             FileFormat fileFormat,
             long targetFileSize,
-            long targetRowNumPerFile,
+            long targetFileRowNum,
             DataFilePathFactory pathFactory,
             RowType writeSchema,
             String fileCompression) {
@@ -55,7 +55,7 @@ public class FormatTableRecordWriter implements AutoCloseable {
         this.writeSchema = writeSchema;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
-        this.targetRowNumPerFile = targetRowNumPerFile;
+        this.targetFileRowNum = targetFileRowNum;
     }
 
     public void write(InternalRow data) throws Exception {
@@ -88,7 +88,7 @@ public class FormatTableRecordWriter implements AutoCloseable {
                 fileIO,
                 fileFormat,
                 targetFileSize,
-                targetRowNumPerFile,
+                targetFileRowNum,
                 writeSchema,
                 pathFactory,
                 fileCompression);

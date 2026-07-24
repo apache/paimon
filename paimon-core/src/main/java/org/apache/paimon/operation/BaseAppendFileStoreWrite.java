@@ -160,7 +160,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.targetFileSize(false),
                 options.blobTargetFileSize(),
                 options.vectorTargetFileSize(),
-                options.writeTargetRowNumPerFile(),
+                options.targetFileRowNum(),
                 writeType,
                 writeCols,
                 restoredMaxSeqNumber,

@@ -77,7 +77,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.createTable(
                 existing, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
         ((AbstractCatalog) DelegateCatalog.rootCatalog(catalog))
-                .tableDefaultOptions.put(CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), "0");
+                .tableDefaultOptions.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "0");
         Schema createSchema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -91,12 +91,12 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                                         createSchema,
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("write.target-row-num-per-file should be at least 1.");
+                .hasMessage("target-file-row-num should be at least 1.");
 
         Schema tableReplaceSchema = Schema.newBuilder().column("id", DataTypes.INT()).build();
         assertThatThrownBy(() -> catalog.replaceTable(existing, tableReplaceSchema, false))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("write.target-row-num-per-file should be at least 1.");
+                .hasMessage("target-file-row-num should be at least 1.");
         assertThat(catalog.getTable(existing)).isNotNull();
 
         Schema replaceSchema =
@@ -106,7 +106,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .build();
         assertThatThrownBy(() -> catalog.replaceTable(existing, replaceSchema, false))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("write.target-row-num-per-file should be at least 1.");
+                .hasMessage("target-file-row-num should be at least 1.");
         assertThat(catalog.getTable(existing)).isNotNull();
     }
 

@@ -51,7 +51,7 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
-import static org.apache.paimon.CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_ROW_NUM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.atLeastOnce;
@@ -118,7 +118,7 @@ class FormatTableWriteTest {
         try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
             assertThatThrownBy(() -> write.write(GenericRow.of(1)))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("targetRowNumPerFile must be positive, but is 0");
+                    .hasMessage("targetFileRowNum must be positive, but is 0");
         }
     }
 
@@ -170,12 +170,12 @@ class FormatTableWriteTest {
     }
 
     private static FormatTable formatTable(
-            Path tablePath, LocalFileIO fileIO, long targetRowNumPerFile) {
+            Path tablePath, LocalFileIO fileIO, long targetFileRowNum) {
         Map<String, String> options = new HashMap<>();
         options.put(PATH.key(), tablePath.toString());
         options.put(FILE_FORMAT.key(), "csv");
         options.put(TARGET_FILE_SIZE.key(), "1 gb");
-        options.put(WRITE_TARGET_ROW_NUM_PER_FILE.key(), Long.toString(targetRowNumPerFile));
+        options.put(TARGET_FILE_ROW_NUM.key(), Long.toString(targetFileRowNum));
         return FormatTable.builder()
                 .fileIO(fileIO)
                 .identifier(Identifier.create("test_db", "test_table"))

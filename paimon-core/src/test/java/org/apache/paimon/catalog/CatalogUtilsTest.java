@@ -32,7 +32,7 @@ import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
-import static org.apache.paimon.CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_ROW_NUM;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.loadTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
@@ -49,12 +49,12 @@ class CatalogUtilsTest {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
-                        .option(WRITE_TARGET_ROW_NUM_PER_FILE.key(), "0")
+                        .option(TARGET_FILE_ROW_NUM.key(), "0")
                         .build();
 
         assertThatThrownBy(() -> validateCreateTable(schema, false))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("write.target-row-num-per-file should be at least 1.");
+                .hasMessage("target-file-row-num should be at least 1.");
     }
 
     @Test

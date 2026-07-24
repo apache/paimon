@@ -109,7 +109,7 @@ public class DedicatedFormatRollingFileWriter
                             RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
             vectorStoreWriterFactory;
     private final long targetFileSize;
-    private final long targetRowNumPerFile;
+    private final long targetFileRowNum;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -133,7 +133,7 @@ public class DedicatedFormatRollingFileWriter
             long targetFileSize,
             long blobTargetFileSize,
             long vectorTargetFileSize,
-            long targetRowNumPerFile,
+            long targetFileRowNum,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             Supplier<LongCounter> seqNumCounterSupplier,
@@ -145,11 +145,11 @@ public class DedicatedFormatRollingFileWriter
             @Nullable BlobFileContext context) {
         // Initialize basic fields
         Preconditions.checkArgument(
-                targetRowNumPerFile > 0,
-                "targetRowNumPerFile must be positive, but is %s",
-                targetRowNumPerFile);
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.targetFileSize = targetFileSize;
-        this.targetRowNumPerFile = targetRowNumPerFile;
+        this.targetFileRowNum = targetFileRowNum;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -431,7 +431,7 @@ public class DedicatedFormatRollingFileWriter
      * writer (all fields dedicated), so blob/vector writers roll together.
      */
     private boolean rollingFile() throws IOException {
-        if (currentFileRecordCount >= targetRowNumPerFile) {
+        if (currentFileRecordCount >= targetFileRowNum) {
             return true;
         }
         return currentWriter != null

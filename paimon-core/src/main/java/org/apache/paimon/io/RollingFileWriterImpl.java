@@ -41,7 +41,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final long targetRowNumPerFile;
+    private final long targetFileRowNum;
     private final List<FileWriterAbortExecutor> closedWriters;
     protected final List<R> results;
 
@@ -53,14 +53,14 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     public RollingFileWriterImpl(
             Supplier<? extends SingleFileWriter<T, R>> writerFactory,
             long targetFileSize,
-            long targetRowNumPerFile) {
+            long targetFileRowNum) {
         Preconditions.checkArgument(
-                targetRowNumPerFile > 0,
-                "targetRowNumPerFile must be positive, but is %s",
-                targetRowNumPerFile);
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
-        this.targetRowNumPerFile = targetRowNumPerFile;
+        this.targetFileRowNum = targetFileRowNum;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
     }
@@ -71,7 +71,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentFileRecordCount >= targetRowNumPerFile
+        return currentFileRecordCount >= targetFileRowNum
                 || currentWriter.reachTargetSize(
                         forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }

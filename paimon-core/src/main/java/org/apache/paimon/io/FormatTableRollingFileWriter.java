@@ -43,7 +43,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
     private final FileIO fileIO;
     private final Supplier<FormatTableSingleFileWriter> writerFactory;
     private final long targetFileSize;
-    private final long targetRowNumPerFile;
+    private final long targetFileRowNum;
     private final List<FileWriterAbortExecutor> closedWriters;
     private final List<TwoPhaseOutputStream.Committer> committers;
 
@@ -56,14 +56,14 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
             FileIO fileIO,
             FileFormat fileFormat,
             long targetFileSize,
-            long targetRowNumPerFile,
+            long targetFileRowNum,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             String fileCompression) {
         Preconditions.checkArgument(
-                targetRowNumPerFile > 0,
-                "targetRowNumPerFile must be positive, but is %s",
-                targetRowNumPerFile);
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.fileIO = fileIO;
         this.writerFactory =
                 () ->
@@ -73,7 +73,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
                                 pathFactory.newPath(),
                                 fileCompression);
         this.targetFileSize = targetFileSize;
-        this.targetRowNumPerFile = targetRowNumPerFile;
+        this.targetFileRowNum = targetFileRowNum;
         this.closedWriters = new ArrayList<>();
         this.committers = new ArrayList<>();
     }
@@ -92,7 +92,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
             recordCount += 1;
             currentFileRecordCount += 1;
             boolean needRolling =
-                    currentFileRecordCount >= targetRowNumPerFile
+                    currentFileRecordCount >= targetFileRowNum
                             || currentWriter.reachTargetSize(
                                     recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
             if (needRolling) {

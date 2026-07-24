@@ -967,7 +967,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.catalog.alter_table(
             table_identifier, [
                 SetOption('target-file-size', '10kb'),
-                SetOption('write.target-row-num-per-file', '1'),
+                SetOption('target-file-row-num', '1'),
             ]
         )
         table = self.catalog.get_table(table_identifier)

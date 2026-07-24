@@ -137,10 +137,10 @@ public class KeyValueFileWriterFactory {
             int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
         // Row limit applies to writes only; compaction output stays size-only.
-        long targetRowNumPerFile =
+        long targetFileRowNum =
                 fileSource == FileSource.COMPACT
                         ? Long.MAX_VALUE
-                        : options.writeTargetRowNumPerFile();
+                        : options.targetFileRowNum();
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -148,7 +148,7 @@ public class KeyValueFileWriterFactory {
                             pathFactory.newPath(), key, fileSource, pathFactory.isExternalPath());
                 },
                 suggestedFileSize,
-                targetRowNumPerFile);
+                targetFileRowNum);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {

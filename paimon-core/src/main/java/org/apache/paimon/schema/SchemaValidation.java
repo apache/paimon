@@ -192,8 +192,8 @@ public class SchemaValidation {
         }
 
         checkArgument(
-                options.writeTargetRowNumPerFile() > 0,
-                CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key() + " should be at least 1");
+                options.targetFileRowNum() > 0,
+                CoreOptions.TARGET_FILE_ROW_NUM.key() + " should be at least 1");
 
         checkArgument(
                 options.snapshotNumRetainMin() > 0,

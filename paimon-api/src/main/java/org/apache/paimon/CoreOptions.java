@@ -818,8 +818,8 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
-    public static final ConfigOption<Long> WRITE_TARGET_ROW_NUM_PER_FILE =
-            key("write.target-row-num-per-file")
+    public static final ConfigOption<Long> TARGET_FILE_ROW_NUM =
+            key("target-file-row-num")
                     .longType()
                     .defaultValue(Long.MAX_VALUE)
                     .withDescription(
@@ -3340,8 +3340,8 @@ public class CoreOptions implements Serializable {
                 .getBytes();
     }
 
-    public long writeTargetRowNumPerFile() {
-        return options.get(WRITE_TARGET_ROW_NUM_PER_FILE);
+    public long targetFileRowNum() {
+        return options.get(TARGET_FILE_ROW_NUM);
     }
 
     public long blobTargetFileSize() {

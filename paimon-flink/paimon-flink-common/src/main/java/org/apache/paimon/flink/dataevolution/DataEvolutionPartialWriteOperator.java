@@ -97,7 +97,7 @@ public class DataEvolutionPartialWriteOperator
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
         options.put(
-                CoreOptions.WRITE_TARGET_ROW_NUM_PER_FILE.key(), String.valueOf(Long.MAX_VALUE));
+                CoreOptions.TARGET_FILE_ROW_NUM.key(), String.valueOf(Long.MAX_VALUE));
         return options;
     }
 
