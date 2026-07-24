@@ -52,9 +52,10 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +75,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
 
 import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
@@ -85,6 +88,11 @@ import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 public class FormatTableScan implements InnerTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
+
+    private static final int LIST_POOL_MAX_THREADS = 1000;
+    private static final ThreadPoolExecutor LIST_POOL =
+            ThreadPoolUtils.createCachedThreadPool(
+                    LIST_POOL_MAX_THREADS, "FORMAT-TABLE-LIST-THREAD-POOL");
 
     final FormatTable table;
     final CoreOptions coreOptions;
@@ -233,8 +241,12 @@ public class FormatTableScan implements InnerTableScan {
                                 "Failed to list files for partition " + pair.getValue(), e);
                     }
                 };
-        ManifestReadThreadPool.randomlyExecuteSequentialReturn(
-                        lister, partitions, coreOptions.formatTableScanListParallelism())
+        int parallelism = coreOptions.formatTableScanListParallelism();
+        ExecutorService executor =
+                parallelism >= LIST_POOL_MAX_THREADS
+                        ? LIST_POOL
+                        : new SemaphoredDelegatingExecutor(LIST_POOL, parallelism, false);
+        ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, lister, partitions)
                 .forEachRemaining(splits::add);
         return splits;
     }
