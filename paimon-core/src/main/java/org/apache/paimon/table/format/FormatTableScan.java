@@ -187,24 +187,29 @@ public class FormatTableScan implements InnerTableScan {
             try {
                 FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
-                    List<PartitionToScan> partitions = new ArrayList<>();
+                    List<Pair<LinkedHashMap<String, String>, Path>> partitions = new ArrayList<>();
                     for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
-                        BinaryRow partitionRow = toPartitionRow(pair.getKey());
-                        // Filter partitions in memory before any file listing, so only the
-                        // IO is parallelized below.
-                        if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            partitions.add(
-                                    new PartitionToScan(
-                                            pair.getKey(), pair.getValue(), partitionRow));
+                        // Filter partitions in memory before any file listing.
+                        if (partitionFilter == null
+                                || partitionFilter.test(toPartitionRow(pair.getKey()))) {
+                            partitions.add(pair);
                         }
                     }
-                    // Internal (catalog-managed) tables list partition files in parallel;
-                    // external (filesystem-discovered) tables keep the sequential path.
-                    PartitionSplitPlanner planner =
-                            partitionManager != null
-                                    ? new ParallelSplitPlanner()
-                                    : new SequentialSplitPlanner();
-                    splits.addAll(planner.plan(fileIO, partitions));
+                    if (partitionManager != null) {
+                        // Internal (catalog-managed) table: list partition files in parallel.
+                        splits.addAll(listPartitionFilesInParallel(fileIO, partitions));
+                    } else {
+                        // External (filesystem-discovered) table: list serially; a missing
+                        // partition
+                        // directory is a hard error (rethrown to fail the whole scan).
+                        for (Pair<LinkedHashMap<String, String>, Path> pair : partitions) {
+                            splits.addAll(
+                                    createSplits(
+                                            fileIO,
+                                            pair.getValue(),
+                                            toPartitionRow(pair.getKey())));
+                        }
+                    }
                 } else {
                     splits.addAll(createSplits(fileIO, new Path(table.location()), null));
                 }
@@ -219,74 +224,37 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    /** A partition selected for scanning: its spec, directory path, and encoded row. */
-    private static final class PartitionToScan {
-        private final LinkedHashMap<String, String> spec;
-        private final Path path;
-        private final BinaryRow row;
-
-        private PartitionToScan(LinkedHashMap<String, String> spec, Path path, BinaryRow row) {
-            this.spec = spec;
-            this.path = path;
-            this.row = row;
-        }
-    }
-
-    /** Lists partition files and builds splits; per-partition sort and bin-packing are shared. */
-    private interface PartitionSplitPlanner {
-        List<Split> plan(FileIO fileIO, List<PartitionToScan> partitions) throws IOException;
-    }
-
     /**
-     * Sequential planner for external (filesystem-discovered) tables: a missing partition directory
-     * is a hard error, matching the pre-parallel behavior.
+     * Lists partition files for an internal (catalog-managed) table in parallel with a bounded,
+     * order-preserving thread pool. A registered partition without a directory reads as empty
+     * (matching Hive); any other listing failure fails the whole scan.
      */
-    private class SequentialSplitPlanner implements PartitionSplitPlanner {
-        @Override
-        public List<Split> plan(FileIO fileIO, List<PartitionToScan> partitions)
-                throws IOException {
-            List<Split> splits = new ArrayList<>();
-            for (PartitionToScan partition : partitions) {
-                splits.addAll(createSplits(fileIO, partition.path, partition.row));
-            }
+    private List<Split> listPartitionFilesInParallel(
+            FileIO fileIO, List<Pair<LinkedHashMap<String, String>, Path>> partitions) {
+        List<Split> splits = new ArrayList<>();
+        if (partitions.isEmpty()) {
             return splits;
         }
+        Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
+                pair -> {
+                    try {
+                        return createSplits(fileIO, pair.getValue(), toPartitionRow(pair.getKey()));
+                    } catch (FileNotFoundException e) {
+                        warnMissingPartition(pair.getKey(), pair.getValue());
+                        return Collections.emptyList();
+                    } catch (IOException e) {
+                        // Fail the whole scan on any real listing error; never truncate.
+                        throw new RuntimeException(
+                                "Failed to list files for partition " + pair.getValue(), e);
+                    }
+                };
+        ManifestReadThreadPool.randomlyExecuteSequentialReturn(
+                        lister, partitions, coreOptions.formatTableScanListParallelism())
+                .forEachRemaining(splits::add);
+        return splits;
     }
 
-    /**
-     * Parallel planner for internal (catalog-managed) tables: lists partitions concurrently with a
-     * bounded, order-preserving thread pool. A registered partition without a directory reads as
-     * empty (matching Hive); any other listing failure fails the whole scan.
-     */
-    private class ParallelSplitPlanner implements PartitionSplitPlanner {
-        @Override
-        public List<Split> plan(FileIO fileIO, List<PartitionToScan> partitions) {
-            List<Split> splits = new ArrayList<>();
-            if (partitions.isEmpty()) {
-                return splits;
-            }
-            Function<PartitionToScan, List<Split>> lister =
-                    partition -> {
-                        try {
-                            return createSplits(fileIO, partition.path, partition.row);
-                        } catch (FileNotFoundException e) {
-                            warnMissingPartition(partition);
-                            return Collections.emptyList();
-                        } catch (IOException e) {
-                            // Fail the whole scan on any real listing error; never return a
-                            // truncated result.
-                            throw new RuntimeException(
-                                    "Failed to list files for partition " + partition.path, e);
-                        }
-                    };
-            ManifestReadThreadPool.randomlyExecuteSequentialReturn(
-                            lister, partitions, coreOptions.formatTableScanListParallelism())
-                    .forEachRemaining(splits::add);
-            return splits;
-        }
-    }
-
-    private void warnMissingPartition(PartitionToScan partition) {
+    private void warnMissingPartition(LinkedHashMap<String, String> spec, Path path) {
         // A registered partition without a directory reads as empty, matching Hive (e.g. ADD
         // PARTITION before the first INSERT). Warn so a directory removed behind the catalog's back
         // stays discoverable.
@@ -295,9 +263,9 @@ public class FormatTableScan implements InnerTableScan {
                         + "'{}' does not exist; treating the partition as empty. If the directory "
                         + "was removed on purpose, drop the partition or repair the metadata, e.g. "
                         + "with MSCK REPAIR TABLE.",
-                PartitionPathUtils.generatePartitionName(partition.spec, false),
+                PartitionPathUtils.generatePartitionName(spec, false),
                 table.fullName(),
-                partition.path);
+                path);
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
