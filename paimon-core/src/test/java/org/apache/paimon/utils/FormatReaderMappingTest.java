@@ -18,8 +18,12 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.shredding.MapSelectedKeysMetadataUtils;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -28,9 +32,14 @@ import org.apache.paimon.types.RowType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Test for {@link FormatReaderMapping.Builder}. */
 public class FormatReaderMappingTest {
@@ -146,5 +155,183 @@ public class FormatReaderMappingTest {
         Assertions.assertThat(trimmed.get(1).id()).isEqualTo(0);
         Assertions.assertThat(trimmed.get(2).id()).isEqualTo(3);
         Assertions.assertThat(trimmed.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testMapSelectedKeysKeepsSelectedRowTypeForFormatReader() throws Exception {
+        RowType dataValueType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(10, "a", DataTypes.INT()),
+                        DataTypes.FIELD(11, "b", DataTypes.INT()),
+                        DataTypes.FIELD(12, "c", DataTypes.INT()));
+        RowType selectedKeysType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "0", dataValueType),
+                        DataTypes.FIELD(1, "1", dataValueType));
+
+        DataField dataField =
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), dataValueType));
+        DataField expectedField =
+                MapSelectedKeysMetadataUtils.withSelectedKeys(
+                        DataTypes.FIELD(2, "attrs", selectedKeysType),
+                        selectedKeysType,
+                        Arrays.asList("key1", "key2"));
+
+        List<DataField> dataFields = Collections.singletonList(dataField);
+        List<DataField> expectedFields = Collections.singletonList(expectedField);
+
+        DataField readField = invokeDataFields(dataFields, expectedFields).get(0);
+
+        Assertions.assertThat(readField.type()).isEqualTo(selectedKeysType);
+        Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
+                .isTrue();
+    }
+
+    @Test
+    public void testMapSelectedKeysUsesDataValueTypeForSchemaEvolution() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+        DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
+
+        DataField readField =
+                invokeDataFields(
+                                Collections.singletonList(dataField),
+                                Collections.singletonList(expectedField))
+                        .get(0);
+        RowType readType = (RowType) readField.type();
+        Assertions.assertThat(readType.getTypeAt(0)).isEqualTo(DataTypes.INT());
+        Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
+                .isTrue();
+
+        IndexCastMapping mapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        Collections.singletonList(expectedField),
+                        Collections.singletonList(readField));
+        Assertions.assertThat(mapping.getCastMapping()).isNotNull();
+        InternalRow selectedKeys =
+                mapping.getCastMapping()[0].getFieldOrNull(GenericRow.of(GenericRow.of(10)));
+        Assertions.assertThat(selectedKeys.getLong(0)).isEqualTo(10L);
+    }
+
+    @Test
+    public void testMapSelectedKeysUsesDataFieldNameAfterRename() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(
+                        2, "old_attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()));
+        DataField expectedField = selectedKeysField(2, "new_attrs", DataTypes.BIGINT());
+
+        DataField readField =
+                invokeDataFields(
+                                Collections.singletonList(dataField),
+                                Collections.singletonList(expectedField))
+                        .get(0);
+
+        Assertions.assertThat(readField.name()).isEqualTo("old_attrs");
+        Assertions.assertThat(readField.description()).isEqualTo(expectedField.description());
+        Assertions.assertThat(MapSelectedKeysMetadataUtils.isMapSelectedKeysField(readField))
+                .isTrue();
+    }
+
+    @Test
+    public void testRejectMapSelectedKeysValuePartialProjection() {
+        RowType tableValueType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(10, "a", DataTypes.INT()),
+                        DataTypes.FIELD(11, "b", DataTypes.INT()));
+        RowType selectedValueType = DataTypes.ROW(DataTypes.FIELD(10, "a", DataTypes.INT()));
+        DataField tableField =
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), tableValueType));
+        DataField expectedField = selectedKeysField(2, "attrs", selectedValueType);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("fields.attrs.map.storage-layout", "shared-shredding");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                invokeSelectedKeysFieldIds(
+                                        tableSchema(Collections.singletonList(tableField), options),
+                                        Collections.singletonList(expectedField)))
+                .hasRootCauseMessage(
+                        "Selected-key MAP pushdown does not support pruning MAP value fields: attrs.");
+    }
+
+    @Test
+    public void testMapSelectedKeysOnlySupportsTopLevelSharedShreddingMap() throws Exception {
+        DataField tableField =
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()));
+        DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
+
+        Map<String, String> options = new HashMap<>();
+        options.put("fields.attrs.map.storage-layout", "shared-shredding");
+        Assertions.assertThat(
+                        invokeSelectedKeysFieldIds(
+                                tableSchema(Collections.singletonList(tableField), options),
+                                Collections.singletonList(expectedField)))
+                .containsExactly(2);
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                invokeSelectedKeysFieldIds(
+                                        tableSchema(
+                                                Collections.singletonList(tableField),
+                                                Collections.emptyMap()),
+                                        Collections.singletonList(expectedField)))
+                .hasRootCauseMessage(
+                        "Selected-key MAP pushdown only supports top-level shared-shredding MAP field: attrs.");
+    }
+
+    @Test
+    public void testRejectSelectedKeysDataFieldWithNonMapType() {
+        DataField dataField = DataTypes.FIELD(2, "attrs", DataTypes.BIGINT());
+        DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                invokeDataFields(
+                                        Collections.singletonList(dataField),
+                                        Collections.singletonList(expectedField)))
+                .hasRootCauseMessage(
+                        "Selected-key MAP field attrs should be MAP type in data schema.");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<DataField> invokeDataFields(
+            List<DataField> allDataFields, List<DataField> expectedFields) throws Exception {
+        FormatReaderMapping.Builder builder =
+                new FormatReaderMapping.Builder(
+                        null, Collections.emptyList(), null, null, null, null);
+        Method method =
+                FormatReaderMapping.Builder.class.getDeclaredMethod(
+                        "readDataFields", List.class, List.class, Set.class);
+        method.setAccessible(true);
+        return (List<DataField>)
+                method.invoke(builder, allDataFields, expectedFields, Collections.singleton(2));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<Integer> invokeSelectedKeysFieldIds(
+            TableSchema tableSchema, List<DataField> expectedFields) throws Exception {
+        FormatReaderMapping.Builder builder =
+                new FormatReaderMapping.Builder(
+                        null, Collections.emptyList(), null, null, null, null);
+        Method method =
+                FormatReaderMapping.Builder.class.getDeclaredMethod(
+                        "selectedKeysFieldIds", TableSchema.class, List.class);
+        method.setAccessible(true);
+        return (Set<Integer>) method.invoke(builder, tableSchema, expectedFields);
+    }
+
+    private static DataField selectedKeysField(
+            int id, String name, org.apache.paimon.types.DataType valueType) {
+        RowType selectedKeysType = DataTypes.ROW(DataTypes.FIELD(0, "0", valueType));
+        return MapSelectedKeysMetadataUtils.withSelectedKeys(
+                DataTypes.FIELD(id, name, selectedKeysType),
+                selectedKeysType,
+                Collections.singletonList("key1"));
+    }
+
+    private static TableSchema tableSchema(List<DataField> fields, Map<String, String> options) {
+        return new TableSchema(
+                1, fields, 100, Collections.emptyList(), Collections.emptyList(), options, "");
     }
 }

@@ -18,7 +18,10 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.data.shredding.MapSelectedKeysMetadataUtils;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -44,10 +47,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Class with index mapping and format reader. */
 public class FormatReaderMapping {
@@ -205,7 +210,9 @@ public class FormatReaderMapping {
                     new ArrayList<>(fieldsExtractor.apply(dataSchema));
             Map<String, Integer> systemFields = findSystemFields(expectedFields);
 
-            List<DataField> readDataFields = readDataFields(allDataFieldsInFile, expectedFields);
+            Set<Integer> selectedKeysFieldIds = selectedKeysFieldIds(tableSchema, expectedFields);
+            List<DataField> readDataFields =
+                    readDataFields(allDataFieldsInFile, expectedFields, selectedKeysFieldIds);
             IndexCastMapping indexCastMapping =
                     SchemaEvolutionUtil.createIndexCastMapping(expectedFields, readDataFields);
 
@@ -314,7 +321,9 @@ public class FormatReaderMapping {
         }
 
         private List<DataField> readDataFields(
-                List<DataField> allDataFields, List<DataField> expectedFields) {
+                List<DataField> allDataFields,
+                List<DataField> expectedFields,
+                Set<Integer> selectedKeysFieldIds) {
             List<DataField> readDataFields = new ArrayList<>();
             for (DataField dataField : allDataFields) {
                 expectedFields.stream()
@@ -322,6 +331,12 @@ public class FormatReaderMapping {
                         .findFirst()
                         .ifPresent(
                                 field -> {
+                                    if (selectedKeysFieldIds.contains(field.id())) {
+                                        checkSelectedKeysDataField(dataField);
+                                        readDataFields.add(selectedKeysDataField(field, dataField));
+                                        return;
+                                    }
+
                                     DataType prunedType =
                                             pruneDataType(field.type(), dataField.type());
                                     if (prunedType != null) {
@@ -330,6 +345,66 @@ public class FormatReaderMapping {
                                 });
             }
             return readDataFields;
+        }
+
+        private DataField selectedKeysDataField(DataField expectedField, DataField dataField) {
+            RowType selectedKeysType = (RowType) expectedField.type();
+            DataType dataValueType = ((MapType) dataField.type()).getValueType();
+            List<DataField> selectedKeysDataFields = new ArrayList<>();
+            for (DataField selectedKeyField : selectedKeysType.getFields()) {
+                selectedKeysDataFields.add(
+                        selectedKeyField.newType(
+                                dataValueType.copy(selectedKeyField.type().isNullable())));
+            }
+            return dataField
+                    .newType(selectedKeysType.copy(selectedKeysDataFields))
+                    .newDescription(expectedField.description());
+        }
+
+        private void checkSelectedKeysDataField(DataField dataField) {
+            checkArgument(
+                    dataField.type() instanceof MapType,
+                    "Selected-key MAP field %s should be MAP type in data schema.",
+                    dataField.name());
+        }
+
+        private Set<Integer> selectedKeysFieldIds(
+                TableSchema tableSchema, List<DataField> expectedFields) {
+            CoreOptions options = CoreOptions.fromMap(tableSchema.options());
+            Map<Integer, DataField> tableFields = tableSchema.idToFieldMap();
+            Set<Integer> selectedKeysFieldIds = new HashSet<>();
+            for (DataField expectedField : expectedFields) {
+                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(expectedField)) {
+                    DataField tableField = tableFields.get(expectedField.id());
+                    checkArgument(
+                            tableField != null,
+                            "Cannot find selected-key MAP field id %s in table schema.",
+                            expectedField.id());
+                    checkArgument(
+                            tableField.type() instanceof MapType,
+                            "Selected-key MAP pushdown only supports top-level MAP field: %s.",
+                            tableField.name());
+                    checkArgument(
+                            options.mapStorageLayout(tableField.name())
+                                    == MapStorageLayout.SHARED_SHREDDING,
+                            "Selected-key MAP pushdown only supports top-level shared-shredding MAP field: %s.",
+                            tableField.name());
+                    validateSelectedKeyValueTypes(expectedField, tableField);
+                    selectedKeysFieldIds.add(expectedField.id());
+                }
+            }
+            return selectedKeysFieldIds;
+        }
+
+        private void validateSelectedKeyValueTypes(DataField expectedField, DataField tableField) {
+            RowType selectedKeysType = (RowType) expectedField.type();
+            DataType mapValueType = ((MapType) tableField.type()).getValueType();
+            for (DataField selectedKeyField : selectedKeysType.getFields()) {
+                checkArgument(
+                        selectedKeyField.type().equalsIgnoreNullable(mapValueType),
+                        "Selected-key MAP pushdown does not support pruning MAP value fields: %s.",
+                        tableField.name());
+            }
         }
 
         @Nullable
