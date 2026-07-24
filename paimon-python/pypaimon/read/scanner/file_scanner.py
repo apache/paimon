@@ -498,7 +498,11 @@ class FileScanner:
                 result = scanner.scan(self.predicate)
                 if result is None:
                     return None
-                return result.or_(scanner.unindexed_rows(self.predicate))
+                # Pure scalar scan: use the coverage-aware scalar search mode so
+                # rows not yet covered by the index are read, not silently pruned.
+                scalar_mode = self.table.options.global_index_scalar_search_mode()
+                return result.or_(
+                    scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
         except Exception:
             return None
 

@@ -733,8 +733,29 @@ class CoreOptions:
         .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
         .with_description(
-            "Search mode for global index queries. "
+            "Search mode for vector and full-text global index queries. "
+            "Defaults to 'fast' because coverage-aware modes are expensive for "
+            "those index types. Scalar (sorted/bitmap) index queries are "
+            "governed by 'scalar-index.search-mode' instead. "
             "Supported values are 'fast', 'full', and 'detail'."
+        )
+    )
+
+    GLOBAL_INDEX_SCALAR_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description(
+            "Search mode for scalar (sorted/bitmap) global index queries. "
+            "Defaults to 'full' rather than 'fast': with 'fast' the query is "
+            "answered purely from index hits, so data rows whose row-id range "
+            "is not yet covered by the global index (e.g. appends/updates "
+            "committed before the index build catches up) are silently pruned "
+            "and go missing from results. 'full'/'detail' additionally read "
+            "those uncovered rows and apply the predicate as a residual filter, "
+            "which is correct and, for 'full', costs essentially nothing when "
+            "the index already covers the data. Supported values are 'fast', "
+            "'full', and 'detail'."
         )
     )
 
@@ -1371,6 +1392,15 @@ class CoreOptions:
 
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
+
+    def global_index_scalar_search_mode(self):
+        # Priority: explicit scalar-index.search-mode -> an explicit
+        # global-index.search-mode (inherited) -> default full.
+        if self.options.contains(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE):
+            return self.options.get(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE)
+        if self.options.contains(CoreOptions.GLOBAL_INDEX_SEARCH_MODE):
+            return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
+        return GlobalIndexSearchMode.FULL
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

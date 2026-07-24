@@ -209,12 +209,21 @@ class DataEvolutionGlobalIndexScanner:
         """Scan the global index with the given predicate."""
         return self._evaluator.evaluate(predicate)
 
-    def unindexed_rows(self, predicate: Optional[Predicate]) -> GlobalIndexResult:
-        """Return coarse row ids not covered by global indexes."""
+    def unindexed_rows(self, predicate: Optional[Predicate],
+                       search_mode=None) -> GlobalIndexResult:
+        """Return coarse row ids not covered by global indexes.
+
+        ``search_mode`` overrides the table's ``global-index.search-mode``. Pure
+        scalar scans pass ``scalar-index.search-mode`` so uncovered rows are read
+        instead of silently pruned; vector/full-text callers leave it unset and
+        keep the default (fast) mode, so a vector scan is not widened to a full
+        table scan.
+        """
         if self._coverage is None:
             return GlobalIndexResult.create_empty()
         return GlobalIndexResult.from_ranges(
-            self._coverage.unindexed_ranges(self._fields, predicate))
+            self._coverage.unindexed_ranges(
+                self._fields, predicate, search_mode=search_mode))
 
     def close(self):
         """Close the scanner and release resources."""
@@ -333,6 +342,19 @@ def _core_options(table):
     if options is None:
         return CoreOptions(Options.from_none())
     return options
+
+
+def _scalar_search_mode(options):
+    """Resolve the scalar global-index search mode, tolerating partial options.
+
+    Production code always holds a real ``CoreOptions``; test doubles may only
+    implement a subset, so fall back to the configured default when the scalar
+    accessor is absent.
+    """
+    getter = getattr(options, "global_index_scalar_search_mode", None)
+    if getter is not None:
+        return getter()
+    return CoreOptions(Options.from_none()).global_index_scalar_search_mode()
 
 
 def _exclude_ranges(base_ranges, excluded_ranges):
