@@ -1183,18 +1183,15 @@ All available procedures are listed below.
             partitions => 'pt1=v1,pt2=v2;pt1=v3,pt2=v4')<br/>
       </td>
       <td>
-         To perform vector similarity search on a table and return score-ordered, JSON-serialized rows. Arguments:
+         To perform vector similarity search on a table with a global vector index. Returns JSON-serialized rows. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>vector_column(required): the name of the vector column to search.</li>
             <li>query_vector(required): comma-separated float values representing the query vector, e.g. '1.0,2.0,3.0'.</li>
-            <li>top_k(required): the maximum number of nearest neighbors, from 1 through 10,000.</li>
-            <li>projection(optional): comma-separated result columns. Add <code>__paimon_search_score</code> to return the similarity score. If omitted, all table columns are returned.</li>
-            <li>options(optional): additional dynamic table and search options. The query authorization setting cannot be overridden.</li>
-            <li>where(optional): a SQL predicate applied before Top-K. Quote the argument name as <code>`where`</code> in SQL. For a primary-key vector index, predicates on non-partition columns require <code>deletion-vectors.enabled=true</code> and <code>deletion-vectors.merge-on-read=false</code>; a <code>first-row</code> table therefore supports partition predicates only.</li>
-            <li>partitions(optional): semicolon-separated partition specs. An omitted or blank value means no partition restriction. A non-blank value must contain only non-empty specs, every spec must include all partition keys, and a key cannot occur twice in one spec.</li>
-         Set <code>vector-search.distribute.enabled=true</code> as a table or dynamic option to evaluate sufficiently large index-split, raw-row-range, or primary-key bucket groups with a bounded Flink job. Smaller searches continue to use the local reader. Distributed parallelism is capped by both the Flink environment parallelism and <code>global-index.thread-num</code>.
-         The procedure resolves the selected time-travel version once, sets <code>scan.mode=from-snapshot</code>, and uses the resulting immutable snapshot ID for vector planning and final row lookup. A table with no snapshot returns an empty result.
-         Tables with <code>query-auth.enabled=true</code> are rejected because authorization predicates cannot yet participate in candidate Top-K planning.
+            <li>top_k(required): the number of nearest neighbors to return.</li>
+            <li>projection(optional): comma-separated column names to include in the result. If omitted, all columns are returned.</li>
+            <li>options(optional): additional dynamic options of the table.</li>
+            <li>where(optional): a SQL predicate applied before Top-K.</li>
+            <li>partitions(optional): semicolon-separated specs for a partitioned table.</li>
       </td>
       <td>
          CALL sys.vector_search(<br/>
