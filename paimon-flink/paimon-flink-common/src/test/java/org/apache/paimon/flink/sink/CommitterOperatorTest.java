@@ -641,6 +641,47 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testCalcDataBytesSendFromCompactAfter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        StreamTableWrite write = table.newWrite(initialCommitUser);
+        write.write(GenericRow.of(1, 10L));
+        write.write(GenericRow.of(1, 20L));
+        List<CommitMessage> committable = write.prepareCommit(false, 0);
+        write.close();
+
+        ManifestCommittable manifestCommittable = new ManifestCommittable(0);
+        for (CommitMessage commitMessage : committable) {
+            CommitMessageImpl impl = (CommitMessageImpl) commitMessage;
+            manifestCommittable.addFileCommittable(
+                    new CommitMessageImpl(
+                            impl.partition(),
+                            impl.bucket(),
+                            impl.totalBuckets(),
+                            DataIncrement.emptyIncrement(),
+                            new CompactIncrement(
+                                    Collections.emptyList(),
+                                    impl.newFilesIncrement().newFiles(),
+                                    Collections.emptyList(),
+                                    impl.newFilesIncrement().newIndexFiles(),
+                                    impl.newFilesIncrement().deletedIndexFiles())));
+        }
+
+        StreamTableCommit commit = table.newCommit(initialCommitUser);
+        OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
+        StoreCommitter committer =
+                new StoreCommitter(
+                        table,
+                        commit,
+                        Committer.createContext("", metricGroup, true, false, null, 1, 1));
+        committer.commit(Collections.singletonList(manifestCommittable));
+        CommitterMetrics metrics = committer.getCommitterMetrics();
+        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(0);
+        assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(0);
+        committer.close();
+    }
+
+    @Test
     public void testCalcDataBytesSendViaFilterAndCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
 

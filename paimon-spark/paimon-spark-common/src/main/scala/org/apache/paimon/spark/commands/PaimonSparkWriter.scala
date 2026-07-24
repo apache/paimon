@@ -424,6 +424,15 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
+    commitTable(commitMessages, operation)
+    postCommit(commitMessages)
+  }
+
+  def commitTable(commitMessages: Seq[CommitMessage]): Unit = {
+    commitTable(commitMessages, null)
+  }
+
+  def commitTable(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
     val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
       writeBuilder
         .asInstanceOf[BatchWriteBuilderImpl]
@@ -444,7 +453,6 @@ case class PaimonSparkWriter(
     } finally {
       tableCommit.close()
     }
-    postCommit(commitMessages)
   }
 
   /** Bootstrap and repartition for cross partition mode. */
