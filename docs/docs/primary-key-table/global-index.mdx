@@ -347,8 +347,9 @@ CALL sys.vector_search(
     vector_column => 'embedding',
     query_vector => '0.1,0.2,0.3',
     top_k => 10,
-    projection => 'id,status',
-    options => 'ivf.nprobe=32'
+    projection => 'id,status,__paimon_search_score',
+    options => 'ivf.nprobe=32',
+    `where` => 'status = ''active'''
 );
 ```
 
