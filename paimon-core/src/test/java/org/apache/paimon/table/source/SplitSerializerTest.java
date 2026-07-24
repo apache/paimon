@@ -44,6 +44,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -74,6 +75,23 @@ public class SplitSerializerTest {
                 assertThat(actual).isEqualTo(readGoldenFile(goldenCase.fileName));
             }
             assertSplitEquals(goldenCase.split, SplitSerializer.deserialize(actual));
+        }
+    }
+
+    @Test
+    public void testV1Compatibility() throws IOException {
+        List<String> v1CompatibleFileNames =
+                Arrays.asList(
+                        "split-v1-data",
+                        "split-v1-incremental",
+                        "split-v1-indexed",
+                        "split-v1-query-auth",
+                        "split-v1-fallback-data",
+                        "split-v1-chain",
+                        "split-v1-fallback");
+
+        for (String fileName : v1CompatibleFileNames) {
+            assertThat(SplitSerializer.deserialize(readGoldenFile(fileName))).isNotNull();
         }
     }
 
@@ -122,13 +140,13 @@ public class SplitSerializerTest {
                         FallbackReadFileStoreTable.toFallbackSplit(dataSplit, true);
         FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit = fallbackSplit();
 
-        cases.add(new GoldenCase("split-v1-data", dataSplit));
-        cases.add(new GoldenCase("split-v1-incremental", incrementalSplit));
-        cases.add(new GoldenCase("split-v1-indexed", indexedSplit));
-        cases.add(new GoldenCase("split-v1-chain", chainSplit));
-        cases.add(new GoldenCase("split-v1-query-auth", queryAuthSplit));
-        cases.add(new GoldenCase("split-v1-fallback-data", fallbackDataSplit));
-        cases.add(new GoldenCase("split-v1-fallback", fallbackSplit));
+        cases.add(new GoldenCase("split-v2-data", dataSplit));
+        cases.add(new GoldenCase("split-v2-incremental", incrementalSplit));
+        cases.add(new GoldenCase("split-v2-indexed", indexedSplit));
+        cases.add(new GoldenCase("split-v2-chain", chainSplit));
+        cases.add(new GoldenCase("split-v2-query-auth", queryAuthSplit));
+        cases.add(new GoldenCase("split-v2-fallback-data", fallbackDataSplit));
+        cases.add(new GoldenCase("split-v2-fallback", fallbackSplit));
         return cases;
     }
 
@@ -184,20 +202,33 @@ public class SplitSerializerTest {
                         .withBucketPath("dt=20260707/bucket-5")
                         .withDataFiles(
                                 Collections.singletonList(dataFile("chain-file", 0, 21, 30, 300L)))
+                        .withDataDeletionFiles(
+                                Collections.singletonList(
+                                        new DeletionFile("deletion_file", 100, 22, null)))
                         .rawConvertible(false)
                         .build();
         Map<String, String> fileBucketPathMapping = new LinkedHashMap<>();
         Map<String, String> fileBranchMapping = new LinkedHashMap<>();
+        List<DeletionFile> deletionFiles = new ArrayList<>();
         List<DataFileMeta> files = new ArrayList<>();
         for (DataSplit split : Arrays.asList(left, right)) {
-            files.addAll(split.dataFiles());
-            for (DataFileMeta file : split.dataFiles()) {
+            Optional<List<DeletionFile>> deletionFilesOpt = split.deletionFiles();
+            for (int i = 0; i < split.dataFiles().size(); i++) {
+                DataFileMeta file = split.dataFiles().get(i);
+                DeletionFile deletionFile =
+                        deletionFilesOpt.isPresent() ? deletionFilesOpt.get().get(i) : null;
+                files.add(file);
+                deletionFiles.add(deletionFile);
                 fileBucketPathMapping.put(file.fileName(), split.bucketPath());
                 fileBranchMapping.put(file.fileName(), split == left ? "snapshot" : "delta");
             }
         }
         return new ChainSplit(
-                DataFileTestUtils.row(2026), files, fileBranchMapping, fileBucketPathMapping);
+                DataFileTestUtils.row(2026),
+                files,
+                fileBranchMapping,
+                fileBucketPathMapping,
+                deletionFiles);
     }
 
     private static QueryAuthSplit queryAuthSplit(Split split) {
@@ -266,6 +297,7 @@ public class SplitSerializerTest {
         assertThat(actual).isEqualTo(expected);
         assertThat(actual.fileBucketPathMapping()).isEqualTo(expected.fileBucketPathMapping());
         assertThat(actual.fileBranchMapping()).isEqualTo(expected.fileBranchMapping());
+        assertThat(actual.deletionFiles()).isEqualTo(expected.deletionFiles());
     }
 
     private static void assertFallbackSplitEquals(
