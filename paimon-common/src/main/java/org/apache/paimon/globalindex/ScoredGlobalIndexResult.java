@@ -21,6 +21,9 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 
 /** Vector search global index result for scored index. */
@@ -117,6 +120,30 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
     /** Returns an empty {@link ScoredGlobalIndexResult}. */
     static ScoredGlobalIndexResult createEmpty() {
         return create(new RoaringNavigableMap64(), rowId -> 0);
+    }
+
+    /** Merges scored results, keeping the score from the first result containing each row ID. */
+    static ScoredGlobalIndexResult merge(List<ScoredGlobalIndexResult> results) {
+        if (results.isEmpty()) {
+            return createEmpty();
+        }
+        if (results.size() == 1) {
+            return results.get(0);
+        }
+
+        RoaringNavigableMap64 mergedRowIds = new RoaringNavigableMap64();
+        Map<Long, Float> mergedScores = new HashMap<>();
+        for (ScoredGlobalIndexResult result : results) {
+            RoaringNavigableMap64 rowIds = result.results();
+            ScoreGetter scoreGetter = result.scoreGetter();
+            for (long rowId : rowIds) {
+                if (!mergedRowIds.contains(rowId)) {
+                    mergedRowIds.add(rowId);
+                    mergedScores.put(rowId, scoreGetter.score(rowId));
+                }
+            }
+        }
+        return create(mergedRowIds, mergedScores::get);
     }
 
     /** Returns a new {@link ScoredGlobalIndexResult} from bitmap. */

@@ -149,14 +149,15 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                                         executor));
                     }
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-                    ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+                    List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
                     for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
                         Optional<ScoredGlobalIndexResult> next = f.join();
                         if (next.isPresent()) {
-                            result = result.or(next.get());
+                            results.add(next.get());
                         }
                     }
-                    result = result.topK(searchLimit);
+                    ScoredGlobalIndexResult result =
+                            ScoredGlobalIndexResult.merge(results).topK(searchLimit);
                     if (result.results().isEmpty()) {
                         return null;
                     }
@@ -213,7 +214,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
-                    ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+                    List<ScoredGlobalIndexResult> results = new ArrayList<>(group.size());
                     for (SerializedSplit serializedSplit : group) {
                         List<Range> rowRanges = deserializeRanges(serializedSplit.split);
                         ScoredGlobalIndexResult splitResult =
@@ -222,9 +223,10 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                                         deserializePreFilter(serializedSplit.preFilter),
                                         metric,
                                         vector);
-                        result = result.or(splitResult);
+                        results.add(splitResult);
                     }
-                    result = result.topK(limit);
+                    ScoredGlobalIndexResult result =
+                            ScoredGlobalIndexResult.merge(results).topK(limit);
                     if (result.results().isEmpty()) {
                         return null;
                     }
@@ -302,18 +304,18 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
     }
 
     private ScoredGlobalIndexResult mergeRemoteResults(List<byte[]> remoteResults, int topK) {
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(remoteResults.size());
         GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
         for (byte[] bytes : remoteResults) {
             if (bytes != null) {
                 try {
-                    result = result.or(serializer.deserialize(bytes));
+                    results.add(serializer.deserialize(bytes));
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to deserialize ScoredGlobalIndexResult", e);
                 }
             }
         }
-        return result.topK(topK);
+        return ScoredGlobalIndexResult.merge(results).topK(topK);
     }
 
     private List<List<Range>> rangeGroups(List<Range> ranges, int parallelism) {
