@@ -49,6 +49,8 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.BlobDescriptorReaderFactory;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.types.DataTypes;
@@ -73,6 +75,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.apache.paimon.rest.RESTApi.READ_VIA_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -418,6 +421,36 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testReadViaHeaderOnDependencyTableAndDataTokenRequests() throws Exception {
+        Identifier root = Identifier.create("db", "root");
+        Identifier target = Identifier.create("db", "target");
+        RESTCatalog restCatalog = initCatalog(true);
+        restCatalog.createDatabase(target.getDatabaseName(), true);
+        restCatalog.createTable(target, DEFAULT_TABLE_SCHEMA, false);
+        restCatalog.createTable(
+                root,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(
+                                CoreOptions.BLOB_DESCRIPTOR_SOURCE_TABLE.key(),
+                                target.getFullName())
+                        .build(),
+                false);
+        FileStoreTable rootTable = (FileStoreTable) restCatalog.getTable(root);
+
+        restCatalogServer.clearReceivedHeaders();
+        BlobDescriptorReaderFactory.create(rootTable);
+
+        String readVia = RESTUtil.encodeString(JsonSerdeUtil.toFlatJson(root));
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .hasSizeGreaterThanOrEqualTo(2)
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(READ_VIA_HEADER.toLowerCase(), readVia));
     }
 
     @Test
