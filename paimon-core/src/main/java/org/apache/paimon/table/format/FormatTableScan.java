@@ -189,19 +189,14 @@ public class FormatTableScan implements InnerTableScan {
                 if (!table.partitionKeys().isEmpty()) {
                     List<Pair<LinkedHashMap<String, String>, Path>> partitions = new ArrayList<>();
                     for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
-                        // Filter partitions in memory before any file listing.
                         if (partitionFilter == null
                                 || partitionFilter.test(toPartitionRow(pair.getKey()))) {
                             partitions.add(pair);
                         }
                     }
                     if (partitionManager != null) {
-                        // Internal (catalog-managed) table: list partition files in parallel.
                         splits.addAll(listPartitionFilesInParallel(fileIO, partitions));
                     } else {
-                        // External (filesystem-discovered) table: list serially; a missing
-                        // partition
-                        // directory is a hard error (rethrown to fail the whole scan).
                         for (Pair<LinkedHashMap<String, String>, Path> pair : partitions) {
                             splits.addAll(
                                     createSplits(
@@ -224,11 +219,6 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    /**
-     * Lists partition files for an internal (catalog-managed) table in parallel with a bounded,
-     * order-preserving thread pool. A registered partition without a directory reads as empty
-     * (matching Hive); any other listing failure fails the whole scan.
-     */
     private List<Split> listPartitionFilesInParallel(
             FileIO fileIO, List<Pair<LinkedHashMap<String, String>, Path>> partitions) {
         List<Split> splits = new ArrayList<>();
@@ -243,7 +233,6 @@ public class FormatTableScan implements InnerTableScan {
                         warnMissingPartition(pair.getKey(), pair.getValue());
                         return Collections.emptyList();
                     } catch (IOException e) {
-                        // Fail the whole scan on any real listing error; never truncate.
                         throw new RuntimeException(
                                 "Failed to list files for partition " + pair.getValue(), e);
                     }
