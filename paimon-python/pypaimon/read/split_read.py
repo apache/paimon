@@ -330,11 +330,15 @@ class SplitRead(ABC):
                 [nested_path_by_name[f.name] for f in ordered_read_fields]
                 if has_nested else None
             )
+            predicate_fields = (
+                predicate_field_names(self.push_down_predicate)
+                if self.push_down_predicate else set())
             format_reader = FormatPyArrowReader(
                 self.table.file_io, file_format, file_path,
                 ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
                 options=self.table.options,
-                nested_name_paths=ordered_nested_paths)
+                nested_name_paths=ordered_nested_paths,
+                predicate_field_names=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
