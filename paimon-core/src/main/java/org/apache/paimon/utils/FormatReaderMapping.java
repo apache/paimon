@@ -356,7 +356,9 @@ public class FormatReaderMapping {
                         selectedKeyField.newType(
                                 dataValueType.copy(selectedKeyField.type().isNullable())));
             }
-            return expectedField.newType(selectedKeysType.copy(selectedKeysDataFields));
+            return dataField
+                    .newType(selectedKeysType.copy(selectedKeysDataFields))
+                    .newDescription(expectedField.description());
         }
 
         private void checkSelectedKeysDataField(DataField dataField) {
