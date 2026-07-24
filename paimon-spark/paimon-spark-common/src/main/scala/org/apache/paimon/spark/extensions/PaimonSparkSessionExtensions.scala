@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, 
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
-import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
+import org.apache.paimon.spark.execution.adaptive.{DisablePostponeCarrierShuffleCoalescing, DisableUnnecessaryPaimonBucketedScan}
 
 import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -114,6 +114,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // query stage preparation
     extensions.injectQueryStagePrepRule(_ => DisableUnnecessaryPaimonBucketedScan)
+    extensions.injectQueryStagePrepRule(_ => DisablePostponeCarrierShuffleCoalescing)
   }
 
   /**
