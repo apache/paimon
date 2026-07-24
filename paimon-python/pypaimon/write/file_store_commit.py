@@ -307,6 +307,16 @@ class FileStoreCommit:
         while True:
             try:
                 latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+                # A successful attempt whose response was lost can make an
+                # overwrite/truncate retry plan empty. Resolve it before replanning.
+                if (outcome_unknown
+                        and self._is_duplicate_commit(
+                            retry_result,
+                            latest_snapshot,
+                            commit_identifier,
+                            commit_kind)):
+                    break
+
                 commit_entries = commit_entries_plan(latest_snapshot)
 
                 if not commit_entries and not index_deletes and not index_adds:

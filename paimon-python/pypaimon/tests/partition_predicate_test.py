@@ -474,3 +474,26 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(tuple(result[0].partition.values), ('p1', 'us'))
+
+    def test_incremental_changes_falls_back_on_overwrite(self):
+        append = Mock(id=2, commit_kind='APPEND')
+        overwrite = Mock(id=3, commit_kind='OVERWRITE')
+        after_overwrite = Mock(id=4, commit_kind='APPEND')
+        snapshots = {2: append, 3: overwrite, 4: after_overwrite}
+
+        table = _mock_table()
+        snapshot_manager = table.snapshot_manager.return_value
+        snapshot_manager.get_snapshot_by_id.side_effect = snapshots.get
+        scanner = CommitScanner(table, Mock())
+        scanner.read_incremental_raw_entries_from_changed_partitions = Mock(
+            return_value=[])
+
+        result = scanner.read_incremental_changes(
+            Mock(id=1), after_overwrite, [])
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            [call.args[0] for call in snapshot_manager.get_snapshot_by_id.call_args_list],
+            [2, 3],
+        )
+        scanner.read_incremental_raw_entries_from_changed_partitions.assert_called_once()

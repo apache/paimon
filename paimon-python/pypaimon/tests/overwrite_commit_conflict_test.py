@@ -271,15 +271,15 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertIn(None, incr_results)          # incremental bailed on missing
         self.assertEqual(full_scans['n'], 2)       # first attempt + fallback
 
-    def test_incremental_merge_across_non_append_snapshot(self):
+    def test_retry_base_matches_full_scan_across_overwrite_snapshot(self):
         self._assert_merge_equals_full_scan(self._overwrite_target)
 
     def test_incremental_merge_across_compact_snapshot(self):
         self._assert_merge_equals_full_scan(self._compact_target)
 
     def _assert_merge_equals_full_scan(self, concurrent_fn):
-        # A non-APPEND snapshot (OVERWRITE/COMPACT, delta = ADD+DELETE) lands
-        # between retries; the merged base must still equal a fresh full scan.
+        # A non-APPEND snapshot lands between retries. OVERWRITE falls back to
+        # a full scan; COMPACT can still merge deltas. Either base must be fresh.
         K = 2
 
         wb = self.table.new_batch_write_builder().overwrite({'f0': 1})

@@ -278,6 +278,8 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         seen_groups = []
         aborted = []
         commit_calls = []
+        retry_error = ValueError("commit retry failed")
+        commit_error = CommitOutcomeUnknownError("commit failed")
         original_add_group = m._IncrementalUpdateCommitter.add_group
         original_abort = StreamTableCommit.abort
 
@@ -288,7 +290,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
         def fail_commit(_commit, _messages, commit_identifier):
             commit_calls.append(commit_identifier)
-            raise CommitOutcomeUnknownError("commit failed")
+            raise commit_error from retry_error
 
         def record_abort(commit, messages):
             aborted.append(list(messages))
@@ -298,7 +300,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 m._IncrementalUpdateCommitter, "add_group", record_group), \
                 mock.patch.object(StreamTableCommit, "commit", fail_commit), \
                 mock.patch.object(StreamTableCommit, "abort", record_abort):
-            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
                 update_by_row_id(
                     target,
                     ray.data.from_arrow(src).repartition(4),
@@ -308,12 +310,138 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                     max_groups_per_commit=2,
                 )
 
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(retry_error, raised.exception.__cause__)
         self.assertEqual(4, len(seen_groups))
         self.assertEqual([1], commit_calls)
         self.assertEqual(
             [[message for group in seen_groups[2:] for message in group]],
             aborted,
         )
+
+    def test_incremental_commit_error_precedes_later_worker_failure(self):
+        import importlib
+
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["x"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        src = pa.table(
+            {"_ROW_ID": [0], "age": [1]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        commit_error = CommitOutcomeUnknownError("commit outcome is uncertain")
+        worker_error = ValueError("worker failed")
+        aborted = []
+        close_calls = []
+
+        def fail_commit(_commit, _messages, _commit_identifier):
+            raise commit_error
+
+        def record_abort(_commit, messages):
+            aborted.append(list(messages))
+
+        def record_close(_commit):
+            close_calls.append(True)
+
+        def fail_after_commit(_update_ds, _table, _update_cols, **kwargs):
+            on_group_result = kwargs["on_group_result"]
+            on_group_result(["uncertain-1"], 1, [])
+            on_group_result(["uncertain-2"], 1, [])
+            on_group_result(["pending"], 1, [])
+            raise RayTaskError("worker", "trace", worker_error)
+
+        with mock.patch.object(
+                m, "distributed_update_apply", fail_after_commit), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort), \
+                mock.patch.object(StreamTableCommit, "close", record_close):
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=2,
+                )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(worker_error, raised.exception.__cause__)
+        self.assertEqual([["pending"]], aborted)
+        self.assertEqual([True], close_calls)
+
+    def test_incremental_commit_preserves_cause_before_worker_failure(self):
+        import importlib
+
+        from ray.exceptions import RayTaskError
+
+        from pypaimon.write.file_store_commit import CommitOutcomeUnknownError
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["x"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        src = pa.table(
+            {"_ROW_ID": [0], "age": [1]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        commit_cause = ValueError("commit retry failed")
+        commit_error = CommitOutcomeUnknownError("commit outcome is uncertain")
+        worker_error = ValueError("worker failed")
+        aborted = []
+        close_calls = []
+
+        def fail_commit(_commit, _messages, _commit_identifier):
+            raise commit_error from commit_cause
+
+        def record_abort(_commit, messages):
+            aborted.append(list(messages))
+
+        def record_close(_commit):
+            close_calls.append(True)
+
+        def fail_after_commit(_update_ds, _table, _update_cols, **kwargs):
+            on_group_result = kwargs["on_group_result"]
+            on_group_result(["uncertain-1"], 1, [])
+            on_group_result(["uncertain-2"], 1, [])
+            on_group_result(["pending"], 1, [])
+            raise RayTaskError("worker", "trace", worker_error)
+
+        with mock.patch.object(
+                m, "distributed_update_apply", fail_after_commit), \
+                mock.patch.object(StreamTableCommit, "commit", fail_commit), \
+                mock.patch.object(StreamTableCommit, "abort", record_abort), \
+                mock.patch.object(StreamTableCommit, "close", record_close), \
+                self.assertLogs(
+                    "pypaimon.ray.update_by_row_id", level="WARNING") as logs:
+            with self.assertRaises(CommitOutcomeUnknownError) as raised:
+                update_by_row_id(
+                    target,
+                    src,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    max_groups_per_commit=2,
+                )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(commit_cause, raised.exception.__cause__)
+        self.assertIs(worker_error, raised.exception.__context__)
+        self.assertIn(
+            "preserving the original commit error: worker failed",
+            "\n".join(logs.output),
+        )
+        self.assertEqual([["pending"]], aborted)
+        self.assertEqual([True], close_calls)
 
     def test_incremental_conflict_aborts_output_files(self):
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER

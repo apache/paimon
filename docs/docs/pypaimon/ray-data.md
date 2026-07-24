@@ -554,7 +554,8 @@ print(metrics)   # {"num_updated": 50}
   in its data file, so it can't be told apart from a live row without reading the target.
 - Incremental commit mode overlaps later worker writes with earlier commits, but is not
   atomic across the whole operation. If a later group fails, earlier committed windows
-  remain visible.
+  remain visible and the table is partially updated. Inspect or reconcile that state,
+  then rerun the intended update as appropriate.
 
 ## Read By Row Id
 

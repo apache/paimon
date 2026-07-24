@@ -134,8 +134,9 @@ class CommitScanner:
                                  index_entries=None) -> Optional[List[ManifestEntry]]:
         """Delta entries (incl. DELETEs) in ``(from_snapshot, to_snapshot]``,
         changed-partition filtered, so a retry can reuse the prior base and read
-        only the changes since. Returns None on a missing snapshot (caller then
-        full-scans). Mirrors Java ``CommitScanner#readIncrementalChanges``.
+        only the changes since. Returns None on a missing or OVERWRITE snapshot
+        (caller then full-scans). An OVERWRITE may replace the base manifest
+        without fully describing the replacement in its delta manifest.
         """
         snapshot_manager = self.table.snapshot_manager()
         partition_filter = self._build_partition_filter_from_changes(
@@ -143,7 +144,7 @@ class CommitScanner:
         entries = []
         for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
             snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot is None:
+            if snapshot is None or snapshot.commit_kind == "OVERWRITE":
                 return None
             entries.extend(
                 self.read_incremental_raw_entries_from_changed_partitions(

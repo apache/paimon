@@ -262,6 +262,8 @@ class ConflictDetection:
             self._row_id_history_cursor_identity = None
             self._row_id_external_snapshots = []
 
+        # Snapshot files below the cursor are immutable. A rollback replaces the
+        # whole tail, including the cursor, whose identity check above resets cache.
         for snapshot_id in range(
                 self._row_id_history_cursor + 1,
                 latest_snapshot.id + 1):

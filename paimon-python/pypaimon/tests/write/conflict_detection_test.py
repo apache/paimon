@@ -18,6 +18,7 @@
 import unittest
 from dataclasses import dataclass
 from typing import List
+from unittest.mock import Mock
 
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
@@ -439,6 +440,30 @@ class TestRowIdBaseEntriesCache(unittest.TestCase):
 
         self.assertEqual(["original", "replacement"], scanner.full_calls)
         self.assertEqual([], scanner.incremental_calls)
+
+    def test_incremental_fallback_rebuilds_overwritten_base_entries(self):
+        base = _FakeSnapshot(1, "APPEND", delta_manifest_list="base")
+        overwrite = _FakeSnapshot(
+            2, "OVERWRITE", delta_manifest_list="overwrite")
+        old_entry = _make_entry("old.parquet")
+        replacement_entry = _make_entry("replacement.parquet")
+        scanner = _FakeBaseEntryScanner({
+            "base": [old_entry],
+            "overwrite": [replacement_entry],
+        }, {})
+        scanner.read_incremental_changes = Mock(return_value=None)
+        detection = self._make_detection([base, overwrite], scanner)
+
+        self.assertEqual(
+            [old_entry], detection.read_row_id_base_entries(base, []))
+        self.assertEqual(
+            [replacement_entry],
+            detection.read_row_id_base_entries(overwrite, []),
+        )
+
+        self.assertEqual(["base", "overwrite"], scanner.full_calls)
+        scanner.read_incremental_changes.assert_called_once_with(
+            base, overwrite, [], None)
 
 
 class TestCheckRowIdFromSnapshot(unittest.TestCase):

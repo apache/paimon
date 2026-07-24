@@ -70,7 +70,10 @@ def update_by_row_id(
     By default all file groups are committed atomically after every worker
     finishes. Set ``max_groups_per_commit`` to incrementally commit each completed
     window of target file groups. Incremental mode can leave earlier windows
-    committed if a later window fails.
+    committed if a later window fails. The table may therefore be partially
+    updated; callers must reconcile the result or rerun the intended update.
+    Concurrent snapshot expiration can also invalidate a committed-window
+    lineage check; the operation then stops with earlier windows still visible.
 
     Returns ``{"num_updated": <rows>}``.
     """
@@ -173,8 +176,34 @@ def update_by_row_id(
     except Exception as e:
         if incremental_committer is not None:
             incremental_committer.abort_pending()
-        _reraise_inner(e)
-        raise  # _reraise_inner always raises; keeps num_updated defined for linters
+        try:
+            _reraise_inner(e)
+        except Exception as worker_error:
+            deferred_error = (
+                incremental_committer._deferred_error
+                if incremental_committer is not None else None
+            )
+            # A commit error can be deferred while the remaining Ray groups drain.
+            # Preserve that earlier failure if a later worker fails, but do not
+            # chain an error to itself when finish() raised the deferred error.
+            if (deferred_error is not None
+                    and deferred_error is not worker_error):
+                if deferred_error.__cause__ is not None:
+                    # Python has only one explicit cause. Keep the original commit
+                    # cause and report the later update failure separately.
+                    logger.warning(
+                        "A later update error occurred after an earlier incremental "
+                        "commit error; preserving the original commit error: %s",
+                        worker_error,
+                        exc_info=(
+                            type(worker_error),
+                            worker_error,
+                            worker_error.__traceback__,
+                        ),
+                    )
+                    raise deferred_error
+                raise deferred_error from worker_error
+            raise
     finally:
         if incremental_committer is not None:
             incremental_committer.close()
@@ -195,6 +224,8 @@ class _IncrementalUpdateCommitter:
         self._table_commit = None
         self._next_commit_identifier = 1
         self._deferred_error = None
+        # Never abort messages whose commit outcome is unknown: their files may
+        # already be referenced by a snapshot. If not, orphan cleanup reclaims them.
         self._uncertain_messages: list = []
         self._last_committed_snapshot = None
 

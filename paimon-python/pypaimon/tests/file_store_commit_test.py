@@ -599,6 +599,84 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertEqual(2, file_store_commit._try_commit_once.call_count)
 
+    def test_unknown_retry_resolves_duplicate_before_replanning(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 1000
+        file_store_commit._commit_retry_wait = Mock()
+        committed_snapshot = Mock(
+            id=1,
+            commit_user="test_user",
+            commit_identifier=1,
+            commit_kind="OVERWRITE",
+        )
+        file_store_commit.snapshot_manager.get_latest_snapshot.side_effect = [
+            None,
+            committed_snapshot,
+        ]
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            committed_snapshot
+        )
+        atomic_error = RuntimeError("response lost")
+        file_store_commit._try_commit_once = Mock(return_value=RetryResult(
+            None, atomic_error, outcome_unknown=True))
+        commit_entries_plan = Mock(side_effect=[[Mock()], []])
+
+        file_store_commit._try_commit(
+            "OVERWRITE", 1, commit_entries_plan)
+
+        self.assertEqual(1, file_store_commit._try_commit_once.call_count)
+        self.assertEqual(1, commit_entries_plan.call_count)
+        get_snapshot_by_id = (
+            file_store_commit.snapshot_manager.get_snapshot_by_id
+        )
+        get_snapshot_by_id.assert_called_once_with(1)
+
+    def test_unknown_retry_with_empty_plan_and_no_duplicate_remains_unknown(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 1000
+        file_store_commit._commit_retry_wait = Mock()
+        other_snapshot = Mock(
+            id=1,
+            commit_user="other_user",
+            commit_identifier=1,
+            commit_kind="OVERWRITE",
+        )
+        file_store_commit.snapshot_manager.get_latest_snapshot.side_effect = [
+            None,
+            other_snapshot,
+        ]
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            other_snapshot
+        )
+        atomic_error = RuntimeError("response lost")
+        file_store_commit._try_commit_once = Mock(return_value=RetryResult(
+            None, atomic_error, outcome_unknown=True))
+        commit_entries_plan = Mock(side_effect=[[Mock()], []])
+
+        with self.assertRaises(CommitOutcomeUnknownError) as raised:
+            file_store_commit._try_commit(
+                "OVERWRITE", 1, commit_entries_plan)
+
+        self.assertIs(atomic_error, raised.exception.__cause__)
+        self.assertEqual(1, file_store_commit._try_commit_once.call_count)
+        self.assertEqual(2, commit_entries_plan.call_count)
+
+    def test_empty_plan_without_retry_remains_no_op(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit._try_commit_once = Mock()
+        file_store_commit._is_duplicate_commit = Mock()
+
+        file_store_commit._try_commit(
+            "OVERWRITE", 1, lambda _snapshot: [])
+
+        file_store_commit._try_commit_once.assert_not_called()
+        file_store_commit._is_duplicate_commit.assert_not_called()
+
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         from pypaimon.data.timestamp import Timestamp
