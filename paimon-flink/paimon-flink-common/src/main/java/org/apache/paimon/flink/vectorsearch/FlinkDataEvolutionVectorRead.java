@@ -38,7 +38,10 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.util.CloseableIterator;
@@ -62,6 +65,10 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
     private static final long serialVersionUID = 1L;
     private static final byte INDEX_RESULT = 0;
     private static final byte RAW_RESULT = 1;
+    private static final TupleTypeInfo<Tuple2<Byte, byte[]>> RESULT_TYPE_INFO =
+            new TupleTypeInfo<Tuple2<Byte, byte[]>>(
+                    BasicTypeInfo.BYTE_TYPE_INFO,
+                    PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO);
 
     private final transient StreamExecutionEnvironment env;
 
@@ -241,23 +248,21 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         List<List<SerializedSplit>> rawGroups =
                 rawSplitGroups(rawRowRanges, rawPreFilter, parallelism);
 
-        List<byte[]> taggedResults =
+        List<Tuple2<Byte, byte[]>> results =
                 executeIndexAndRawSearchGroups(
                         indexGroups, searchLimit, rawGroups, rawMetric, parallelism);
         List<byte[]> indexedResults = new ArrayList<>();
         List<byte[]> rawResults = new ArrayList<>();
-        for (byte[] taggedResult : taggedResults) {
-            if (taggedResult.length == 0) {
-                throw new IllegalArgumentException("Missing vector-search result type.");
-            }
-            byte[] result = untagResult(taggedResult);
-            if (taggedResult[0] == INDEX_RESULT) {
-                indexedResults.add(result);
-            } else if (taggedResult[0] == RAW_RESULT) {
-                rawResults.add(result);
+        for (Tuple2<Byte, byte[]> result : results) {
+            byte resultType = checkNotNull(result.f0, "Missing vector-search result type.");
+            byte[] resultBytes = checkNotNull(result.f1, "Missing vector-search result payload.");
+            if (resultType == INDEX_RESULT) {
+                indexedResults.add(resultBytes);
+            } else if (resultType == RAW_RESULT) {
+                rawResults.add(resultBytes);
             } else {
                 throw new IllegalArgumentException(
-                        "Unknown vector-search result type: " + taggedResult[0]);
+                        "Unknown vector-search result type: " + resultType);
             }
         }
 
@@ -294,23 +299,23 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                 rawSearchStream(groups, metric, parallelism, operatorName), operatorName);
     }
 
-    protected List<byte[]> executeIndexAndRawSearchGroups(
+    protected List<Tuple2<Byte, byte[]>> executeIndexAndRawSearchGroups(
             List<List<SerializedSplit>> indexGroups,
             int searchLimit,
             List<List<SerializedSplit>> rawGroups,
             String rawMetric,
             int parallelism) {
-        DataStream<byte[]> indexResults =
-                tagResults(
+        DataStream<Tuple2<Byte, byte[]>> indexResults =
+                addResultType(
                         indexSearchStream(
                                 indexGroups, searchLimit, parallelism, "Vector Index Search"),
                         INDEX_RESULT,
-                        "Tag Vector Index Results");
-        DataStream<byte[]> rawResults =
-                tagResults(
+                        "Add Vector Index Result Type");
+        DataStream<Tuple2<Byte, byte[]>> rawResults =
+                addResultType(
                         rawSearchStream(rawGroups, rawMetric, parallelism, "Raw Vector Search"),
                         RAW_RESULT,
-                        "Tag Raw Vector Results");
+                        "Add Raw Result Type");
         return collectResults(indexResults.union(rawResults), "Vector Index and Raw Search");
     }
 
@@ -349,10 +354,12 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                 .setParallelism(Math.min(parallelism, groups.size()));
     }
 
-    static DataStream<byte[]> tagResults(
+    static DataStream<Tuple2<Byte, byte[]>> addResultType(
             DataStream<byte[]> results, byte resultType, String operatorName) {
-        return results.map((MapFunction<byte[], byte[]>) bytes -> tagResult(resultType, bytes))
-                .returns(PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO)
+        return results.map(
+                        (MapFunction<byte[], Tuple2<Byte, byte[]>>)
+                                bytes -> Tuple2.of(resultType, bytes))
+                .returns(RESULT_TYPE_INFO)
                 .name(operatorName)
                 .setParallelism(results.getParallelism());
     }
@@ -440,9 +447,9 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         }
     }
 
-    private List<byte[]> collectResults(DataStream<byte[]> results, String operatorName) {
-        List<byte[]> output = new ArrayList<>();
-        try (CloseableIterator<byte[]> iterator =
+    private <T> List<T> collectResults(DataStream<T> results, String operatorName) {
+        List<T> output = new ArrayList<>();
+        try (CloseableIterator<T> iterator =
                 results.executeAndCollect(flinkJobName(operatorName))) {
             iterator.forEachRemaining(output::add);
         } catch (Exception e) {
@@ -453,19 +460,6 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
     protected String flinkJobName(String operatorName) {
         return "Vector Search - " + operatorName + " : " + table.fullName();
-    }
-
-    static byte[] tagResult(byte resultType, byte[] result) {
-        byte[] tagged = new byte[result.length + 1];
-        tagged[0] = resultType;
-        System.arraycopy(result, 0, tagged, 1, result.length);
-        return tagged;
-    }
-
-    private static byte[] untagResult(byte[] taggedResult) {
-        byte[] result = new byte[taggedResult.length - 1];
-        System.arraycopy(taggedResult, 1, result, 0, result.length);
-        return result;
     }
 
     private byte[] serializeResult(ScoredGlobalIndexResult result) {

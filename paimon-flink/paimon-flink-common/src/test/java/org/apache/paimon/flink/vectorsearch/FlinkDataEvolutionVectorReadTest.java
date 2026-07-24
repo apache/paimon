@@ -44,6 +44,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
@@ -156,7 +157,7 @@ public class FlinkDataEvolutionVectorReadTest {
     }
 
     @Test
-    public void testMixedResultTagsKeepSearchParallelism() {
+    public void testMixedResultTypeKeepsSearchParallelism() {
         StreamExecutionEnvironment env = environment();
         env.setParallelism(8);
         DataStream<byte[]> searchResults =
@@ -168,11 +169,11 @@ public class FlinkDataEvolutionVectorReadTest {
                         .returns(PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO)
                         .setParallelism(2);
 
-        DataStream<byte[]> tagged =
-                FlinkDataEvolutionVectorRead.tagResults(
-                        searchResults, (byte) 0, "Tag Vector Search Results");
+        DataStream<Tuple2<Byte, byte[]>> typedResults =
+                FlinkDataEvolutionVectorRead.addResultType(
+                        searchResults, (byte) 0, "Add Vector Search Result Type");
 
-        assertThat(tagged.getParallelism()).isEqualTo(2);
+        assertThat(typedResults.getParallelism()).isEqualTo(2);
     }
 
     @Test
@@ -353,7 +354,7 @@ public class FlinkDataEvolutionVectorReadTest {
         }
 
         @Override
-        protected List<byte[]> executeIndexAndRawSearchGroups(
+        protected List<Tuple2<Byte, byte[]>> executeIndexAndRawSearchGroups(
                 List<List<SerializedSplit>> indexGroups,
                 int searchLimit,
                 List<List<SerializedSplit>> rawGroups,
@@ -368,8 +369,8 @@ public class FlinkDataEvolutionVectorReadTest {
             try {
                 GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
                 return Arrays.asList(
-                        tagResult((byte) 0, serializer.serialize(scoredResult(0L, 1.0f))),
-                        tagResult((byte) 1, serializer.serialize(scoredResult(42L, 0.9f))));
+                        Tuple2.of((byte) 0, serializer.serialize(scoredResult(0L, 1.0f))),
+                        Tuple2.of((byte) 1, serializer.serialize(scoredResult(42L, 0.9f))));
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
