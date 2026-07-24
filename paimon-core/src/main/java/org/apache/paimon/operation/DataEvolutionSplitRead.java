@@ -76,6 +76,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
@@ -115,6 +116,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    // Kept apart from formatReaderMappings: the single file path pushes per file filters into the
+    // mapping and keys by writeCols, so it must not share entries with the merge path, which keys
+    // by the projected read field names and pushes no filters.
+    private final Map<FormatKey, FormatReaderMapping> singleFileReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
     private final CoreOptions coreOptions;
     private final boolean fileIndexReadEnabled;
@@ -138,6 +143,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         this.coreOptions = coreOptions;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
+        this.singleFileReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
         this.readRowType = rowType;
     }
@@ -208,17 +214,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
-        Builder formatBuilder =
-                new Builder(
-                        formatDiscover,
-                        readRowType.getFields(),
-                        // file has no row id and sequence number, they are in manifest entry
-                        schema ->
-                                rowTypeWithRowTracking(schema.logicalRowType(), true, true)
-                                        .getFields(),
-                        filters,
-                        null,
-                        null);
+        // the merge path builds its readers with filter push down disabled, so the shared builder
+        // carries no filters, the single file path creates its own with per file filters
+        Builder formatBuilder = formatBuilder(readRowType, null);
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
@@ -232,7 +230,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     partition,
                                     dataFilePathFactory,
                                     needMergeFiles.get(0),
-                                    formatBuilder,
                                     rowRanges,
                                     readRowType,
                                     deletionVector);
@@ -495,7 +492,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
-            Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector)
@@ -503,9 +499,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
         String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
+        // no column merge here, so the filters this file can answer are pushed down
+        Builder formatBuilder = formatBuilder(readRowType, fileFilters(file));
         FormatReaderMapping formatReaderMapping =
-                formatReaderMappings.computeIfAbsent(
-                        new FormatKey(file.schemaId(), formatIdentifier),
+                singleFileReaderMappings.computeIfAbsent(
+                        new FormatKey(file.schemaId(), formatIdentifier, file.writeCols()),
                         key ->
                                 formatBuilder.build(
                                         formatIdentifier,
@@ -514,7 +512,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                                 ? schema
                                                 : schemaFetcher.apply(schemaId)));
 
-        // no column merge here, the filters can be fully pushed down
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
             fileIndexResult =
@@ -667,6 +664,43 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return false;
+    }
+
+    private Builder formatBuilder(RowType readRowType, @Nullable List<Predicate> filters) {
+        return new Builder(
+                formatDiscover,
+                readRowType.getFields(),
+                // file has no row id and sequence number, they are in manifest entry
+                schema -> rowTypeWithRowTracking(schema.logicalRowType(), true, true).getFields(),
+                filters,
+                null,
+                null);
+    }
+
+    /**
+     * Filters the file can answer. A column missing from a data evolution file is not null, its
+     * values live in another file of the same row id range, so a predicate on it must not be pushed
+     * down: formats such as Parquet read a column absent from the file schema as all null and would
+     * drop every row.
+     */
+    @Nullable
+    private List<Predicate> fileFilters(DataFileMeta file) {
+        if (isNullOrEmpty(filters)) {
+            return null;
+        }
+
+        Set<Integer> fileFieldIds = new HashSet<>();
+        for (DataField field :
+                schemaFetcher.apply(file.schemaId()).project(file.writeCols()).fields()) {
+            fileFieldIds.add(field.id());
+        }
+        Set<String> missing = new HashSet<>();
+        for (DataField field : schema.fields()) {
+            if (!fileFieldIds.contains(field.id())) {
+                missing.add(field.name());
+            }
+        }
+        return excludePredicateWithFields(filters, missing);
     }
 
     /**

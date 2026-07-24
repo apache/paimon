@@ -20,13 +20,23 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -36,6 +46,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -44,6 +55,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,6 +68,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -172,6 +188,84 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertAligned(rows);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc", "avro"})
+    public void testFilterOnColumnMissingFromFileIsNotApplied(String format) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), format);
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
+        FileStoreTable table = createTable("missing_column_" + format, options);
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), Collections.emptyMap());
+
+        // projecting f2 leaves only the file that does not contain f1, so the filter reaches a
+        // format reader that knows nothing about the column and must not drop anything
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), rowType().project("f2"));
+        assertThat(rows).hasSize(ROW_COUNT);
+    }
+
+    @Test
+    public void testBitmapSelectionComposesWithDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("bitmap_dv", options);
+        writeAllColumns(table, ROW_COUNT);
+
+        // both the bitmap selection and the deletion vector filter by position, so deleting the
+        // very row the bitmap selects has to make it disappear
+        deleteRows(table, 50);
+        assertThat(readWithFilter(table, equalF1(f1(50)))).isEmpty();
+
+        // deleting a neighbour must leave the selected row untouched
+        FileStoreTable other = createTable("bitmap_dv_other", options);
+        writeAllColumns(other, ROW_COUNT);
+        deleteRows(other, 51);
+        List<InternalRow> rows = readWithFilter(other, equalF1(f1(50)));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(50);
+    }
+
+    /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */
+    private void deleteRows(FileStoreTable table, long... positions) throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        List<DataFileMeta> dataFiles =
+                ((DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0)).dataFiles();
+        String anchor = retrieveAnchorFile(dataFiles, file -> file).fileName();
+
+        BaseAppendDeleteFileMaintainer maintainer =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                        latest.store().newIndexFileHandler(),
+                        latest.latestSnapshot().get(),
+                        BinaryRow.EMPTY_ROW);
+        DeletionVector deletionVector = new BitmapDeletionVector();
+        for (long position : positions) {
+            deletionVector.delete(position);
+        }
+        maintainer.notifyNewDeletionVector(anchor, deletionVector);
+
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        for (IndexManifestEntry entry : maintainer.persist()) {
+            if (entry.kind() == FileKind.ADD) {
+                newIndexFiles.add(entry.indexFile());
+            }
+        }
+
+        try (BatchTableCommit commit = latest.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    BucketMode.UNAWARE_BUCKET,
+                                    null,
+                                    new DataIncrement(
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            newIndexFiles,
+                                            Collections.emptyList()),
+                                    CompactIncrement.emptyIncrement())));
+        }
+    }
+
     private FileStoreTable createTable(String name, Map<String, String> options) throws Exception {
         Schema.Builder builder =
                 Schema.newBuilder()
@@ -263,10 +357,20 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
     private List<InternalRow> readWithFilter(FileStoreTable table, Predicate predicate)
             throws Exception {
+        return readWithFilter(table, predicate, null);
+    }
+
+    private List<InternalRow> readWithFilter(
+            FileStoreTable table, Predicate predicate, @Nullable RowType readType)
+            throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
         ReadBuilder readBuilder = latest.newReadBuilder().withFilter(predicate);
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
         TableRead read = readBuilder.newRead();
-        InternalRowSerializer serializer = new InternalRowSerializer(latest.rowType());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(readType == null ? latest.rowType() : readType);
         List<InternalRow> rows = new ArrayList<>();
         for (Split split : readBuilder.newScan().plan().splits()) {
             try (RecordReader<InternalRow> reader = read.createReader(split)) {
