@@ -56,6 +56,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_SCAN_LIST_PARALLELISM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -503,6 +504,134 @@ class CatalogManagedPartitionScanTest {
         @Override
         public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
             listedPaths.add(path);
+            return super.listFiles(path, recursive);
+        }
+    }
+
+    @Test
+    void testInternalParallelListingMatchesSerialAndIsDeterministic() throws Exception {
+        TrackingLocalFileIO fileIO = new TrackingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        List<Partition> partitions = new ArrayList<>();
+        List<Path> expected = new ArrayList<>();
+        for (int m = 10; m <= 15; m++) {
+            partitions.add(partition("2025", Integer.toString(m)));
+            expected.add(writeDataFile(fileIO, tablePath, "year=2025/month=" + m));
+        }
+
+        List<Path> serial =
+                plannedFiles(
+                        new FormatTableScan(
+                                        managedStringTable(fileIO, tablePath, partitions, 1),
+                                        null,
+                                        null)
+                                .plan()
+                                .splits());
+        List<Path> parallel =
+                plannedFiles(
+                        new FormatTableScan(
+                                        managedStringTable(fileIO, tablePath, partitions, 8),
+                                        null,
+                                        null)
+                                .plan()
+                                .splits());
+
+        assertThat(parallel).containsExactlyElementsOf(serial);
+        assertThat(parallel).containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    void testInternalMissingPartitionDirectoryTreatedAsEmpty() throws Exception {
+        InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        List<Partition> partitions =
+                Arrays.asList(
+                        partition("2025", "10"), partition("2025", "11"), partition("2025", "12"));
+        Path oct = writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        Path dec = writeDataFile(fileIO, tablePath, "year=2025/month=12");
+        // month=11 is registered but its directory is missing -> FileNotFound -> treated as empty.
+        fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
+
+        List<Path> files =
+                plannedFiles(
+                        new FormatTableScan(
+                                        managedStringTable(fileIO, tablePath, partitions, 4),
+                                        null,
+                                        null)
+                                .plan()
+                                .splits());
+
+        assertThat(files).containsExactlyInAnyOrder(oct, dec);
+    }
+
+    @Test
+    void testInternalListingIoErrorFailsWholeScan() throws Exception {
+        InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        List<Partition> partitions =
+                Arrays.asList(partition("2025", "10"), partition("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        // A real (non-FileNotFound) listing error must fail the whole scan, not truncate.
+        fileIO.failListFilesContaining("month=11", new IOException("boom"));
+
+        FormatTable table = managedStringTable(fileIO, tablePath, partitions, 4);
+        assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void testExternalMissingDirectoryStillFailsScan() throws Exception {
+        InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        // External tables (partitionManager == null) keep the rethrow-on-missing behavior.
+        fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
+
+        FormatTable table = createStringPartitionTable(fileIO, tablePath, null);
+        assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    private FormatTable managedStringTable(
+            LocalFileIO fileIO, Path tablePath, List<Partition> partitions, int parallelism) {
+        RowType rowType =
+                RowType.builder()
+                        .field("year", DataTypes.STRING())
+                        .field("month", DataTypes.STRING())
+                        .field("id", DataTypes.INT())
+                        .build();
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(), "false");
+        options.put(FORMAT_TABLE_SCAN_LIST_PARALLELISM.key(), Integer.toString(parallelism));
+        return FormatTable.builder()
+                .fileIO(fileIO)
+                .identifier(IDENTIFIER)
+                .rowType(rowType)
+                .partitionKeys(Arrays.asList("year", "month"))
+                .location(tablePath.toString())
+                .format(FormatTable.Format.CSV)
+                .options(options)
+                .partitionManager(recordingCatalog(partitions))
+                .build();
+    }
+
+    private static class InjectingLocalFileIO extends LocalFileIO {
+
+        private final Map<String, IOException> listFailures = new LinkedHashMap<>();
+
+        void failListFilesContaining(String marker, IOException failure) {
+            listFailures.put(marker, failure);
+        }
+
+        @Override
+        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+            for (Map.Entry<String, IOException> entry : listFailures.entrySet()) {
+                if (path.toString().contains(entry.getKey())) {
+                    throw entry.getValue();
+                }
+            }
             return super.listFiles(path, recursive);
         }
     }

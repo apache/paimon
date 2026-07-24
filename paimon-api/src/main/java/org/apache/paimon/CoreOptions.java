@@ -1230,6 +1230,18 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
+    public static final ConfigOption<Integer> FORMAT_TABLE_SCAN_LIST_PARALLELISM =
+            key("format-table.scan.list-parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The parallelism of listing partition files during format table split "
+                                    + "planning for catalog-managed (internal) tables, default value is the "
+                                    + "size of cpu processor. Listing files is I/O bound, so a value larger "
+                                    + "than the cpu count can further reduce planning time; bound it by the "
+                                    + "object store connection limit. External (filesystem-discovered) tables "
+                                    + "always list serially and ignore this option.");
+
     public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")
                     .durationType()
@@ -3706,6 +3718,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public Integer formatTableScanListParallelism() {
+        return options.get(FORMAT_TABLE_SCAN_LIST_PARALLELISM);
     }
 
     public Integer scanBucket() {
