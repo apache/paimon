@@ -261,9 +261,26 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
      * binary row fixed part. See {@link BinaryRow}.
      */
     private int checkSkipWriteForFixLengthPart(AbstractPagedOutputView out) throws IOException {
+        // The fixed-length part of a BinaryRow must reside within a single memory segment,
+        // because random field access (e.g. getLong/getString) always reads from segments[0]
+        // without bounds checking. If it is larger than the page size, advancing to the next
+        // segment cannot help and the row would silently span segments, leading to corrupted
+        // field offsets and eventually a NegativeArraySizeException. Fail fast instead.
+        int fixedPartLength = getSerializedRowFixedPartLength();
+        int segmentSize = out.getSegmentSize();
+        checkArgument(
+                fixedPartLength <= segmentSize,
+                "Cannot serialize BinaryRow to pages: the serialized fixed-length part (%d bytes, "
+                        + "numFields=%d) is larger than the page size (%d bytes). The fixed-length "
+                        + "part must fit within a single page. Please increase the 'page-size' option "
+                        + "to at least %d bytes.",
+                fixedPartLength,
+                numFields,
+                segmentSize,
+                fixedPartLength);
         // skip if there is no enough size.
-        int available = out.getSegmentSize() - out.getCurrentPositionInSegment();
-        if (available < getSerializedRowFixedPartLength()) {
+        int available = segmentSize - out.getCurrentPositionInSegment();
+        if (available < fixedPartLength) {
             out.advance();
             return available;
         }
