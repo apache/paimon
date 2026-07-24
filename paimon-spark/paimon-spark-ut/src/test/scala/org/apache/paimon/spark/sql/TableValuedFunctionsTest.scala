@@ -27,6 +27,7 @@ import org.apache.paimon.utils.DateTimeUtils
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
 
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.Collections
 
@@ -311,6 +312,57 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             )
           }
         }
+    }
+  }
+
+  test("Table Valued Functions: paimon_incremental_between_timestamp with start tag boundary") {
+    withTable("t_snapshot", "t_snapshot_or_tag") {
+      val tag = LocalDate.now().minusDays(1).toString
+
+      sql("""
+            |CREATE TABLE t_snapshot (id INT) USING paimon
+            |TBLPROPERTIES ('incremental-between-scan-mode' = 'diff')
+            |""".stripMargin)
+      sql("INSERT INTO t_snapshot VALUES 1")
+      sql(s"CALL sys.create_tag('t_snapshot', '$tag')")
+      Thread.sleep(100)
+      val start = System.currentTimeMillis()
+      sql("INSERT INTO t_snapshot VALUES 2")
+      Thread.sleep(100)
+      val end = System.currentTimeMillis()
+      checkAnswer(
+        sql("CALL sys.expire_snapshots(table => 't_snapshot', retain_max => 1, retain_min => 1)"),
+        Row(1) :: Nil)
+      checkAnswer(sql("SELECT snapshot_id FROM `t_snapshot$snapshots`"), Row(2L) :: Nil)
+
+      checkAnswer(
+        sql(
+          s"SELECT * FROM paimon_incremental_between_timestamp('t_snapshot', '$start', '$end') ORDER BY id"),
+        Seq.empty)
+
+      sql("""
+            |CREATE TABLE t_snapshot_or_tag (id INT) USING paimon
+            |TBLPROPERTIES (
+            |  'incremental-between-scan-mode' = 'diff',
+            |  'incremental-between-boundary-mode' = 'snapshot-or-tag')
+            |""".stripMargin)
+      sql("INSERT INTO t_snapshot_or_tag VALUES 1")
+      sql(s"CALL sys.create_tag('t_snapshot_or_tag', '$tag')")
+      Thread.sleep(100)
+      val startSnapshotOrTag = System.currentTimeMillis()
+      sql("INSERT INTO t_snapshot_or_tag VALUES 2")
+      Thread.sleep(100)
+      val endSnapshotOrTag = System.currentTimeMillis()
+      checkAnswer(
+        sql(
+          "CALL sys.expire_snapshots(table => 't_snapshot_or_tag', retain_max => 1, retain_min => 1)"),
+        Row(1) :: Nil)
+      checkAnswer(sql("SELECT snapshot_id FROM `t_snapshot_or_tag$snapshots`"), Row(2L) :: Nil)
+
+      checkAnswer(
+        sql(
+          s"SELECT * FROM paimon_incremental_between_timestamp('t_snapshot_or_tag', '$startSnapshotOrTag', '$endSnapshotOrTag') ORDER BY id"),
+        Seq(Row(2)))
     }
   }
 

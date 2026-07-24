@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -491,12 +490,6 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 }
             }
 
-            Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            if (earliestSnapshot == null || latestSnapshot == null) {
-                return new EmptyResultStartingScanner(snapshotManager);
-            }
-
             long startTimestamp = incrementalBetween.getLeft();
             long endTimestamp = incrementalBetween.getRight();
             checkArgument(
@@ -505,17 +498,14 @@ abstract class AbstractDataTableScan implements DataTableScan {
                     endTimestamp,
                     startTimestamp);
 
-            if (startTimestamp == endTimestamp
-                    || startTimestamp > latestSnapshot.timeMillis()
-                    || endTimestamp < earliestSnapshot.timeMillis()) {
+            if (startTimestamp == endTimestamp) {
                 return new EmptyResultStartingScanner(snapshotManager);
             }
 
             CoreOptions.IncrementalBetweenScanMode scanMode = options.incrementalBetweenScanMode();
-
             return scanMode == DIFF
                     ? IncrementalDiffStartingScanner.betweenTimestamps(
-                            startTimestamp, endTimestamp, snapshotManager)
+                            startTimestamp, endTimestamp, snapshotManager, options)
                     : IncrementalDeltaStartingScanner.betweenTimestamps(
                             startTimestamp,
                             endTimestamp,
