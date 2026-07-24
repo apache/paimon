@@ -130,7 +130,7 @@ jobs:
               # Validate the RC wheel from TestPyPI; switch to PyPI and 0.3.0 after GA.
               python -m pip install --no-deps --only-binary=:all: --index-url https://test.pypi.org/simple/ "pypaimon-rust==${PYPAIMON_RUST_VERSION}"
               python -c "import importlib.metadata as m; assert m.version('pypaimon-rust') == '${PYPAIMON_RUST_VERSION}'"
-              python -c "from pypaimon_rust.datafusion import PaimonCatalog; assert hasattr(PaimonCatalog, 'get_table')"
+              python -c "from pypaimon_rust.datafusion import PaimonCatalog, Split; assert hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')"
             else
               python -m pip install pypaimon-rust==0.2.0
             fi
