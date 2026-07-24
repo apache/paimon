@@ -71,6 +71,18 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_target_file_row_num_fails_fast(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['dt'],
+            options={'target-file-row-num': '5'})
+        self.catalog.create_table('default.test_target_file_row_num', schema, False)
+        table = self.catalog.get_table('default.test_target_file_row_num')
+        with self.assertRaisesRegex(
+                NotImplementedError, 'row-count based file rolling'):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_write.write_arrow(self.expected)
+
     def test_orc_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'orc'})
         self.catalog.create_table('default.test_append_only_orc', schema, False)

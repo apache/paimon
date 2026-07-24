@@ -31,17 +31,19 @@ import org.apache.paimon.utils.SerializationUtils
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 
-import java.util.Collections
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
   extends WriteHelper {
 
-  // File rolling will never be performed
-  override val table: FileStoreTable =
-    paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
+  // File rolling will never be performed: disable both size and row rolling.
+  override val table: FileStoreTable = {
+    val writeOptions = Map(
+      CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
+      CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
+    paimonTable.copy(writeOptions.asJava)
+  }
 
   def writePartialFields(
       data: DataFrame,

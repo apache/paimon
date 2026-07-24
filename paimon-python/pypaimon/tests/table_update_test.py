@@ -945,8 +945,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     def test_update_with_large_file(self):
-        """Even with a tiny ``target-file-size`` the update produces one
-        output file per first_row_id group (rolling is disabled internally)."""
+        """Updates disable both size- and row-based rolling."""
         from pypaimon.schema.schema_change import SetOption
 
         N = 5000
@@ -966,7 +965,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }))
 
         self.catalog.alter_table(
-            table_identifier, [SetOption('target-file-size', '10kb')]
+            table_identifier, [
+                SetOption('target-file-size', '10kb'),
+                SetOption('target-file-row-num', '1'),
+            ]
         )
         table = self.catalog.get_table(table_identifier)
 

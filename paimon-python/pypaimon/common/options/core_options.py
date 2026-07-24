@@ -390,6 +390,17 @@ class CoreOptions:
         .with_description("The target file size for data files.")
     )
 
+    TARGET_FILE_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("target-file-row-num")
+        .long_type()
+        .default_value((1 << 63) - 1)
+        .with_description(
+            "Target number of rows per newly written data file. PyPaimon format-table "
+            "writers split files at this limit; file-store writers fail fast when "
+            "this option is enabled."
+        )
+    )
+
     BLOB_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("blob.target-file-size")
         .memory_type()
@@ -1116,6 +1127,9 @@ class CoreOptions:
                                 MemorySize.of_mebi_bytes(
                                     128 if has_primary_key else 256) if default is None else MemorySize.parse(
                                     default)).get_bytes()
+
+    def target_file_row_num(self):
+        return self.options.get(CoreOptions.TARGET_FILE_ROW_NUM)
 
     def blob_target_file_size(self, default=None):
         """

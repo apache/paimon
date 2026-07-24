@@ -51,7 +51,8 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable List<String> writeCols,
-            @Nullable FileFormat rowSidecarFormat) {
+            @Nullable FileFormat rowSidecarFormat,
+            long targetFileRowNum) {
         super(
                 () -> {
                     Path dataPath = pathFactory.newPath();
@@ -76,6 +77,7 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                             rowSidecarFormat,
                             rowSidecarPath);
                 },
-                targetFileSize);
+                targetFileSize,
+                targetFileRowNum);
     }
 }

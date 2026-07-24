@@ -92,10 +92,17 @@ public class DataEvolutionPartialWriteOperator
     private transient AbstractFileStoreWrite<InternalRow> tableWrite;
     private transient Writer writer;
 
+    private static Map<String, String> dataEvolutionWriteOptions() {
+        // Data evolution requires a single output file: disable both size and row rolling.
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), String.valueOf(Long.MAX_VALUE));
+        return options;
+    }
+
     public DataEvolutionPartialWriteOperator(
             FileStoreTable table, RowType dataType, Long baseSnapshotId) {
-        this.table =
-                table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"));
+        this.table = table.copy(dataEvolutionWriteOptions());
         this.baseSnapshotId = baseSnapshotId;
         List<String> fieldNames =
                 dataType.getFieldNames().stream()
