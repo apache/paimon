@@ -19,25 +19,70 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.ObjectSerializer;
+
+import java.util.Arrays;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta}. */
-public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
+/**
+ * Serializer for {@link DataFileMeta} with the legacy 20-field layout, i.e. up to {@code
+ * _WRITE_COLS} and before {@code _WRITTEN_FIELD_IDS} was appended. It freezes that layout so
+ * streams written by older versions keep deserializing correctly.
+ */
+public class DataFileMetaWriteColsLegacySerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    public DataFileMetaSerializer() {
-        super(DataFileMeta.SCHEMA);
+    /** The frozen {@link DataFileMeta} schema of the {@code _WRITE_COLS} era (fields 0-19). */
+    public static final RowType SCHEMA =
+            new RowType(
+                    false,
+                    Arrays.asList(
+                            new DataField(0, "_FILE_NAME", newStringType(false)),
+                            new DataField(1, "_FILE_SIZE", new BigIntType(false)),
+                            new DataField(2, "_ROW_COUNT", new BigIntType(false)),
+                            new DataField(3, "_MIN_KEY", newBytesType(false)),
+                            new DataField(4, "_MAX_KEY", newBytesType(false)),
+                            new DataField(5, "_KEY_STATS", SimpleStats.SCHEMA),
+                            new DataField(6, "_VALUE_STATS", SimpleStats.SCHEMA),
+                            new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(9, "_SCHEMA_ID", new BigIntType(false)),
+                            new DataField(10, "_LEVEL", new IntType(false)),
+                            new DataField(
+                                    11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))),
+                            new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)),
+                            new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)),
+                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true)),
+                            new DataField(
+                                    16,
+                                    "_VALUE_STATS_COLS",
+                                    DataTypes.ARRAY(DataTypes.STRING().notNull())),
+                            new DataField(17, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(18, "_FIRST_ROW_ID", new BigIntType(true)),
+                            new DataField(
+                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false)))));
+
+    public DataFileMetaWriteColsLegacySerializer() {
+        super(SCHEMA);
     }
 
     @Override
@@ -62,8 +107,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
-                meta.writtenFieldIds() == null ? null : new GenericArray(meta.writtenFieldIds()));
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
     }
 
     @Override
@@ -88,7 +132,6 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
-                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
-                row.isNullAt(20) ? null : row.getArray(20).toIntArray());
+                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
     }
 }

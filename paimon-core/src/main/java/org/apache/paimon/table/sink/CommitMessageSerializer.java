@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMeta12LegacySerializer;
 import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
@@ -51,11 +52,12 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    public static final int CURRENT_VERSION = 11;
+    public static final int CURRENT_VERSION = 12;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
+    private DataFileMetaWriteColsLegacySerializer dataFileMetaWriteColsLegacySerializer;
     private DataFileMetaFirstRowIdLegacySerializer dataFileMetaFirstRowIdLegacySerializer;
     private DataFileMeta12LegacySerializer dataFileMeta12LegacySerializer;
     private DataFileMeta10LegacySerializer dataFileMeta10LegacySerializer;
@@ -184,8 +186,13 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 9) {
+        if (version >= 12) {
             return () -> dataFileSerializer.deserializeList(view);
+        } else if (version >= 9) {
+            if (dataFileMetaWriteColsLegacySerializer == null) {
+                dataFileMetaWriteColsLegacySerializer = new DataFileMetaWriteColsLegacySerializer();
+            }
+            return () -> dataFileMetaWriteColsLegacySerializer.deserializeList(view);
         } else if (version == 8) {
             if (dataFileMetaFirstRowIdLegacySerializer == null) {
                 dataFileMetaFirstRowIdLegacySerializer =

@@ -19,6 +19,10 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.Collection;
 import java.util.Comparator;
@@ -27,6 +31,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -63,6 +68,28 @@ public class DataEvolutionUtils {
                 anchor != null,
                 "Data-evolution deletion vectors should have a normal anchor file in each row range group.");
         return anchor;
+    }
+
+    /**
+     * Resolve the field ids of the columns written in the given file. Prefers the id-based {@link
+     * DataFileMeta#writtenFieldIds()} when present; otherwise falls back to resolving the legacy
+     * name-based {@link DataFileMeta#writeCols()} against the file's schema (with row-tracking
+     * fields, since writeCols may contain {@code _ROW_ID}/{@code _SEQUENCE_NUMBER}). Returns {@code
+     * null} if the file wrote all columns.
+     */
+    @Nullable
+    public static int[] writtenFieldIds(
+            DataFileMeta file, Function<Long, TableSchema> schemaFetcher) {
+        if (file.writtenFieldIds() != null) {
+            return file.writtenFieldIds();
+        }
+        List<String> writeCols = file.writeCols();
+        if (writeCols == null) {
+            return null;
+        }
+        RowType rowType =
+                rowTypeWithRowTracking(schemaFetcher.apply(file.schemaId()).logicalRowType());
+        return writeCols.stream().mapToInt(col -> rowType.getField(col).id()).toArray();
     }
 
     /** Check files row ranges. */
