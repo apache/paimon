@@ -1790,4 +1790,17 @@ public class IcebergCompatibilityTest {
             }
         }
     }
+
+    @Test
+    public void testVariantIsNotPublishableToIceberg() {
+        RowType withVariant =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARIANT()},
+                        new String[] {"k", "payload"});
+        assertThatThrownBy(() -> IcebergCommitCallback.checkVariantNotPublishable(withVariant))
+                .hasMessageContaining("VARIANT type");
+
+        IcebergCommitCallback.checkVariantNotPublishable(
+                RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}));
+    }
 }

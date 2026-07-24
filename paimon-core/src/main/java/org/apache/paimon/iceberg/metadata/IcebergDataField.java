@@ -38,6 +38,7 @@ import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -193,11 +194,13 @@ public class IcebergDataField {
                         timestampLtzPrecision >= 3 && timestampLtzPrecision <= 9,
                         "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
                 return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
+            case VARIANT:
+                return "variant";
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
                 return new IcebergListType(
                         SpecialFields.getArrayElementFieldId(fieldId, depth + 1),
-                        !dataType.isNullable(),
+                        !arrayType.getElementType().isNullable(),
                         toTypeObject(arrayType.getElementType(), fieldId, depth + 1));
             case MAP:
                 MapType mapType = (MapType) dataType;
@@ -285,6 +288,8 @@ public class IcebergDataField {
                     return new TimestampType(!isRequired, 9);
                 case "timestamptz_ns": // iceberg v3 format
                     return new LocalZonedTimestampType(!isRequired, 9);
+                case "variant": // iceberg v3 format
+                    return new VariantType(!isRequired);
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported primitive data type: " + icebergType);
