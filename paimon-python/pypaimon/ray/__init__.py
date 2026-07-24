@@ -17,6 +17,7 @@
 
 from pypaimon.ray.ray_paimon import map_with_blobs, read_paimon, write_paimon
 from pypaimon.ray.bucket_join import bucket_join
+from pypaimon.ray.range_join import range_join
 from pypaimon.ray.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -35,6 +36,7 @@ __all__ = [
     "map_with_blobs",
     "write_paimon",
     "bucket_join",
+    "range_join",
     "merge_into",
     "update_by_row_id",
     "read_by_row_id",

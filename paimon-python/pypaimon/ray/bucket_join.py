@@ -21,21 +21,20 @@ Same key -> same bucket on both sides, so each bucket is read and joined in its 
 Ray task with no global shuffle -- the no-shuffle alternative to ``ray.data.join``.
 """
 
-import threading
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional
+
+from pypaimon.ray.join_common import (
+    OnSpec,
+    get_table as _shared_get_table,
+    key_type as _key_type,
+    norm_on as _norm,
+    pin_latest_snapshot,
+    read_splits,
+)
+# The table cache now lives in join_common; keep the old name for callers/tests.
+from pypaimon.ray.join_common import _TABLE_CACHE  # noqa: F401
 
 __all__ = ["bucket_join"]
-
-OnSpec = Union[str, Sequence[str]]
-
-
-def _norm(on: OnSpec) -> List[str]:
-    return [on] if isinstance(on, str) else list(on)
-
-
-def _key_type(table, col):
-    # Logical type without nullability -- a present key hashes the same either way.
-    return str(table.field_dict[col].type).replace(" NOT NULL", "")
 
 
 def _bucketing(table):
@@ -46,34 +45,8 @@ def _bucketing(table):
             table.table_schema.options.get("bucket-function.type", "default"))
 
 
-# Per-worker table cache, keyed by schema id (so a schema change invalidates it) and
-# lock-guarded against concurrent tasks. Planning always loads a fresh table.
-_TABLE_CACHE: Dict = {}
-_TABLE_CACHE_LOCK = threading.Lock()
-
-
 def _get_table(table_id, catalog_options, schema_id=None):
-    from pypaimon.catalog.catalog_factory import CatalogFactory
-    if schema_id is None:  # planning: always load the latest schema
-        return CatalogFactory.create(catalog_options).get_table(table_id)
-    key = (table_id, tuple(sorted(catalog_options.items())), schema_id)
-    with _TABLE_CACHE_LOCK:
-        table = _TABLE_CACHE.get(key)
-        if table is None:
-            table = CatalogFactory.create(catalog_options).get_table(table_id)
-            if table.table_schema.id != schema_id:
-                # get_table loads the latest schema; a mismatch means the schema moved
-                # after the driver planned, so the split plan is stale -- fail fast.
-                raise ValueError(
-                    f"{table_id} schema changed during bucket_join (planned {schema_id}, "
-                    f"now {table.table_schema.id}); retry.")
-            _TABLE_CACHE[key] = table
-        return table
-
-
-def _read_builder(table_id, catalog_options, projection, schema_id=None):
-    rb = _get_table(table_id, catalog_options, schema_id).new_read_builder()
-    return rb.with_projection(projection) if projection is not None else rb
+    return _shared_get_table(table_id, catalog_options, schema_id, "bucket_join")
 
 
 def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total_buckets):
@@ -83,24 +56,12 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
     built this plan, so workers validate against the schema the plan was made with
     (not a possibly-newer one loaded earlier by the caller).
     """
-    from pypaimon.common.options.core_options import CoreOptions
     table = _get_table(table_id, catalog_options)  # fresh, latest schema
     schema_id = table.table_schema.id
-    snapshot = table.snapshot_manager().get_latest_snapshot()
-    if snapshot is None:
-        return {}, schema_id
     # Pin the guard and the split plan to one snapshot, else a commit between the two
-    # manifest reads could slip stale-bucket files past the guard. Drop any existing
-    # scan.mode / point-in-time options first so snapshot-id doesn't clash with them.
-    opts = table.options.options
-    for key in (CoreOptions.SCAN_MODE, CoreOptions.SCAN_SNAPSHOT_ID,
-                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_WATERMARK,
-                CoreOptions.SCAN_TIMESTAMP, CoreOptions.SCAN_TIMESTAMP_MILLIS,
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP,
-                CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
-                CoreOptions.SCAN_CREATION_TIME_MILLIS):
-        opts.data.pop(key.key(), None)
-    opts.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
+    # manifest reads could slip stale-bucket files past the guard.
+    if pin_latest_snapshot(table) is None:
+        return {}, schema_id
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
     # Guard against a rescaled table (old files under a different total_buckets, which
@@ -121,9 +82,7 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
 
 
 def _read_splits(table_id, catalog_options, projection, splits, schema_id):
-    # Snapshot-independent but schema-dependent -> cache by schema id (in _get_table).
-    return _read_builder(
-        table_id, catalog_options, projection, schema_id).new_read().to_arrow(splits)
+    return read_splits(table_id, catalog_options, projection, splits, schema_id, "bucket_join")
 
 
 def bucket_join(
