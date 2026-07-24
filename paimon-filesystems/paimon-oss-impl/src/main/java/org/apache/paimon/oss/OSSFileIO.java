@@ -19,6 +19,7 @@
 package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
@@ -55,6 +56,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -253,6 +255,28 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         } catch (Exception e) {
             throw new IOException("Failed to atomic write " + path, e);
         }
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        try {
+            return OSSBlobPresigner.create(
+                    ossClient(new Path(descriptor.uri())),
+                    tableRoot,
+                    descriptor,
+                    extension,
+                    validity);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to create blob presigned URL.", e);
+        }
+    }
+
+    OSSClient ossClient(Path path) throws Exception {
+        return getOssClient((AliyunOSSFileSystem) getFileSystem(path(path)));
     }
 
     @Override

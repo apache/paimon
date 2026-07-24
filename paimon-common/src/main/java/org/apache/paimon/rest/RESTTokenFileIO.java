@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -44,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -148,6 +150,16 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return fileIO().rename(src, dst);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        if (!path.equals(tableRoot)) {
+            throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
+        }
+        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, extension, validity);
     }
 
     @Override

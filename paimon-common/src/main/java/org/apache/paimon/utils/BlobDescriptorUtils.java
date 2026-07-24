@@ -20,17 +20,49 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_PREFIX;
 
 /** Utils for {@link BlobDescriptor}. */
 public class BlobDescriptorUtils {
+
+    public static void validateTableRoot(Path tableRoot, BlobDescriptor descriptor)
+            throws IOException {
+        URI root = tableRoot.toUri().normalize();
+        URI blob;
+        try {
+            blob = new Path(descriptor.uri()).toUri().normalize();
+        } catch (RuntimeException e) {
+            throw new IOException("Invalid blob descriptor URI.", e);
+        }
+
+        if (!Objects.equals(normalizeScheme(root.getScheme()), normalizeScheme(blob.getScheme()))
+                || !Objects.equals(root.getAuthority(), blob.getAuthority())) {
+            throw new IOException(
+                    "Blob descriptor URI must use the same scheme and authority as table root.");
+        }
+
+        String rootPath = root.getPath();
+        String blobPath = blob.getPath();
+        String childPrefix = rootPath.endsWith("/") ? rootPath : rootPath + "/";
+        if (!blobPath.startsWith(childPrefix)) {
+            throw new IOException("Blob descriptor URI must be under table root.");
+        }
+    }
+
+    private static String normalizeScheme(@Nullable String scheme) {
+        return scheme == null ? null : scheme.toLowerCase();
+    }
 
     /**
      * Try to create a {@link CatalogContext} for input {@link BlobDescriptor}. This enables reading

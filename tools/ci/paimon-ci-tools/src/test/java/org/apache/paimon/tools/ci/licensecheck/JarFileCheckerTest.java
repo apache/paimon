@@ -248,6 +248,56 @@ class JarFileCheckerTest {
                 .isEqualTo(1);
     }
 
+    @Test
+    void testIgnoreDualLicensedJavaxFiles(@TempDir Path tempDir) throws Exception {
+        assertThat(
+                        JarFileChecker.checkJar(
+                                createJar(
+                                        tempDir,
+                                        Entry.fileEntry(VALID_NOTICE_CONTENTS, VALID_NOTICE_PATH),
+                                        Entry.fileEntry(VALID_LICENSE_CONTENTS, VALID_LICENSE_PATH),
+                                        Entry.fileEntry(
+                                                "GNU General Public License",
+                                                Arrays.asList(
+                                                        "javax",
+                                                        "xml",
+                                                        "bind",
+                                                        "Messages.properties")),
+                                        Entry.fileEntry(
+                                                "GNU General Public License",
+                                                Arrays.asList(
+                                                        "javax",
+                                                        "xml",
+                                                        "bind",
+                                                        "helpers",
+                                                        "Messages.properties")),
+                                        Entry.fileEntry(
+                                                "GNU General Public License",
+                                                Arrays.asList(
+                                                        "javax",
+                                                        "xml",
+                                                        "bind",
+                                                        "util",
+                                                        "Messages.properties")),
+                                        Entry.fileEntry(
+                                                "GNU General Public License",
+                                                Arrays.asList(
+                                                        "META-INF",
+                                                        "maven",
+                                                        "javax.activation",
+                                                        "javax.activation-api",
+                                                        "pom.xml")),
+                                        Entry.fileEntry(
+                                                "GNU General Public License",
+                                                Arrays.asList(
+                                                        "META-INF",
+                                                        "maven",
+                                                        "javax.xml.bind",
+                                                        "jaxb-api",
+                                                        "pom.xml")))))
+                .isEqualTo(0);
+    }
+
     private static class Entry {
         final String contents;
         final List<String> path;

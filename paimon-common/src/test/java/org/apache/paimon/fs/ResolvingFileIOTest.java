@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -34,6 +36,10 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link ResolvingFileIO}. */
 public class ResolvingFileIOTest {
@@ -136,5 +142,27 @@ public class ResolvingFileIOTest {
         assertNotNull(hdfsFileIOAgain);
         assertEquals(localFileIO, localFileIOAgain);
         assertEquals(hdfsFileIO, hdfsFileIOAgain);
+    }
+
+    @Test
+    public void testCreateBlobPresignedUrlResolvesDescriptorFileIO() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
+
+        Path tableRoot = new Path("oss://bucket/table");
+        BlobDescriptor descriptor =
+                new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 0, 1);
+        Duration validity = Duration.ofMinutes(5);
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+                .thenReturn("https://example");
+
+        assertEquals(
+                "https://example",
+                resolvingFileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity));
+        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, "png", validity);
     }
 }

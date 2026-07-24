@@ -94,6 +94,40 @@ SELECT sys.descriptor_to_string(content) FROM t WHERE id = '1';
 -- [BlobDescriptor{version=1', uri='/path/to/data-2c103f6f-3857-4062-abc3-2e260374a68e-1.blob', offset=4, length=1048576}]
 ```
 
+### descriptor_to_presigned_url
+
+`sys.descriptor_to_presigned_url($source_table, $descriptor, $extension, $validity)`
+
+Creates a temporary HTTPS GET URL for an OSS-backed blob descriptor. Use
+`sys.try_descriptor_to_presigned_url` to return `NULL` instead of failing on row-level errors.
+
+- `source_table` must be a non-null STRING literal in `database.table` form, or
+  `catalog.database.table` with the same catalog as the function.
+- `descriptor` is the serialized BINARY descriptor. Set `blob-as-descriptor=true` when reading a
+  normal BLOB column.
+- `extension` determines the materialized object's MIME type and must match the content.
+- `validity` is a positive day-time interval containing whole seconds.
+
+The catalog's `fs.oss.endpoint` must be a standard public HTTPS endpoint, for example
+`https://oss-cn-hangzhou.aliyuncs.com`.
+
+```sql
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    'png',
+    INTERVAL '5' MINUTE)
+FROM image_table;
+```
+
+Repeated short-term calls for the same descriptor reuse the materialized object and issue a fresh
+URL. Treat the URL as a bearer credential: send it immediately to the consumer and never log or
+persist it. Direct model `image_url` use is supported only for image formats verified with that
+model; PDF is not covered. See [Blob Storage](../multimodal-table/blob#presigned-urls-for-oss-blobs)
+for Java and Flink examples, caching behavior, and current limitations.
+
 ## User-defined Function
 
 Paimon Spark supports three types of user-defined functions: lambda functions, file-based functions, and SQL functions.

@@ -502,6 +502,81 @@ CREATE TABLE descriptor_table (
 
 Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
 
+## Presigned URLs for OSS Blobs
+
+Paimon can create a temporary HTTPS URL for an OSS-backed `BlobDescriptor`. The descriptor may
+refer to a byte range inside a larger `.blob` file. Paimon first materializes exactly that range as
+a separate OSS object, sets its content type from the requested extension, and then returns a
+presigned GET URL.
+
+Configure the catalog with the standard public HTTPS OSS endpoint. Internal endpoints and
+endpoints without the `https` scheme are rejected because external consumers must be able to fetch
+the returned URL:
+
+```properties
+fs.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
+```
+
+To obtain descriptors from a regular BLOB column, read the source table with
+`blob-as-descriptor=true`. The SQL functions have strict and error-tolerant forms:
+
+```sql
+-- Flink SQL
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    'png',
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+
+SELECT sys.try_descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    'png',
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+```
+
+```sql
+-- Spark SQL
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    'png',
+    INTERVAL '5' MINUTE)
+FROM image_table;
+```
+
+In both Flink and Spark, `source_table` must be a non-null string literal in
+`database.table` form. `catalog.database.table` is also accepted when the catalog matches the
+catalog that owns the function. Dynamic columns and `CASE` expressions are rejected during
+planning. The strict function propagates row errors; `try_descriptor_to_presigned_url` returns
+`NULL` for row-level errors. The validity interval must be positive whole seconds.
+
+The Java API uses the same table-root safety check:
+
+```java
+DataTable table = ...;
+Blob blob = ...;
+String url =
+        blob.toPresignedUrl(
+                table.fileIO(), table.location(), "png", Duration.ofMinutes(5));
+```
+
+The extension must contain only lower-case letters or digits after normalization and must map to a
+known MIME type. It must match the actual content. For direct model `image_url` inputs, use only
+image formats verified with the target model; PDF is not covered by this entry point.
+
+Materialized objects are keyed by the complete descriptor fingerprint and extension. Repeated
+short-term calls for the same descriptor reuse an object whose length, content type, and
+fingerprint still match, while generating a fresh URL. The first version does not resolve races
+with stale-cache cleanup or orphan-file cleaning.
+
+Treat the returned URL as a bearer credential: submit it immediately to the external service, do
+not persist it, and never write the URL or its signature/security-token query parameters to logs.
+
 ## Blob View
 
 Blob view is useful when a downstream table should reference BLOB values already stored in an upstream table, without copying the bytes or creating new `.blob` files. A blob view field stores only a small `BlobViewStruct` inline. When the field is read, Paimon resolves the referenced BLOB from the upstream table.

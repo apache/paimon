@@ -19,11 +19,13 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.oss.OSSBlobPresigner;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SensitiveConfigUtils;
@@ -33,6 +35,8 @@ import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
+import com.aliyun.oss.OSSClient;
+import com.aliyun.oss.OSSClientBuilder;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
@@ -41,6 +45,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -64,6 +69,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
      */
     private static final String[] CONFIG_PREFIXES = {"fs."};
 
+    private static final String OSS_ENDPOINT = "fs.oss.endpoint";
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
@@ -90,6 +96,13 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private transient OSSClient blobClient;
+
+    public JindoFileIO() {}
+
+    JindoFileIO(OSSClient blobClient) {
+        this.blobClient = blobClient;
+    }
 
     @Override
     public boolean isObjectStore() {
@@ -199,6 +212,36 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
+            throws IOException {
+        return OSSBlobPresigner.create(blobClient(), tableRoot, descriptor, extension, validity);
+    }
+
+    private synchronized OSSClient blobClient() {
+        if (blobClient == null) {
+            blobClient = createBlobClient(hadoopOptions);
+        }
+        return blobClient;
+    }
+
+    static OSSClient createBlobClient(Options options) {
+        String securityToken = options.get(OSS_SECURITY_TOKEN);
+        OSSClientBuilder builder = new OSSClientBuilder();
+        return (OSSClient)
+                (StringUtils.isNullOrWhitespaceOnly(securityToken)
+                        ? builder.build(
+                                options.get(OSS_ENDPOINT),
+                                options.get(OSS_ACCESS_KEY_ID),
+                                options.get(OSS_ACCESS_KEY_SECRET))
+                        : builder.build(
+                                options.get(OSS_ENDPOINT),
+                                options.get(OSS_ACCESS_KEY_ID),
+                                options.get(OSS_ACCESS_KEY_SECRET),
+                                securityToken));
+    }
+
+    @Override
     protected Pair<JindoHadoopSystem, String> createFileSystem(
             org.apache.hadoop.fs.Path path, boolean enableCache) {
         final String scheme = path.toUri().getScheme();
@@ -246,7 +289,11 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (blobClient != null) {
+            blobClient.shutdown();
+            blobClient = null;
+        }
         if (!allowCache) {
             fsMap.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
             fsMap.clear();
