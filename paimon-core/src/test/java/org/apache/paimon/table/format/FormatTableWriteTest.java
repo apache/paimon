@@ -50,8 +50,8 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_ROW_NUM;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.atLeastOnce;
