@@ -146,6 +146,9 @@ public class LeafPredicate implements Predicate {
             return !(function instanceof AlwaysFalse);
         }
         FieldRef fieldRef = fieldRefOptional.get();
+        if (fieldRef.nestedIndexes() != null && fieldRef.nestedIndexes().length > 0) {
+            return true;
+        }
         int index = fieldRef.index();
         DataType type = fieldRef.type();
 
