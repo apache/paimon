@@ -187,22 +187,14 @@ public class FormatTableScan implements InnerTableScan {
             try {
                 FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
-                    List<Pair<LinkedHashMap<String, String>, Path>> partitions = new ArrayList<>();
-                    for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
-                        if (partitionFilter == null
-                                || partitionFilter.test(toPartitionRow(pair.getKey()))) {
-                            partitions.add(pair);
-                        }
-                    }
                     if (partitionManager != null) {
-                        splits.addAll(listPartitionFilesInParallel(fileIO, partitions));
+                        splits.addAll(listPartitionFilesInParallel(fileIO, findPartitions()));
                     } else {
-                        for (Pair<LinkedHashMap<String, String>, Path> pair : partitions) {
-                            splits.addAll(
-                                    createSplits(
-                                            fileIO,
-                                            pair.getValue(),
-                                            toPartitionRow(pair.getKey())));
+                        for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
+                            BinaryRow partitionRow = toPartitionRow(pair.getKey());
+                            if (partitionFilter == null || partitionFilter.test(partitionRow)) {
+                                splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
+                            }
                         }
                     }
                 } else {
@@ -227,8 +219,12 @@ public class FormatTableScan implements InnerTableScan {
         }
         Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
                 pair -> {
+                    BinaryRow partitionRow = toPartitionRow(pair.getKey());
+                    if (partitionFilter != null && !partitionFilter.test(partitionRow)) {
+                        return Collections.emptyList();
+                    }
                     try {
-                        return createSplits(fileIO, pair.getValue(), toPartitionRow(pair.getKey()));
+                        return createSplits(fileIO, pair.getValue(), partitionRow);
                     } catch (FileNotFoundException e) {
                         warnMissingPartition(pair.getKey(), pair.getValue());
                         return Collections.emptyList();
