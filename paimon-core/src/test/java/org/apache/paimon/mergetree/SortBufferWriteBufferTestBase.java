@@ -33,6 +33,7 @@ import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -126,6 +127,25 @@ public abstract class SortBufferWriteBufferTestBase {
                     expected.poll().assertEquals(kv);
                 });
         assertThat(expected).isEmpty();
+    }
+
+    @Test
+    public void testCreateReader() throws Exception {
+        List<ReusingTestData> input = ReusingTestData.generateData(100, addOnly());
+        Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
+        prepareTable(input);
+
+        try (RecordReaderIterator<KeyValue> reader =
+                new RecordReaderIterator<>(
+                        table.createReader(KEY_COMPARATOR, createMergeFunction()))) {
+            while (reader.hasNext()) {
+                assertThat(expected.isEmpty()).isFalse();
+                expected.poll().assertEquals(reader.next());
+            }
+        }
+
+        assertThat(expected).isEmpty();
+        assertThat(table.isEmpty()).isTrue();
     }
 
     private void prepareTable(List<ReusingTestData> input) throws IOException {

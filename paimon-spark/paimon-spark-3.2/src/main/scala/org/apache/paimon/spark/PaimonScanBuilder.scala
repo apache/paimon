@@ -18,10 +18,15 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.read.{PaimonLocalScan, VectorSearchResultUtils}
-import org.apache.paimon.table.InnerTable
+import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable, Table}
+import org.apache.paimon.table.source.PostponeMergeReadBuilder
 
 import org.apache.spark.sql.connector.read.Scan
+
+import scala.collection.JavaConverters._
 
 class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
 
@@ -34,6 +39,19 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
       case ftst: org.apache.paimon.table.FullTextSearchTable =>
         (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
       case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
+    }
+    val postponeMergeReadBuilder = actualTable match {
+      case fileStoreTable: FileStoreTable
+          if PaimonScanBuilder.postponeMergeOnReadEnabled(fileStoreTable) =>
+        createPostponeMergeReadBuilder(fileStoreTable)
+      case _ => None
+    }
+    if (
+      postponeMergeReadBuilder.isDefined &&
+      (vectorSearch.isDefined || hybridSearch.isDefined || fullTextSearch.isDefined)
+    ) {
+      throw new UnsupportedOperationException(
+        "Option 'postpone.merge-on-read' does not support vector, hybrid or full-text search.")
     }
     if (
       vectorSearch.isDefined &&
@@ -50,7 +68,7 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
         actualTable,
         pushedPartitionFilters)
     }
-    PaimonScan(
+    val scan = PaimonScan(
       actualTable,
       requiredSchema,
       pushedPartitionFilters,
@@ -60,5 +78,29 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
       vectorSearch,
       hybridSearch,
       fullTextSearch)
+    postponeMergeReadBuilder
+      .map(builder => new PostponeMergeOnReadScan(scan, builder))
+      .getOrElse(scan)
+  }
+
+  private def createPostponeMergeReadBuilder(
+      table: FileStoreTable): Option[PostponeMergeReadBuilder] = {
+    val partitionFilter =
+      if (pushedPartitionFilters.isEmpty) null
+      else PartitionPredicate.and(pushedPartitionFilters.toList.asJava)
+    val result = PostponeMergeReadBuilder.create(table, partitionFilter)
+    if (result.isPresent) Some(result.get) else None
+  }
+}
+
+object PaimonScanBuilder {
+
+  private[spark] def postponeMergeOnReadEnabled(table: Table): Boolean = {
+    CoreOptions.fromMap(table.options()).postponeMergeOnRead() && (table match {
+      case fileStoreTable: FileStoreTable =>
+        fileStoreTable.bucketMode() == BucketMode.POSTPONE_MODE &&
+        !fileStoreTable.primaryKeys().isEmpty
+      case _ => false
+    })
   }
 }

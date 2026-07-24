@@ -29,17 +29,19 @@ import org.apache.paimon.types.{DataType, RowType}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -191,8 +193,18 @@ trait SparkShim {
   def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
-      output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
-      : DataSourceV2Relation
+      output: Seq[AttributeReference]): DataSourceV2Relation
+
+  /** Creates an internal scan relation whose constructor changed across Spark minor versions. */
+  def createDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation
+
+  /** Creates a clustered distribution whose constructor changed in Spark 3.3. */
+  def createClusteredDistribution(
+      expressions: Seq[Expression],
+      requiredNumPartitions: Int): Distribution
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.

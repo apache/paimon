@@ -18,8 +18,11 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
+import org.apache.spark.sql.connector.read.Scan
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
 object MinorVersionShim {
 
@@ -41,4 +44,17 @@ object MinorVersionShim {
 
   // Spark 3.3 has no `notMatchedBySourceActions` field on `MergeIntoTable` (added in 3.4).
   def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] = Seq.empty
+
+  def createDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation = {
+    DataSourceV2ScanRelation(relation.relation, scan, output, None)
+  }
+
+  def createClusteredDistribution(
+      expressions: Seq[Expression],
+      requiredNumPartitions: Int): Distribution = {
+    ClusteredDistribution(expressions, requireAllClusterKeys = false, Some(requiredNumPartitions))
+  }
 }

@@ -18,15 +18,28 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.bucket.BucketFunction;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PostponeFileReadTask;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -42,6 +55,131 @@ import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 
 /** Utils for postpone table. */
 public class PostponeUtils {
+
+    /**
+     * Replays postpone files in creation order.
+     *
+     * <p>Sequence numbers in postpone files are intentionally not comparable across files. Both
+     * compaction and merge-on-read must therefore use the same stable physical-file order.
+     */
+    public static List<DataSplit> splitAndOrderPostponeFiles(List<DataSplit> splits) {
+        List<PostponeFile> files = new ArrayList<>();
+        for (int splitOrder = 0; splitOrder < splits.size(); splitOrder++) {
+            DataSplit split = splits.get(splitOrder);
+            List<DataFileMeta> dataFiles = split.dataFiles();
+            for (int fileOrder = 0; fileOrder < dataFiles.size(); fileOrder++) {
+                files.add(new PostponeFile(split, dataFiles.get(fileOrder), splitOrder, fileOrder));
+            }
+        }
+        files.sort(
+                Comparator.comparingLong((PostponeFile file) -> file.file.creationTimeEpochMillis())
+                        .thenComparing(file -> file.file.fileName())
+                        .thenComparingInt(file -> file.splitOrder)
+                        .thenComparingInt(file -> file.fileOrder));
+
+        List<DataSplit> result = new ArrayList<>(files.size());
+        for (PostponeFile postponeFile : files) {
+            DataSplit split = postponeFile.split;
+            DataFileMeta file = postponeFile.file;
+            DataSplit.Builder singleFileSplit =
+                    DataSplit.builder()
+                            .withSnapshot(split.snapshotId())
+                            .withPartition(split.partition())
+                            .withBucket(split.bucket())
+                            .withBucketPath(split.bucketPath())
+                            .withTotalBuckets(split.totalBuckets())
+                            .withDataFiles(Collections.singletonList(file))
+                            .isStreaming(false)
+                            .rawConvertible(split.rawConvertible());
+            split.deletionFiles()
+                    .ifPresent(
+                            deletionFiles ->
+                                    singleFileSplit.withDataDeletionFiles(
+                                            Collections.singletonList(
+                                                    deletionFiles.get(postponeFile.fileOrder))));
+            result.add(singleFileSplit.build());
+        }
+        return result;
+    }
+
+    /**
+     * Plans one read task per physical postpone file and assigns deterministic replay intervals.
+     *
+     * <p>The interval of a file is reserved from its metadata row count. Reader-side filtering may
+     * leave gaps, which is harmless because only sequence ordering is significant.
+     */
+    public static List<PostponeFileReadTask> planPostponeFileReads(List<DataSplit> splits) {
+        List<DataSplit> orderedSplits = splitAndOrderPostponeFiles(splits);
+        List<PostponeFileReadTask> tasks = new ArrayList<>(orderedSplits.size());
+        long sequenceBase = 0L;
+        for (DataSplit split : orderedSplits) {
+            tasks.add(new PostponeFileReadTask(split, sequenceBase));
+            sequenceBase = Math.addExact(sequenceBase, split.rowCount());
+        }
+        return tasks;
+    }
+
+    public static PostponeBucketAssigner createPostponeBucketAssigner(
+            FileStoreTable table, long snapshotId, int defaultParallelism) {
+        return createPostponeBucketAssigner(table, snapshotId, defaultParallelism, null);
+    }
+
+    public static PostponeBucketAssigner createPostponeBucketAssigner(
+            FileStoreTable table,
+            long snapshotId,
+            int defaultParallelism,
+            @Nullable PartitionPredicate partitionFilter) {
+        Map<BinaryRow, Integer> knownNumBuckets =
+                getKnownNumBuckets(table, snapshotId, partitionFilter);
+        Long targetRowNumPerBucket =
+                table.coreOptions().postponeTargetRowNumPerBucket().orElse(null);
+        Map<BinaryRow, Long> postponeRowCounts =
+                targetRowNumPerBucket == null
+                        ? Collections.emptyMap()
+                        : getPostponeRowCounts(table, snapshotId, partitionFilter);
+        int defaultBucketNum =
+                table.coreOptions()
+                                .toConfiguration()
+                                .contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
+                        ? table.coreOptions().postponeDefaultBucketNum()
+                        : defaultParallelism;
+        return new PostponeBucketAssigner(
+                knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, defaultBucketNum);
+    }
+
+    public static PostponeBucketRouter createPostponeBucketRouter(
+            FileStoreTable table, long snapshotId, int defaultParallelism) {
+        return createPostponeBucketRouter(table, snapshotId, defaultParallelism, null);
+    }
+
+    public static PostponeBucketRouter createPostponeBucketRouter(
+            FileStoreTable table,
+            long snapshotId,
+            int defaultParallelism,
+            @Nullable PartitionPredicate partitionFilter) {
+        List<String> trimmedPrimaryKeys = table.schema().trimmedPrimaryKeys();
+        int[] bucketKeyMapping =
+                table.schema().bucketKeys().stream()
+                        .mapToInt(trimmedPrimaryKeys::indexOf)
+                        .toArray();
+        for (int index : bucketKeyMapping) {
+            if (index < 0) {
+                throw new IllegalArgumentException(
+                        "Postpone bucket key must be part of the trimmed primary key.");
+            }
+        }
+        RowType keyType =
+                new RowType(
+                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR.keyFields(
+                                table.schema()));
+        return new PostponeBucketRouter(
+                createPostponeBucketAssigner(
+                        table, snapshotId, defaultParallelism, partitionFilter),
+                keyType,
+                table.schema().logicalBucketKeyType(),
+                bucketKeyMapping,
+                table.coreOptions().bucketFunctionType());
+    }
 
     public static int computeBucketNumByRowCount(long rowCount, long targetRowNumPerBucket) {
         if (targetRowNumPerBucket <= 0) {
@@ -100,12 +238,16 @@ public class PostponeUtils {
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(
             FileStoreTable table, long snapshotId) {
-        return getKnownNumBuckets(
-                table.store()
-                        .newScan()
-                        .withSnapshot(snapshotId)
-                        .onlyReadRealBuckets()
-                        .readSimpleEntries());
+        return getKnownNumBuckets(table, snapshotId, null);
+    }
+
+    public static Map<BinaryRow, Integer> getKnownNumBuckets(
+            FileStoreTable table, long snapshotId, @Nullable PartitionPredicate partitionFilter) {
+        FileStoreScan scan = table.store().newScan().withSnapshot(snapshotId).onlyReadRealBuckets();
+        if (partitionFilter != null) {
+            scan.withPartitionFilter(partitionFilter);
+        }
+        return getKnownNumBuckets(scan.readSimpleEntries());
     }
 
     private static Map<BinaryRow, Integer> getKnownNumBuckets(
@@ -157,11 +299,19 @@ public class PostponeUtils {
 
     /** Returns row counts of active postpone files in the specified snapshot. */
     public static Map<BinaryRow, Long> getPostponeRowCounts(FileStoreTable table, long snapshotId) {
-        return getPostponeRowCounts(
+        return getPostponeRowCounts(table, snapshotId, null);
+    }
+
+    public static Map<BinaryRow, Long> getPostponeRowCounts(
+            FileStoreTable table, long snapshotId, @Nullable PartitionPredicate partitionFilter) {
+        SnapshotReader reader =
                 table.newSnapshotReader()
                         .withSnapshot(snapshotId)
-                        .withBucket(BucketMode.POSTPONE_BUCKET)
-                        .readFileIterator());
+                        .withBucket(BucketMode.POSTPONE_BUCKET);
+        if (partitionFilter != null) {
+            reader.withPartitionFilter(partitionFilter);
+        }
+        return getPostponeRowCounts(reader.readFileIterator());
     }
 
     private static Map<BinaryRow, Long> getPostponeRowCounts(Iterator<ManifestEntry> iterator) {
@@ -194,6 +344,107 @@ public class PostponeUtils {
     public static FileStoreTable tableForCommit(FileStoreTable table) {
         return table.copy(
                 Collections.singletonMap(BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET)));
+    }
+
+    /** Snapshot-bound bucket-count assignment shared by postpone compaction and merge-on-read. */
+    public static final class PostponeBucketAssigner implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Map<BinaryRow, Integer> knownNumBuckets;
+        @Nullable private final Long targetRowNumPerBucket;
+        private final Map<BinaryRow, Long> postponeRowCounts;
+        private final int defaultBucketNum;
+
+        private PostponeBucketAssigner(
+                Map<BinaryRow, Integer> knownNumBuckets,
+                @Nullable Long targetRowNumPerBucket,
+                Map<BinaryRow, Long> postponeRowCounts,
+                int defaultBucketNum) {
+            this.knownNumBuckets = knownNumBuckets;
+            this.targetRowNumPerBucket = targetRowNumPerBucket;
+            this.postponeRowCounts = postponeRowCounts;
+            this.defaultBucketNum = defaultBucketNum;
+        }
+
+        public int assign(BinaryRow partition) {
+            return determineBucketNum(
+                    partition,
+                    knownNumBuckets,
+                    targetRowNumPerBucket,
+                    postponeRowCounts,
+                    defaultBucketNum);
+        }
+    }
+
+    /** Serializable snapshot-bound routing metadata for postpone records. */
+    public static final class PostponeBucketRouter implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final PostponeBucketAssigner bucketAssigner;
+        private final RowType keyType;
+        private final RowType bucketKeyType;
+        private final int[] bucketKeyMapping;
+        private final CoreOptions.BucketFunctionType bucketFunctionType;
+
+        private PostponeBucketRouter(
+                PostponeBucketAssigner bucketAssigner,
+                RowType keyType,
+                RowType bucketKeyType,
+                int[] bucketKeyMapping,
+                CoreOptions.BucketFunctionType bucketFunctionType) {
+            this.bucketAssigner = bucketAssigner;
+            this.keyType = keyType;
+            this.bucketKeyType = bucketKeyType;
+            this.bucketKeyMapping = bucketKeyMapping;
+            this.bucketFunctionType = bucketFunctionType;
+        }
+
+        /** Creates task-local routing state. Generated projections are intentionally not shared. */
+        public PostponeBucketComputer createComputer() {
+            return new PostponeBucketComputer(
+                    bucketAssigner,
+                    CodeGenUtils.newProjection(keyType, bucketKeyMapping),
+                    BucketFunction.create(bucketFunctionType, bucketKeyType));
+        }
+    }
+
+    /** Task-local bucket computer created from {@link PostponeBucketRouter}. */
+    public static final class PostponeBucketComputer {
+
+        private final PostponeBucketAssigner bucketAssigner;
+        private final Projection bucketKeyProjection;
+        private final BucketFunction bucketFunction;
+
+        private PostponeBucketComputer(
+                PostponeBucketAssigner bucketAssigner,
+                Projection bucketKeyProjection,
+                BucketFunction bucketFunction) {
+            this.bucketAssigner = bucketAssigner;
+            this.bucketKeyProjection = bucketKeyProjection;
+            this.bucketFunction = bucketFunction;
+        }
+
+        public int bucket(BinaryRow partition, InternalRow trimmedPrimaryKey) {
+            return bucketFunction.bucket(
+                    bucketKeyProjection.apply(trimmedPrimaryKey), bucketAssigner.assign(partition));
+        }
+    }
+
+    private static final class PostponeFile {
+
+        private final DataSplit split;
+        private final DataFileMeta file;
+        private final int splitOrder;
+        private final int fileOrder;
+
+        private PostponeFile(DataSplit split, DataFileMeta file, int splitOrder, int fileOrder) {
+            this.split = split;
+            this.file = file;
+            this.splitOrder = splitOrder;
+            this.fileOrder = fileOrder;
+        }
     }
 
     /** A real bucket which requires background compaction. */

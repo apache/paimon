@@ -24,7 +24,8 @@ import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
 import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions, VectorSearchResultUtils}
-import org.apache.paimon.table.{FileStoreTable, InnerTable}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable, Table}
+import org.apache.paimon.table.source.PostponeMergeReadBuilder
 
 import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
@@ -97,6 +98,16 @@ class PaimonScanBuilder(val table: InnerTable)
 
   // Spark does not support push down aggregation for streaming scan.
   override def pushAggregation(aggregation: Aggregation): Boolean = {
+    table match {
+      case fileStoreTable: FileStoreTable
+          if PaimonScanBuilder.postponeMergeOnReadEnabled(fileStoreTable) &&
+            createPostponeMergeReadBuilder(fileStoreTable).isDefined =>
+        // Metadata aggregation does not invoke the combined reader. Reject it only when the
+        // selected partitions actually contain postpone files.
+        return false
+      case _ =>
+    }
+
     if (localScan.isDefined) {
       return true
     }
@@ -140,6 +151,20 @@ class PaimonScanBuilder(val table: InnerTable)
           case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
         }
 
+        val postponeMergeReadBuilder = actualTable match {
+          case fileStoreTable: FileStoreTable
+              if PaimonScanBuilder.postponeMergeOnReadEnabled(fileStoreTable) =>
+            createPostponeMergeReadBuilder(fileStoreTable)
+          case _ => None
+        }
+        if (
+          postponeMergeReadBuilder.isDefined &&
+          (vectorSearch.isDefined || hybridSearch.isDefined || fullTextSearch.isDefined)
+        ) {
+          throw new UnsupportedOperationException(
+            "Option 'postpone.merge-on-read' does not support vector, hybrid or full-text search.")
+        }
+
         if (
           vectorSearch.isDefined &&
           !CoreOptions
@@ -160,7 +185,7 @@ class PaimonScanBuilder(val table: InnerTable)
             pushedPartitionFilters)
         }
 
-        PaimonScan(
+        val scan = PaimonScan(
           actualTable,
           requiredSchema,
           pushedPartitionFilters,
@@ -172,6 +197,30 @@ class PaimonScanBuilder(val table: InnerTable)
           fullTextSearch,
           acceptedVariantExtractions
         )
+        postponeMergeReadBuilder
+          .map(builder => PostponeMergeOnReadScan(scan, builder))
+          .getOrElse(scan)
     }
+  }
+
+  private def createPostponeMergeReadBuilder(
+      table: FileStoreTable): Option[PostponeMergeReadBuilder] = {
+    val partitionFilter =
+      if (pushedPartitionFilters.isEmpty) null
+      else PartitionPredicate.and(pushedPartitionFilters.toList.asJava)
+    val result = PostponeMergeReadBuilder.create(table, partitionFilter)
+    if (result.isPresent) Some(result.get) else None
+  }
+}
+
+object PaimonScanBuilder {
+
+  private[spark] def postponeMergeOnReadEnabled(table: Table): Boolean = {
+    CoreOptions.fromMap(table.options()).postponeMergeOnRead() && (table match {
+      case fileStoreTable: FileStoreTable =>
+        fileStoreTable.bucketMode() == BucketMode.POSTPONE_MODE &&
+        !fileStoreTable.primaryKeys().isEmpty
+      case _ => false
+    })
   }
 }

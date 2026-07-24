@@ -35,6 +35,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
@@ -179,6 +180,51 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         while (mergeIterator.hasNext()) {
             mergedConsumer.accept(mergeIterator.next());
         }
+    }
+
+    /**
+     * Creates a sorted reader which merges records with the same key.
+     *
+     * <p>The returned reader owns this buffer. Closing it clears the buffer and releases spill
+     * files. No records may be added after this method is called.
+     */
+    public RecordReader<KeyValue> createReader(
+            Comparator<InternalRow> keyComparator, MergeFunction<KeyValue> mergeFunction)
+            throws IOException {
+        MergeIterator mergeIterator =
+                new MergeIterator(null, buffer.sortedIterator(), keyComparator, mergeFunction);
+        return new RecordReader<KeyValue>() {
+
+            private boolean read;
+            private boolean closed;
+
+            @Nullable
+            @Override
+            public RecordIterator<KeyValue> readBatch() {
+                if (read) {
+                    return null;
+                }
+                read = true;
+                return new RecordIterator<KeyValue>() {
+                    @Nullable
+                    @Override
+                    public KeyValue next() throws IOException {
+                        return mergeIterator.hasNext() ? mergeIterator.next() : null;
+                    }
+
+                    @Override
+                    public void releaseBatch() {}
+                };
+            }
+
+            @Override
+            public void close() {
+                if (!closed) {
+                    closed = true;
+                    clear();
+                }
+            }
+        };
     }
 
     @Override

@@ -20,12 +20,14 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonSparkTestBase, PostponeMergeOnReadScan}
 import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
 import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
 
@@ -129,6 +131,274 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
           Seq(Row(-2), Row(0), Row(1), Row(2), Row(3))
         )
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read") {
+    withTable("t", "normal_t", "postpone_only_t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base-1'), (2, 'base-2')")
+      val baseSnapshotId = loadTable("t").latestSnapshot().get().id()
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "base-1"), Row(2, "base-2")))
+        val plan = sql("SELECT * FROM t").queryExecution.executedPlan.toString()
+        assert(!plan.contains("PostponeMergeOnRead"), plan)
+
+        val aggregate = sql("SELECT count(*) FROM t")
+        checkAnswer(aggregate, Seq(Row(2L)))
+        assert(
+          aggregate.queryExecution.executedPlan.collect {
+            case _: BaseAggregateExec => true
+          }.isEmpty,
+          aggregate.queryExecution.executedPlan)
+      }
+
+      sql("CREATE TABLE normal_t (k INT, v STRING) USING paimon")
+      sql("INSERT INTO normal_t VALUES (10, 'normal')")
+
+      sql("""
+            |CREATE TABLE postpone_only_t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO postpone_only_t VALUES (4, 'only-postpone')")
+
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (1, 'new-1'), (3, 'new-3')")
+        sql("INSERT INTO t VALUES (1, 'newest-1')")
+        sql("DELETE FROM t WHERE k = 2")
+      }
+
+      // Default reads keep the existing delayed-visibility behavior.
+      checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "base-1"), Row(2, "base-2")))
+      checkAnswer(sql("SELECT * FROM postpone_only_t"), Seq.empty)
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        // The session option must not affect non-postpone tables.
+        checkAnswer(sql("SELECT * FROM normal_t"), Seq(Row(10, "normal")))
+        val postponeOnly = sql("SELECT * FROM postpone_only_t")
+        assert(postponeOnly.queryExecution.optimizedPlan.stats.rowCount.contains(BigInt(1)))
+        val postponeScan = postponeOnly.queryExecution.optimizedPlan.collectFirst {
+          case relation: DataSourceV2ScanRelation
+              if relation.scan.isInstanceOf[PostponeMergeOnReadScan] =>
+            relation.scan.asInstanceOf[PostponeMergeOnReadScan]
+        }.get
+        assert(postponeScan.filterAttributes().isEmpty)
+        assert(
+          intercept[UnsupportedOperationException](postponeScan.toBatch).getMessage
+            .contains("PostponeMergeOnReadExec"))
+        checkAnswer(postponeOnly, Seq(Row(4, "only-postpone")))
+        checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "newest-1"), Row(3, "new-3")))
+        checkAnswer(sql("SELECT v FROM t ORDER BY v"), Seq(Row("new-3"), Row("newest-1")))
+        checkAnswer(sql("SELECT * FROM t WHERE v = 'base-1'"), Seq.empty)
+        checkAnswer(sql("SELECT * FROM t WHERE v = 'new-3'"), Seq(Row(3, "new-3")))
+        checkAnswer(sql("SELECT k FROM t WHERE k = 3"), Seq(Row(3)))
+        checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(2L)))
+        checkAnswer(sql("SELECT count(*), max(k) FROM t"), Seq(Row(2, 3)))
+        checkAnswer(sql("SELECT v FROM t ORDER BY k LIMIT 1"), Seq(Row("newest-1")))
+        checkAnswer(
+          sql(s"SELECT * FROM t VERSION AS OF $baseSnapshotId ORDER BY k"),
+          Seq(Row(1, "base-1"), Row(2, "base-2")))
+
+        val plan = sql("SELECT * FROM t").queryExecution.executedPlan.toString()
+        assert(plan.contains("PostponeMergeOnRead"), plan)
+        assert(plan.contains("PaimonPostponeMergeInput"), plan)
+        assert(plan.contains("Exchange hashpartitioning"), plan)
+        assert(plan.contains("Sort [__paimon_postpone_partition"), plan)
+      }
+
+      withSparkSQLConf(
+        "spark.paimon.postpone.merge-on-read" -> "true",
+        "spark.paimon.scan.mode" -> "compacted-full") {
+        val compactedFull = sql("SELECT * FROM t ORDER BY k")
+        checkAnswer(compactedFull, Seq(Row(1, "base-1"), Row(2, "base-2")))
+        assert(!compactedFull.queryExecution.executedPlan.toString.contains("PostponeMergeOnRead"))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read respects full scan protection") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false'
+            |)
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a', 1), (2, 'b', 2)")
+
+      withSparkSQLConf(
+        "spark.paimon.postpone.merge-on-read" -> "true",
+        "spark.paimon.read.allow.fullScan" -> "false") {
+        assert(
+          intercept[Exception](sql("SELECT * FROM t").collect()).getMessage
+            .contains("Full scan is not supported."))
+        checkAnswer(sql("SELECT * FROM t WHERE pt = 1"), Seq(Row(1, "a", 1)))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read custom bucket key") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k1 INT,
+            |  k2 INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k1, k2',
+            |  'bucket-key' = 'k1',
+            |  'bucket' = '-2',
+            |  'postpone.default-bucket-num' = '3',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 1, 'a'), (1, 2, 'b'), (2, 1, 'c')")
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (1, 1, 'new-a'), (1, 2, 'new-b'), (3, 1, 'd')")
+      }
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY k1, k2"),
+          Seq(Row(1, 1, "new-a"), Row(1, 2, "new-b"), Row(2, 1, "c"), Row(3, 1, "d")))
+        checkAnswer(sql("SELECT v FROM t WHERE k1 = 1 AND k2 = 2"), Seq(Row("new-b")))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read sequence field") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  seq INT
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'sequence.field' = 'seq',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base-1', 10), (2, 'base-2', 10)")
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (1, 'older', 5), (2, 'newer', 20)")
+      }
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY k"),
+          Seq(Row(1, "base-1", 10), Row(2, "newer", 20)))
+        // Spark only requests v; Core must retain seq until the merge is complete.
+        checkAnswer(sql("SELECT v FROM t ORDER BY v"), Seq(Row("base-1"), Row("newer")))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read keeps partitions isolated") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base-a', 'a'), (1, 'base-b', 'b')")
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (1, 'new-a', 'a')")
+      }
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY pt"),
+          Seq(Row(1, "new-a", "a"), Row(1, "base-b", "b")))
+        checkAnswer(sql("SELECT * FROM t WHERE pt = 'a'"), Seq(Row(1, "new-a", "a")))
+        checkAnswer(sql("SELECT * FROM t WHERE pt = 'b'"), Seq(Row(1, "base-b", "b")))
+
+        val mergePlan = sql("SELECT * FROM t WHERE pt = 'a'").queryExecution.executedPlan.toString
+        val ordinaryPlan =
+          sql("SELECT * FROM t WHERE pt = 'b'").queryExecution.executedPlan.toString
+        assert(mergePlan.contains("PostponeMergeOnRead"), mergePlan)
+        assert(!ordinaryPlan.contains("PostponeMergeOnRead"), ordinaryPlan)
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read merge engines") {
+    withTable("partial_t", "aggregation_t") {
+      sql("""
+            |CREATE TABLE partial_t (
+            |  k INT,
+            |  v1 STRING,
+            |  v2 STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'merge-engine' = 'partial-update',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO partial_t VALUES (1, 'a', CAST(NULL AS STRING))")
+
+      sql("""
+            |CREATE TABLE aggregation_t (
+            |  k INT,
+            |  total BIGINT
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'merge-engine' = 'aggregation',
+            |  'fields.total.aggregate-function' = 'sum',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO aggregation_t VALUES (1, 10L)")
+
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO partial_t VALUES (1, CAST(NULL AS STRING), 'b')")
+        sql("INSERT INTO aggregation_t VALUES (1, 3L)")
+      }
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT * FROM partial_t"), Seq(Row(1, "a", "b")))
+        checkAnswer(sql("SELECT * FROM aggregation_t"), Seq(Row(1, 13L)))
+        checkAnswer(sql("SELECT v1 FROM partial_t"), Seq(Row("a")))
+        checkAnswer(sql("SELECT total FROM aggregation_t"), Seq(Row(13L)))
+        checkAnswer(sql("SELECT * FROM partial_t WHERE v2 = 'b'"), Seq(Row(1, "a", "b")))
+        checkAnswer(sql("SELECT * FROM aggregation_t WHERE total = 13"), Seq(Row(1, 13L)))
       }
     }
   }
