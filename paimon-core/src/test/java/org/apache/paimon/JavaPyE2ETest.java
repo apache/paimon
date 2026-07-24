@@ -44,6 +44,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -584,15 +585,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         try (BatchTableWrite write = writeBuilder.newWrite();
@@ -661,15 +664,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, "bitmap").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         // assert index
@@ -764,15 +769,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         // assert index
@@ -845,15 +852,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, indexType).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         List<IndexManifestEntry> indexEntries =
@@ -925,15 +934,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         // assert index
@@ -1004,15 +1015,17 @@ public class JavaPyE2ETest {
                 new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(
+                    SortedIndexBuildTestUtils.sortAndBuild(
+                            builder,
+                            table,
+                            "k",
                             builder.scan()
                                     .map(org.apache.paimon.utils.Pair::getValue)
                                     .orElseThrow(
                                             () ->
                                                     new IllegalStateException(
                                                             "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+                                    .get(0)));
         }
 
         // assert index

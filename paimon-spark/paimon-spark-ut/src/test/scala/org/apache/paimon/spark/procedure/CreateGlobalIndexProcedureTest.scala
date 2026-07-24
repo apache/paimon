@@ -18,8 +18,11 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.globalindex.{KeySerializer, SortedIndexFileMeta}
+import org.apache.paimon.data.BinaryString
+import org.apache.paimon.globalindex.{GlobalIndexScanner, KeySerializer, ReversedKeySerializer, SortedIndexFileMeta}
+import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.memory.MemorySlice
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
 import org.apache.paimon.utils.Range
@@ -284,6 +287,124 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
           )
         case _ => // ignore
       }
+    }
+  }
+
+  test("create reverse-btree global index and query endsWith") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      // non-ASCII suffixes exercise multi-byte UTF-8 through the engine sort
+      val suffixes = Seq("red", "grün", "中文", "gold")
+      val numRows = 4000
+      val values =
+        (0 until numRows)
+          .map(i => s"($i, '名_${i}_${suffixes(i % suffixes.length)}')")
+          .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name'," +
+            " index_type => 'reverse-btree', options => 'sorted-index.records-per-range=200')")
+          .collect()
+          .head
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val reverseEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "reverse-btree")
+        .map(_.indexFile())
+      assert(reverseEntries.nonEmpty)
+      assert(reverseEntries.map(_.rowCount()).sum == numRows)
+
+      // index files must be ordered and non-overlapping in the reversed key space
+      val reversedSerializer = new ReversedKeySerializer(KeySerializer.create(new VarCharType()))
+      val reversedComparator = reversedSerializer.createComparator()
+      def deserialize(bytes: Array[Byte]): Object =
+        reversedSerializer.deserialize(MemorySlice.wrap(bytes))
+      val metas = reverseEntries
+        .map(_.globalIndexMeta().indexMeta())
+        .map(meta => SortedIndexFileMeta.deserialize(meta))
+        .map(m => (deserialize(m.getFirstKey), deserialize(m.getLastKey)))
+        .sortWith((a, b) => reversedComparator.compare(a._1, b._1) < 0)
+      metas.zip(metas.drop(1)).foreach {
+        case (prev, next) => assert(reversedComparator.compare(prev._2, next._1) <= 0)
+      }
+
+      val nameIdx = table.rowType().getFieldIndex("name")
+      val predicateBuilder = new PredicateBuilder(table.rowType())
+      val scannerOpt =
+        GlobalIndexScanner.create(
+          table,
+          new java.util.HashSet[IndexFileMeta](reverseEntries.asJava))
+      assert(scannerOpt.isPresent)
+      val scanner = scannerOpt.get()
+      try {
+        var union = Set.empty[Long]
+        for (suffix <- suffixes) {
+          val result =
+            scanner.scan(predicateBuilder.endsWith(nameIdx, BinaryString.fromString(suffix)))
+          assert(result.isPresent)
+          val ids = {
+            val buffer = scala.collection.mutable.ArrayBuffer[Long]()
+            val it = result.get().results().iterator()
+            while (it.hasNext) buffer += it.next()
+            buffer
+          }
+          assert(ids.size == numRows / suffixes.length, s"wrong match count for suffix '$suffix'")
+          union ++= ids
+        }
+        assert(union.size == numRows)
+
+        val none =
+          scanner.scan(predicateBuilder.endsWith(nameIdx, BinaryString.fromString("nosuchsuffix")))
+        assert(none.isPresent)
+        assert(none.get().results().isEmpty)
+      } finally {
+        scanner.close()
+      }
+    }
+  }
+
+  test("reverse-btree global index rejects non-string column") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+
+      val e = intercept[Exception] {
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id'," +
+            " index_type => 'reverse-btree')")
+          .collect()
+      }
+      def messages(t: Throwable): String = {
+        var result = ""
+        var current: Throwable = t
+        while (current != null) {
+          result += current.getMessage + " "
+          current = current.getCause
+        }
+        result
+      }
+      assert(messages(e).contains("only supports CHAR/VARCHAR"))
     }
   }
 }

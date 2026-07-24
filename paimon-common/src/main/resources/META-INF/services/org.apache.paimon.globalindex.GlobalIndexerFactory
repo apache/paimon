@@ -14,4 +14,5 @@
 # limitations under the License.
 
 org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory
+org.apache.paimon.globalindex.btree.ReverseBTreeGlobalIndexerFactory
 org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory

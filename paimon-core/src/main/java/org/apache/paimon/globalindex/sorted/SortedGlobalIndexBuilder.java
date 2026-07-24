@@ -18,17 +18,16 @@
 
 package org.apache.paimon.globalindex.sorted;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -36,8 +35,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
@@ -48,8 +45,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.MutableObjectIteratorAdapter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
@@ -70,7 +65,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
-import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -199,45 +193,6 @@ public class SortedGlobalIndexBuilder implements Serializable {
                                 && !isVectorStoreFile(entry.file().fileName()));
     }
 
-    @VisibleForTesting
-    public List<CommitMessage> build(DataSplit split, IOManager ioManager) throws IOException {
-        BinaryRow partition = split.partition();
-        Range rowRange = calcRowRange(split);
-
-        CoreOptions options = new CoreOptions(this.options);
-        BinaryExternalSortBuffer buffer =
-                BinaryExternalSortBuffer.create(
-                        ioManager,
-                        readRowType,
-                        // sort by <partition, indexed_field>
-                        IntStream.range(0, readRowType.getFieldCount() - 1).toArray(),
-                        options.writeBufferSize(),
-                        options.pageSize(),
-                        options.localSortMaxNumFileHandles(),
-                        options.spillCompressOptions(),
-                        options.writeBufferSpillDiskSize());
-
-        List<Split> splitList = Collections.singletonList(split);
-        RecordReader<InternalRow> reader =
-                table.newReadBuilder().withReadType(readRowType).newRead().createReader(splitList);
-        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
-            while (iterator.hasNext()) {
-                InternalRow row = iterator.next();
-                buffer.write(row);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        Iterator<InternalRow> iterator =
-                new MutableObjectIteratorAdapter<>(
-                        buffer.sortedIterator(), new BinaryRow(readRowType.getFieldCount()));
-        List<CommitMessage> result = buildForSinglePartition(rowRange, partition, iterator);
-        buffer.clear();
-
-        return result;
-    }
-
     public long recordsPerRange() {
         return recordsPerRange;
     }
@@ -259,6 +214,10 @@ public class SortedGlobalIndexBuilder implements Serializable {
             }
             return commitMessages;
         }
+    }
+
+    public Optional<KeySerializer> sortKeySerializer() {
+        return GlobalIndexer.create(indexType, indexField, options).sortKeySerializer();
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {

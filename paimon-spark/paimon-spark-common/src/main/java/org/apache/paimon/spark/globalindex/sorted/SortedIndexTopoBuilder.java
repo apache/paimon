@@ -19,8 +19,10 @@
 package org.apache.paimon.spark.globalindex.sorted;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.options.Options;
@@ -47,8 +49,11 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.api.java.UDF1;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
+import org.apache.spark.sql.expressions.UserDefinedFunction;
 import org.apache.spark.sql.functions;
+import org.apache.spark.sql.types.DataTypes;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -67,7 +72,7 @@ import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.spli
 public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
-            new HashSet<>(Arrays.asList("btree", "bitmap"));
+            new HashSet<>(Arrays.asList("btree", "bitmap", "reverse-btree"));
 
     public static boolean supports(String indexType) {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
@@ -90,6 +95,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         if (partitionPredicate != null) {
             indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
+
+        Optional<KeySerializer> sortKeySerializer = indexBuilder.sortKeySerializer();
 
         Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
                 indexBuilder.incrementalScan();
@@ -143,12 +150,30 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                         .map(functions::col)
                                         .toArray(Column[]::new));
 
-                Column[] sortFields =
-                        sortColumns.stream().map(functions::col).toArray(Column[]::new);
+                Dataset<Row> toSort = selected;
+                Column[] sortFields;
+                String encodedCol = null;
+                if (sortKeySerializer.isPresent()) {
+                    encodedCol = encodedSortKeyColumn(selectedColumns);
+                    toSort =
+                            selected.withColumn(
+                                    encodedCol,
+                                    encodedSortKeyUdf(sortKeySerializer.get())
+                                            .apply(
+                                                    functions
+                                                            .col(indexField.name())
+                                                            .cast(DataTypes.BinaryType)));
+                    sortFields = new Column[] {functions.col(encodedCol)};
+                } else {
+                    sortFields = sortColumns.stream().map(functions::col).toArray(Column[]::new);
+                }
 
                 Dataset<Row> partitioned =
-                        selected.repartitionByRange(partitionNum, sortFields)
+                        toSort.repartitionByRange(partitionNum, sortFields)
                                 .sortWithinPartitions(sortFields);
+                if (encodedCol != null) {
+                    partitioned = partitioned.drop(encodedCol);
+                }
 
                 final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
                 final byte[] partitionBytes =
@@ -171,6 +196,25 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             }
         }
         return allMessages;
+    }
+
+    private static String encodedSortKeyColumn(List<String> existingColumns) {
+        String name = "_sorted_index_encoded_sort_key";
+        while (existingColumns.contains(name)) {
+            name = "_" + name;
+        }
+        return name;
+    }
+
+    private static UserDefinedFunction encodedSortKeyUdf(KeySerializer sortKeySerializer) {
+        // The column is cast to binary before this UDF, so the serializer sees the exact
+        // bytes of the value instead of a lossy UTF8String -> java String conversion.
+        UDF1<byte[], byte[]> udf =
+                value ->
+                        value == null
+                                ? null
+                                : sortKeySerializer.serialize(BinaryString.fromBytes(value));
+        return functions.udf(udf, DataTypes.BinaryType);
     }
 
     private static Iterator<byte[]> buildSortedIndex(

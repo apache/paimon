@@ -38,6 +38,7 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.options.Options;
@@ -66,6 +67,8 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -86,8 +89,10 @@ public class SortedIndexTopoBuilder {
 
     private static final String BUILD_TASK_ID_FIELD = "_SORTED_INDEX_BUILD_TASK_ID";
     private static final int BUILD_TASK_ID_FIELD_ID = -1;
+    private static final String ENCODED_SORT_KEY_FIELD = "_SORTED_INDEX_ENCODED_SORT_KEY";
+    private static final int ENCODED_SORT_KEY_FIELD_ID = -2;
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
-            new HashSet<>(Arrays.asList("btree", "bitmap"));
+            new HashSet<>(Arrays.asList("btree", "bitmap", "reverse-btree"));
 
     public static boolean supports(String indexType) {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
@@ -148,9 +153,26 @@ public class SortedIndexTopoBuilder {
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
             ReadBuilder readBuilder = table.newReadBuilder().withReadType(dataReadType);
+
+            KeySerializer sortKeySerializer = indexBuilder.sortKeySerializer().orElse(null);
             List<String> sortColumns = new ArrayList<>();
             sortColumns.add(buildTaskIdField);
-            sortColumns.add(indexColumn);
+            RowType sortInputType;
+            if (sortKeySerializer != null) {
+                String encodedKeyField = ENCODED_SORT_KEY_FIELD;
+                while (sortReadType.containsField(encodedKeyField)) {
+                    encodedKeyField = "_" + encodedKeyField;
+                }
+                List<DataField> sortInputFields = new ArrayList<>(sortReadType.getFields());
+                sortInputFields.add(
+                        new DataField(
+                                ENCODED_SORT_KEY_FIELD_ID, encodedKeyField, DataTypes.BYTES()));
+                sortInputType = new RowType(sortReadType.isNullable(), sortInputFields);
+                sortColumns.add(encodedKeyField);
+            } else {
+                sortInputType = sortReadType;
+                sortColumns.add(indexColumn);
+            }
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
             List<SortedBuildTask> buildTasks = new ArrayList<>();
@@ -193,6 +215,8 @@ public class SortedIndexTopoBuilder {
                             sortColumns,
                             coreOptions,
                             sortReadType,
+                            sortInputType,
+                            sortKeySerializer,
                             recordsPerRange,
                             maxParallelism);
 
@@ -242,6 +266,8 @@ public class SortedIndexTopoBuilder {
             List<String> sortColumns,
             CoreOptions coreOptions,
             RowType readType,
+            RowType sortInputType,
+            @Nullable KeySerializer sortKeySerializer,
             long recordsPerRange,
             int maxParallelism) {
         int parallelism = calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
@@ -260,6 +286,18 @@ public class SortedIndexTopoBuilder {
                                 new ReadDataOperator(readBuilder))
                         .setParallelism(parallelism);
 
+        if (sortKeySerializer != null) {
+            rowDataStream =
+                    rowDataStream
+                            .transform(
+                                    "Append Encoded Sort Key",
+                                    InternalTypeInfo.of(
+                                            LogicalTypeConversion.toLogicalType(sortInputType)),
+                                    new AppendEncodedKeyOperator(
+                                            sortKeySerializer, indexFieldType, indexFieldPos))
+                            .setParallelism(parallelism);
+        }
+
         TableSortInfo sortInfo =
                 new TableSortInfo.Builder()
                         .setSortColumns(sortColumns)
@@ -271,7 +309,7 @@ public class SortedIndexTopoBuilder {
                         .build();
 
         TableSorter sorter =
-                TableSorter.getSorter(env, rowDataStream, coreOptions, readType, sortInfo);
+                TableSorter.getSorter(env, rowDataStream, coreOptions, sortInputType, sortInfo);
         DataStream<RowData> sortedStream = sorter.sort();
 
         return sortedStream
@@ -336,6 +374,44 @@ public class SortedIndexTopoBuilder {
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
+    }
+
+    private static class AppendEncodedKeyOperator
+            extends org.apache.flink.table.runtime.operators.TableStreamOperator<RowData>
+            implements org.apache.flink.streaming.api.operators.OneInputStreamOperator<
+                    RowData, RowData> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final KeySerializer sortKeySerializer;
+        private final DataType indexFieldType;
+        private final int indexFieldPos;
+
+        private transient InternalRow.FieldGetter indexFieldGetter;
+
+        private AppendEncodedKeyOperator(
+                KeySerializer sortKeySerializer, DataType indexFieldType, int indexFieldPos) {
+            this.sortKeySerializer = sortKeySerializer;
+            this.indexFieldType = indexFieldType;
+            this.indexFieldPos = indexFieldPos;
+        }
+
+        @Override
+        public void open() throws Exception {
+            super.open();
+            this.indexFieldGetter = InternalRow.createFieldGetter(indexFieldType, indexFieldPos);
+        }
+
+        @Override
+        public void processElement(StreamRecord<RowData> element) {
+            InternalRow row = new FlinkRowWrapper(element.getValue());
+            Object indexValue = indexFieldGetter.getFieldOrNull(row);
+            byte[] encodedKey = indexValue == null ? null : sortKeySerializer.serialize(indexValue);
+            output.collect(
+                    new StreamRecord<>(
+                            new FlinkRowData(
+                                    new JoinedRow(row, GenericRow.of((Object) encodedKey)))));
+        }
     }
 
     /** Operator to read data from splits. */
