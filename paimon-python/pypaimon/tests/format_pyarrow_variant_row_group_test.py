@@ -145,6 +145,17 @@ class VariantRowGroupReaderTest(unittest.TestCase):
         self.assertEqual(self.n, rows)
         self.assertEqual(["payload"], columns)
 
+    def test_projection_preserves_requested_order(self):
+        reader = self._reader([
+            DataField(1, "payload", AtomicType("VARIANT")),
+            DataField(0, "content_key", AtomicType("STRING")),
+        ])
+        batch = reader.read_arrow_batch()
+        self.assertEqual(["payload", "content_key"], batch.schema.names)
+        self.assertEqual(
+            {"value": b"v0", "metadata": b"m"}, batch.column(0)[0].as_py())
+        self.assertEqual("robot_pose_raw", batch.column(1)[0].as_py())
+
     def test_single_row_group_scalar_read_uses_fast_path(self):
         rows, columns, _ = _drain(
             self._reader([DataField(0, "content_key", AtomicType("STRING"))]))
