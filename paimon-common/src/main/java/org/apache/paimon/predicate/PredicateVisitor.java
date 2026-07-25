@@ -40,8 +40,8 @@ public interface PredicateVisitor<T> {
         return predicate.visit(new FieldNameCollector());
     }
 
-    /** Collects the field names referenced by a transform's inputs. */
-    static Set<String> collectFieldNames(Transform transform) {
+    /** Collects the field names a transform's inputs reference. */
+    static Set<String> collectTransformFieldNames(Transform transform) {
         Set<String> fieldNames = new HashSet<>();
         for (Object input : transform.inputs()) {
             if (input instanceof FieldRef) {
@@ -69,7 +69,7 @@ public interface PredicateVisitor<T> {
 
         @Override
         public Set<String> visit(LeafPredicate predicate) {
-            return collectFieldNames(predicate.transform());
+            return collectTransformFieldNames(predicate.transform());
         }
 
         @Override

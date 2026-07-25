@@ -96,6 +96,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         this.filter = predicate;
 
+        if (queryAuthEnabled()) {
+            // let the wrapped scan defer the filter: a conjunct on a masked column must not
+            // reach raw statistics or the global index
+            batchScan.withFilter(predicate);
+            return this;
+        }
         batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
         return this;
     }
@@ -291,11 +297,20 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    private boolean queryAuthEnabled() {
+        CoreOptions options = table == null ? null : table.coreOptions();
+        return options != null && options.queryAuthEnabled();
+    }
+
     private Optional<GlobalIndexResult> evalGlobalIndex() {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
         if (filter == null) {
+            return Optional.empty();
+        }
+        if (queryAuthEnabled()) {
+            // the index ranks raw values, which a mask may invalidate; fall back to a full scan
             return Optional.empty();
         }
         CoreOptions options = table.coreOptions();

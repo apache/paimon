@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
@@ -67,11 +68,14 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -96,6 +100,15 @@ abstract class AbstractDataTableScan implements DataTableScan {
     // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
     // AbstractBatchTableScan to disable limit push down; not pushed through withFilter.
     protected boolean authHasNonPartitionFilter;
+    // auth state, refreshed each plan(). The filter is pushed once, without the conjuncts on
+    // masked columns, whose raw statistics a mask invalidates; the partition fields are
+    // replaced on each push, as ManifestsReader#withPartitionFilter overwrites rather than ands.
+    protected Set<String> authMaskedFields = Collections.emptySet();
+    @Nullable private RowType appliedScanReadType;
+    @Nullable private Predicate userFilter;
+    private boolean filterPushed = false;
+    private Set<String> pushedMaskedFields = Collections.emptySet();
+    private Set<String> partitionFilterFields = Collections.emptySet();
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -110,14 +123,17 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.queryAuth = queryAuth;
     }
 
-    // the read type last pushed to the snapshot reader; widened for auth when needed
-    @Nullable private RowType appliedScanReadType;
-
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
         // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
         applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
+        this.authMaskedFields =
+                queryAuthResult == null
+                        ? Collections.emptySet()
+                        : queryAuthResult.extractColumnMasking().keySet();
+        rejectMaskedPartitionFilter();
+        ensureFilterPushdown(authMaskedFields);
         applyAuthReadType(queryAuthResult);
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
@@ -161,7 +177,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        if (!options.queryAuthEnabled()) {
+            // no masks to strip; push now, else chain-table sub-scans read before plan()
+            snapshotReader.withFilter(predicate);
+            return this;
+        }
+        // deferred to plan(), which strips conjuncts on masked columns before stats pruning
+        this.userFilter = predicate;
         return this;
     }
 
@@ -187,30 +209,50 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public AbstractDataTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+        partitionFilterFields =
+                partitionSpec == null
+                        ? Collections.emptySet()
+                        : new HashSet<>(partitionSpec.keySet());
         snapshotReader.withPartitionFilter(partitionSpec);
         return this;
     }
 
     @Override
     public AbstractDataTableScan withPartitionFilter(List<BinaryRow> partitions) {
+        // binary partitions carry no field names; assume every partition key
+        partitionFilterFields =
+                partitions == null ? Collections.emptySet() : new HashSet<>(schema.partitionKeys());
         snapshotReader.withPartitionFilter(partitions);
         return this;
     }
 
     @Override
     public AbstractDataTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        Set<String> fields = new HashSet<>();
+        if (partitions != null) {
+            partitions.forEach(spec -> fields.addAll(spec.keySet()));
+        }
+        partitionFilterFields = fields;
         snapshotReader.withPartitionsFilter(partitions);
         return this;
     }
 
     @Override
     public AbstractDataTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        partitionFilterFields =
+                partitionPredicate == null
+                        ? Collections.emptySet()
+                        : partitionPredicateFields(partitionPredicate);
         snapshotReader.withPartitionFilter(partitionPredicate);
         return this;
     }
 
     @Override
     public InnerTableScan withPartitionFilter(Predicate predicate) {
+        partitionFilterFields =
+                predicate == null
+                        ? Collections.emptySet()
+                        : PredicateVisitor.collectFieldNames(predicate);
         snapshotReader.withPartitionFilter(predicate);
         return this;
     }
@@ -234,9 +276,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
         List<String> select = readType == null ? null : readType.getFieldNames();
         TableQueryAuthResult result = queryAuth.auth(select);
         if (result != null && result.hasRules()) {
-            // validated on every plan (this path already pays an auth-service call per plan), so
-            // schema changes under a live scan fail closed: references stale in the latest schema,
-            // or renamed relative to the schema being read (e.g. time travel), are rejected
+            // re-validated every plan, so a schema change under a live scan fails closed
             RowType latestSchema =
                     schemaManager
                             .latest()
@@ -266,6 +306,67 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    /** The partition columns a predicate references, or all of them when it cannot be read. */
+    private Set<String> partitionPredicateFields(PartitionPredicate partitionPredicate) {
+        if (partitionPredicate instanceof PartitionPredicate.DefaultPartitionPredicate) {
+            return PredicateVisitor.collectFieldNames(
+                    ((PartitionPredicate.DefaultPartitionPredicate) partitionPredicate)
+                            .predicate());
+        }
+        return new HashSet<>(schema.partitionKeys());
+    }
+
+    /**
+     * A partition predicate is consumed by pruning and, in Spark, dropped from post-scan
+     * evaluation, so it can never be re-checked on the masked value. Fail closed. One routed
+     * through withFilter is fine: that path defers it and evaluates it post-mask.
+     */
+    protected void rejectMaskedPartitionFilter() {
+        if (partitionFilterFields.isEmpty() || authMaskedFields.isEmpty()) {
+            return;
+        }
+        for (String partitionKey : partitionFilterFields) {
+            if (authMaskedFields.contains(partitionKey)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "A partition filter cannot be enforced on masked partition key "
+                                        + "'%s': engines push partition predicates past the "
+                                        + "reader, so it would be matched against the raw "
+                                        + "partition value.",
+                                partitionKey));
+            }
+        }
+    }
+
+    /**
+     * Pushes the query filter once, minus the conjuncts on masked columns. Also called by partition
+     * listing; a mask found later on an already-pushed column fails closed.
+     */
+    protected final void ensureFilterPushdown(Set<String> maskedFields) {
+        if (userFilter == null) {
+            return;
+        }
+        Set<String> maskedInFilter = new HashSet<>(maskedFields);
+        maskedInFilter.retainAll(PredicateVisitor.collectFieldNames(userFilter));
+        if (!maskedInFilter.isEmpty()) {
+            // masked conjuncts drop rows at read time only: keep limit/TopN pruning off
+            authHasNonPartitionFilter = true;
+        }
+        if (!filterPushed) {
+            Predicate effective =
+                    maskedInFilter.isEmpty()
+                            ? userFilter
+                            : TableQueryAuthResult.excludeFields(userFilter, maskedInFilter);
+            snapshotReader.withFilter(userFilter, effective);
+            filterPushed = true;
+            pushedMaskedFields = maskedInFilter;
+        } else if (!pushedMaskedFields.containsAll(maskedInFilter)) {
+            throw new IllegalStateException(
+                    "Query auth rules changed and now mask a pushed-down filter column. "
+                            + "Recreate the scan to apply the new rules.");
+        }
+    }
+
     /**
      * Push the auth-widened read type to the snapshot reader before planning, so file-level column
      * pruning keeps the files of the columns the rules read.
@@ -276,7 +377,25 @@ abstract class AbstractDataTableScan implements DataTableScan {
         }
         RowType desired = readType;
         if (queryAuthResult != null && queryAuthResult.hasRules()) {
-            RowType widened = queryAuthResult.widenReadType(schema.logicalRowType(), readType);
+            // post-mask conjuncts are evaluated at read time; their columns must survive planning
+            List<String> seed = readType.getFieldNames();
+            Set<String> postMask =
+                    TableQueryAuthResult.postMaskFilterFields(
+                            userFilter, queryAuthResult.extractColumnMasking().keySet());
+            if (!postMask.isEmpty()) {
+                seed = new ArrayList<>(seed);
+                for (String field : postMask) {
+                    if (!seed.contains(field)) {
+                        seed.add(field);
+                    }
+                }
+            }
+            Set<String> ruleFields = queryAuthResult.requiredAuthFields(seed);
+            // requiredAuthFields returns what the rules read, not the seed itself
+            ruleFields.addAll(postMask);
+            RowType widened =
+                    TableQueryAuthResult.appendMissingFields(
+                            schema.logicalRowType(), readType, ruleFields);
             if (widened != null) {
                 desired = widened;
             }
