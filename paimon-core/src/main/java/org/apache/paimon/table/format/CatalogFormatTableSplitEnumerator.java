@@ -29,10 +29,9 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
-import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,8 +48,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
 
 /** A {@link FormatTableSplitEnumerator} whose partitions are managed by the catalog. */
@@ -58,11 +55,6 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CatalogFormatTableSplitEnumerator.class);
-
-    private static final int LIST_POOL_MAX_THREADS = 1000;
-    private static final ThreadPoolExecutor LIST_POOL =
-            ThreadPoolUtils.createCachedThreadPool(
-                    LIST_POOL_MAX_THREADS, "FORMAT-TABLE-LIST-THREAD-POOL");
 
     private final FormatTablePartitionManager partitionManager;
 
@@ -101,11 +93,7 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
                     }
                 };
         int parallelism = Math.max(1, coreOptions.formatTableScanListParallelism());
-        ExecutorService executor =
-                parallelism >= LIST_POOL_MAX_THREADS
-                        ? LIST_POOL
-                        : new SemaphoredDelegatingExecutor(LIST_POOL, parallelism, false);
-        ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, lister, partitions)
+        ManifestReadThreadPool.randomlyExecuteSequentialReturn(lister, partitions, parallelism)
                 .forEachRemaining(splits::add);
         return splits;
     }
