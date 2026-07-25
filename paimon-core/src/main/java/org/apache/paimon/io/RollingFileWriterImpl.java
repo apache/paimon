@@ -41,17 +41,26 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
+    private final long targetFileRowNum;
     private final List<FileWriterAbortExecutor> closedWriters;
     protected final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
     private long recordCount = 0;
+    private long currentFileRecordCount = 0;
     private boolean closed = false;
 
     public RollingFileWriterImpl(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
+            Supplier<? extends SingleFileWriter<T, R>> writerFactory,
+            long targetFileSize,
+            long targetFileRowNum) {
+        Preconditions.checkArgument(
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
+        this.targetFileRowNum = targetFileRowNum;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
     }
@@ -62,8 +71,9 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+        return currentFileRecordCount >= targetFileRowNum
+                || currentWriter.reachTargetSize(
+                        forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
@@ -76,6 +86,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.write(row);
             recordCount += 1;
+            currentFileRecordCount += 1;
 
             if (rollingFile(false)) {
                 closeCurrentWriter();
@@ -101,6 +112,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.writeBundle(bundle);
             recordCount += bundle.rowCount();
+            currentFileRecordCount += bundle.rowCount();
 
             if (rollingFile(true)) {
                 closeCurrentWriter();
@@ -132,6 +144,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         currentWriter.abortExecutor().ifPresent(closedWriters::add);
         results.add(currentWriter.result());
         currentWriter = null;
+        currentFileRecordCount = 0;
     }
 
     @Override
@@ -153,6 +166,14 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     public List<R> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
         return results;
+    }
+
+    /** Transfers ownership of abort executors for closed files to the caller. */
+    public List<FileWriterAbortExecutor> drainAbortExecutors() {
+        Preconditions.checkState(closed, "Cannot drain abort executors unless close all writers.");
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>(closedWriters);
+        closedWriters.clear();
+        return abortExecutors;
     }
 
     @Override

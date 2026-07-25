@@ -113,6 +113,14 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testTargetFileRowNumMustBePositive() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "0");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("target-file-row-num should be at least 1");
+    }
+
+    @Test
     public void testFromSnapshotConflict() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));

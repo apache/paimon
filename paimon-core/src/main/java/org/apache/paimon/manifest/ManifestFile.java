@@ -174,7 +174,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
         return new RollingFileWriterImpl<>(
                 () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
-                suggestedFileSize);
+                suggestedFileSize,
+                Long.MAX_VALUE);
     }
 
     public ManifestEntryWriter createManifestEntryWriter(Path manifestPath) {

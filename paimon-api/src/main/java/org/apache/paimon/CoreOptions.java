@@ -818,6 +818,21 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    public static final ConfigOption<Long> TARGET_FILE_ROW_NUM =
+            key("target-file-row-num")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription(
+                            "Target number of rows per newly written data file; a file rolls when "
+                                    + "this or target-file-size is reached, whichever comes first. "
+                                    + "Enforced at bundle granularity, so a bundled write may exceed it "
+                                    + "by up to one bundle. Only constrains files at write time: "
+                                    + "compaction is size-based and may merge into larger files, and "
+                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "per-file rows for wide columns to avoid data-evolution OOM. "
+                                    + "PyPaimon file-store writers do not support this option and "
+                                    + "fail fast when it is enabled. Disabled by default.");
+
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
                     .doubleType()
@@ -3323,6 +3338,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(TARGET_FILE_SIZE)
                 .orElse(hasPrimaryKey ? VALUE_128_MB : VALUE_256_MB)
                 .getBytes();
+    }
+
+    public long targetFileRowNum() {
+        return options.get(TARGET_FILE_ROW_NUM);
     }
 
     public long blobTargetFileSize() {
