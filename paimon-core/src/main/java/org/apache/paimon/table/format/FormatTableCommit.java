@@ -48,7 +48,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.StringJoiner;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
 
@@ -63,6 +62,7 @@ public class FormatTableCommit implements BatchTableCommit {
     protected boolean overwrite = false;
     private Catalog hiveCatalog;
     private Identifier tableIdentifier;
+    @Nullable private final FormatTablePartitionManager partitionManager;
 
     public FormatTableCommit(
             String location,
@@ -73,7 +73,8 @@ public class FormatTableCommit implements BatchTableCommit {
             Identifier tableIdentifier,
             @Nullable Map<String, String> staticPartitions,
             @Nullable String syncHiveUri,
-            CatalogContext catalogContext) {
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -82,6 +83,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
         this.tableIdentifier = tableIdentifier;
+        this.partitionManager = partitionManager;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -143,7 +145,9 @@ public class FormatTableCommit implements BatchTableCommit {
 
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
-                if (partitionKeys != null && !partitionKeys.isEmpty() && hiveCatalog != null) {
+                if (partitionKeys != null
+                        && !partitionKeys.isEmpty()
+                        && (hiveCatalog != null || partitionManager != null)) {
                     partitionSpecs.add(
                             extractPartitionSpecFromPath(
                                     committer.targetPath().getParent(), partitionKeys));
@@ -151,6 +155,11 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.clean(this.fileIO);
+            }
+            if (partitionManager != null && !partitionSpecs.isEmpty()) {
+                // Concurrent writers may touch the same partition, so registration is an
+                // idempotent ADD rather than a strict create.
+                partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
                 if (hiveCatalog != null) {
@@ -192,12 +201,25 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private LinkedHashMap<String, String> extractPartitionSpecFromPath(
             Path partitionPath, List<String> partitionKeys) {
-        if (formatTablePartitionOnlyValueInPath) {
-            return PartitionPathUtils.extractPartitionSpecFromPathOnlyValue(
-                    partitionPath, partitionKeys);
-        } else {
-            return PartitionPathUtils.extractPartitionSpecFromPath(partitionPath);
+        // Only the trailing partitionKeys.size() components are the spec: the table location
+        // itself may contain foreign 'k=v' segments that must not leak into what is registered.
+        LinkedHashMap<String, String> partitionSpec =
+                formatTablePartitionOnlyValueInPath
+                        ? PartitionPathUtils.extractPartitionSpecFromPathOnlyValue(
+                                partitionPath, partitionKeys)
+                        : PartitionPathUtils.extractPartitionSpecFromPath(
+                                partitionPath, partitionKeys);
+        if (partitionSpec == null) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition path '%s' does not end in the %s partition directories of "
+                                    + "table %s declared by partition keys %s.",
+                            partitionPath,
+                            partitionKeys.size(),
+                            tableIdentifier.getFullName(),
+                            partitionKeys));
         }
+        return partitionSpec;
     }
 
     private static Path buildPartitionPath(
@@ -208,20 +230,19 @@ public class FormatTableCommit implements BatchTableCommit {
         if (partitionSpec.isEmpty() || partitionKeys.isEmpty()) {
             throw new IllegalArgumentException("partitionSpec or partitionKeys is empty.");
         }
-        StringJoiner joiner = new StringJoiner("/");
+        LinkedHashMap<String, String> orderedSpec = new LinkedHashMap<>();
         for (int i = 0; i < partitionSpec.size(); i++) {
             String key = partitionKeys.get(i);
             if (partitionSpec.containsKey(key)) {
-                if (formatTablePartitionOnlyValueInPath) {
-                    joiner.add(partitionSpec.get(key));
-                } else {
-                    joiner.add(key + "=" + partitionSpec.get(key));
-                }
+                orderedSpec.put(key, partitionSpec.get(key));
             } else {
                 throw new RuntimeException("partitionSpec does not contain key: " + key);
             }
         }
-        return new Path(location, joiner.toString());
+        return new Path(
+                location,
+                PartitionPathUtils.generatePartitionPathUtil(
+                        orderedSpec, formatTablePartitionOnlyValueInPath));
     }
 
     @Override

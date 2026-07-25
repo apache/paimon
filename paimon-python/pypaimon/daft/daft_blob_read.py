@@ -77,6 +77,8 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
 
     @daft.func.batch(return_dtype=DataType.binary())
     def _read_blobs(files):
+        import pyarrow as pa
+
         pos_field, size_field = _file_range_fields()
         # Vectorized field extraction: per-File attr access (to_pylist +
         # f.path/.position/.size) is GIL-bound and serializes the pool. daft
@@ -93,7 +95,8 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
                       for f in files.to_pylist()]
 
         fio = _get_file_io(_cache_key(catalog_options), table)
-        # Coalesce same-file adjacent reads to cut per-request round trips.
-        return fio.read_ranges_coalesced(ranges, max_concurrency)
+        # Build Arrow from shared views without intermediate BLOB copies.
+        views = fio.read_ranges_coalesced_views(ranges, max_concurrency)
+        return pa.array(views, type=pa.binary())
 
     return _read_blobs(column)

@@ -23,10 +23,11 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -47,8 +48,15 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.OutputStreamAppender;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -160,6 +168,62 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testGlobalIndexDiagnosticLogs() throws Exception {
+        write(10L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OutputStreamAppender appender =
+                OutputStreamAppender.newBuilder()
+                        .setName("global-index-diagnostic-test")
+                        .setTarget(output)
+                        .setLayout(PatternLayout.newBuilder().withPattern("%level %msg%n").build())
+                        .build();
+        Logger scanLogger = (Logger) LogManager.getLogger(DataEvolutionBatchScan.class);
+        Logger scannerLogger = (Logger) LogManager.getLogger(DataEvolutionGlobalIndexScanner.class);
+        Level previousScanLevel = scanLogger.getLevel();
+        Level previousScannerLevel = scannerLogger.getLevel();
+
+        appender.start();
+        scanLogger.addAppender(appender);
+        scannerLogger.addAppender(appender);
+        scanLogger.setLevel(Level.INFO);
+        scannerLogger.setLevel(Level.INFO);
+        try {
+            Predicate predicate =
+                    new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
+            table.newReadBuilder().withFilter(predicate).newScan().plan();
+
+            PredicateBuilder rowIdBuilder =
+                    new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
+            int rowIdIndex = table.rowType().getFieldCount();
+            Predicate mixedRowIdPredicate =
+                    PredicateBuilder.or(
+                            rowIdBuilder.equal(rowIdIndex, 1L),
+                            rowIdBuilder.equal(1, BinaryString.fromString("a7")));
+            table.newReadBuilder().withFilter(mixedRowIdPredicate).newScan().plan();
+
+            String logs = new String(output.toByteArray(), StandardCharsets.UTF_8);
+            assertThat(logs)
+                    .containsPattern(
+                            "INFO Scan table '[^']+' with global index\\. "
+                                    + "searchMode='fast', total=\\d+ ms, metadata=\\d+ ms, "
+                                    + "lookup=\\d+ ms, coverage=\\d+ ms\\.")
+                    .containsPattern(
+                            "INFO Global index lookup table='[^']+', type='btree', "
+                                    + "fields='\\[f1\\]', lookup=\\d+ ms\\.")
+                    .contains("INFO Scan table '" + table.name() + "' without global index.");
+        } finally {
+            scanLogger.setLevel(previousScanLevel);
+            scannerLogger.setLevel(previousScannerLevel);
+            scanLogger.removeAppender(appender);
+            scannerLogger.removeAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
     public void testBTreeGlobalIndexSearchModeControlsUnindexedData() throws Exception {
         write(500L);
         createIndex("f1");
@@ -195,7 +259,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testGlobalIndexScannerKeepsUnindexedRowsSeparate() throws Exception {
+    public void testDataEvolutionGlobalIndexScannerKeepsUnindexedRowsSeparate() throws Exception {
         write(500L);
         createIndex("f1");
         appendRows(500, 1000);
@@ -210,8 +274,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         BinaryString.fromString("a100"),
                                         BinaryString.fromString("a700")));
 
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
             assertThat(scanner.scan(predicate).get().results().toRangeList())
                     .containsExactly(new Range(100L, 100L));
             assertThat(scanner.unindexedRows(predicate).results().toRangeList())
@@ -220,10 +286,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testSourceBackedIndexIsExcludedFromGlobalRowIdScan() throws Exception {
+    public void testDataEvolutionSourceBackedIndexParticipatesInGlobalRowIdScan() throws Exception {
         write(10L);
         FileStoreTable table =
                 tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
         IndexFileMeta sourceBacked =
                 new IndexFileMeta(
                         "btree",
@@ -233,44 +300,48 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
                         null);
 
-        assertThat(GlobalIndexScanner.create(table, Collections.singletonList(sourceBacked)))
-                .isEmpty();
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.create(
+                                table, Collections.singletonList(sourceBacked)))
+                .isPresent();
 
-        GlobalIndexCoverage coverage =
-                new GlobalIndexCoverage(
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
                         table,
-                        table.snapshotManager().latestSnapshot(),
+                        snapshot,
                         PartitionPredicate.ALWAYS_TRUE,
                         Collections.singletonList(sourceBacked));
-        assertThat(coverage.unindexedRanges(1)).containsExactly(new Range(0, 9));
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
-    public void testOrdinaryAndSourceBackedBTreeIndexesCanCoexist() throws Exception {
+    public void testOrdinaryAndSourceBackedBTreeIndexCoverageCanCoexist() throws Exception {
         write(10L);
-        createIndex("f1");
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        List<IndexFileMeta> mixedIndexes =
-                table.store().newIndexFileHandler().scan(snapshot, "btree").stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .collect(Collectors.toCollection(ArrayList::new));
+        List<IndexFileMeta> mixedIndexes = new ArrayList<>();
+        mixedIndexes.add(
+                new IndexFileMeta(
+                        "btree",
+                        "ordinary-index",
+                        0,
+                        5,
+                        new GlobalIndexMeta(0, 4, 1, null, null),
+                        null));
         mixedIndexes.add(
                 new IndexFileMeta(
                         "btree",
                         "source-backed-index",
                         0,
-                        10,
-                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                        5,
+                        new GlobalIndexMeta(5, 9, 1, null, null, new byte[] {1}),
                         null));
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
 
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, mixedIndexes).orElseThrow(AssertionError::new)) {
-            assertThat(scanner.scan(predicate).get().results().toRangeList())
-                    .containsExactly(new Range(7, 7));
-        }
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
+                        table, snapshot, PartitionPredicate.ALWAYS_TRUE, mixedIndexes);
+        assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
     @Test
@@ -375,6 +446,69 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(rowIds.toRangeList()).containsExactly(new Range(0L, oldRowCount - 1));
     }
 
+    @Test
+    public void testUnionAcrossRangesWithMixedFallbackAnswers() throws Exception {
+        write(100L);
+        createIndex("f0");
+
+        appendRows(100, 20100);
+        createIndexIncremental("f0");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+
+        long firstRangeSize = 0;
+        long secondRangeSize = 0;
+        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
+            IndexFileMeta file = entry.indexFile();
+            if (!"btree".equals(file.indexType())) {
+                continue;
+            }
+            if (file.globalIndexMeta().rowRangeStart() == 0) {
+                firstRangeSize += file.fileSize();
+            } else {
+                secondRangeSize += file.fileSize();
+            }
+        }
+        assertThat(firstRangeSize).isGreaterThan(0);
+        assertThat(secondRangeSize).isGreaterThan(firstRangeSize);
+
+        long fallbackScanMaxSize = (firstRangeSize + secondRangeSize) / 2;
+        FileStoreTable capped =
+                table.copy(
+                        Collections.singletonMap(
+                                BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE.key(),
+                                String.valueOf(fallbackScanMaxSize)));
+
+        Predicate predicate = new PredicateBuilder(capped.rowType()).lessThan(0, 150);
+        List<String> result = readF1(capped, predicate);
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 150; i++) {
+            expected.add("a" + i);
+        }
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private void createIndexIncremental(String fieldName) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField(fieldName);
+        List<DataSplit> dataSplits =
+                builder.incrementalScan()
+                        .map(org.apache.paimon.utils.Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incremental scan result when building index."));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
+    }
+
     private void createIndex(String fieldName) throws Exception {
         createIndex(fieldName, null);
     }
@@ -450,8 +584,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
             return scanner.scan(predicate).get().results();
         }
     }

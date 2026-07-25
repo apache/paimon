@@ -24,13 +24,14 @@ under the License.
 
 # BLOB Storage
 
-Primary-key tables can store top-level `BLOB` and `ARRAY<BLOB>` payloads in table-managed files. Unlike the positional
-BLOB files used by append tables, managed BLOB payloads have stable descriptors. MergeTree sorting, deduplication, and
-compaction can therefore reorder or remove rows without rewriting the surviving payload bytes.
+Primary-key tables can store top-level `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` payloads in table-managed files.
+Unlike the positional BLOB files used by append tables, managed BLOB payloads have stable descriptors. MergeTree
+sorting, deduplication, and compaction can therefore reorder or remove rows without rewriting the surviving payload
+bytes.
 
 This mode stores:
 
-- a serialized `BlobDescriptor` for each scalar value or non-null array element;
+- a serialized `BlobDescriptor` for each scalar value, non-null array element, or non-null map value;
 - the payload in an immutable `.managed.blob` pack; and
 - one `.blobref` sidecar for every data file, containing the exact managed packs referenced by that file.
 
@@ -38,7 +39,7 @@ For general BLOB concepts and read options, see [BLOB Storage](../multimodal-tab
 
 ## Create a Table
 
-Use `blob-field` to mark scalar or array fields whose payloads should be stored in managed BLOB files.
+Use `blob-field` to mark scalar, array, or map fields whose payloads should be stored in managed BLOB files.
 `blob-descriptor-field` and `blob-view-field` are inline forms: their serialized descriptor or view metadata stays in
 the normal data file and is not materialized into a managed BLOB file.
 
@@ -50,6 +51,7 @@ CREATE TABLE media (
     name STRING,
     content BYTES COMMENT '__BLOB_FIELD; media content',
     attachments ARRAY<BYTES> COMMENT '__BLOB_FIELD; related files',
+    renditions MAP<STRING, BYTES> COMMENT '__BLOB_FIELD; named renditions',
     PRIMARY KEY (id) NOT ENFORCED
 ) WITH (
     'merge-engine' = 'deduplicate',
@@ -58,7 +60,7 @@ CREATE TABLE media (
 );
 
 INSERT INTO media VALUES
-    (1, 'logo', X'89504E470D0A1A0A', ARRAY[X'25504446', NULL]);
+    (1, 'logo', X'89504E470D0A1A0A', ARRAY[X'25504446', NULL], MAP['thumbnail', X'89504E47']);
 ```
 
 For a primary-key table, every non-null `Blob` value in a `blob-field` is externalized before it enters the MergeTree
@@ -67,9 +69,32 @@ Reads return the payload bytes by default; the existing `blob-as-descriptor` rea
 A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
 reference sidecars.
 
+When descriptor-backed BLOBs are copied to another table, the target normally rebuilds a `FileIO` from its catalog
+context. For a managed `blob-field`, this is a copy flow: the target writes the payload into its own BLOB storage and
+does not retain the source descriptor. If the source table uses table-scoped credentials, configure
+`blob-descriptor.source-table` on the target so that the source table's `FileIO` is used to materialize the payload:
+
+```sql
+ALTER TABLE media_copy SET TBLPROPERTIES (
+    'blob-descriptor.source-table' = 'db.media$branch_rt'
+);
+```
+
+Use `blob-descriptor-field` to retain literal descriptors, or `blob-view-field` to retain a logical, no-copy reference
+to an upstream row. Other `blob-descriptor.*` filesystem options remain sufficient when the source storage can be
+accessed with static configuration; `source-table` is for table-scoped `FileIO` credentials.
+
+The source table must belong to the same catalog. A branch suffix is supported. Target tables without a catalog loader,
+including external tables in REST catalogs, are not supported. When this option is set, it takes precedence over other
+`blob-descriptor.*` options; remove it before switching back to descriptor-specific filesystem configuration.
+
 `ARRAY<BLOB>` is externalized element by element. Every non-null `Blob` element is copied into managed storage, while
 array order, a null array, and null elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses
 `blob-field`; `blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
+
+`MAP<K, BLOB>` is externalized value by value. Keys remain in the normal data file and every non-null value is replaced
+with a descriptor to managed storage. A null map, an empty map, and null values are preserved. Supported key types are
+the integer family, `CHAR`, and `VARCHAR`; `blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
 
 `blob.target-file-size` controls when a writer rolls to a new managed payload pack. A pack can contain payloads from
 multiple rows, and a row descriptor records its URI, offset, and length.
@@ -88,7 +113,7 @@ Primary-key managed BLOB storage has the following requirements:
 
 | Item | Requirement |
 |------|-------------|
-| Managed BLOB declaration | Scalar `BLOB` and `ARRAY<BLOB>` use `blob-field`; `blob-descriptor-field` remains inline |
+| Managed BLOB declaration | `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` use `blob-field`; `blob-descriptor-field` remains inline |
 | Merge engine | `deduplicate` only |
 | Changelog producer | `none` only |
 | Key usage | A managed BLOB column cannot be a primary, partition, bucket, or sequence key |
@@ -99,9 +124,9 @@ Primary-key managed BLOB storage has the following requirements:
 
 ## Update, Delete, and Compaction
 
-An update writes a new descriptor and managed payload when a scalar value or array element changes. A delete record does
-not write a new payload. Deduplication determines the final rows of each data file, and its `.blobref` sidecar contains
-only the managed packs referenced by those rows.
+An update writes a new descriptor and managed payload when a scalar value, array element, or map value changes. A delete
+record does not write a new payload. Deduplication determines the final rows of each data file, and its `.blobref`
+sidecar contains only the managed packs referenced by those rows.
 
 Compaction preserves descriptors for surviving values and creates new `.blobref` sidecars from the compacted output.
 It does not copy the referenced payload bytes into new `.managed.blob` packs. This keeps ordinary compaction cost

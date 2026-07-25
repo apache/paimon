@@ -39,7 +39,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.{BlobType, DataTypeRoot, RowType}
+import org.apache.paimon.types.{BlobType, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
@@ -430,10 +430,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobFieldNames = rawBlobFields
       .map(_.name())
       .toSet
-    val rawArrayBlobFieldNames = rawBlobFields
-      .filter(_.`type`().getTypeRoot == DataTypeRoot.ARRAY)
-      .map(_.name())
-      .toSet
 
     def isRawBlobUpdateColumn(attr: AttributeReference): Boolean = {
       rawBlobFieldNames.exists(rawBlobFieldName => resolver(rawBlobFieldName, attr.name))
@@ -453,17 +449,6 @@ case class MergeIntoPaimonDataEvolutionTable(
             None
           }
       }.toSet
-    }
-
-    val modifiedRawArrayBlobColumnNames = matchedActions
-      .collect { case action: UpdateAction => modifiedRawBlobNames(action) }
-      .flatten
-      .filter(name => rawArrayBlobFieldNames.exists(arrayBlobName => resolver(arrayBlobName, name)))
-      .toSet
-    if (modifiedRawArrayBlobColumnNames.nonEmpty) {
-      throw new UnsupportedOperationException(
-        "Should not append/update raw-data ARRAY<BLOB> column through MERGE INTO: " +
-          modifiedRawArrayBlobColumnNames.toSeq.sorted.mkString(", "))
     }
 
     val rawBlobMarkerNames =
@@ -922,6 +907,12 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def checkUpdateResult(updateCommit: Seq[CommitMessage]): Seq[CommitMessage] = {
+    if (
+      table.coreOptions().globalIndexColumnUpdateAction() == GlobalIndexColumnUpdateAction.IGNORE
+    ) {
+      return updateCommit
+    }
+
     val affectedParts: Set[BinaryRow] = updateCommit.map(_.partition()).toSet
     val rowType = table.rowType()
 

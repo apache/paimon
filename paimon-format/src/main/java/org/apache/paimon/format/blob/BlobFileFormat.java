@@ -35,7 +35,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -46,26 +45,23 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileFormat} for blob file. */
 public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
+    private final int copyBufferSize;
     private boolean writeNullOnMissingFile;
     private boolean writeNullOnFetchFailure;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     @Nullable public BlobConsumer writeConsumer;
 
-    public BlobFileFormat() {
-        this(false);
-    }
-
-    public BlobFileFormat(boolean blobAsDescriptor) {
+    public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
+        this.copyBufferSize = copyBufferSize;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -105,8 +101,8 @@ public class BlobFileFormat extends FileFormat {
     public void validateDataFields(RowType rowType) {
         checkArgument(rowType.getFieldCount() == 1, "BlobFileFormat only support one field.");
         checkArgument(
-                isBlobFileField(rowType.getField(0).type()),
-                "BlobFileFormat only support blob type or array of blob type.");
+                BlobElementSerializerFactory.supports(rowType.getField(0).type()),
+                "BlobFileFormat only supports BLOB, ARRAY<BLOB>, or supported MAP<X, BLOB> types.");
     }
 
     @Override
@@ -121,6 +117,7 @@ public class BlobFileFormat extends FileFormat {
         private final RowType type;
 
         private BlobFormatWriterFactory(RowType type) {
+            checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
             this.type = type;
         }
 
@@ -132,7 +129,8 @@ public class BlobFileFormat extends FileFormat {
                     type,
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
-                    blobFetchMetricReporter);
+                    blobFetchMetricReporter,
+                    copyBufferSize);
         }
     }
 
@@ -157,16 +155,13 @@ public class BlobFileFormat extends FileFormat {
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
-            SeekableInputStream in = null;
+            SeekableInputStream in = fileIO.newInputStream(filePath);
             BlobFileMeta fileMeta;
             try {
-                in = fileIO.newInputStream(filePath);
                 fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
-            } finally {
-                if (blobAsDescriptor && blobFieldType.getTypeRoot() != DataTypeRoot.ARRAY) {
-                    IOUtils.closeQuietly(in);
-                    in = null;
-                }
+            } catch (Exception e) {
+                IOUtils.closeQuietly(in);
+                throw e;
             }
 
             return new BlobFormatReader(
@@ -182,7 +177,7 @@ public class BlobFileFormat extends FileFormat {
 
         private static int findBlobFieldIndex(RowType rowType) {
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (isBlobFileField(rowType.getTypeAt(i))) {
+                if (BlobElementSerializerFactory.supports(rowType.getTypeAt(i))) {
                     return i;
                 }
             }

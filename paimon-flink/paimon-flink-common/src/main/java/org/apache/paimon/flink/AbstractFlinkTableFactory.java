@@ -37,6 +37,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
@@ -289,7 +290,7 @@ public abstract class AbstractFlinkTableFactory
             LOG.info(
                     "Loading dynamic table options for {} in table config: {}",
                     tableName,
-                    optionsFromTableConfig);
+                    SensitiveConfigUtils.redactMap(optionsFromTableConfig));
         }
         return optionsFromTableConfig;
     }

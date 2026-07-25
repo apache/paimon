@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.globalindex.GlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -145,14 +145,15 @@ public class DataEvolutionVectorScan implements VectorScan {
         }
 
         List<Range> rawRowRanges =
-                new GlobalIndexCoverage(table, snapshot, partitionFilter, vectorIndexFiles)
+                new DataEvolutionGlobalIndexCoverage(
+                                table, snapshot, partitionFilter, vectorIndexFiles)
                         .unindexedRanges(vectorColumn.id());
         if (filter != null) {
             rawRowRanges =
                     Range.sortAndMergeOverlap(
                             addAll(
                                     rawRowRanges,
-                                    new GlobalIndexCoverage(
+                                    new DataEvolutionGlobalIndexCoverage(
                                                     table,
                                                     snapshot,
                                                     partitionFilter,

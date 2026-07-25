@@ -39,6 +39,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -215,6 +218,81 @@ public class PredicateBuilderTest {
         predicate = builder.in(0, Arrays.asList(1, 2));
         assertThat(predicate.test(GenericRow.of(1))).isEqualTo(true);
         assertThat(predicate.test(GenericRow.of(10))).isEqualTo(false);
+    }
+
+    // ---- or()/and() binary tree structure tests ----
+
+    @Test
+    public void testOrBinaryTree() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Predicate> predicates =
+                IntStream.range(0, 25)
+                        .mapToObj(i -> builder.equal(0, i))
+                        .collect(Collectors.toList());
+
+        Predicate result = PredicateBuilder.or(predicates);
+
+        assertThat(result).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate root = (CompoundPredicate) result;
+        assertThat(root.function()).isEqualTo(Or.INSTANCE);
+        assertThat(root.children()).hasSize(2);
+        assertThat(countLeaves(root)).isEqualTo(25);
+        assertThat(maxDepth(root)).isLessThanOrEqualTo(5);
+    }
+
+    @Test
+    public void testOrBinaryTreeEvaluation() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Predicate> predicates =
+                IntStream.range(0, 25)
+                        .mapToObj(i -> builder.equal(0, i))
+                        .collect(Collectors.toList());
+
+        Predicate result = PredicateBuilder.or(predicates);
+
+        assertThat(result.test(GenericRow.of(0))).isTrue();
+        assertThat(result.test(GenericRow.of(24))).isTrue();
+        assertThat(result.test(GenericRow.of(25))).isFalse();
+    }
+
+    @Test
+    public void testAndBinaryTree() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Predicate> predicates =
+                IntStream.range(0, 25)
+                        .mapToObj(i -> builder.greaterThan(0, i))
+                        .collect(Collectors.toList());
+
+        Predicate result = PredicateBuilder.and(predicates);
+
+        assertThat(result).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate root = (CompoundPredicate) result;
+        assertThat(root.function()).isEqualTo(And.INSTANCE);
+        assertThat(root.children()).hasSize(2);
+        assertThat(countLeaves(root)).isEqualTo(25);
+        assertThat(maxDepth(root)).isLessThanOrEqualTo(5);
+    }
+
+    private static int countLeaves(Predicate predicate) {
+        if (!(predicate instanceof CompoundPredicate)) {
+            return 1;
+        }
+        int count = 0;
+        for (Predicate child : ((CompoundPredicate) predicate).children()) {
+            count += countLeaves(child);
+        }
+        return count;
+    }
+
+    private static int maxDepth(Predicate predicate) {
+        if (!(predicate instanceof CompoundPredicate)) {
+            return 0;
+        }
+        int max = 0;
+        for (Predicate child : ((CompoundPredicate) predicate).children()) {
+            max = Math.max(max, maxDepth(child));
+        }
+        return 1 + max;
     }
 
     @Test

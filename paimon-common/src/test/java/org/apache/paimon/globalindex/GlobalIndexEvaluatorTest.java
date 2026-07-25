@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -643,6 +644,75 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testUnsupportedIsNaNFallsBack() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "a", DataTypes.DOUBLE())));
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> Collections.singletonList(new StubGlobalIndexReader(null)));
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluate(new PredicateBuilder(rowType).isNaN(0));
+
+        assertThat(result).isEmpty();
+        evaluator.close();
+    }
+
+    @Test
+    void testNotBetweenThroughUnionAndOffset() {
+        RowType rowType = rowType();
+        GlobalIndexReader delegate =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+                            FieldRef fieldRef, Object from, Object to) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
+                    }
+                };
+        GlobalIndexReader wrapped =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(new OffsetGlobalIndexReader(delegate, 10L, 20L)));
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.singletonList(wrapped));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluate(builder.between(0, 1, 2).negate().get());
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 11L, 13L);
+        evaluator.close();
+    }
+
+    @Test
+    void testWrappedUnsupportedRangePredicatesFallBack() {
+        RowType rowType = rowType();
+        GlobalIndexReader wrapped =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(
+                                new OffsetGlobalIndexReader(
+                                        new StubGlobalIndexReader(null), 10L, 20L)));
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.singletonList(wrapped));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        assertThat(evaluator.evaluate(builder.between(0, 1, 2).negate().get())).isEmpty();
+        assertThat(evaluator.evaluate(builder.between(0, 1, 2))).isEmpty();
+        evaluator.close();
+    }
+
+    @Test
+    void testConstantReaderReturnsFixedResultForIsNaNAndNotBetween() {
+        GlobalIndexResult expected = resultOf(1, 2);
+        GlobalIndexReader reader = new ConstantGlobalIndexReader(expected);
+        FieldRef fieldRef = new FieldRef(0, "a", DataTypes.DOUBLE());
+
+        assertThat(reader.visitIsNaN(fieldRef).join()).contains(expected);
+        assertThat(reader.visitNotBetween(fieldRef, 1, 2).join()).contains(expected);
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
@@ -679,6 +749,26 @@ class GlobalIndexEvaluatorTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("expected close failure");
         assertThat(secondClosed).isTrue();
+    }
+
+    @Test
+    void testUnionReaderReportsVectorSearchDuration() {
+        AtomicInteger callbacks = new AtomicInteger();
+        GlobalIndexReader reader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+                            VectorSearch vectorSearch) {
+                        return CompletableFuture.completedFuture(Optional.empty());
+                    }
+                };
+        UnionGlobalIndexReader union =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(reader), ignored -> callbacks.incrementAndGet());
+
+        union.visitVectorSearch(new VectorSearch(new float[] {1}, 1, "test")).join();
+
+        assertThat(callbacks).hasValue(1);
     }
 
     private static void assertBitmapContainsExactly(

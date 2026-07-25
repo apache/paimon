@@ -22,6 +22,8 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryWriter;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.io.DataInputView;
@@ -29,9 +31,11 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Serializer for {@link InternalMap}. */
@@ -88,9 +92,25 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
     public InternalMap copy(InternalMap from) {
         if (from instanceof BinaryMap) {
             return ((BinaryMap) from).copy();
+        } else if (valueType.getTypeRoot() == DataTypeRoot.BLOB) {
+            return copyBlobMap(from);
         } else {
             return toBinaryMap(from);
         }
+    }
+
+    private GenericMap copyBlobMap(InternalMap map) {
+        Map<Object, Object> copied = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            Object key = keyGetter.getElementOrNull(keys, i);
+            Blob value = (Blob) valueGetter.getElementOrNull(values, i);
+            copied.put(
+                    key == null ? null : keySerializer.copy(key),
+                    value == null ? null : valueSerializer.copy(value));
+        }
+        return new GenericMap(copied);
     }
 
     @Override

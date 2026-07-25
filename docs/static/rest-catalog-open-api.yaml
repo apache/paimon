@@ -983,6 +983,90 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - partition
+      summary: Create partitions
+      operationId: createPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartitionsRequest'
+      responses:
+        "200":
+          description: Partitions created or found to exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePartitionsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
+    post:
+      tags:
+        - partition
+      summary: Drop partitions
+      description: Unregisters partitions from the catalog. The server never deletes data files; for a format table with catalog-managed partitions, data deletion is performed by the client afterwards.
+      operationId: dropPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPartitionsRequest'
+      responses:
+        "200":
+          description: Partitions dropped or found missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DropPartitionsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
     post:
       tags:
@@ -1046,6 +1130,50 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ListPartitionsByNamesRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/list-by-filter:
+    post:
+      tags:
+        - partition
+      summary: List partitions by filter
+      description: Lists a page of partitions using a serialized Paimon partition predicate. The response may be a superset of the matching partitions, so clients must re-evaluate the predicate and continue pagination while nextPageToken is non-empty, even if the current page contains no partitions.
+      operationId: listPartitionsByFilter
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListPartitionsByFilterRequest'
       responses:
         "200":
           description: OK
@@ -2352,11 +2480,68 @@ components:
             type: string
     DropPartitionsRequest:
       type: object
+      required:
+        - partitionSpecs
       properties:
-        specs:
+        partitionSpecs:
           type: array
           items:
             type: object
+            additionalProperties:
+              type: string
+        ignoreIfNotExists:
+          type: boolean
+          default: true
+    DropPartitionsResponse:
+      type: object
+      required:
+        - dropped
+        - missing
+      properties:
+        dropped:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        missing:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+    CreatePartitionsRequest:
+      type: object
+      required:
+        - partitionSpecs
+      properties:
+        partitionSpecs:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        ignoreIfExists:
+          type: boolean
+          default: true
+    CreatePartitionsResponse:
+      type: object
+      required:
+        - created
+        - existed
+      properties:
+        created:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        existed:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
     AlterTableRequest:
       type: object
       properties:
@@ -2381,6 +2566,24 @@ components:
             type: object
             additionalProperties:
               type: string
+    ListPartitionsByFilterRequest:
+      type: object
+      required:
+        - filter
+      properties:
+        filter:
+          type: string
+          description: JSON serialization of a Paimon Predicate tree over the partition columns.
+        partitionNamePattern:
+          type: string
+          description: A SQL LIKE pattern (%) for partition names. Currently, only prefix matching is supported.
+        maxResults:
+          type: integer
+          format: int32
+          description: Maximum number of matching partitions to return in this page. A missing or zero value uses the server default.
+        pageToken:
+          type: string
+          description: Token returned by the previous page. Omit for the first page.
     CreateDatabaseResponse:
       type: object
       properties:
@@ -2398,7 +2601,7 @@ components:
         resourceType:
           type: string
           nullable: true
-          enum: [ "DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
         resourceName:
           type: string
           nullable: true

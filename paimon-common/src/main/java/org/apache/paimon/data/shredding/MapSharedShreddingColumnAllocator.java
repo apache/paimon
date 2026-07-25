@@ -29,44 +29,43 @@ import java.util.TreeSet;
 /**
  * Per-row physical column allocator for one shared-shredding MAP column.
  *
- * <p>This is a simple temporary implementation which assigns fields to physical columns by row
- * order. A later version will use a more sophisticated LRU-style allocator to improve column reuse
- * across rows.
+ * <p>Implementations decide the physical column placement for each row. This base class accumulates
+ * the file-level metadata shared by all placement policies.
  */
-public class MapSharedShreddingColumnAllocator {
+public abstract class MapSharedShreddingColumnAllocator {
 
-    private final int numColumns;
+    protected final int numColumns;
     private final Map<Integer, Set<Integer>> fieldToColumns = new TreeMap<>();
     private final Set<Integer> overflowFieldSet = new TreeSet<>();
     private int maxRowWidth = 0;
 
-    public MapSharedShreddingColumnAllocator(int numColumns) {
+    protected MapSharedShreddingColumnAllocator(int numColumns) {
         this.numColumns = numColumns;
     }
 
-    public RowAllocation allocateRow(List<Integer> fieldIds) {
+    /** Allocates physical columns for one row's field IDs. */
+    public abstract RowAllocation allocateRow(List<Integer> fieldIds);
+
+    /** Commits one row allocation and updates accumulated file-level metadata. */
+    protected void commitRow(RowAllocation allocation, List<Integer> fieldIds) {
         maxRowWidth = Math.max(maxRowWidth, fieldIds.size());
 
+        for (int column = 0; column < numColumns; column++) {
+            int fieldId = allocation.colToField[column];
+            if (fieldId != -1) {
+                fieldToColumns.computeIfAbsent(fieldId, ignored -> new TreeSet<>()).add(column);
+            }
+        }
+
+        overflowFieldSet.addAll(allocation.overflowFields);
+    }
+
+    protected int[] emptyColumnMapping() {
         int[] colToField = new int[numColumns];
         for (int i = 0; i < numColumns; i++) {
             colToField[i] = -1;
         }
-
-        int assignLimit = Math.min(fieldIds.size(), numColumns);
-        for (int i = 0; i < assignLimit; i++) {
-            int fieldId = fieldIds.get(i);
-            colToField[i] = fieldId;
-            fieldToColumns.computeIfAbsent(fieldId, ignored -> new TreeSet<>()).add(i);
-        }
-
-        List<Integer> overflowFields = new ArrayList<>();
-        for (int i = assignLimit; i < fieldIds.size(); i++) {
-            int fieldId = fieldIds.get(i);
-            overflowFields.add(fieldId);
-            overflowFieldSet.add(fieldId);
-        }
-
-        return new RowAllocation(colToField, overflowFields);
+        return colToField;
     }
 
     public Map<Integer, List<Integer>> fieldToColumns() {
@@ -97,9 +96,9 @@ public class MapSharedShreddingColumnAllocator {
         private final int[] colToField;
         private final List<Integer> overflowFields;
 
-        private RowAllocation(int[] colToField, List<Integer> overflowFields) {
-            this.colToField = colToField;
-            this.overflowFields = Collections.unmodifiableList(overflowFields);
+        RowAllocation(int[] colToField, List<Integer> overflowFields) {
+            this.colToField = colToField.clone();
+            this.overflowFields = Collections.unmodifiableList(new ArrayList<>(overflowFields));
         }
 
         public int[] colToField() {

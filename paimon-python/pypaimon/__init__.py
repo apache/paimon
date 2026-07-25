@@ -17,7 +17,7 @@
 
 import sys
 
-if sys.version_info[:2] == (3, 6):
+if sys.version_info[:2] < (3, 8):
     try:
         from pypaimon.manifest import fastavro_py36_compat  # noqa: F401
     except ImportError:

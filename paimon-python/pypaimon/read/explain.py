@@ -64,6 +64,10 @@ class ExplainSplitInfo:
     level_histogram: Dict[int, int]
     deletion_file_count: int
     file_paths: List[str]
+    # Per-file metadata (DataFileMeta) for consumers that need write_cols /
+    # row-id ranges, e.g. projection-aware reader routing. Optional so callers
+    # constructing ExplainSplitInfo without file objects stay compatible.
+    data_files: Optional[List[Any]] = None
 
 
 @dataclass
@@ -126,6 +130,10 @@ class ExplainResult:
     # Verbose-only
     splits: Optional[List[ExplainSplitInfo]] = None
 
+    # Native (pypaimon_rust) plan; pruning funnel not tracked. Kept last to
+    # preserve positional-arg compatibility.
+    native_planned: bool = False
+
     def __str__(self) -> str:
         return render_explain(self)
 
@@ -159,6 +167,8 @@ def render_explain(result: ExplainResult) -> str:
     _line(out, "Limit", str(result.limit) if result.limit is not None else "<none>")
 
     out.write("\n")
+    if result.native_planned:
+        _line(out, "Planner", "native (pypaimon_rust); pruning not tracked")
     _line(out, "Partition pruning",
           result.partition_pruning.format() if result.partition_pruning else "n/a")
     _line(out, "Bucket pruning",

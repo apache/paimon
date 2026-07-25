@@ -65,14 +65,23 @@ public class SparkRow implements InternalRow, Serializable {
     private final UriReaderFactory uriReaderFactory;
 
     public SparkRow(RowType type, Row row) {
-        this(type, row, RowKind.INSERT, null);
+        this(type, row, RowKind.INSERT, (CatalogContext) null);
     }
 
     public SparkRow(RowType type, Row row, RowKind rowkind, CatalogContext catalogContext) {
+        this(type, row, rowkind, new UriReaderFactory(catalogContext));
+    }
+
+    public static SparkRow fromUriReaderFactory(
+            RowType type, Row row, RowKind rowkind, UriReaderFactory uriReaderFactory) {
+        return new SparkRow(type, row, rowkind, uriReaderFactory);
+    }
+
+    private SparkRow(RowType type, Row row, RowKind rowkind, UriReaderFactory uriReaderFactory) {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     @Override
@@ -185,7 +194,8 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public InternalRow getRow(int i, int i1) {
-        return new SparkRow((RowType) type.getTypeAt(i), row.getStruct(i));
+        return new SparkRow(
+                (RowType) type.getTypeAt(i), row.getStruct(i), RowKind.INSERT, uriReaderFactory);
     }
 
     private static int toPaimonDate(Object object) {
@@ -376,7 +386,7 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public InternalRow getRow(int i, int i1) {
-            return new SparkRow((RowType) elementType, getAs(i));
+            return new SparkRow((RowType) elementType, getAs(i), RowKind.INSERT, uriReaderFactory);
         }
 
         @Override

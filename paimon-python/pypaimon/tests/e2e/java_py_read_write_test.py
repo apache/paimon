@@ -26,7 +26,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
@@ -39,7 +39,8 @@ else:
 
 
 def get_file_format_params():
-    if sys.version_info[:2] == (3, 6):
+    # lance has no wheel on Python < 3.8.
+    if sys.version_info[:2] < (3, 8):
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]
@@ -757,7 +758,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         predicate = predicate_factory(read_builder.new_predicate_builder())
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -785,7 +786,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                      .new_predicate_builder()
                      .greater_or_equal('k', 'key-295'))
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -803,7 +804,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
         disabled_table = table.copy({budget_key: '0 b'})
-        disabled_scanner = GlobalIndexScanner.create(disabled_table, predicate=predicate)
+        disabled_scanner = DataEvolutionGlobalIndexScanner.create(disabled_table, predicate=predicate)
         self.assertIsNotNone(disabled_scanner)
         with disabled_scanner:
             disabled_result = disabled_scanner.scan(predicate)
@@ -1455,6 +1456,81 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(
             result.column('payloads').to_pylist(),
             data.column('payloads').to_pylist(),
+        )
+
+    def test_read_map_blob_written_by_java(self):
+        table = self.catalog.get_table('default.map_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_map(result.schema.field('payloads').type))
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'java-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'java-omega'},
+            ],
+        )
+
+    def test_write_map_blob_for_java(self):
+        map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        table_name = 'default.map_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [(1, b'python-alpha'), (2, None), (3, b'')],
+                    [],
+                    None,
+                    [(4, b'python-omega')],
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'python-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'python-omega'},
+            ],
         )
 
     def test_compact_conflict_shard_update(self):

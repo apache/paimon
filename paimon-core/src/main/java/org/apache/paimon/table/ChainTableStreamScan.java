@@ -118,8 +118,16 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     /** Maximum number of retries when race condition is detected during position capture. */
     private static final int MAX_RACE_RETRIES = 3;
 
+    /**
+     * If true, the starting phase uses the same anchor-based chain merging plan as batch mode,
+     * allowing streaming readers to see deletions/updates that require merging historical snapshot
+     * partitions with delta partitions.
+     */
+    private final boolean mergeSnapshot;
+
     public ChainTableStreamScan(ChainGroupReadTable chainGroupReadTable) {
         this.chainGroupReadTable = chainGroupReadTable;
+        this.mergeSnapshot = chainGroupReadTable.coreOptions().chainTableStreamingMergeSnapshot();
         this.batchScan =
                 new ChainGroupReadTable.ChainTableBatchScan(
                         chainGroupReadTable.schema(), chainGroupReadTable);
@@ -176,8 +184,10 @@ public class ChainTableStreamScan implements StreamDataTableScan {
      * come after it. Older snapshot partitions are excluded. Each primary key appears exactly once
      * under its natural partition.
      *
-     * <p>Unlike batch full scan, anchor-based chain merging is not performed. This keeps Phase 1
-     * lightweight for long-running jobs.
+     * <p>By default anchor-based chain merging is skipped to keep Phase 1 lightweight. When {@code
+     * chain-table.streaming.merge-snapshot} is true, the latest snapshot partition per group is
+     * merged with delta partitions whose chain key is strictly greater than the snapshot chain key,
+     * allowing streaming readers to see cross-branch deletions and updates.
      */
     private TableScan.Plan planStarting() {
         FileStoreTable deltaTable = chainGroupReadTable.other();
@@ -274,9 +284,52 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         }
 
         // 4. Build ChainSplits:
-        //    - Snapshot partitions are already filtered to latest per group at the pinned snapshot.
-        //    - Delta partitions: include partitions with chain key > latest snapshot chain key for
-        //      that group, or all partitions if no snapshot exists for that group.
+        //    - Lightweight mode: snapshot partitions are read directly; delta partitions are
+        //      included only if their chain key is greater than the latest snapshot chain key.
+        //    - Merge mode: for each group, merge the latest snapshot partition with delta
+        //      partitions whose chain key is strictly greater than the snapshot chain key.
+        //      This allows streaming readers to see deletions/updates that span both branches.
+        List<Split> allSplits =
+                mergeSnapshot
+                        ? buildMergedStartingSplits(
+                                snapshotBranch,
+                                deltaBranch,
+                                snapshotSplitsByPartition,
+                                deltaSplitsByPartition,
+                                latestChainPartitionPerGroup)
+                        : buildLightweightStartingSplits(
+                                snapshotBranch,
+                                deltaBranch,
+                                snapshotSplitsByPartition,
+                                deltaSplitsByPartition,
+                                latestChainPartitionPerGroup);
+
+        LOG.info(
+                "ChainTableStreamScan.planStarting [snapshot={}, delta={}]: "
+                        + "{} delta partitions, {} snapshot partitions, "
+                        + "{} latest snapshot groups, {} total splits",
+                snapshotBranch,
+                deltaBranch,
+                deltaSplitsByPartition.size(),
+                snapshotSplitsByPartition.size(),
+                latestChainPartitionPerGroup.size(),
+                allSplits.size());
+
+        startingDone = true;
+        return new DataFilePlan<>(allSplits);
+    }
+
+    /**
+     * Lightweight starting splits: read the latest snapshot partition per group directly, and only
+     * include delta partitions whose chain key is strictly greater than the latest snapshot chain
+     * key for that group.
+     */
+    private List<Split> buildLightweightStartingSplits(
+            String snapshotBranch,
+            String deltaBranch,
+            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
         for (Map.Entry<BinaryRow, List<DataSplit>> entry : snapshotSplitsByPartition.entrySet()) {
@@ -303,19 +356,102 @@ public class ChainTableStreamScan implements StreamDataTableScan {
             }
         }
 
-        LOG.info(
-                "ChainTableStreamScan.planStarting [snapshot={}, delta={}]: "
-                        + "{} delta partitions, {} snapshot partitions, "
-                        + "{} latest snapshot groups, {} total splits",
-                snapshotBranch,
-                deltaBranch,
-                deltaSplitsByPartition.size(),
-                snapshotSplitsByPartition.size(),
-                latestChainPartitionPerGroup.size(),
-                allSplits.size());
+        return allSplits;
+    }
 
-        startingDone = true;
-        return new DataFilePlan<>(allSplits);
+    /**
+     * Merge-mode starting splits: for each group, merge the latest snapshot partition (if any) with
+     * all delta partitions whose chain key is strictly greater than the snapshot chain key. Groups
+     * without a snapshot merge all their delta partitions into the latest delta partition. This
+     * makes cross-branch deletions and updates visible in the streaming starting phase.
+     */
+    private List<Split> buildMergedStartingSplits(
+            String snapshotBranch,
+            String deltaBranch,
+            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<Object, BinaryRow> latestChainPartitionPerGroup) {
+        List<Split> allSplits = new ArrayList<>();
+
+        // Pre-group delta splits and find the latest delta partition per group.
+        Map<Object, List<DataSplit>> deltaSplitsByGroup = new HashMap<>();
+        Map<Object, BinaryRow> latestDeltaPartitionPerGroup = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<DataSplit>> e : deltaSplitsByPartition.entrySet()) {
+            BinaryRow deltaPartition = e.getKey();
+            Object groupKey = toGroupKey(deltaPartition);
+            deltaSplitsByGroup
+                    .computeIfAbsent(groupKey, k -> new ArrayList<>())
+                    .addAll(e.getValue());
+
+            BinaryRow currentLatest = latestDeltaPartitionPerGroup.get(groupKey);
+            if (currentLatest == null
+                    || chainPartitionComparator.compare(
+                                    partitionProjector.extractChainPartition(deltaPartition),
+                                    partitionProjector.extractChainPartition(currentLatest))
+                            > 0) {
+                latestDeltaPartitionPerGroup.put(groupKey, deltaPartition);
+            }
+        }
+
+        // Groups that have a snapshot anchor.
+        for (Map.Entry<Object, BinaryRow> entry : latestChainPartitionPerGroup.entrySet()) {
+            Object groupKey = entry.getKey();
+            BinaryRow snapshotPartition = entry.getValue();
+            List<DataSplit> snapshotSplits =
+                    snapshotSplitsByPartition.getOrDefault(
+                            snapshotPartition, Collections.emptyList());
+
+            BinaryRow latestDeltaPartition = latestDeltaPartitionPerGroup.get(groupKey);
+            boolean hasDeltaAfterSnapshot =
+                    latestDeltaPartition != null
+                            && chainPartitionComparator.compare(
+                                            partitionProjector.extractChainPartition(
+                                                    latestDeltaPartition),
+                                            partitionProjector.extractChainPartition(
+                                                    snapshotPartition))
+                                    > 0;
+
+            List<DataSplit> selectedDeltaSplits = new ArrayList<>();
+            if (hasDeltaAfterSnapshot) {
+                for (DataSplit dataSplit : deltaSplitsByGroup.get(groupKey)) {
+                    BinaryRow deltaPartition = dataSplit.partition();
+                    if (chainPartitionComparator.compare(
+                                    partitionProjector.extractChainPartition(deltaPartition),
+                                    partitionProjector.extractChainPartition(snapshotPartition))
+                            > 0) {
+                        selectedDeltaSplits.add(dataSplit);
+                    }
+                }
+            }
+
+            BinaryRow logicalPartition =
+                    hasDeltaAfterSnapshot ? latestDeltaPartition : snapshotPartition;
+            allSplits.addAll(
+                    ChainTableUtils.buildChainSplits(
+                            logicalPartition,
+                            snapshotSplits,
+                            selectedDeltaSplits,
+                            snapshotBranch,
+                            deltaBranch));
+        }
+
+        // Delta-only groups: there is no snapshot anchor, so merge all delta partitions in the
+        // group into the latest delta partition.
+        for (Map.Entry<Object, List<DataSplit>> entry : deltaSplitsByGroup.entrySet()) {
+            Object groupKey = entry.getKey();
+            if (!latestChainPartitionPerGroup.containsKey(groupKey)) {
+                BinaryRow logicalPartition = latestDeltaPartitionPerGroup.get(groupKey);
+                allSplits.addAll(
+                        ChainTableUtils.buildChainSplits(
+                                logicalPartition,
+                                Collections.emptyList(),
+                                entry.getValue(),
+                                snapshotBranch,
+                                deltaBranch));
+            }
+        }
+
+        return allSplits;
     }
 
     /**

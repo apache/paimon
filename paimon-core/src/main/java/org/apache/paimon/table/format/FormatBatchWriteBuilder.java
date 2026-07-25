@@ -87,7 +87,8 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 Identifier.fromString(table.fullName()),
                 staticPartition,
                 syncHiveUri,
-                table.catalogContext());
+                table.catalogContext(),
+                table.partitionManager());
     }
 
     @Override

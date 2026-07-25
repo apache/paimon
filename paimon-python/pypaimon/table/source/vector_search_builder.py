@@ -20,8 +20,10 @@
 from abc import ABC, abstractmethod
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
-from pypaimon.table.source.vector_search_scan import VectorSearchScanImpl
+from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 
 
 class VectorSearchBuilder(ABC):
@@ -211,13 +213,23 @@ class AbstractVectorSearchBuilderImpl:
         # type: () -> VectorSearchScan
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        return VectorSearchScanImpl(
+        scan_class = DataEvolutionVectorScan
+        if self._is_primary_key_vector_search():
+            from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
+            scan_class = PrimaryKeyVectorScan
+        return scan_class(
             self._table,
             self._vector_column,
             filter_=self._filter,
             partition_filter=self._partition_filter,
             options=self._options,
         )
+
+    def _is_primary_key_vector_search(self):
+        if self._vector_column is None:
+            return False
+        core = CoreOptions(Options(dict(self._table.table_schema.options)))
+        return self._vector_column.name in core.primary_key_vector_index_columns()
 
 
 class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuilder):
@@ -240,7 +252,11 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
-        return VectorSearchReadImpl(
+        read_class = DataEvolutionVectorRead
+        if self._is_primary_key_vector_search():
+            from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
+            read_class = PrimaryKeyVectorRead
+        return read_class(
             self._table,
             self._limit,
             self._vector_column,

@@ -21,6 +21,7 @@ package org.apache.paimon.spark.util
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.types.{RowKind, RowType}
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.StructType
@@ -31,14 +32,23 @@ object SparkRowUtils {
       writeType: RowType,
       rowkindColIdx: Int,
       catalogContext: CatalogContext): Row => SparkRow = {
+    toPaimonRow(writeType, rowkindColIdx, new UriReaderFactory(catalogContext))
+  }
+
+  def toPaimonRow(
+      writeType: RowType,
+      rowkindColIdx: Int,
+      uriReaderFactory: UriReaderFactory): Row => SparkRow = {
     if (rowkindColIdx != -1) {
       row =>
-        new SparkRow(
+        SparkRow.fromUriReaderFactory(
           writeType,
           row,
           RowKind.fromByteValue(row.getByte(rowkindColIdx)),
-          catalogContext)
-    } else { row => new SparkRow(writeType, row, RowKind.INSERT, catalogContext) }
+          uriReaderFactory)
+    } else {
+      row => SparkRow.fromUriReaderFactory(writeType, row, RowKind.INSERT, uriReaderFactory)
+    }
   }
 
   def getFieldIndex(schema: StructType, colName: String): Int = {

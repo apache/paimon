@@ -20,6 +20,7 @@ package org.apache.paimon.arrow.reader;
 
 import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
@@ -68,9 +69,6 @@ public class ArrowBatchReader {
         this.caseSensitive = caseSensitive;
     }
 
-    /** A {@link ColumnVector} that always returns null for any position. */
-    private static final ColumnVector NULL_COLUMN_VECTOR = i -> true;
-
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
         int[] mapping = new int[projectedRowType.getFieldCount()];
         Schema arrowSchema = vsr.getSchema();
@@ -89,7 +87,7 @@ public class ArrowBatchReader {
             if (mapping[i] >= 0) {
                 batch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
             } else {
-                batch.columns[i] = NULL_COLUMN_VECTOR;
+                batch.columns[i] = AllNullColumnVector.INSTANCE;
             }
         }
 

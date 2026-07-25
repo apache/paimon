@@ -785,7 +785,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertEqual([100], captured_limits)
 
     def test_full_text_scan_ignores_other_index_types_on_same_column(self):
-        from pypaimon.table.source.full_text_scan import FullTextScanImpl
+        from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
 
         text_field = _field(1, "content", "STRING")
         ft_entry = _entry(
@@ -797,7 +797,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         table = _StubTable(fields=[text_field], entries=[ft_entry, btree_entry])
         _patch_snapshot(self, [ft_entry, btree_entry])
 
-        splits = FullTextScanImpl(table, [text_field]).scan().splits()
+        splits = DataEvolutionFullTextScan(table, [text_field]).scan().splits()
 
         self.assertEqual(1, len(splits))
         self.assertEqual(
@@ -807,7 +807,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
     def test_full_text_scan_adds_raw_split_for_uncovered_ranges(self):
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
-        from pypaimon.table.source.full_text_scan import FullTextScanImpl
+        from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
         from pypaimon.table.source.full_text_search_split import (
             IndexFullTextSearchSplit,
             RawFullTextSearchSplit,
@@ -827,7 +827,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         table.options = _Options()
         _patch_snapshot(self, [entry], types.SimpleNamespace(next_row_id=10))
 
-        splits = FullTextScanImpl(table, [text_field]).scan().splits()
+        splits = DataEvolutionFullTextScan(table, [text_field]).scan().splits()
         index = [split for split in splits if isinstance(split, IndexFullTextSearchSplit)]
         raw = [split for split in splits if isinstance(split, RawFullTextSearchSplit)]
 
@@ -931,7 +931,7 @@ class VectorSearchFilterTest(unittest.TestCase):
             return _FakeReader()
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner.GlobalIndexScanner.create",
+                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
                 return_value=scanner), \
              mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
@@ -963,7 +963,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 
         entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
@@ -998,7 +998,7 @@ class VectorSearchFilterTest(unittest.TestCase):
              mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
                 side_effect=_fake_create):
-            result = VectorSearchReadImpl(
+            result = DataEvolutionVectorRead(
                 table,
                 limit=3,
                 vector_column=self.embedding_field,
@@ -1193,14 +1193,14 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertLess(result.score_getter()(2), 1.0)
 
     def test_raw_candidate_search_scores_only_candidate_bitmap(self):
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 
         table = _StubTable(fields=[self.id_field, self.embedding_field],
                            entries=[])
         raw_calls = _install_raw_vector_read_builder(
             table, "embedding", {0: [0.0], 1: [10.0], 2: [20.0]})
 
-        reader = VectorSearchReadImpl(
+        reader = DataEvolutionVectorRead(
             table,
             limit=1,
             vector_column=self.embedding_field,
@@ -1282,9 +1282,9 @@ class VectorSearchFilterTest(unittest.TestCase):
             )
 
     def test_scanner_threads_external_path_to_btree_reader(self):
-        """GlobalIndexScanner (backing _pre_filter) must thread external_path
+        """DataEvolutionGlobalIndexScanner (backing _pre_filter) must thread external_path
         onto the GlobalIndexIOMeta handed to the btree reader factory."""
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 
         scalar_file = self.entries[2].index_file
 
@@ -1301,7 +1301,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.LazyFilteredBTreeReader",
                 _FakeLazyReader):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=self.table.fields,
                 file_io=self.table.file_io,
                 index_path="/unused/index-path",
@@ -1488,7 +1488,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
     """Scalar pre-filter across multiple btree shards of the same field.
 
-    Exercises the real GlobalIndexScanner reader-construction path (with
+    Exercises the real DataEvolutionGlobalIndexScanner reader-construction path (with
     OffsetGlobalIndexReader + UnionGlobalIndexReader wrapping) so that:
       - Local row ids from each shard are rebased to the global row-id space
         before being unioned.
@@ -1500,8 +1500,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_hit_only_in_later_shard_returns_global_row_id(self):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         id_field = _field(0, "id")
@@ -1545,7 +1545,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=wide_meta):
-                scanner = GlobalIndexScanner(
+                scanner = DataEvolutionGlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
                     index_path="/unused",
@@ -1566,8 +1566,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_groups_are_padded_before_and(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a")
@@ -1606,9 +1606,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader(io_meta.file_name) for io_meta in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1629,8 +1629,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_groups_pad_missing_coverage_before_and(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a")
@@ -1675,9 +1675,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader(io_meta.file_name) for io_meta in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1697,8 +1697,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_extra_field_padding_does_not_convert_none_to_hits(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         a_field = _field(0, "a", "STRING")
@@ -1727,9 +1727,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             return [_StubReader() for _ in io_metas]
 
         with mock.patch(
-                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                "pypaimon.globalindex.data_evolution_global_index_scanner._create_inner_readers",
                 side_effect=_stub_create_inner_readers):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
@@ -1746,12 +1746,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
     def test_native_fulltext_index_is_dispatched_by_scanner(self):
         """Non-btree scalar global indexes (full-text, etc.) must be
-        instantiated by GlobalIndexScanner — previously only 'btree' was
+        instantiated by DataEvolutionGlobalIndexScanner — previously only 'btree' was
         handled and everything else was silently dropped, making text-column
         pre-filter a no-op."""
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1785,7 +1785,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.globalindex.full_text.NativeFullTextGlobalIndexReader",
                 _StubFullTextReader):
-            scanner = GlobalIndexScanner(
+            scanner = DataEvolutionGlobalIndexScanner(
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path="/unused",
@@ -1814,8 +1814,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         the pre-filter is silently skipped and vector search returns rows
         that violate the predicate."""
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1847,7 +1847,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = GlobalIndexScanner(
+                scanner = DataEvolutionGlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
                     index_path="/unused",
@@ -1867,8 +1867,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
     def test_scanner_reports_unindexed_rows_for_full_mode(self):
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         class _Options:
@@ -1893,7 +1893,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         table.options = _Options()
         table.snapshot_manager = lambda: _Snapshots()
 
-        scanner = GlobalIndexScanner.create(table, index_files=[indexed])
+        scanner = DataEvolutionGlobalIndexScanner.create(table, index_files=[indexed])
         try:
             result = scanner.unindexed_rows(
                 Predicate(method="equal", index=0, field="id", literals=[7]))
@@ -1903,8 +1903,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], result.results().to_range_list())
 
     def test_scanner_create_selects_extra_field_indexes(self):
-        from pypaimon.globalindex.global_index_scanner import (
-            GlobalIndexScanner,
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
         )
 
         name_field = _field(0, "name", "STRING")
@@ -1940,7 +1940,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             with mock.patch(
                     "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = GlobalIndexScanner.create(
+                scanner = DataEvolutionGlobalIndexScanner.create(
                     table,
                     predicate=Predicate(method="equal", index=1, field="id",
                                         literals=[3]),
@@ -2201,7 +2201,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_split import VectorSearchSplit
 
         num_splits = 1200
@@ -2245,7 +2245,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
                 side_effect=_fake_create):
-            reader = VectorSearchReadImpl(
+            reader = DataEvolutionVectorRead(
                 table, limit=10, vector_column=embedding_field,
                 query_vector=[1.0], filter_=None)
             result = reader.read(splits)
@@ -2259,7 +2259,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_split import (
             IndexVectorSearchSplit,
             RawVectorSearchSplit,
@@ -2293,7 +2293,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
                 side_effect=_fake_create):
-            reader = VectorSearchReadImpl(
+            reader = DataEvolutionVectorRead(
                 table, limit=2, vector_column=embedding_field,
                 query_vector=[1.0], filter_=None)
             with mock.patch.object(
@@ -2360,7 +2360,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         self.assertEqual([2, 8], sorted(list(results[1].results())))
 
     def test_read_uses_empty_index_prefilter_when_scalar_index_missing(self):
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 
         id_field = _field(0, "id")
@@ -2378,7 +2378,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             scalar_index_files=[],
         )
 
-        reader = VectorSearchReadImpl(
+        reader = DataEvolutionVectorRead(
             table, limit=2, vector_column=embedding_field,
             query_vector=[1.0], filter_=filter_pred)
 
@@ -2390,7 +2390,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
     def test_raw_search_uses_partition_filter_and_index_type_metric(self):
         import pyarrow as pa
 
-        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 
         id_field = _field(0, "id")
         embedding_field = _field(1, "embedding", "FLOAT")
@@ -2442,7 +2442,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                 return _Read()
 
         table.new_read_builder = lambda: _Builder()
-        reader = VectorSearchReadImpl(
+        reader = DataEvolutionVectorRead(
             table,
             limit=1,
             vector_column=embedding_field,
@@ -2469,7 +2469,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 class FullTextSearchManySplitsTest(unittest.TestCase):
 
     def test_full_text_read_threads_external_path_to_reader(self):
-        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
         from pypaimon.table.source.full_text_search_split import (
             IndexFullTextSearchSplit,
         )
@@ -2502,7 +2502,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.table.source.full_text_read._create_full_text_reader",
                 side_effect=_fake_create):
-            reader = FullTextReadImpl(
+            reader = DataEvolutionFullTextRead(
                 table, limit=10, text_column=text_field,
                 query=match_query("test"))
             reader.read([split])
@@ -2515,7 +2515,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
         from pypaimon.table.source.full_text_search_split import (
             IndexFullTextSearchSplit,
         )
@@ -2557,7 +2557,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
              mock.patch(
                 "pypaimon.table.source.full_text_read._create_full_text_reader",
                 side_effect=_fake_create):
-            result = FullTextReadImpl(
+            result = DataEvolutionFullTextRead(
                 table,
                 limit=10,
                 text_column=text_field,
@@ -2573,7 +2573,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
         from pypaimon.table.source.full_text_search_split import (
             IndexFullTextSearchSplit,
             RawFullTextSearchSplit,
@@ -2615,12 +2615,12 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
                 side_effect=_fake_create), \
              mock.patch(
                 "pypaimon.table.source.full_text_read."
-                "FullTextReadImpl._build_raw_index",
+                "DataEvolutionFullTextRead._build_raw_index",
                 return_value=b"raw-index") as build_raw_index, \
              mock.patch(
                 "pypaimon.table.source.full_text_read._search_raw_full_text",
                 return_value=DictBasedScoredIndexResult({8: 9.0})) as search_raw:
-            result = FullTextReadImpl(
+            result = DataEvolutionFullTextRead(
                 table,
                 limit=10,
                 text_column=text_field,
@@ -2642,7 +2642,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
-        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
         from pypaimon.table.source.full_text_search_split import (
             IndexFullTextSearchSplit,
         )
@@ -2683,7 +2683,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         with mock.patch(
                 "pypaimon.table.source.full_text_read._create_full_text_reader",
                 side_effect=_fake_create):
-            reader = FullTextReadImpl(
+            reader = DataEvolutionFullTextRead(
                 table, limit=10, text_column=text_field,
                 query=match_query("test"))
             result = reader.read(splits)

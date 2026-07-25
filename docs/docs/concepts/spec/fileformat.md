@@ -849,9 +849,9 @@ BLOB files use the `.blob` extension and have the following structure:
 +------------------+
 ```
 
-Each physical BLOB file stores one logical field. The field can be either `BLOB` or
-`ARRAY<BLOB>`. For `ARRAY<BLOB>`, the variable-length data area in an entry uses the
-following nested payload:
+Each physical BLOB file stores one logical field. The field can be `BLOB`,
+`ARRAY<BLOB>`, or `MAP<K, BLOB>`. For `ARRAY<BLOB>`, the variable-length data area in
+an entry uses the following nested payload:
 
 ```
 +----------------------+-----------------------------------------------+
@@ -864,10 +864,33 @@ following nested payload:
 +----------------------+-----------------------------------------------+
 ```
 
-An element length of `-1` represents a null array element. At the outer file index
-level, `-1` represents a null field and `-2` represents a field placeholder used by
-data evolution. An empty array is encoded with an element count of zero and an empty
-element index; it is distinct from a null array.
+An element length of `-1` represents a null array element. An empty array is encoded
+with an element count of zero and an empty element index; it is distinct from a null
+array.
+
+For `MAP<K, BLOB>`, the variable-length data area uses the following nested payload:
+
+```
++----------------------+-----------------------------------------------+
+| Map Magic Number     | 4 bytes (1296188226, Little Endian)           |
+| Map Version          | 1 byte                                        |
+| Entry Count          | 4 bytes (Little Endian)                       |
+| Key Data             | Concatenated bytes of all non-null keys       |
+| Blob Data            | Concatenated bytes of all non-null values     |
+| Key Length Index     | Delta-Varint compressed key lengths           |
+| Blob Length Index    | Delta-Varint compressed Blob lengths          |
+| Key Index Length     | 4 bytes (Little Endian)                       |
+| Blob Index Length    | 4 bytes (Little Endian)                       |
++----------------------+-----------------------------------------------+
+```
+
+The key and Blob length indexes are aligned by entry position. A length of `-1`
+represents null, while zero represents an empty key or Blob. Supported key types are
+the integer family, `CHAR`, and `VARCHAR`. An empty map has an entry count of zero and
+is distinct from a null map.
+
+At the outer file index level, `-1` represents a null field and `-2` represents a
+field placeholder used by data evolution.
 
 Key features:
 - **CRC32 Checksums**: Each blob entry has a CRC32 checksum for data integrity verification
@@ -875,7 +898,7 @@ Key features:
 - **Delta-Varint Compression**: The index uses delta-varint compression for space efficiency
 
 Limitations:
-1. BLOB format only supports a single `BLOB` or `ARRAY<BLOB>` field per physical file.
+1. BLOB format only supports a single `BLOB`, `ARRAY<BLOB>`, or `MAP<K, BLOB>` field per physical file.
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 

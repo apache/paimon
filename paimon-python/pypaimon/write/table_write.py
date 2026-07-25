@@ -56,8 +56,18 @@ class TableWrite:
             partition_bucket_groups[(tuple(partitions[i]), buckets[i])].append(i)
 
         for (partition, bucket), row_indices in partition_bucket_groups.items():
-            indices_array = pa.array(row_indices, type=pa.int64())
-            sub_table = pa.compute.take(data, indices_array)
+            if len(row_indices) == data.num_rows:
+                # Every input row belongs to the same partition/bucket. Passing the
+                # original batch through avoids copying large BLOB values through
+                # Arrow take before the dedicated BLOB writer consumes them.
+                sub_table = data
+            elif row_indices[-1] - row_indices[0] + 1 == len(row_indices):
+                # Contiguous groups can share the original Arrow buffers instead of
+                # gathering their rows into newly allocated buffers with take.
+                sub_table = data.slice(row_indices[0], len(row_indices))
+            else:
+                indices_array = pa.array(row_indices, type=pa.int64())
+                sub_table = pa.compute.take(data, indices_array)
             self.file_store_write.write(partition, bucket, sub_table)
 
     def write_row(self, row):
@@ -75,7 +85,14 @@ class TableWrite:
         self.file_store_write.write_row(partition, bucket, row, values_by_name)
 
     def write_pandas(self, dataframe):
-        pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            # Column-subset write (append-only ``with_write_type``): build the
+            # RecordBatch against the subset schema so the input only needs the
+            # written columns, mirroring the ``write_arrow`` path.
+            pa_schema = self._write_cols_pyarrow_schema(write_cols)
+        else:
+            pa_schema = self.table_pyarrow_schema
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 

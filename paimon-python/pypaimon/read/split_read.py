@@ -832,6 +832,10 @@ class MergeFileSplitRead(SplitRead):
             outer_extract_name_paths: Optional[List[List[str]]] = None,
             outer_flat_read_type: Optional[List[DataField]] = None,
             limit: Optional[int] = None):
+        self.row_ranges = None
+        if isinstance(split, IndexedSplit):
+            self.row_ranges = split.row_ranges()
+            split = split.data_split()
         # Merge functions need full ROW sub-structures, so nested paths
         # are not pushed down here; sub-path extraction happens above
         # the merge via OuterProjectionRecordReader.
@@ -858,10 +862,22 @@ class MergeFileSplitRead(SplitRead):
 
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
+        selected_positions = None
+        if self.row_ranges is not None:
+            selected_positions = [
+                position
+                for row_range in self.row_ranges
+                for position in range(row_range.from_, row_range.to + 1)
+            ]
+            file_batch_reader = RowIdFilterRecordBatchReader(
+                file_batch_reader, 0, self.row_ranges)
         dv = dv_factory() if dv_factory else None
         if dv:
+            if selected_positions is not None:
+                dv = PositionMappedDeletionVector(
+                    dv, row_positions=selected_positions)
             return ApplyDeletionVectorReader(
-                KeyValueWrapReader(RowPositionReader(file_batch_reader),
+                KeyValueWrapReader(file_batch_reader,
                                    len(self.trimmed_primary_key), self.value_arity), dv)
         else:
             return KeyValueWrapReader(file_batch_reader, len(self.trimmed_primary_key), self.value_arity)

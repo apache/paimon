@@ -32,13 +32,23 @@ indexed according to their data type and per-field options.
 
 > **Plugin required.** `es-index` is provided by this `paimon-eslib` module. Make sure `paimon-eslib`
 > is on the classpath of your Spark or Flink job (and of any reader) before building or querying an
-> `es-index`. The module and its ESLib/Lucene dependencies require Java 11 or newer; the root Maven
-> build intentionally skips `paimon-eslib` when it runs on JDK 8.
+> `es-index`. The module and its ESLib/Lucene dependencies require Java 11 or newer. It is excluded
+> from the default Maven reactor; build it explicitly with `-Ppaimon-eslib` on JDK 11 or newer.
 
 `paimon-eslib` is distributed as a thin JAR and does not embed ESLib or Lucene classes. Maven and
-Gradle resolve these dependencies transitively. When installing JARs manually, place `eslib-core`,
-`eslib-simdvec`, and their Lucene 9.12 dependencies in the same runtime classloader as
-`paimon-eslib`.
+Gradle resolve these dependencies transitively. When installing JARs manually, place
+`eslib-core-lucene9` and `eslib-simdvec-lucene9` 1.0.7, together with their Lucene 9.12
+dependencies, in the same runtime classloader as `paimon-eslib`.
+
+## ESLib source and artifacts
+
+- ESLib source code: [CrownChu/es-paimon-lib](https://github.com/CrownChu/es-paimon-lib)
+- Published ESLib JARs:
+  [CrownChu/es-paimon-lib-releases](https://github.com/CrownChu/es-paimon-lib-releases)
+
+The ESLib source and binary repositories are maintained independently of the Apache Software
+Foundation. The exact ESLib artifact versions used by this module are declared in
+[`pom.xml`](pom.xml).
 
 See the general [Global Index](../docs/docs/multimodal-table/global-index.mdx) documentation for the
 required Data Evolution table properties, coverage/freshness behavior, and shared build options.
@@ -138,11 +148,11 @@ column.
 | Key | Applies to | Default | Description |
 |---|---|---|---|
 | `type` | any column | inferred from data type | Force the sub-index type: `vector`, `fulltext`, `keyword`, `date`. |
-| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw` or `diskbbq`. `native` is not supported by paimon-eslib. |
+| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw`, `int8_hnsw`, or `diskbbq`. `native` is not supported by paimon-eslib. |
 | `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension (1–4096). Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
 | `metric` | vector | `cosine` | Distance metric (for example `cosine`, `l2`, `dot_product`). Use the same metric at build and query time. |
-| `m` | vector (`hnsw`) | engine default | HNSW graph out-degree; valid range: 1–512. |
-| `ef_construction` | vector (`hnsw`) | engine default | HNSW construction search width; valid range: 1–3200. |
+| `m` | vector (`hnsw`, `int8_hnsw`) | engine default | HNSW graph out-degree; valid range: 1–512. |
+| `ef_construction` | vector (`hnsw`, `int8_hnsw`) | engine default | HNSW construction search width; valid range: 1–3200. |
 | `vectors_per_cluster` | vector (`diskbbq`) | engine default | Target vectors per cluster for DiskBBQ; valid range: 64–65536. |
 | `centroids_per_parent_cluster` | vector (`diskbbq`) | engine default | Number of child centroids per parent cluster for DiskBBQ; valid range: 2–384. |
 | `analyzer` | string | `standard` | Text analyzer used by the full-text primary field or `.fulltext` sub-field: `standard`, `whitespace`, `simple`, or `keyword`. |

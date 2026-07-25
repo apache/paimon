@@ -20,6 +20,7 @@ package org.apache.paimon.arrow.writer;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.DataGetters;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 
 import org.apache.arrow.vector.FieldVector;
@@ -57,6 +58,19 @@ public abstract class ArrowFieldWriter {
             @Nullable int[] pickedInColumn,
             int startIndex,
             int batchRows) {
+        if (batchRows == 0) {
+            fieldVector.setValueCount(0);
+            return;
+        }
+
+        if (columnVector == AllNullColumnVector.INSTANCE) {
+            for (int i = 0; i < batchRows; i++) {
+                fieldVector.setNull(i);
+            }
+            fieldVector.setValueCount(batchRows);
+            return;
+        }
+
         doWrite(columnVector, pickedInColumn, startIndex, batchRows);
         fieldVector.setValueCount(batchRows);
     }

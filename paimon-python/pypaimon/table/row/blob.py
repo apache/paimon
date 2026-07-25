@@ -442,6 +442,15 @@ class _PlaceholderBlobArray:
 Blob.ARRAY_PLACE_HOLDER = _PlaceholderBlobArray()
 
 
+class _PlaceholderBlobMap:
+
+    def __repr__(self) -> str:
+        return "Blob.MAP_PLACE_HOLDER"
+
+
+Blob.MAP_PLACE_HOLDER = _PlaceholderBlobMap()
+
+
 class BlobData(Blob):
 
     def __init__(self, data: Optional[Union[bytes, bytearray]] = None):

@@ -38,7 +38,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.parquet.filter2.compat.FilterCompat;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -593,7 +592,7 @@ public class ParquetColumnVectorTest {
         writer.close();
 
         ParquetReaderFactory readerFactory =
-                new ParquetReaderFactory(new Options(), rowType, 1024, FilterCompat.NOOP);
+                new ParquetReaderFactory(new Options(), rowType, 1024, null);
 
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(

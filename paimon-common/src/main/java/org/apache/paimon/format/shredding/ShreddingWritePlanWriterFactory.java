@@ -22,78 +22,42 @@ import org.apache.paimon.data.shredding.ShreddingWritePlan;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.Collections;
 
-/** Decorates a format writer factory with optional per-file shredding write plans. */
-public class ShreddingWritePlanWriterFactory
-        implements FormatWriterFactory, SupportsShreddingWritePlan {
+/** Decorates a raw format writer factory with an active per-file shredding write plan. */
+public class ShreddingWritePlanWriterFactory implements FormatWriterFactory {
 
-    private final FormatWriterFactory delegate;
+    private final SupportsShreddingWritePlan delegate;
     private final ShreddingWritePlanFactory writePlanFactory;
 
     public ShreddingWritePlanWriterFactory(
             FormatWriterFactory delegate, ShreddingWritePlanFactory writePlanFactory) {
-        this.delegate = delegate;
+        Preconditions.checkArgument(
+                writePlanFactory.shouldCreateWritePlan(),
+                "Shredding write plan factory must be active.");
+        if (!(delegate instanceof SupportsShreddingWritePlan)) {
+            throw new UnsupportedOperationException(
+                    "Delegate writer factory does not support shredding write plans: "
+                            + delegate.getClass().getName());
+        }
+        this.delegate = (SupportsShreddingWritePlan) delegate;
         this.writePlanFactory = writePlanFactory;
     }
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        if (!writePlanFactory.shouldCreateWritePlan()) {
-            return delegate.create(out, compression);
-        }
-        if (!(delegate instanceof SupportsShreddingWritePlan)) {
-            throw new UnsupportedOperationException(
-                    "Delegate writer factory does not support shredding write plans: "
-                            + delegate.getClass().getName());
-        }
-
-        SupportsShreddingWritePlan shreddingDelegate = (SupportsShreddingWritePlan) delegate;
         if (writePlanFactory.shouldInferWritePlan()) {
-            return new InferShreddingWritePlanWriter(
-                    shreddingDelegate, writePlanFactory, out, compression);
+            return new InferShreddingWritePlanWriter(delegate, writePlanFactory, out, compression);
         }
 
         return createWriterWithPlan(
-                shreddingDelegate,
+                delegate,
                 out,
                 compression,
                 writePlanFactory.createWritePlan(Collections.emptyList()));
-    }
-
-    @Override
-    public FormatWriter createWithShreddingWritePlan(
-            PositionOutputStream out, String compression, ShreddingWritePlan writePlan)
-            throws IOException {
-        if (writePlanFactory.shouldCreateWritePlan()) {
-            throw new UnsupportedOperationException(
-                    "Composing multiple active shredding write plans is not supported.");
-        }
-
-        return shreddingDelegate().createWithShreddingWritePlan(out, compression, writePlan);
-    }
-
-    @Override
-    public void commitShreddingMetadata(
-            FormatWriter writer, ShreddingWritePlan writePlan, String compression)
-            throws IOException {
-        if (writePlanFactory.shouldCreateWritePlan()) {
-            throw new UnsupportedOperationException(
-                    "Composing multiple active shredding write plans is not supported.");
-        }
-
-        shreddingDelegate().commitShreddingMetadata(writer, writePlan, compression);
-    }
-
-    private SupportsShreddingWritePlan shreddingDelegate() {
-        if (!(delegate instanceof SupportsShreddingWritePlan)) {
-            throw new UnsupportedOperationException(
-                    "Delegate writer factory does not support shredding write plans: "
-                            + delegate.getClass().getName());
-        }
-        return (SupportsShreddingWritePlan) delegate;
     }
 
     static FormatWriter createWriterWithPlan(

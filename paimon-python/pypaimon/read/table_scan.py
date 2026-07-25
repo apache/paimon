@@ -16,9 +16,11 @@
 # under the License.
 
 import json as _json
+import logging
 from typing import Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
+from pypaimon.common.identifier import UNKNOWN_DATABASE
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -27,6 +29,15 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
+
+logger = logging.getLogger(__name__)
+
+# Options native forwards to Rust; any other copy() override is invisible to Rust.
+_NATIVE_FORWARDED_OPTIONS = frozenset({
+    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
+    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
+    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+})
 
 
 class TableScan:
@@ -52,10 +63,133 @@ class TableScan:
 
     def plan(self) -> Plan:
         auth_result = self.__auth_query()
+        # Native planning covers only a plain full-snapshot scan and bypasses the
+        # auth-aware file scanner; fall back to the normal path otherwise.
+        if (auth_result is None and self.table.options.native_plan_enabled()
+                and self._native_plan_supported()):
+            native = self._try_native_plan()
+            if native is not None:
+                return native
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
+
+    def _native_plan_supported(self) -> bool:
+        # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
+        try:
+            return self._native_plan_supported_impl()
+        except Exception as e:
+            logger.warning("Native-plan capability probe failed, falling back: %s", e)
+            return False
+
+    def _native_plan_supported_impl(self) -> bool:
+        """Fall back to the Python scanner for scans native can't carry:
+        shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
+        drops L0), deletion vectors (Python drops L0), data evolution
+        (dedicated split generator), postpone bucket (drops synthetic buckets),
+        a primary-key table whose trimmed PK is empty (PK equals the partition
+        key; native may mark splits raw-convertible and skip merge), dynamic
+        bucket / cross-partition PK tables (unconfirmed Rust parity), any
+        partitioned table (Rust bucket_path vs the writer's str(value) can
+        diverge), a stale schema (Rust reloads the latest), copy() overrides
+        Rust does not see (e.g. a removed scan.snapshot-id), a row limit
+        (native has no plan-time limit pushdown), query auth, non-main branch,
+        time-travel, scan.version, incremental, a missing/old pypaimon-rust, or
+        a catalog / identifier Rust cannot reconstruct. Keep this capability
+        gate in sync when adding scan features."""
+        from pypaimon.read.native_plan import native_runtime_available
+        if not native_runtime_available():
+            return False
+        # Native has no plan-time limit pushdown; Python trims splits before read.
+        if self.limit is not None:
+            return False
+        fs = self.file_scanner
+        if (getattr(fs, 'idx_of_this_subtask', None) is not None
+                or getattr(fs, 'start_pos_of_this_subtask', None) is not None
+                or getattr(fs, 'chunk_shuffle', None) is not None
+                or getattr(fs, '_global_index_result', None) is not None
+                or getattr(fs, 'deletion_vectors_enabled', False)
+                or getattr(fs, 'data_evolution', False)
+                or getattr(fs, 'only_read_real_buckets', False)):
+            return False
+        loader = getattr(
+            getattr(self.table, 'catalog_environment', None),
+            'catalog_loader',
+            None,
+        )
+        context_fn = getattr(loader, 'context', None)
+        if not callable(context_fn):
+            return False
+        from pypaimon.read.native_plan import _catalog_metastore
+        if _catalog_metastore(loader) is None:
+            return False
+        context = context_fn()
+        catalog_options = getattr(context, 'options', None)
+        if catalog_options is None:
+            return False
+        if any(getattr(context, attr, None) is not None for attr in (
+                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+            return False
+        database_name = self.table.identifier.get_database_name()
+        if not database_name or database_name == UNKNOWN_DATABASE or '.' in database_name:
+            return False
+        if self.table.options.query_auth_enabled \
+                or self.table.options.merge_engine() == 'first-row' \
+                or self.table.current_branch() != 'main':
+            return False
+        # Empty trimmed PK (PK == partition key): native skips merge -> duplicate/stale rows.
+        if getattr(self.table, 'is_primary_key_table', False) \
+                and not self.table.trimmed_primary_keys:
+            return False
+        # Dynamic-bucket / cross-partition PK: Rust parity unconfirmed -> fall back.
+        from pypaimon.table.bucket_mode import BucketMode
+        if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
+            return False
+        # Rust bucket_path vs the writer's unescaped str(value) can diverge -> fall back.
+        if self.table.partition_keys:
+            return False
+        # Rust reloads the latest schema; fall back if this table's schema is stale.
+        latest_schema = self.table.schema_manager.latest()
+        if latest_schema is not None and latest_schema.id != self.table.table_schema.id:
+            return False
+        # copy() overrides Rust can't see (e.g. removed scan.snapshot-id) -> fall back.
+        overrides = set(getattr(self.table, '_applied_dynamic_options', {}) or {})
+        if overrides - _NATIVE_FORWARDED_OPTIONS:
+            return False
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        options = self.table.options.options
+        if any(options.contains_key(k) for k in SCAN_KEYS) \
+                or options.contains_key('scan.version'):
+            return False
+        return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+
+    def _try_native_plan(self) -> Optional[Plan]:
+        """Plan via pypaimon_rust, then drop partitions the predicate rejects.
+
+        The predicate is not pushed to the native planner, so this may read more
+        files; the reader's row filter/limit still apply, so results match. Return
+        None when Rust finds no splits so the caller can use the matching Python
+        fallback (with scan stats when requested).
+        """
+        from pypaimon.read.native_plan import native_plan
+
+        try:
+            splits = native_plan(self.table)
+            if not splits:
+                return None
+            snapshot_id = splits[0].snapshot_id
+            partition_predicate = self.file_scanner.partition_key_predicate
+            if partition_predicate is not None:
+                splits = [s for s in splits
+                          if getattr(s, 'partition', None) is None
+                          or partition_predicate.test(s.partition)]
+            return Plan(splits, snapshot_id=snapshot_id)
+        except Exception as e:
+            # Any native construction/planning/pruning failure -> fall back.
+            logger.warning(
+                "Native plan failed, falling back to the Python scanner: %s", e)
+            return None
 
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
@@ -65,13 +199,20 @@ class TableScan:
     def __auth_query(self):
         return resolve_auth_result(self._query_auth_fn, self._read_type)
 
-    def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
+    def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         """Run :meth:`plan` while recording manifest / pruning counters.
 
         Only used by :meth:`ReadBuilder.explain`; the regular read path
-        keeps going through :meth:`plan`.
+        keeps going through :meth:`plan`. Native planning is not tracked, so
+        stats is None on the native path -- explain reflects the real plan and
+        marks the pruning funnel as untracked.
         """
         auth_result = self.__auth_query()
+        if (auth_result is None and self.table.options.native_plan_enabled()
+                and self._native_plan_supported()):
+            native = self._try_native_plan()
+            if native is not None:
+                return native, None
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()

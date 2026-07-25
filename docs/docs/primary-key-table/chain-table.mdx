@@ -222,9 +222,11 @@ you will get the following result:
 
 Chain tables support Flink streaming read. A streaming read job operates in two phases:
 
-1. **Full load phase**: Produces a full result by reading the latest snapshot partition (per group)
-   and delta partitions that come after it. For each partition group, only the most recent snapshot
-   partition is included — older snapshot partitions are considered outdated and excluded.
+1. **Full load phase**: By default it produces a lightweight result by reading the latest
+   snapshot partition (per group) and delta partitions that come after it. Older snapshot
+   partitions are excluded. You can enable `chain-table.streaming.merge-snapshot` to perform
+   anchor-based chain merging in this phase, allowing cross-branch `DELETE` records to be
+   resolved together with the snapshot data.
 2. **Incremental phase**: Continuously reads new commits from the delta branch as they arrive.
 
 ### Write-Side Requirements
@@ -251,6 +253,28 @@ SET 'execution.runtime-mode' = 'streaming';
 INSERT INTO downstream_sink SELECT * FROM default.t;
 ```
 
+### Merge Snapshot in Full Load Phase
+
+By default, the full-load phase is lightweight: for each group it reads the latest snapshot and later
+delta partitions as separate splits. This is fast but cross-branch deletes are invisible — the `DELETE`
+records in the delta branch cannot be deleted in the snapshot branch.
+
+If you need a fully reconciled starting snapshot, enable merge mode:
+
+```sql
+ALTER TABLE default.t SET (
+  'chain-table.streaming.merge-snapshot' = 'true'
+);
+```
+
+With merge mode enabled, the full-load phase merges the latest snapshot partition per group with
+delta partitions whose chain key is strictly greater than the snapshot's, so cross-branch
+deletes are correctly resolved. The trade-off is a heavier startup scan.
+
+To reduce the overhead, run `CALL sys.compact_chain_table(...)` periodically.
+After compaction, only the delta changes that arrived after compaction need to be merged.
+
+
 ### Limitations
 
 - The incremental phase only monitors the **delta branch**. Writes to the snapshot branch are
@@ -268,6 +292,12 @@ INSERT INTO downstream_sink SELECT * FROM default.t;
   specific partition, use batch mode instead.
 - The delta branch must use the `DEDUPLICATE` merge engine (default). Other merge engine
   types are not supported.
+- The `changelog-producer` option must be `none` (default) or `input`; `lookup` and `full-compaction`
+  are not supported for chain tables.
+  - When `changelog-producer` is `none`, Flink's operator normalizes records by the full
+    primary key including the chain partition. The records of `-D`/`-U` in a different chain partition
+    than the original records of `+I` will be dropped. Use `input` if downstream must receive cross-partition
+    changelog records.
 
 ## Lookup Join
 

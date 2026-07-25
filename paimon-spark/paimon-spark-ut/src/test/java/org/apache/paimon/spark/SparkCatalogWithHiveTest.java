@@ -42,13 +42,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9087;
+    private static int port;
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -186,12 +187,12 @@ public class SparkCatalogWithHiveTest {
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
                         "spark.sql.extensions",

@@ -109,8 +109,12 @@ added_files = table.create_global_index(
 print(added_files)
 ```
 
-PyPaimon full-text build and query require the `paimon_ftindex` Python package
-and the native FFI library from `paimon-full-text`.
+Install the PyPaimon full-text extra before building or querying full-text
+indexes:
+
+```shell
+pip install 'pypaimon[full-text]'
+```
 
 </TabItem>
 

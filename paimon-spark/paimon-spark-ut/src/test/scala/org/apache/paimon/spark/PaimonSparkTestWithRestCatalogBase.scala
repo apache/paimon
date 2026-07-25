@@ -25,8 +25,6 @@ import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.Row
-import org.assertj.core.api.Assertions
 
 import java.util.UUID
 
@@ -61,6 +59,12 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
       restCatalogServer.shutdown()
     }
   }
+
+  protected def clearFilteredListingRequests(): Unit =
+    restCatalogServer.clearReceivedListPartitionsByFilterRequests()
+
+  protected def filteredListingWasRequested: Boolean =
+    restCatalogServer.hasReceivedListPartitionsByFilterRequest
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf

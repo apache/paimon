@@ -26,6 +26,7 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
@@ -113,7 +114,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                     LOG.debug(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
-                            hadoopOptions.get(key));
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
         }

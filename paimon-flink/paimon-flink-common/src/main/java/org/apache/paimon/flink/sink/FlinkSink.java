@@ -29,6 +29,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.operators.SlotSharingGroup;
@@ -82,9 +83,15 @@ public abstract class FlinkSink<T> implements Serializable {
     protected final FileStoreTable table;
     private final boolean ignorePreviousFiles;
 
+    @Nullable private UriReaderFactory blobDescriptorReaderFactory;
+
     public FlinkSink(FileStoreTable table, boolean ignorePreviousFiles) {
         this.table = table;
         this.ignorePreviousFiles = ignorePreviousFiles;
+    }
+
+    void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {
+        this.blobDescriptorReaderFactory = uriReaderFactory;
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
@@ -130,18 +137,22 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean isStreaming = isStreaming(input);
 
         boolean writeOnly = table.coreOptions().writeOnly();
+        StoreSinkWrite.Provider writeProvider =
+                StoreSinkWrite.createWriteProvider(
+                        table,
+                        env.getCheckpointConfig(),
+                        isStreaming,
+                        ignorePreviousFiles,
+                        hasSinkMaterializer(input));
+        writeProvider =
+                StoreSinkWrite.withBlobDescriptorReaderFactory(
+                        writeProvider, blobDescriptorReaderFactory);
+
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
                         new CommittableTypeInfo(),
-                        createWriteOperatorFactory(
-                                StoreSinkWrite.createWriteProvider(
-                                        table,
-                                        env.getCheckpointConfig(),
-                                        isStreaming,
-                                        ignorePreviousFiles,
-                                        hasSinkMaterializer(input)),
-                                commitUser));
+                        createWriteOperatorFactory(writeProvider, commitUser));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {

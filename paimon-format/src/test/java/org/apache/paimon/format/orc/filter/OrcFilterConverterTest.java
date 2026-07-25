@@ -75,10 +75,10 @@ public class OrcFilterConverterTest {
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
-                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3)),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
                 true);
 
         test(
@@ -92,14 +92,14 @@ public class OrcFilterConverterTest {
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
-                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
+                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "long1", PredicateLeaf.Type.LONG, 2))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
+                                                "long1", PredicateLeaf.Type.LONG, 3)))),
                 true);
 
         assertThat(
@@ -186,29 +186,29 @@ public class OrcFilterConverterTest {
                                 Collections.singletonList(
                                         new DataField(0, "testField", new BigIntType()))));
 
-        // Test IN with multiple values (≤20 values should be converted to OR of EQUALS)
+        // Test IN with multiple values
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L)),
-                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L)),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
                 true);
 
-        // Test NOT IN with multiple values (should be converted to AND of NOT EQUALS)
+        // Test NOT IN with multiple values
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 1L)),
+                                                "testField", PredicateLeaf.Type.LONG, 2L)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 2L))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
+                                                "testField", PredicateLeaf.Type.LONG, 3L)))),
                 true);
     }
 

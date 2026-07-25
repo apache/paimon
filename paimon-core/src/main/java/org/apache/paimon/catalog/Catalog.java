@@ -27,6 +27,7 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -424,6 +425,32 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
+     * Get a page of partitions using {@code predicate} as a best-effort filter.
+     *
+     * <p>The result may be a superset — an implementation must never exclude a partition it cannot
+     * prove non-matching — so callers must evaluate {@code predicate} again. Continue pagination
+     * while {@link PagedList#getNextPageToken()} is non-empty, even if a page has no elements.
+     *
+     * @param identifier path of the table
+     * @param predicate partition predicate
+     * @param maxResults maximum page size, or {@code null}/0 to use the catalog default
+     * @param pageToken token returned by the previous page, or {@code null} for the first page
+     * @param partitionNamePattern optional SQL LIKE prefix pattern (%) for partition names,
+     *     conjunctive with {@code predicate}
+     * @return a page of candidate partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    default PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    /**
      * Get Partition list by partition names of the table.
      *
      * @param identifier path of the table to list partitions
@@ -498,7 +525,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
-     *     not set or empty. Currently, only prefix matching is supported.
+     *     not set or empty. Whether full LIKE semantics or only prefix matching is supported is
+     *     catalog-specific; the default implementation ignores the pattern.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -525,7 +553,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All view details will be
-     *     returned if not set or empty. Currently, only prefix matching is supported.
+     *     returned if not set or empty. Whether full LIKE semantics or only prefix matching is
+     *     supported is catalog-specific; the default implementation ignores the pattern.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
@@ -651,7 +680,10 @@ public interface Catalog extends AutoCloseable {
 
     /**
      * Whether this catalog supports name pattern filter when list objects paged. If not,
-     * corresponding methods will throw exception if name pattern provided.
+     * corresponding methods will throw exception if name pattern provided. This flag is a
+     * catalog-wide default consulted by the base implementations; a specific list method may still
+     * honor a pattern by overriding the method directly (in which case it need not rely on this
+     * flag).
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
@@ -1033,6 +1065,27 @@ public interface Catalog extends AutoCloseable {
      */
     default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {}
+
+    /**
+     * Create partitions of the specify table with explicit existence semantics.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        if (!ignoreIfExists) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Catalog %s does not support createPartitions without ignoreIfExists.",
+                            getClass().getName()));
+        }
+        createPartitions(identifier, partitions);
+    }
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.

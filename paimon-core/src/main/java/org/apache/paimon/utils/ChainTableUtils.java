@@ -22,12 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -37,10 +40,14 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utils for chain table. */
 public class ChainTableUtils {
@@ -363,6 +370,76 @@ public class ChainTableUtils {
         }
 
         return PredicateBuilder.and(conditions);
+    }
+
+    /**
+     * Builds per-bucket {@link ChainSplit}s from the given snapshot and delta splits. Files that
+     * originate from the snapshot splits are tagged with {@code snapshotBranch}; all other files
+     * are tagged with {@code deltaBranch}.
+     *
+     * @param logicalPartition the logical partition for the resulting ChainSplits
+     * @param snapshotSplits splits from the snapshot branch
+     * @param deltaSplits splits from the delta branch
+     * @param snapshotBranch name of the snapshot branch
+     * @param deltaBranch name of the delta branch
+     * @return one ChainSplit per bucket
+     */
+    public static List<ChainSplit> buildChainSplits(
+            BinaryRow logicalPartition,
+            List<DataSplit> snapshotSplits,
+            List<DataSplit> deltaSplits,
+            String snapshotBranch,
+            String deltaBranch) {
+        Set<String> snapshotFileNames =
+                snapshotSplits.stream()
+                        .flatMap(s -> s.dataFiles().stream().map(DataFileMeta::fileName))
+                        .collect(Collectors.toSet());
+
+        Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
+        Integer bucketInAll = null;
+        for (DataSplit ds : snapshotSplits) {
+            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        }
+        for (DataSplit ds : deltaSplits) {
+            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        }
+
+        List<ChainSplit> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
+            Map<String, String> fileBranchMapping = new HashMap<>();
+            Map<String, String> fileBucketPathMapping = new HashMap<>();
+            for (DataSplit ds : entry.getValue()) {
+                for (DataFileMeta file : ds.dataFiles()) {
+                    fileBucketPathMapping.put(file.fileName(), ds.bucketPath());
+                    String branch =
+                            snapshotFileNames.contains(file.fileName())
+                                    ? snapshotBranch
+                                    : deltaBranch;
+                    fileBranchMapping.put(file.fileName(), branch);
+                }
+            }
+            result.add(
+                    new ChainSplit(
+                            logicalPartition,
+                            entry.getValue().stream()
+                                    .flatMap(ds -> ds.dataFiles().stream())
+                                    .collect(Collectors.toList()),
+                            fileBranchMapping,
+                            fileBucketPathMapping));
+        }
+        return result;
+    }
+
+    private static Integer addToBucketMap(
+            DataSplit ds, Map<Integer, List<DataSplit>> bucketSplits, Integer bucketInAll) {
+        Integer totalBuckets = ds.totalBuckets();
+        checkNotNull(totalBuckets, "totalBuckets should not be null");
+        if (bucketInAll != null) {
+            checkArgument(
+                    totalBuckets.equals(bucketInAll), "Inconsistent bucket num " + ds.bucket());
+        }
+        bucketSplits.computeIfAbsent(ds.bucket(), k -> new ArrayList<>()).add(ds);
+        return totalBuckets;
     }
 
     /**

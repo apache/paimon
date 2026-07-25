@@ -26,8 +26,11 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -43,10 +46,14 @@ import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -57,6 +64,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -212,6 +220,179 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertEquals(
                 restCatalog.getTable(identifier).options().get(catalogConfigInServerKey),
                 "default-value");
+    }
+
+    @Test
+    void testCatalogManagedPagedPartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitionsPaged(identifier, null, null, null))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingByNamesDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.listPartitionsByNames(
+                                        identifier,
+                                        Collections.singletonList(
+                                                Collections.singletonMap("dt", "20260717"))))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitions(identifier))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingReflectsCatalogMutationsImmediately() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        FormatTablePartitionManager partitionManager = table.partitionManager();
+        assertThat(partitionManager).isNotNull();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+
+        restCatalog.createPartitions(identifier, Collections.singletonList(partition));
+
+        // Listings are not cached, so a mutation through the catalog is visible to the next read.
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+
+        restCatalog.dropPartitions(identifier, Collections.singletonList(partition));
+
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
+    }
+
+    @Test
+    void testPartitionManagerSurvivesSerialization() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+        restCatalog.createPartitions(identifier, Collections.singletonList(partition));
+
+        // A table travels to task processes; its partition catalog must rebuild its client there.
+        FormatTablePartitionManager roundTripped =
+                InstantiationUtil.clone(table.partitionManager());
+
+        assertThat(roundTripped.listPartitions(Collections.emptyMap(), null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+    }
+
+    @Test
+    void testFilteredListingPreservesNextTokenAcrossSparsePage() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Predicate predicate = partitionFilter("20260717");
+        Partition partition =
+                new Partition(Collections.singletonMap("dt", "20260717"), 0, 0, 0, 0, -1, false);
+        restCatalogServer.enqueueListPartitionsByFilterResponse(null, "p2");
+        restCatalogServer.enqueueListPartitionsByFilterResponse(
+                Collections.singletonList(partition), null);
+
+        PagedList<Partition> firstPage =
+                restCatalog.listPartitionsByFilterPaged(identifier, predicate, 1, null, "dt=2026%");
+        assertThat(firstPage.getElements()).isEmpty();
+        assertThat(firstPage.getNextPageToken()).isEqualTo("p2");
+
+        PagedList<Partition> secondPage =
+                restCatalog.listPartitionsByFilterPaged(
+                        identifier, predicate, 1, firstPage.getNextPageToken(), "dt=2026%");
+        assertThat(secondPage.getElements()).containsExactly(partition);
+        assertThat(secondPage.getNextPageToken()).isNull();
+
+        assertThat(restCatalogServer.getReceivedListPartitionsByFilterRequests())
+                .extracting(
+                        request ->
+                                Arrays.asList(
+                                        request.getFilter(),
+                                        request.getMaxResults(),
+                                        request.getPageToken(),
+                                        request.getPartitionNamePattern()))
+                .containsExactly(
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, null, "dt=2026%"),
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, "p2", "dt=2026%"));
+    }
+
+    @Test
+    void testRejectCatalogManagedPartitionsOnExternalTableBeforeCreate() throws Exception {
+        Identifier identifier = Identifier.create("db1", "external_partitioned_format_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        String externalPath = dataPath + "/external-partitioned-format-table";
+        Schema schema =
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.PATH.key(), externalPath)
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
+
+        assertThatThrownBy(() -> restCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("internal table");
+        assertThat(restCatalog.listTables(identifier.getDatabaseName()))
+                .doesNotContain(identifier.getTableName());
+        assertThat(LocalFileIO.create().exists(new Path(externalPath))).isFalse();
+    }
+
+    @Test
+    void testRoundTrippedFormatTableReplacePassesClientValidation() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable existing = (FormatTable) restCatalog.getTable(identifier);
+        Schema replacement =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .options(existing.options())
+                        .build();
+        assertThat(replacement.options())
+                .containsEntry(CoreOptions.PATH.key(), existing.location());
+
+        // The mock service does not implement Format Table replacement. Reaching that response
+        // proves the REST client accepted the unchanged synthetic path from the loaded table.
+        assertThatThrownBy(() -> restCatalog.replaceTable(identifier, replacement, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("replaceTable does not support format tables");
+    }
+
+    private Identifier createFormatTableWithCatalogManagedPartitions() throws Exception {
+        Identifier identifier = Identifier.create("db1", "managed_partition_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        return identifier;
+    }
+
+    private static Predicate partitionFilter(String value) {
+        return new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}))
+                .equal(0, value);
     }
 
     @Test

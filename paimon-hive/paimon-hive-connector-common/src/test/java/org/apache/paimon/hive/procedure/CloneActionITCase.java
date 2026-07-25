@@ -63,11 +63,12 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9088;
+    private static int port;
 
     @BeforeAll
     public static void beforeAll() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterAll
@@ -198,7 +199,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_database",
                         "test",
                         "--target_table",
@@ -251,7 +252,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_database",
                         "test",
                         "--target_table",
@@ -325,7 +326,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -407,7 +408,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_database",
                         "test",
                         "--target_table",
@@ -471,7 +472,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_database",
                         "test",
                         "--target_catalog_conf",
@@ -531,7 +532,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_database",
                         "test",
                         "--target_catalog_conf",
@@ -590,7 +591,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -650,7 +651,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -729,7 +730,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_catalog_conf",
                         "warehouse=" + warehouse,
                         "--excluded_tables",
@@ -810,7 +811,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
+                        "uri=thrift://localhost:" + port,
                         "--target_catalog_conf",
                         "warehouse=" + warehouse,
                         "--included_tables",
@@ -872,7 +873,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -932,7 +933,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -993,7 +994,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -1052,7 +1053,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -1108,7 +1109,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--catalog_conf",
                                 "metastore=hive",
                                 "--catalog_conf",
-                                "uri=thrift://localhost:" + PORT,
+                                "uri=thrift://localhost:" + port,
                                 "--target_database",
                                 "test",
                                 "--target_table",

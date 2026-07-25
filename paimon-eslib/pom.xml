@@ -35,6 +35,7 @@ under the License.
         <!-- eslib-api / eslib-core are compiled for Java 11 (Lucene 9.12); compile this module
              at Java 11 instead of the project default (1.8) so their class files are readable. -->
         <target.java.version>11</target.java.version>
+        <eslib.version>1.0.7</eslib.version>
     </properties>
 
     <dependencies>
@@ -49,9 +50,8 @@ under the License.
              into eslib-core), so no separate eslib-api artifact is needed. -->
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
-            <artifactId>eslib-core</artifactId>
-            <version>1.0.6</version>
-            <classifier>lucene9</classifier>
+            <artifactId>eslib-core-lucene9</artifactId>
+            <version>${eslib.version}</version>
             <!-- Paimon supplies its own ArchiveDataProvider over FileIO; the standalone
                  OSSRangeIndexInput and Aliyun SDK are not used in this module. -->
             <exclusions>
@@ -63,8 +63,8 @@ under the License.
         </dependency>
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
-            <artifactId>eslib-simdvec</artifactId>
-            <version>1.0.6</version>
+            <artifactId>eslib-simdvec-lucene9</artifactId>
+            <version>${eslib.version}</version>
         </dependency>
         <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
              not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm
@@ -115,7 +115,7 @@ under the License.
     <repositories>
         <repository>
             <id>eslib-github</id>
-            <url>https://raw.githubusercontent.com/CrownChu/es-paimon-lib-releases/main/repository</url>
+            <url>https://raw.githubusercontent.com/CrownChu/es-paimon-lib-releases/eslib-${eslib.version}/repository</url>
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>false</enabled></snapshots>
         </repository>

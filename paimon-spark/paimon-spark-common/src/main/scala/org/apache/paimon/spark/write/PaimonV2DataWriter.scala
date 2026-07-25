@@ -19,12 +19,11 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, TableWriteImpl}
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.IOUtils
+import org.apache.paimon.utils.{IOUtils, UriReaderFactory}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.JoinedRow
@@ -38,7 +37,7 @@ case class PaimonV2DataWriter(
     writeSchema: StructType,
     dataSchema: StructType,
     coreOptions: CoreOptions,
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     batchId: Option[Long] = None,
     paimonWriteType: Option[RowType] = None,
     metadataSchema: Option[StructType] = None,
@@ -79,7 +78,7 @@ case class PaimonV2DataWriter(
       schema: StructType): InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
     val reusableWrapper =
-      new SparkInternalRowWrapper(writeSchema, numFields, schema, catalogContext)
+      SparkInternalRowWrapper.fromUriReaderFactory(writeSchema, numFields, schema, uriReaderFactory)
     record => reusableWrapper.replace(record)
   }
 

@@ -490,7 +490,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshotFromFileSystem();
         boolean actualIgnorePreviousFiles =
                 ignorePreviousFilesForWriter(
                         partition, bucket, latestSnapshot, ignorePreviousFiles);

@@ -96,7 +96,8 @@ public class KeyValueFileWriterFactory {
                                 valueType,
                                 managedBlobFields,
                                 formatContext.pathFactory(new WriteFormatKey(0, false)),
-                                options.blobTargetFileSize());
+                                options.blobTargetFileSize(),
+                                options.blobCopyBufferSize());
     }
 
     public RowType keyType() {
@@ -135,13 +136,17 @@ public class KeyValueFileWriterFactory {
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
+        // Row limit applies to writes only; compaction output stays size-only.
+        long targetFileRowNum =
+                fileSource == FileSource.COMPACT ? Long.MAX_VALUE : options.targetFileRowNum();
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
                     return createDataFileWriter(
                             pathFactory.newPath(), key, fileSource, pathFactory.isExternalPath());
                 },
-                suggestedFileSize);
+                suggestedFileSize,
+                targetFileRowNum);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
@@ -155,7 +160,8 @@ public class KeyValueFileWriterFactory {
                             FileSource.APPEND,
                             pathFactory.isExternalPath());
                 },
-                suggestedFileSize);
+                suggestedFileSize,
+                Long.MAX_VALUE);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingClusteringFileWriter() {
@@ -166,7 +172,8 @@ public class KeyValueFileWriterFactory {
                     return createKvSeparatedFileWriter(
                             pathFactory.newPath(), key, pathFactory.isExternalPath());
                 },
-                suggestedFileSize);
+                suggestedFileSize,
+                Long.MAX_VALUE);
     }
 
     private KeyValueClusteringFileWriter createKvSeparatedFileWriter(

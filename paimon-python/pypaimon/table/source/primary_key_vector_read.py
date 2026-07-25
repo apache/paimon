@@ -1,0 +1,298 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+from concurrent.futures import wait
+from heapq import nsmallest
+
+from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
+from pypaimon.table.source.primary_key_scored_result import (
+    PrimaryKeyScoredResult, PrimaryKeySearchPosition, _partition_bytes)
+from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
+from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+from pypaimon.table.source.vector_search_read import (
+    _check_vector_dimension, _compute_score, _raw_search_metric, _to_vector_list)
+from pypaimon.read.split import DataSplit
+from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+
+class PrimaryKeyVectorRead(DataEvolutionVectorRead):
+    """Search PK vector payloads and localize payload row ids to data files."""
+
+    def read_plan(self, plan):
+        if not isinstance(plan, PrimaryKeyVectorScanPlan):
+            raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
+        index_type = self._table.options.primary_key_vector_index_type(
+            self._vector_column.name)
+        indexed_limit = self._indexed_search_limit(index_type)
+        if indexed_limit > 2147483647:
+            raise ValueError(
+                "Vector search limit overflow: limit=%d, refine factor=%d"
+                % (self._limit, indexed_limit // self._limit))
+        futures = []
+        contexts = []
+        deleted_positions = _deleted_positions(self._table, plan)
+        for split in plan.splits():
+            for payload in split.payloads:
+                source_meta = PrimaryKeyIndexSourceMeta.from_index_file(payload)
+                row_count = sum(source.row_count for source in source_meta.source_files)
+                include_row_ids = _include_row_ids(
+                    split, source_meta.source_files, deleted_positions)
+                future = self._eval(
+                    0, row_count - 1, [payload], self._query_vector,
+                    indexed_limit, include_row_ids)
+                futures.append(future)
+                contexts.append((split, source_meta))
+        wait(futures)
+
+        def indexed_candidate_iter():
+            for future, context in zip(futures, contexts):
+                result = future.result()
+                if result is None:
+                    continue
+                score_getter = result.score_getter()
+                for local_row_id in result.results():
+                    source, row_position = _localize(
+                        context[1].source_files, local_row_id)
+                    if row_position in deleted_positions.get(
+                            (id(context[0]), source.file_name), set()):
+                        continue
+                    if not _allowed(context[0], source.file_name, row_position):
+                        continue
+                    yield PrimaryKeySearchPosition(
+                        _partition_bytes(context[0].data_split.partition),
+                        context[0].data_split.bucket, source.file_name,
+                        row_position, score_getter(local_row_id))
+
+        # Match Java's separately bounded indexed and exact queues.  The ANN
+        # queue must retain indexed_limit until exact reranking is complete.
+        indexed_candidates = _top_k(indexed_candidate_iter(), indexed_limit)
+        if self._configured_refine_factor(index_type) > 0 and indexed_candidates:
+            indexed_candidates = self._rerank_indexed(
+                plan, indexed_candidates, index_type)
+        else:
+            indexed_candidates = _top_k(indexed_candidates, self._limit)
+        exact_candidates = _top_k(self._raw_candidates(plan), self._limit)
+        candidates = _top_k(
+            (candidate
+             for group in (indexed_candidates, exact_candidates)
+             for candidate in group),
+            self._limit)
+        source_splits = [split.data_split for split in plan.splits()]
+        return PrimaryKeyScoredResult(plan.snapshot_id, source_splits, candidates)
+
+    def _rerank_indexed(self, plan, candidates, index_type):
+        source_splits = [split.data_split for split in plan.splits()]
+        selected = {}
+        for candidate in candidates:
+            key = (candidate.partition_bytes, candidate.bucket,
+                   candidate.data_file_name, candidate.row_position)
+            if key in selected:
+                raise ValueError(
+                    "Duplicate primary-key vector candidate %s." % (key,))
+            selected[key] = candidate
+
+        candidate_result = PrimaryKeyScoredResult(
+            plan.snapshot_id, source_splits, candidates)
+        reader = self._table.new_read_builder().with_projection(
+            [self._vector_column.name]).new_read()
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+
+        def reranked_iter():
+            for split in candidate_result.splits:
+                data_split = split.data_split()
+                if len(data_split.files) != 1:
+                    raise ValueError(
+                        "Primary-key vector rerank split must contain one data file.")
+                data_file_name = data_split.files[0].file_name
+                partition = _partition_bytes(data_split.partition)
+                positions = sorted(
+                    key[3] for key in selected
+                    if key[:3] == (partition, data_split.bucket, data_file_name))
+                position_iter = iter(positions)
+                for batch in reader.to_arrow([split]).to_batches():
+                    for stored in batch.column(0).to_pylist():
+                        try:
+                            row_position = next(position_iter)
+                        except StopIteration:
+                            raise ValueError(
+                                "Primary-key vector rerank read unexpected row.")
+                        key = (partition, data_split.bucket,
+                               data_file_name, row_position)
+                        candidate = selected.pop(key, None)
+                        if candidate is None:
+                            raise ValueError(
+                                "Primary-key vector rerank read unexpected position %s."
+                                % (key,))
+                        if stored is None:
+                            raise ValueError(
+                                "Primary-key vector candidate %s contains a null vector."
+                                % (key,))
+                        stored = _to_vector_list(stored)
+                        _check_vector_dimension(self._query_vector, stored)
+                        yield candidate.with_score(_compute_score(
+                            self._query_vector, stored, metric))
+                try:
+                    next(position_iter)
+                    raise ValueError(
+                        "Failed to read all primary-key vector candidates "
+                        "for reranking.")
+                except StopIteration:
+                    pass
+
+        reranked = _top_k(reranked_iter(), self._limit)
+        if selected:
+            raise ValueError(
+                "Failed to read %d primary-key vector candidates for reranking."
+                % len(selected))
+        return reranked
+
+    def _raw_candidates(self, plan):
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options,
+            self._table.options.primary_key_vector_index_type(
+                self._vector_column.name))
+        read_builder = self._table.new_read_builder().with_projection(
+            [self._vector_column.name])
+        reader = read_builder.new_read()
+        for split in plan.splits():
+            uncovered = set(split.uncovered_data_files)
+            for file_index, data_file in enumerate(split.data_split.files):
+                if data_file.file_name not in uncovered:
+                    continue
+                deletion_file = None
+                if split.data_split.data_deletion_files is not None:
+                    deletion_file = split.data_split.data_deletion_files[file_index]
+                single = DataSplit([data_file], split.data_split.partition,
+                                   split.data_split.bucket, False,
+                                   [deletion_file] if deletion_file is not None else None)
+                ranges = split.row_ranges_by_file.get(data_file.file_name)
+                if ranges is not None and not ranges:
+                    continue
+                read_split = (IndexedSplit(single, list(ranges), None)
+                              if ranges is not None else single)
+                positions = (
+                    position for position in _live_position_iter(
+                        self._table, data_file.row_count, deletion_file)
+                    if _allowed(split, data_file.file_name, position))
+                position_iter = iter(positions)
+                for batch in reader.to_arrow([read_split]).to_batches():
+                    for stored in batch.column(0).to_pylist():
+                        try:
+                            row_position = next(position_iter)
+                        except StopIteration:
+                            raise ValueError(
+                                "Raw vector read returned an unexpected row.")
+                        if stored is None:
+                            continue
+                        stored = _to_vector_list(stored)
+                        _check_vector_dimension(self._query_vector, stored)
+                        yield PrimaryKeySearchPosition(
+                            _partition_bytes(split.data_split.partition),
+                            split.data_split.bucket, data_file.file_name,
+                            row_position, _compute_score(
+                                self._query_vector, stored, metric))
+                try:
+                    next(position_iter)
+                    raise ValueError(
+                        "Raw vector row count does not match physical positions.")
+                except StopIteration:
+                    pass
+
+
+def _rank_key(position):
+    return (
+        -position.score, position.partition_bytes, position.bucket,
+        position.data_file_name, position.row_position)
+
+
+def _top_k(candidates, limit):
+    # nsmallest uses a size-K heap and preserves the previous total ordering.
+    return nsmallest(limit, candidates, key=_rank_key)
+
+
+def _localize(source_files, local_row_id):
+    offset = 0
+    for source in source_files:
+        end = offset + source.row_count
+        if offset <= local_row_id < end:
+            return source, local_row_id - offset
+        offset = end
+    raise ValueError("Vector index returned out-of-range local row id %s." % local_row_id)
+
+
+def _live_position_iter(table, row_count, deletion_file):
+    deleted = set()
+    if deletion_file is not None:
+        deleted = set(DeletionVector.read(table.file_io, deletion_file).bit_map())
+    return (position for position in range(row_count) if position not in deleted)
+
+
+def _live_positions(table, row_count, deletion_file):
+    deleted = set()
+    if deletion_file is not None:
+        deleted = set(DeletionVector.read(table.file_io, deletion_file).bit_map())
+    return [position for position in range(row_count) if position not in deleted]
+
+
+def _deleted_positions(table, plan):
+    result = {}
+    for split in plan.splits():
+        deletions = split.data_split.data_deletion_files or []
+        for index, data_file in enumerate(split.data_split.files):
+            deletion = deletions[index] if index < len(deletions) else None
+            if deletion is not None:
+                result[(id(split), data_file.file_name)] = set(
+                    DeletionVector.read(table.file_io, deletion).bit_map())
+    return result
+
+
+def _allowed(split, file_name, position):
+    ranges = split.row_ranges_by_file.get(file_name)
+    return ranges is None or any(row_range.contains(position) for row_range in ranges)
+
+
+def _include_row_ids(split, source_files, deleted_positions):
+    """Map live, pre-filtered physical positions to payload-local row ids."""
+    include = RoaringBitmap64()
+    deleted_ids = RoaringBitmap64()
+    offset = 0
+    filtered = False
+    for source in source_files:
+        deleted = deleted_positions.get(
+            (id(split), source.file_name), set())
+        ranges = split.row_ranges_by_file.get(source.file_name)
+        if deleted or ranges is not None:
+            filtered = True
+        if ranges is None:
+            if source.row_count > 0:
+                include.add_range(offset, offset + source.row_count - 1)
+        else:
+            for row_range in ranges:
+                start = max(0, row_range.from_)
+                end = min(source.row_count - 1, row_range.to)
+                if start <= end:
+                    include.add_range(offset + start, offset + end)
+        for position in deleted:
+            if 0 <= position < source.row_count:
+                deleted_ids.add(offset + position)
+        offset += source.row_count
+    if not filtered:
+        return None
+    return RoaringBitmap64.remove_all(include, deleted_ids)
