@@ -85,9 +85,8 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
         }
 
         FileIO fileIO = table.fileIO();
-        // Establish the filesystem on the caller thread so the listing workers reuse a filesystem
-        // created under the caller's security context, matching how a FileStore scan reads the
-        // snapshot on the caller thread before its parallel manifest reads.
+        // Establish the filesystem on the caller thread so listing workers reuse it under the
+        // caller's security context instead of creating it lazily under a shared worker.
         fileIO.exists(new Path(table.location()));
         Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
                 pair -> {

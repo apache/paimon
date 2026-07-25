@@ -56,6 +56,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
@@ -608,6 +609,34 @@ class CatalogManagedPartitionScanTest {
         assertThat(fileIO.maxConcurrentListings()).isOne();
     }
 
+    @Test
+    void testCatalogListingEstablishesFilesystemOnCallerThread() throws Exception {
+        CallerBoundLocalFileIO fileIO = new CallerBoundLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        List<Partition> partitions = new ArrayList<>();
+        for (int month = 10; month <= 13; month++) {
+            partitions.add(partition("2025", Integer.toString(month)));
+            writeDataFile(fileIO, tablePath, "year=2025/month=" + month);
+        }
+
+        fileIO.resetBinding();
+        CallerBoundLocalFileIO.CALLER_USER.set("caller-user");
+        try {
+            new FormatTableScan(
+                            stringPartitionTable(
+                                    fileIO, tablePath, recordingCatalog(partitions), 4),
+                            null,
+                            null)
+                    .plan()
+                    .splits();
+        } finally {
+            CallerBoundLocalFileIO.CALLER_USER.remove();
+        }
+
+        assertThat(fileIO.boundUser()).isEqualTo("caller-user");
+        assertThat(fileIO.boundOnListingWorker()).isFalse();
+    }
+
     private FormatTable stringPartitionTable(
             LocalFileIO fileIO,
             Path tablePath,
@@ -703,6 +732,59 @@ class CatalogManagedPartitionScanTest {
                     throw entry.getValue();
                 }
             }
+            return super.listFiles(path, recursive);
+        }
+    }
+
+    /** Binds to the thread and thread-local user that first touches the filesystem. */
+    private static class CallerBoundLocalFileIO extends LocalFileIO {
+
+        static final ThreadLocal<String> CALLER_USER = new ThreadLocal<>();
+
+        private final AtomicReference<Thread> boundThread = new AtomicReference<>();
+        private final AtomicReference<String> boundUser = new AtomicReference<>();
+
+        private void bindOnce() {
+            if (boundThread.compareAndSet(null, Thread.currentThread())) {
+                boundUser.set(CALLER_USER.get());
+            }
+        }
+
+        void resetBinding() {
+            boundThread.set(null);
+            boundUser.set(null);
+        }
+
+        String boundUser() {
+            return boundUser.get();
+        }
+
+        boolean boundOnListingWorker() {
+            Thread thread = boundThread.get();
+            return thread != null && thread.getName().contains("FORMAT-TABLE-LIST");
+        }
+
+        @Override
+        public boolean exists(Path path) throws IOException {
+            bindOnce();
+            return super.exists(path);
+        }
+
+        @Override
+        public FileStatus getFileStatus(Path path) throws IOException {
+            bindOnce();
+            return super.getFileStatus(path);
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            bindOnce();
+            return super.listStatus(path);
+        }
+
+        @Override
+        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+            bindOnce();
             return super.listFiles(path, recursive);
         }
     }
