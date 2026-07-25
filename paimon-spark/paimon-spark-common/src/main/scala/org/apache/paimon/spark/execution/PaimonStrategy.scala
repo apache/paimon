@@ -24,7 +24,7 @@ import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlo
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.optimizer.RepartitionLateralVectorSearchInput
@@ -72,7 +72,7 @@ case class PaimonStrategy(spark: SparkSession)
 
     case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
-        case scan: PaimonScan =>
+        case scan: PaimonScan if PostponeMergeOnRead.enabled(scan.table) =>
           scan.planPostponeMerge(spark.sparkContext.defaultParallelism) match {
             case Some(mergePlan) =>
               val inputScan = PostponeMergeInputScan(mergePlan)
