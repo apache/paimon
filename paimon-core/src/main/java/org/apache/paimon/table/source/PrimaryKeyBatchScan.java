@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -135,8 +136,15 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
                 || snapshotPlan.splits().isEmpty()) {
             return dataPlan;
         }
+        // the index is built over raw values, so a conjunct on a masked column must not reach it
+        Predicate indexCandidate =
+                filter == null || authMaskedFields.isEmpty()
+                        ? filter
+                        : TableQueryAuthResult.excludeFields(filter, authMaskedFields);
         Predicate indexFilter =
-                filter == null ? null : filter.visit(indexPredicateExtractor).orElse(null);
+                indexCandidate == null
+                        ? null
+                        : indexCandidate.visit(indexPredicateExtractor).orElse(null);
         if (indexFilter == null) {
             return dataPlan;
         }

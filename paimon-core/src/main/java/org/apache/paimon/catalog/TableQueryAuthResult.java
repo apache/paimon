@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
@@ -45,6 +46,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -65,7 +67,8 @@ public class TableQueryAuthResult implements Serializable {
     private final @Nullable List<String> filter;
     private final @Nullable Map<String, String> columnMasking;
 
-    // lazily parsed views of the JSON rules; transient so serialization stays unchanged
+    // Lazily parsed views of the JSON rules; transient so serialization stays unchanged. No
+    // invalidation needed: an instance is immutable and rebuilt for every plan().
     private transient volatile Optional<Predicate> parsedFilter;
     private transient volatile Map<String, Transform> parsedMasking;
 
@@ -98,6 +101,60 @@ public class TableQueryAuthResult implements Serializable {
     public RowType widenReadType(RowType tableType, RowType readType) {
         return appendMissingFields(
                 tableType, readType, requiredAuthFields(readType.getFieldNames()));
+    }
+
+    /**
+     * Drops the conjuncts of {@code predicate} referencing any of {@code fields}; returns null when
+     * nothing remains. Used to keep raw-statistics pushdown off masked columns.
+     */
+    @Nullable
+    public static Predicate excludeFields(Predicate predicate, Set<String> fields) {
+        return filterConjuncts(predicate, fields, true);
+    }
+
+    /**
+     * Keeps only the conjuncts of {@code predicate} referencing any of {@code fields}; returns null
+     * when none does.
+     */
+    @Nullable
+    public static Predicate retainFields(Predicate predicate, Set<String> fields) {
+        return filterConjuncts(predicate, fields, false);
+    }
+
+    @Nullable
+    private static Predicate filterConjuncts(
+            Predicate predicate, Set<String> fields, boolean keepDisjoint) {
+        List<Predicate> kept = new ArrayList<>();
+        for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
+            if (Collections.disjoint(PredicateVisitor.collectFieldNames(conjunct), fields)
+                    == keepDisjoint) {
+                kept.add(conjunct);
+            }
+        }
+        if (kept.isEmpty()) {
+            return null;
+        }
+        return kept.size() == 1 ? kept.get(0) : PredicateBuilder.and(kept);
+    }
+
+    /**
+     * Every column read by the conjuncts of {@code filter} that touch {@code maskTargets}. Their
+     * unmasked operands count too, since splitAnd does not split a disjunction.
+     */
+    public static Set<String> postMaskFilterFields(
+            @Nullable Predicate filter, Set<String> maskTargets) {
+        if (filter == null || maskTargets.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> maskedInFilter = new HashSet<>(PredicateVisitor.collectFieldNames(filter));
+        maskedInFilter.retainAll(maskTargets);
+        if (maskedInFilter.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Predicate retained = retainFields(filter, maskedInFilter);
+        return retained == null
+                ? Collections.emptySet()
+                : new HashSet<>(PredicateVisitor.collectFieldNames(retained));
     }
 
     /** Appends the missing {@code ruleFields} of {@code tableType} to {@code readType}. */
@@ -189,25 +246,38 @@ public class TableQueryAuthResult implements Serializable {
                 result.put(column, transform);
             }
         }
-        return result;
+        // the cache is shared by every caller, so hand out a view that cannot rewrite the rules
+        return Collections.unmodifiableMap(result);
     }
 
     /**
      * Validates that every column the auth rules reference exists in the table's <b>latest</b>
-     * schema (not a time-travel-pinned one). A rule keyed by a since-renamed column looks just like
-     * an unprojected one at read time and would silently stop masking: fail closed instead.
+     * schema. A rule keyed by a since-renamed column would silently stop masking; fail closed.
      */
     public void validateAgainstSchema(RowType tableType, @Nullable List<String> projectedFields) {
-        for (Map.Entry<String, Transform> entry : extractColumnMasking().entrySet()) {
+        Map<String, Transform> masking = extractColumnMasking();
+        for (Map.Entry<String, Transform> entry : masking.entrySet()) {
             String target = entry.getKey();
-            // a mask on an unprojected system column is inert (never in the output); don't reject
+            // a mask on an unprojected system column never reaches the output; inert, don't reject
             if (SpecialFields.SYSTEM_FIELD_NAMES.contains(target)
                     && (projectedFields == null || !projectedFields.contains(target))) {
                 continue;
             }
             checkFieldExists("Column masking", target, tableType, projectedFields);
-            for (String input : PredicateVisitor.collectFieldNames(entry.getValue())) {
+            for (String input : PredicateVisitor.collectTransformFieldNames(entry.getValue())) {
                 checkFieldExists("Column masking", input, tableType, projectedFields);
+                // A transform reads the raw row, so an input that is itself masked would be
+                // consumed unmasked and its raw value published through this target. Masking
+                // the target of another mask is only self-consistent if composed, which the
+                // read does not do; refuse the pair rather than leak.
+                if (!input.equals(target) && masking.containsKey(input)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Column masking on '%s' reads column '%s', which is masked "
+                                            + "too. The mask would be computed from the raw value "
+                                            + "of '%s' and expose it through '%s'.",
+                                    target, input, input, target));
+                }
             }
         }
         for (String operand : PredicateVisitor.collectFieldNames(extractPredicate())) {
@@ -216,42 +286,59 @@ public class TableQueryAuthResult implements Serializable {
     }
 
     /**
-     * Fails closed when a masked column is present in the read schema under a different name than
-     * the rule uses (renamed between the read snapshot and latest): name-based enforcement would
-     * skip the mask and leak the raw value. A column absent from the read schema is left inert.
+     * Fails closed when the read schema exposes a rule's column under a different name, where
+     * enforcing by name would skip it. A column absent from that schema stays inert.
      */
     public void validateReadableWithoutRename(RowType latestType, RowType readType) {
         for (Map.Entry<String, Transform> entry : extractColumnMasking().entrySet()) {
-            checkNotRenamed(entry.getKey(), latestType, readType);
+            checkNotRenamed("Column masking", entry.getKey(), latestType, readType);
             // a mask whose target is absent from the read schema is inert; skip its inputs
             if (readType.containsField(entry.getKey())) {
-                for (String input : PredicateVisitor.collectFieldNames(entry.getValue())) {
-                    checkNotRenamed(input, latestType, readType);
+                for (String input : PredicateVisitor.collectTransformFieldNames(entry.getValue())) {
+                    checkNotRenamed("Column masking", input, latestType, readType);
                 }
             }
         }
+        // the row filter is remapped by name as well, so it needs the same binding check
+        for (String operand : PredicateVisitor.collectFieldNames(extractPredicate())) {
+            checkNotRenamed("Row filter", operand, latestType, readType);
+        }
     }
 
-    private static void checkNotRenamed(String field, RowType latestType, RowType readType) {
-        // present by name: enforced fine. absent from latest: already thrown. else: renamed?
-        if (readType.containsField(field) || !latestType.containsField(field)) {
+    private static void checkNotRenamed(
+            String rule, String field, RowType latestType, RowType readType) {
+        // absent from latest: already thrown by validateAgainstSchema
+        if (!latestType.containsField(field)) {
             return;
         }
         int id = latestType.getField(field).id();
+        if (readType.containsField(field)) {
+            // a dropped and re-added column keeps the name but gets a fresh id, so the same
+            // name may be an unrelated column in the snapshot being read
+            if (readType.getField(field).id() != id) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "%s references column '%s' which the snapshot being read exposes "
+                                        + "as a different column of the same name (dropped and "
+                                        + "re-added since); refusing to read to avoid applying the "
+                                        + "rule to unrelated data.",
+                                rule, field));
+            }
+            return;
+        }
         if (readType.containsField(id)) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Column masking references column '%s' which the snapshot being read "
-                                    + "exposes as '%s' (renamed since); refusing to read to avoid "
-                                    + "applying the rule by a stale name.",
-                            field, readType.getField(id).name()));
+                            "%s references column '%s' which the snapshot being read exposes as "
+                                    + "'%s' (renamed since); refusing to read to avoid applying "
+                                    + "the rule by a stale name.",
+                            rule, field, readType.getField(id).name()));
         }
     }
 
     /**
      * The field names the auth rules read for a query projecting {@code projectedFields}: the
-     * row-filter operands, plus (transitively) the inputs of every mask whose target is readable —
-     * projected, or itself pulled in by the filter or another mask.
+     * row-filter operands, plus transitively the inputs of every mask whose target is readable.
      */
     public Set<String> requiredAuthFields(List<String> projectedFields) {
         Map<String, Transform> masking = extractColumnMasking();
@@ -269,7 +356,7 @@ public class TableQueryAuthResult implements Serializable {
             if (mask == null) {
                 continue;
             }
-            for (String input : PredicateVisitor.collectFieldNames(mask)) {
+            for (String input : PredicateVisitor.collectTransformFieldNames(mask)) {
                 ruleFields.add(input);
                 if (readable.add(input)) {
                     newlyReadable.add(input);
@@ -281,8 +368,7 @@ public class TableQueryAuthResult implements Serializable {
 
     private static void checkFieldExists(
             String rule, String field, RowType tableType, @Nullable List<String> projectedFields) {
-        // system fields (e.g. _ROW_ID) are readable metadata absent from the table schema,
-        // but only when the query actually projects them -- they cannot be widened in
+        // system fields (e.g. _ROW_ID) cannot be widened in; only usable when projected
         if (SpecialFields.SYSTEM_FIELD_NAMES.contains(field)) {
             if (projectedFields != null && projectedFields.contains(field)) {
                 return;

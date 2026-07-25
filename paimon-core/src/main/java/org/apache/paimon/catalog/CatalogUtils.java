@@ -168,6 +168,17 @@ public class CatalogUtils {
         if (tableType.equals(TableType.FORMAT_TABLE)) {
             validateFormatTableOptions(options, dataTokenEnabled);
         }
+        // only a file-store table reads through the auth reader; anywhere else the rules would
+        // be accepted and then silently not applied
+        if (options.get(CoreOptions.QUERY_AUTH_ENABLED)
+                && tableType != TableType.TABLE
+                && tableType != TableType.MATERIALIZED_TABLE) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s is not supported on a %s: its read does not apply row filters or "
+                                    + "column masks.",
+                            CoreOptions.QUERY_AUTH_ENABLED.key(), tableType));
+        }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
         }

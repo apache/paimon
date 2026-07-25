@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -151,6 +152,15 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        // partition listing bypasses plan(), so resolve the masks here too: pushing a filter on a
+        // masked column against raw partition values would drop partitions the query matches
+        TableQueryAuthResult authResult = authQuery();
+        this.authMaskedFields =
+                authResult == null
+                        ? java.util.Collections.emptySet()
+                        : authResult.extractColumnMasking().keySet();
+        rejectMaskedPartitionFilter();
+        ensureFilterPushdown(authMaskedFields);
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -222,6 +232,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
 
         SortValue order = orders.get(0);
+        if (authMaskedFields.contains(order.field().name())) {
+            // the pruning below reads raw statistics; a mask may alter the ordering column
+            return Optional.empty();
+        }
         DataType type = order.field().type();
         if (!minmaxAvailable(type)) {
             return Optional.empty();

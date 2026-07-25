@@ -125,6 +125,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
+        rejectUnderQueryAuth();
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
                     table,
@@ -156,5 +157,13 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     protected boolean isPrimaryKeyVectorSearch() {
         return vectorColumn != null
                 && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+    }
+
+    private void rejectUnderQueryAuth() {
+        if (table.coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Search is not supported on a query-auth table: the index ranks raw values, "
+                            + "which a column mask invalidates.");
+        }
     }
 }

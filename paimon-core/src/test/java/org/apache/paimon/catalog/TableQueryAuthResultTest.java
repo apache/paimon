@@ -20,7 +20,10 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -33,6 +36,7 @@ import java.util.Collections;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests that malformed query-authorization definitions cannot be silently ignored. */
@@ -97,12 +101,59 @@ public class TableQueryAuthResultTest {
                     new org.apache.paimon.types.DataField(0, "display", DataTypes.STRING()),
                     new org.apache.paimon.types.DataField(1, "extra", DataTypes.STRING()));
 
+    private static String filterJson() {
+        return JsonSerdeUtil.toFlatJson(
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "extra", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("x"))));
+    }
+
     private static String maskJson() {
         return JsonSerdeUtil.toFlatJson(
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(1, "extra", DataTypes.STRING()))));
+    }
+
+    @Test
+    public void testValidateRejectsReAddedColumnOfSameName() {
+        Map<String, String> masking = Collections.singletonMap("display", maskJson());
+        TableQueryAuthResult result = new TableQueryAuthResult(null, masking);
+
+        // same names and ids: the rule binds to the same physical columns
+        assertThatCode(() -> result.validateReadableWithoutRename(TABLE_TYPE, TABLE_TYPE))
+                .doesNotThrowAnyException();
+
+        // the mask input 'extra' was dropped and re-added, so the latest schema gives it a fresh
+        // id. A time-travel read of the pre-drop snapshot still has an 'extra', but it is an
+        // unrelated column; resolving the rule by name would mask with its values.
+        RowType latest =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(0, "display", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(7, "extra", DataTypes.STRING()));
+        assertThatThrownBy(() -> result.validateReadableWithoutRename(latest, TABLE_TYPE))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dropped and re-added");
+    }
+
+    @Test
+    public void testValidateRejectsReAddedColumnForRowFilter() {
+        // a row filter is remapped by name too, so it needs the same binding check as a mask
+        TableQueryAuthResult result =
+                new TableQueryAuthResult(Collections.singletonList(filterJson()), null);
+        assertThatCode(() -> result.validateReadableWithoutRename(TABLE_TYPE, TABLE_TYPE))
+                .doesNotThrowAnyException();
+
+        RowType latest =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(0, "display", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(7, "extra", DataTypes.STRING()));
+        assertThatThrownBy(() -> result.validateReadableWithoutRename(latest, TABLE_TYPE))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Row filter")
+                .hasMessageContaining("dropped and re-added");
     }
 
     @Test
