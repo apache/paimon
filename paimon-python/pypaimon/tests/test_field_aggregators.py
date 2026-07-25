@@ -25,6 +25,7 @@ on real PK tables lives in ``test_aggregation_e2e.py``.
 """
 
 import datetime
+import math
 import unittest
 from decimal import Decimal as BigDecimal
 from functools import reduce
@@ -337,6 +338,36 @@ class FieldProductAggTest(unittest.TestCase):
             _make("product", "VARCHAR")
 
         self.assertIn("numeric", str(ctx.exception))
+
+    def test_decimal_high_precision_product(self):
+        agg = _make("product", "DECIMAL(38,0)")
+
+        left = BigDecimal("1234567890123456789")
+        right = BigDecimal("1000000000000000001")
+
+        result = agg.agg(left, right)
+
+        self.assertEqual(
+            result,
+            BigDecimal("1234567890123456790234567890123456789"),
+        )
+
+    def test_decimal_divide_requires_exact_result(self):
+        agg = _make("product", "DECIMAL(38,0)")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(
+                BigDecimal("1"),
+                BigDecimal("3"),
+            )
+
+    def test_float_divide_by_zero(self):
+        agg = _make("product", "FLOAT")
+
+        self.assertTrue(math.isnan(agg.retract(0.0, 0.0)))
+        self.assertTrue(math.isinf(agg.retract(1.0, 0.0)))
+        self.assertEqual(agg.retract(1.0, 0.0),  float("inf"))
+        self.assertEqual(agg.retract(-1.0, 0.0), float("-inf"))
 
 
 class FieldMaxAggTest(unittest.TestCase):
