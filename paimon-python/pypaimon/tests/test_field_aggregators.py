@@ -295,6 +295,19 @@ class FieldSumAggTest(unittest.TestCase):
         self.assertEqual(agg.retract(BigDecimal("10.00"), BigDecimal("5.00")), BigDecimal("5.00"))
         self.assertEqual(agg.retract(None, BigDecimal("5.00")), BigDecimal("-5.00"))
 
+    def test_decimal_high_precision_sum(self):
+        agg = _make("sum", "DECIMAL(38,0)")
+
+        result = agg.agg(
+            BigDecimal("12345678901234567890123456789012345678"),
+            BigDecimal("1"),
+        )
+
+        self.assertEqual(
+            result,
+            BigDecimal("12345678901234567890123456789012345679"),
+        )
+
 
 class FieldProductAggTest(unittest.TestCase):
 
