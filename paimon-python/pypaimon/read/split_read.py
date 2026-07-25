@@ -764,6 +764,11 @@ class RawFileSplitRead(SplitRead):
                 row_tracking_enabled=True)
         dv = dv_factory() if dv_factory else None
         if dv:
+            if file.file_name in shard_file_idx_map:
+                dv = PositionMappedDeletionVector(
+                    dv,
+                    file_offset=start_pos,
+                )
             return ApplyDeletionVectorReader(RowPositionReader(file_batch_reader), dv)
         else:
             return file_batch_reader
