@@ -241,7 +241,7 @@ public class FormatTableScan implements InnerTableScan {
                                 "Failed to list files for partition " + pair.getValue(), e);
                     }
                 };
-        int parallelism = coreOptions.formatTableScanListParallelism();
+        int parallelism = Math.max(1, coreOptions.formatTableScanListParallelism());
         ExecutorService executor =
                 parallelism >= LIST_POOL_MAX_THREADS
                         ? LIST_POOL
