@@ -103,6 +103,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -148,6 +149,73 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testRollingByRows() throws IOException {
+        CoreOptions options = new CoreOptions(new Options());
+        long hugeSize = 1024L * 1024 * 1024;
+        DedicatedFormatRollingFileWriter cappedWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        5L,
+                        SCHEMA,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(options),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, options));
+        for (int i = 0; i < 11; i++) {
+            cappedWriter.write(
+                    GenericRow.of(i, BinaryString.fromString("t" + i), new BlobData(testBlobData)));
+        }
+        cappedWriter.close();
+        assertThat(cappedWriter.result())
+                .filteredOn(f -> "parquet".equals(f.fileFormat()))
+                .extracting(DataFileMeta::rowCount)
+                .containsExactly(5L, 5L, 1L);
+    }
+
+    @Test
+    public void testAbortAfterRollingByRowsDeletesBlobFiles() throws IOException {
+        CoreOptions options = new CoreOptions(new Options());
+        long hugeSize = 1024L * 1024 * 1024;
+        DedicatedFormatRollingFileWriter cappedWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        1L,
+                        SCHEMA,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(options),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, options));
+
+        cappedWriter.write(
+                GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        cappedWriter.abort();
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).count()).isZero();
+        }
+    }
+
+    @Test
     public void testDoesNotWriteRowSidecar() throws IOException {
         // Tests that: dedicated blob files do not create row-store sidecars.
         // Kills mutation: adding row sidecar writing to DedicatedFormatRollingFileWriter.
@@ -187,6 +255,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -252,6 +321,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize, // Different blob target size
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         new DataFilePathFactory(
                                 new Path(tempDir + "/blob-size-test"),
@@ -323,6 +393,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         new DataFilePathFactory(
                                 new Path(tempDir + "/bundle-blob-size-test"),
@@ -396,6 +467,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -476,6 +548,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -697,6 +770,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         customSchema, // Use custom schema
                         pathFactory,
                         () -> seqNumCounter,

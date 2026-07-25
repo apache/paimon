@@ -40,12 +40,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkChainTableITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9091;
+    private static int port;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -58,12 +59,12 @@ public class SparkChainTableITCase {
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
@@ -852,12 +853,12 @@ public class SparkChainTableITCase {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("hive.metastore.uris", "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
+                                "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
@@ -1284,12 +1285,12 @@ public class SparkChainTableITCase {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("hive.metastore.uris", "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
+                                "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
@@ -1741,12 +1742,12 @@ public class SparkChainTableITCase {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("hive.metastore.uris", "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
+                                "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",

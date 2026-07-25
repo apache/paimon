@@ -23,9 +23,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.service.network.NetworkUtils;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
@@ -75,7 +77,15 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
                                 .getEnvironment()
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
-        this.query = ((FileStoreTable) table).newLocalTableQuery().withIOManager(ioManager);
+        PartialLookupMetrics metrics =
+                new PartialLookupMetrics(
+                        new FlinkMetricRegistry(getRuntimeContext().getMetricGroup()),
+                        table.name());
+        this.query =
+                ((FileStoreTable) table)
+                        .newLocalTableQuery()
+                        .withIOManager(ioManager)
+                        .withMetrics(metrics);
         KvQueryServer server =
                 new KvQueryServer(
                         RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),

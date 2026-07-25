@@ -41,7 +41,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
 /** Data-evolution implementation for {@link VectorRead}. */
-public class DataEvolutionVectorRead extends AbstractVectorRead implements VectorRead {
+public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead implements VectorRead {
 
     private static final long serialVersionUID = 1L;
 

@@ -43,11 +43,12 @@ public class RepairActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9082;
+    private static int port;
 
     @BeforeEach
     public void beforeEach() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterEach
@@ -61,7 +62,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -84,7 +85,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
-        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put("uri", "thrift://localhost:" + port);
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         RepairAction repairAction = new RepairAction("test_db.t_repair_hive", catalogConf);

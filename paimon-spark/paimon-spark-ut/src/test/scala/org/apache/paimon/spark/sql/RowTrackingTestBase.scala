@@ -1381,4 +1381,32 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: test global indexed column update action -- ignore") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, name STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'global-index.column-update-action' = 'IGNORE')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'name_1')")
+      sql(
+        "CALL sys.create_global_index(table => 'test.T', index_column => 'name', " +
+          "index_type => 'btree')")
+
+      sql("""
+            |MERGE INTO T
+            |USING T AS source
+            |ON T._ROW_ID = source._ROW_ID
+            |WHEN MATCHED THEN UPDATE SET name = 'updated_name'
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT id, name FROM T"), Seq(Row(1, "updated_name")))
+      val indexEntries = loadTable("T").store().newIndexFileHandler().scan("btree")
+      assert(!indexEntries.isEmpty)
+    }
+  }
+
 }

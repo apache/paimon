@@ -137,6 +137,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return unionAsync(reader -> reader.visitNotBetween(fieldRef, from, to));
+    }
+
+    @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
         long start = durationConsumer == null ? 0L : System.nanoTime();

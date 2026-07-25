@@ -29,7 +29,7 @@ under the License.
 
 ## Overview
 
-The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects. A field can also use `ARRAY<BLOB>` to store an ordered collection of blobs, including null arrays and null elements.
+The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects. A field can also use `ARRAY<BLOB>` for an ordered collection or `MAP<K, BLOB>` for keyed blobs.
 
 The Blob Storage is based on Data Evolution mode.
 
@@ -76,7 +76,7 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
 
 1. **Default blob storage** (`__BLOB_FIELD`)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
-   This mode supports both `BLOB` and `ARRAY<BLOB>` fields.
+   This mode supports `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` fields.
 
 2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
    Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
@@ -85,8 +85,10 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
 This allows one table to mix different storage modes for different BLOB columns.
-`ARRAY<BLOB>` is supported only by `__BLOB_FIELD`; descriptor-only and blob-view
-comment directives accept scalar BLOB fields only.
+`ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only by `__BLOB_FIELD`;
+descriptor-only and blob-view comment directives accept scalar BLOB fields only.
+Map keys support the integer family, `CHAR`, and `VARCHAR`. Use non-null keys for
+compatibility across Flink, Spark, and Python.
 
 ## Table Options
 
@@ -173,7 +175,7 @@ CREATE TABLE image_table (
 
 ## Creating a Table
 
-The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column type to `BLOB` and registers it in the corresponding option.
+The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column to the corresponding BLOB type and registers it in the corresponding option.
 
 <Tabs groupId="blob-create-table">
 
@@ -243,7 +245,7 @@ Schema schema = Schema.newBuilder()
 import pyarrow as pa
 from pypaimon import Schema
 
-# pa.large_binary() and list_(large_binary()) are recognized as blob types.
+# Scalar, list, and map types with large_binary() values are recognized as blob types.
 pa_schema = pa.schema([
     ('id', pa.int32()),
     ('name', pa.string()),
@@ -264,13 +266,13 @@ schema = Schema.from_pyarrow_schema(
 
 </Tabs>
 
-The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB` and `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, registers the field in the corresponding option, and stores the text after `;` as the column's real comment.
+The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB`, `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, and `MAP<K, BYTES>`/`MAP<K, BINARY>` to `MAP<K, BLOB>`. It registers the field in the corresponding option and stores the text after `;` as the column's real comment.
 
 Supported directives:
 
 | Directive | Storage mode | Option |
 |-----------|-------------|--------|
-| `__BLOB_FIELD` | Raw scalar or array elements in `.blob` files | `blob-field` |
+| `__BLOB_FIELD` | Raw scalar, array elements, or map values in `.blob` files | `blob-field` |
 | `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
 | `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
 
@@ -600,12 +602,12 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 ## Limitations
 
-1. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
+1. **Primary Key Tables**: Managed BLOB storage in primary-key tables has additional requirements; see [Primary-Key BLOB Storage](../primary-key-table/blob-storage).
 2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
 3. **No Statistics**: Statistics collection is not supported for blob columns.
-4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+4. **Append Table Options**: For append tables, `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
-6. **Array Storage Mode**: `ARRAY<BLOB>` is supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
+6. **Collection Storage Mode**: `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
 
 ## Best Practices
 

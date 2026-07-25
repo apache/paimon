@@ -22,8 +22,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -293,8 +293,10 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
             return scanner.scan(predicate).get().results();
         }
     }

@@ -42,6 +42,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -65,6 +66,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
@@ -570,6 +572,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
             tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            validateCreateTable(schema, dataTokenEnabled);
             // Defaults participate in the catalog-managed partition combination, so validate
             // the effective options rather than only the explicit ones.
             validateCatalogManagedFormatTablePartitions(
@@ -652,6 +655,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(identifier, "replaceTable");
         validateCreateTable(newSchema, dataTokenEnabled);
         tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+        validateCreateTable(newSchema, dataTokenEnabled);
         // Defaults participate in the catalog-managed partition combination, so validate the
         // effective options rather than only the explicit ones. Externality is not validated
         // client-side here: a round-tripped schema of an internal table may carry the synthetic
@@ -827,6 +831,32 @@ public class RESTCatalog implements Catalog {
                 throw e;
             }
             return new PagedList<>(listPartitionsFromFileSystem(table), null);
+        }
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByFilterPaged(
+                    identifier,
+                    JsonSerdeUtil.toFlatJson(predicate),
+                    maxResults,
+                    pageToken,
+                    partitionNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // HTTP 501 is transport detail; callers only see the Catalog-level capability.
+            throw new UnsupportedOperationException(
+                    "The REST server does not support listing partitions by filter.", e);
         }
     }
 

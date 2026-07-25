@@ -310,7 +310,7 @@ public class HiveTypeUtils {
             } else if (TypeInfoFactory.dateTypeInfo.equals(atomic)) {
                 return DataTypes.DATE();
             } else if (TypeInfoFactory.timestampTypeInfo.equals(atomic)) {
-                return DataTypes.TIMESTAMP_MILLIS();
+                return DataTypes.TIMESTAMP();
             }
 
             throw new UnsupportedOperationException(

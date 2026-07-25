@@ -411,6 +411,38 @@ public class JdbcUtils {
                     + VIEW_DATABASE
                     + " = ?";
 
+    // Ordered view listing with an exclusive cursor (view_name > ?). A {@code LIMIT n} clause is
+    // appended by the caller when paging is requested.
+    static final String LIST_VIEWS_PAGED_SQL =
+            "SELECT "
+                    + VIEW_NAME
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " > ? ORDER BY "
+                    + VIEW_NAME;
+
+    static final String LIST_VIEWS_PAGED_WITH_PATTERN_SQL =
+            "SELECT "
+                    + VIEW_NAME
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " LIKE ? AND "
+                    + VIEW_NAME
+                    + " > ? ORDER BY "
+                    + VIEW_NAME;
+
     static final String INSERT_VIEW_SQL =
             "INSERT INTO "
                     + VIEW_TABLE_NAME

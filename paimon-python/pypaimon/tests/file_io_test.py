@@ -97,14 +97,19 @@ class FileIOTest(unittest.TestCase):
         mock_fs.create_dir = MagicMock()
         mock_fs.open_output_stream.return_value = MagicMock()
         oss_io.filesystem = mock_fs
-        oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
-        mock_fs.create_dir.assert_called_once()
-        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+        # Bucket-in-endpoint mode (PyArrow < 16) mkdirs probes the real bucket
+        # over HTTP; keep the test offline.
+        with patch("requests.get", return_value=MagicMock(status_code=403)):
+            oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
         if bucket_stripped:
-            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+            # Legacy mkdirs must not create_dir (it would CreateBucket the
+            # first key segment and corrupt the parent directory).
+            mock_fs.create_dir.assert_not_called()
         else:
+            mock_fs.create_dir.assert_called_once()
+            path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
-        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+            self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
         if bucket_stripped:
             for call_paths in get_file_info_calls:
                 for p in call_paths:
@@ -480,11 +485,13 @@ class FileIOTest(unittest.TestCase):
         mock_fs.copy_file = MagicMock()
         oss_io.filesystem = mock_fs
 
-        oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
-        oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
-                      "oss://test-bucket/db.db/tbl/new.parquet")
-        oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
-                         "oss://test-bucket/db.db/tbl/dst.parquet")
+        # PyArrow < 16 mkdirs probes the real bucket over HTTP; keep the test offline.
+        with patch("requests.get", return_value=MagicMock(status_code=403)):
+            oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
+            oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
+                          "oss://test-bucket/db.db/tbl/new.parquet")
+            oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
+                             "oss://test-bucket/db.db/tbl/dst.parquet")
 
         for call in mock_fs.create_dir.call_args_list:
             self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")

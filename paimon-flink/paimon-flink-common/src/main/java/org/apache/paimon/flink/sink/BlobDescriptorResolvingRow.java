@@ -20,7 +20,9 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -70,7 +72,27 @@ final class BlobDescriptorResolvingRow extends PartialRow {
 
     @Override
     public InternalArray getArray(int pos) {
-        return new BlobDescriptorResolvingArray(super.getArray(pos), uriReaderFactory);
+        return withReader(super.getArray(pos), uriReaderFactory);
+    }
+
+    @Override
+    public InternalMap getMap(int pos) {
+        return withReader(super.getMap(pos), uriReaderFactory);
+    }
+
+    private static InternalArray withReader(
+            InternalArray array, UriReaderFactory uriReaderFactory) {
+        if (array == BlobArrayPlaceholder.INSTANCE) {
+            return array;
+        }
+        return new BlobDescriptorResolvingArray(array, uriReaderFactory);
+    }
+
+    private static InternalMap withReader(InternalMap map, UriReaderFactory uriReaderFactory) {
+        if (map == BlobMapPlaceholder.INSTANCE) {
+            return map;
+        }
+        return new BlobDescriptorResolvingMap(map, uriReaderFactory);
     }
 
     private static final class BlobDescriptorResolvingArray implements InternalArray {
@@ -161,7 +183,7 @@ final class BlobDescriptorResolvingRow extends PartialRow {
 
         @Override
         public InternalArray getArray(int pos) {
-            return new BlobDescriptorResolvingArray(wrapped.getArray(pos), uriReaderFactory);
+            return withReader(wrapped.getArray(pos), uriReaderFactory);
         }
 
         @Override
@@ -171,7 +193,7 @@ final class BlobDescriptorResolvingRow extends PartialRow {
 
         @Override
         public InternalMap getMap(int pos) {
-            return wrapped.getMap(pos);
+            return withReader(wrapped.getMap(pos), uriReaderFactory);
         }
 
         @Override
@@ -212,6 +234,32 @@ final class BlobDescriptorResolvingRow extends PartialRow {
         @Override
         public double[] toDoubleArray() {
             return wrapped.toDoubleArray();
+        }
+    }
+
+    private static final class BlobDescriptorResolvingMap implements InternalMap {
+
+        private final InternalMap wrapped;
+        private final UriReaderFactory uriReaderFactory;
+
+        private BlobDescriptorResolvingMap(InternalMap wrapped, UriReaderFactory uriReaderFactory) {
+            this.wrapped = wrapped;
+            this.uriReaderFactory = uriReaderFactory;
+        }
+
+        @Override
+        public int size() {
+            return wrapped.size();
+        }
+
+        @Override
+        public InternalArray keyArray() {
+            return wrapped.keyArray();
+        }
+
+        @Override
+        public InternalArray valueArray() {
+            return withReader(wrapped.valueArray(), uriReaderFactory);
         }
     }
 }

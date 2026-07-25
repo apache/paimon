@@ -22,10 +22,10 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
@@ -71,7 +71,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
-public abstract class AbstractVectorRead implements Serializable {
+public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -86,7 +86,7 @@ public abstract class AbstractVectorRead implements Serializable {
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
 
-    protected AbstractVectorRead(
+    protected AbstractDataEvolutionVectorRead(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,
@@ -172,13 +172,13 @@ public abstract class AbstractVectorRead implements Serializable {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
 
-        Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return new RoaringNavigableMap64();
         }
 
-        try (GlobalIndexScanner scanner = optionalScanner.get()) {
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (!result.isPresent()) {
                 return new RoaringNavigableMap64();
@@ -205,14 +205,14 @@ public abstract class AbstractVectorRead implements Serializable {
         for (RawVectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
-        Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
         }
 
         RoaringNavigableMap64 include = new RoaringNavigableMap64();
-        try (GlobalIndexScanner scanner = optionalScanner.get()) {
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (!result.isPresent()) {
                 return null;
