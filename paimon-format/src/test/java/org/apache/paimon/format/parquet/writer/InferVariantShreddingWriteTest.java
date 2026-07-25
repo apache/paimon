@@ -193,6 +193,46 @@ public class InferVariantShreddingWriteTest {
     }
 
     @Test
+    public void testAdaptiveInferenceOnShortRolledFile() throws Exception {
+        ParquetFileFormat format = createFormat(adaptiveOptions(4, 4, 0.4, 0.2));
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "payload", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+
+        Path firstFile = file;
+        writeRows(
+                factory,
+                firstFile,
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"a\",\"stable\":1}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"b\",\"stable\":2}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"c\",\"stable\":3}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"d\",\"stable\":4}")));
+
+        Path secondFile = newFile();
+        writeRows(
+                factory,
+                secondFile,
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":true,\"stable\":5}")),
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":false,\"stable\":6}")),
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":true,\"stable\":7}")));
+
+        assertThat(readVariantFileType(secondFile, "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+        assertThat(readVariantJson(format, writeType, secondFile, 0))
+                .containsExactly(
+                        "{\"emerging\":true,\"stable\":5}",
+                        "{\"emerging\":false,\"stable\":6}",
+                        "{\"emerging\":true,\"stable\":7}");
+    }
+
+    @Test
     public void testAdaptiveInferenceWithMultipleVariantFields() throws Exception {
         ParquetFileFormat format = createFormat(adaptiveOptions(2, 2, 0.4, 0.2));
         RowType writeType =
