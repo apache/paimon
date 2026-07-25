@@ -53,11 +53,11 @@ import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecTo
 /**
  * Enumerates {@link FormatDataSplit}s for a {@link FormatTable}.
  *
- * <p>Partitions come either from the catalog ({@link CatalogFormatTableSplitEnumerator}) or from
- * the filesystem ({@link FileSystemFormatTableSplitEnumerator}); the source is chosen once by
- * {@link #create} so the enumeration paths stay free of {@code partitionManager != null} branching.
+ * <p>Partitions come either from the catalog ({@link CatalogSplitEnumerator}) or from the
+ * filesystem ({@link FileSystemSplitEnumerator}); the source is chosen once by {@link #create} so
+ * the enumeration paths stay free of {@code partitionManager != null} branching.
  */
-abstract class FormatTableSplitEnumerator {
+abstract class SplitEnumerator {
 
     protected final FormatTable table;
     protected final CoreOptions coreOptions;
@@ -65,7 +65,7 @@ abstract class FormatTableSplitEnumerator {
     protected final long openFileCost;
     protected final FormatTable.Format format;
 
-    FormatTableSplitEnumerator(FormatTable table, CoreOptions coreOptions) {
+    SplitEnumerator(FormatTable table, CoreOptions coreOptions) {
         this.table = table;
         this.coreOptions = coreOptions;
         this.targetSplitSize = coreOptions.splitTargetSize();
@@ -73,14 +73,14 @@ abstract class FormatTableSplitEnumerator {
         this.format = table.format();
     }
 
-    static FormatTableSplitEnumerator create(
+    static SplitEnumerator create(
             FormatTable table,
             CoreOptions coreOptions,
             @Nullable FormatTablePartitionManager partitionManager) {
         if (partitionManager != null) {
-            return new CatalogFormatTableSplitEnumerator(table, coreOptions, partitionManager);
+            return new CatalogSplitEnumerator(table, coreOptions, partitionManager);
         }
-        return new FileSystemFormatTableSplitEnumerator(table, coreOptions);
+        return new FileSystemSplitEnumerator(table, coreOptions);
     }
 
     final List<Split> enumerate(@Nullable PartitionPredicate partitionFilter) throws IOException {

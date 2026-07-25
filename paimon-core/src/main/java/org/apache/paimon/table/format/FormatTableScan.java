@@ -63,7 +63,7 @@ public class FormatTableScan implements InnerTableScan {
     final FormatTable table;
     final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
-    private final FormatTableSplitEnumerator splitEnumerator;
+    private final SplitEnumerator splitEnumerator;
     @Nullable private final Integer limit;
 
     public FormatTableScan(
@@ -74,8 +74,7 @@ public class FormatTableScan implements InnerTableScan {
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.splitEnumerator =
-                FormatTableSplitEnumerator.create(table, coreOptions, table.partitionManager());
+        this.splitEnumerator = SplitEnumerator.create(table, coreOptions, table.partitionManager());
     }
 
     @Override

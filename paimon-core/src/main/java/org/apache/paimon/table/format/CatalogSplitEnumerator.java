@@ -56,11 +56,10 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-/** A {@link FormatTableSplitEnumerator} whose partitions are managed by the catalog. */
-final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator {
+/** A {@link SplitEnumerator} whose partitions are managed by the catalog. */
+final class CatalogSplitEnumerator extends SplitEnumerator {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(CatalogFormatTableSplitEnumerator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CatalogSplitEnumerator.class);
 
     private static final int LIST_POOL_MAX_THREADS = 1000;
 
@@ -78,7 +77,7 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
 
     private final FormatTablePartitionManager partitionManager;
 
-    CatalogFormatTableSplitEnumerator(
+    CatalogSplitEnumerator(
             FormatTable table,
             CoreOptions coreOptions,
             FormatTablePartitionManager partitionManager) {

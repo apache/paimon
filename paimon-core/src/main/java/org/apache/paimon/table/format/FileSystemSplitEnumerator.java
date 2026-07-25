@@ -44,13 +44,12 @@ import java.util.Set;
 
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
-/** A {@link FormatTableSplitEnumerator} whose partitions are discovered from the filesystem. */
-final class FileSystemFormatTableSplitEnumerator extends FormatTableSplitEnumerator {
+/** A {@link SplitEnumerator} whose partitions are discovered from the filesystem. */
+final class FileSystemSplitEnumerator extends SplitEnumerator {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(FileSystemFormatTableSplitEnumerator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(FileSystemSplitEnumerator.class);
 
-    FileSystemFormatTableSplitEnumerator(FormatTable table, CoreOptions coreOptions) {
+    FileSystemSplitEnumerator(FormatTable table, CoreOptions coreOptions) {
         super(table, coreOptions);
     }
 
