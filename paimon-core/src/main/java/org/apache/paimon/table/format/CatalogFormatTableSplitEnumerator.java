@@ -33,6 +33,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 import org.apache.paimon.utils.ThreadPoolUtils;
+import org.apache.paimon.utils.ThreadUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +51,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /** A {@link FormatTableSplitEnumerator} whose partitions are managed by the catalog. */
@@ -59,10 +62,19 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
     private static final Logger LOG =
             LoggerFactory.getLogger(CatalogFormatTableSplitEnumerator.class);
 
-    private static final int LIST_POOL_MAX_THREADS = 128;
+    private static final int LIST_POOL_MAX_THREADS = 1000;
+
+    // Cached pool bounded at 1000 threads that reuses idle workers; CallerRunsPolicy lists on the
+    // caller for back pressure once the cap is hit.
     private static final ThreadPoolExecutor LIST_POOL =
-            ThreadPoolUtils.createCachedThreadPool(
-                    LIST_POOL_MAX_THREADS, "FORMAT-TABLE-LIST-THREAD-POOL");
+            new ThreadPoolExecutor(
+                    0,
+                    LIST_POOL_MAX_THREADS,
+                    1,
+                    TimeUnit.MINUTES,
+                    new SynchronousQueue<>(),
+                    ThreadUtils.newDaemonThreadFactory("FORMAT-TABLE-LIST-THREAD-POOL"),
+                    new ThreadPoolExecutor.CallerRunsPolicy());
 
     private final FormatTablePartitionManager partitionManager;
 
