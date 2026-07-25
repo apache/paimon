@@ -123,3 +123,133 @@ class DecimalTest(unittest.TestCase):
     def test_extract_decimal_precision_scale_invalid(self):
         with self.assertRaises(ValueError):
             Decimal.extract_decimal_precision_scale("INT")
+
+    def test_high_precision_unscaled_bytes_round_trip(self):
+        value = BigDecimal("12345678901234567890123456789012345678")
+
+        d = Decimal.from_big_decimal(value, precision=38, scale=0)
+
+        self.assertIsNotNone(d)
+
+        encoded = d.to_unscaled_bytes()
+
+        d2 = Decimal.from_unscaled_bytes(
+            encoded,
+            precision=38,
+            scale=0,
+        )
+
+        self.assertEqual(d2, d)
+        self.assertEqual(d2.to_big_decimal(), value)
+
+    def test_high_precision_scaled_round_trip(self):
+        value = BigDecimal("12345678901234567890.123456789012345678")
+
+        d = Decimal.from_big_decimal(
+            value,
+            precision=38,
+            scale=18,
+        )
+
+        self.assertIsNotNone(d)
+
+        d2 = Decimal.from_unscaled_bytes(
+            d.to_unscaled_bytes(),
+            precision=38,
+            scale=18,
+        )
+
+        self.assertEqual(d2.to_big_decimal(), value)
+
+    def test_to_unscaled_bytes_java_compatible(self):
+        cases = [
+            (-32769, "ff7fff"),
+            (-32768, "8000"),
+            (-129, "ff7f"),
+            (-128, "80"),
+            (-127, "81"),
+            (-2, "fe"),
+            (-1, "ff"),
+            (0, "00"),
+            (1, "01"),
+            (127, "7f"),
+            (128, "0080"),
+            (255, "00ff"),
+            (256, "0100"),
+            (32767, "7fff"),
+            (32768, "008000"),
+        ]
+
+        for unscaled, expected in cases:
+            with self.subTest(unscaled=unscaled):
+                d = Decimal.from_unscaled_long(
+                    unscaled,
+                    precision=18,
+                    scale=0,
+                )
+
+                self.assertEqual(
+                    d.to_unscaled_bytes().hex(),
+                    expected,
+                )
+
+    def test_from_unscaled_bytes_java_compatible(self):
+        cases = [
+            ("80", -128),
+            ("ff7f", -129),
+            ("ff", -1),
+            ("00", 0),
+            ("7f", 127),
+            ("0080", 128),
+            ("00ff", 255),
+        ]
+
+        for encoded, expected in cases:
+            with self.subTest(encoded=encoded):
+                d = Decimal.from_unscaled_bytes(
+                    bytes.fromhex(encoded),
+                    precision=18,
+                    scale=0,
+                )
+
+                self.assertEqual(
+                    d.to_unscaled_long(),
+                    expected,
+                )
+
+    def test_unscaled_bytes_round_trip(self):
+        values = [
+            -123456789012345678,
+            -1000,
+            -129,
+            -128,
+            -127,
+            -1,
+            0,
+            1,
+            127,
+            128,
+            255,
+            256,
+            123456789012345678,
+        ]
+
+        for value in values:
+            with self.subTest(value=value):
+                d = Decimal.from_unscaled_long(
+                    value,
+                    precision=18,
+                    scale=0,
+                )
+
+                d2 = Decimal.from_unscaled_bytes(
+                    d.to_unscaled_bytes(),
+                    precision=18,
+                    scale=0,
+                )
+
+                self.assertEqual(d2, d)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -18,6 +18,7 @@
 
 import re
 from decimal import Decimal as BigDecimal
+from decimal import Inexact
 from decimal import ROUND_HALF_UP
 from decimal import localcontext
 from typing import Optional, Tuple
@@ -82,10 +83,12 @@ class Decimal:
 
     def to_big_decimal(self) -> BigDecimal:
         """
-        Converts this Decimal into a decimal.Decimal instance.
+        Converts this Decimal into a python builtin-in decimal.Decimal instance.
         """
         if self.decimal_val is None:
-            self.decimal_val = BigDecimal(self.long_val).scaleb(-self.scale)
+            with localcontext() as ctx:
+                ctx.prec = max(self.precision + abs(self.scale), 38)
+                self.decimal_val = BigDecimal(self.long_val).scaleb(-self.scale)
         return self.decimal_val
 
     def to_unscaled_long(self) -> int:
@@ -99,10 +102,17 @@ class Decimal:
         if self.is_compact():
             return self.long_val
 
-        value = self.to_big_decimal().scaleb(self.scale)
+        with localcontext() as ctx:
+            bd = self.to_big_decimal()
+            ctx.prec = max(
+                len(bd.as_tuple().digits) + abs(self.scale),
+                self.precision,
+                38,
+            )
+            value = bd.scaleb(self.scale)
 
-        if value != value.to_integral_exact():
-            raise ArithmeticError("Decimal does not exactly fit in long.")
+            if value != value.to_integral_exact():
+                raise ArithmeticError("Decimal does not exactly fit in long.")
 
         int_val = int(value)
         if not (-(1 << 63) <= int_val <= (1 << 63) - 1):
@@ -114,13 +124,21 @@ class Decimal:
         """
         Returns the unscaled value encoded as a signed byte array.
         """
-        value = self.to_big_decimal().scaleb(self.scale)
 
-        if value != value.to_integral_exact():
-            raise ArithmeticError("Decimal does not exactly fit in long.")
+        with localcontext() as ctx:
+            bd = self.to_big_decimal()
+            ctx.prec = max(
+                len(bd.as_tuple().digits) + abs(self.scale),
+                self.precision,
+                38,
+            )
+            value = bd.scaleb(self.scale)
+
+            if value != value.to_integral_exact():
+                raise ArithmeticError("Decimal does not exactly fit in long.")
 
         unscaled = int(value)
-        length = max(1, (unscaled.bit_length() + 8) // 8)
+        length = self._get_compact_byte_length(unscaled)
         return unscaled.to_bytes(length, byteorder="big", signed=True)
 
     def is_compact(self) -> bool:
@@ -139,33 +157,6 @@ class Decimal:
             self.long_val,
             self.decimal_val,
         )
-
-    @staticmethod
-    def extract_decimal_precision_scale(type_str: str) -> Tuple[int, int]:
-        """
-        Extracts the precision and scale from a DECIMAL/NUMERIC/DEC type string.
-
-        Examples:
-            DECIMAL -> (10, 0)
-            DECIMAL(10) -> (10, 0)
-            DECIMAL(10,2) -> (10, 2)
-            NUMERIC(20,5) -> (20, 5)
-            DEC(18,6) -> (18, 6)
-        """
-        match = _DECIMAL_PATTERN.fullmatch(type_str.strip())
-        if match is None:
-            raise ValueError(f"Invalid decimal type: {type_str}")
-
-        precision = match.group(2)
-        scale = match.group(3)
-
-        if precision is None:
-            return 10, 0
-
-        if scale is None:
-            return int(precision), 0
-
-        return int(precision), int(scale)
 
     # ----------------------------------------------------------------------
     # Comparison
@@ -233,45 +224,45 @@ class Decimal:
             modifying the global decimal context.
         """
 
-        quant = BigDecimal(1).scaleb(-scale)
+        if not value.is_finite():
+            raise ArithmeticError("NaN and Infinity are not supported.")
 
         with localcontext() as ctx:
-            # Java BigDecimal is arbitrary precision.
-            # Paimon DECIMAL supports precision up to 38.
+            t = value.as_tuple()
             ctx.prec = max(
                 precision + scale,
-                len(value.as_tuple().digits) + abs(value.as_tuple().exponent) + scale,
+                len(t.digits) + abs(t.exponent) + scale,
                 38,
             )
 
             value = value.quantize(
-                quant,
+                BigDecimal(1).scaleb(-scale),
                 rounding=ROUND_HALF_UP,
             )
 
-        digits = len(value.as_tuple().digits)
+            digits = len(value.as_tuple().digits)
 
-        if digits > precision:
-            return None
+            if digits > precision:
+                return None
 
-        long_val = -1
+            long_val = -1
 
-        if precision <= cls.MAX_COMPACT_PRECISION:
-            unscaled = value.scaleb(scale)
+            if precision <= cls.MAX_COMPACT_PRECISION:
+                unscaled = value.scaleb(scale)
 
-            if unscaled != unscaled.to_integral_exact():
-                raise ArithmeticError(
-                    "Decimal does not exactly fit in long."
-                )
+                if unscaled != unscaled.to_integral_exact():
+                    raise ArithmeticError(
+                        "Decimal does not exactly fit in long."
+                    )
 
-            long_val = int(unscaled)
+                long_val = int(unscaled)
 
-        return cls(
-            precision,
-            scale,
-            long_val,
-            value,
-        )
+            return cls(
+                precision,
+                scale,
+                long_val,
+                value,
+            )
 
     @classmethod
     def from_unscaled_long(
@@ -313,7 +304,13 @@ class Decimal:
             signed=True,
         )
 
-        bd = BigDecimal(value).scaleb(-scale)
+        with localcontext() as ctx:
+            ctx.prec = max(
+                len(str(abs(value))) + abs(scale),
+                precision,
+                38,
+            )
+            bd = BigDecimal(value).scaleb(-scale)
 
         return cls.from_big_decimal(
             bd,
@@ -342,9 +339,169 @@ class Decimal:
             scale,
         )
 
+    # ----------------------------------------------------------------------
+    # Arithmetic Operations
+    # ----------------------------------------------------------------------
+
+    @staticmethod
+    def add(lhs: BigDecimal, rhs: BigDecimal, precision: int) -> BigDecimal:
+        """
+        Returns the sum of two decimal values without losing precision due to
+        Python's default decimal context.
+
+        The operation is performed in a temporary high-precision context to
+        emulate Java BigDecimal arithmetic.
+        """
+        assert isinstance(
+            lhs, BigDecimal
+        ), f"'lhs' must be a decimal.Decimal, got {type(lhs).__name__}"
+
+        assert isinstance(
+            rhs, BigDecimal
+        ), f"'rhs' must be a decimal.Decimal, got {type(rhs).__name__}"
+
+        with localcontext() as ctx:
+            ctx.prec = max(
+                len(lhs.as_tuple().digits),
+                len(rhs.as_tuple().digits),
+                precision,
+                38,
+            ) + 1
+
+            return lhs + rhs
+
+    @staticmethod
+    def subtract(lhs: BigDecimal, rhs: BigDecimal, precision: int) -> BigDecimal:
+        """
+        Returns the difference of two decimal values without losing precision due
+        to Python's default decimal context.
+
+        The operation is performed in a temporary high-precision context to
+        emulate Java BigDecimal arithmetic.
+        """
+        assert isinstance(
+            lhs, BigDecimal
+        ), f"'lhs' must be a decimal.Decimal, got {type(lhs).__name__}"
+
+        assert isinstance(
+            rhs, BigDecimal
+        ), f"'rhs' must be a decimal.Decimal, got {type(rhs).__name__}"
+
+        with localcontext() as ctx:
+            ctx.prec = max(
+                len(lhs.as_tuple().digits),
+                len(rhs.as_tuple().digits),
+                precision,
+                38,
+            ) + 1
+
+            return lhs - rhs
+
+    @staticmethod
+    def multiply(lhs: BigDecimal, rhs: BigDecimal, precision: int) -> BigDecimal:
+        """
+        Returns the product of two decimal values without losing precision due to
+        Python's default decimal context.
+
+        The operation is performed in a temporary high-precision context to
+        emulate Java BigDecimal arithmetic.
+        """
+        assert isinstance(
+            lhs, BigDecimal
+        ), f"'lhs' must be a decimal.Decimal, got {type(lhs).__name__}"
+
+        assert isinstance(
+            rhs, BigDecimal
+        ), f"'rhs' must be a decimal.Decimal, got {type(rhs).__name__}"
+
+        with localcontext() as ctx:
+            ctx.prec = max(
+                len(lhs.as_tuple().digits)
+                + len(rhs.as_tuple().digits),
+                precision,
+                38,
+            )
+
+            return lhs * rhs
+
+    @staticmethod
+    def divide(lhs: BigDecimal, rhs: BigDecimal, precision: int) -> BigDecimal:
+        """
+        Returns the exact quotient of two decimal values.
+
+        Raises:
+            ArithmeticError:
+                If the division has a non-terminating decimal expansion,
+                matching the behavior of Java BigDecimal.divide(BigDecimal).
+        """
+        assert isinstance(
+            lhs, BigDecimal
+        ), f"'lhs' must be a decimal.Decimal, got {type(lhs).__name__}"
+
+        assert isinstance(
+            rhs, BigDecimal
+        ), f"'rhs' must be a decimal.Decimal, got {type(rhs).__name__}"
+
+        with localcontext() as ctx:
+            ctx.prec = max(precision, 38)
+            ctx.traps[Inexact] = True
+
+            try:
+                return lhs / rhs
+            except Inexact:
+                raise ArithmeticError(
+                    "Non-terminating decimal expansion; "
+                    "no exact representable decimal result."
+                )
+
+    # ----------------------------------------------------------------------
+    # Utility Methods
+    # ----------------------------------------------------------------------
+
     @staticmethod
     def is_compact_precision(precision: int) -> bool:
         """
         Returns whether the specified precision can be stored in compact form.
         """
         return precision <= Decimal.MAX_COMPACT_PRECISION
+
+    @staticmethod
+    def extract_decimal_precision_scale(type_str: str) -> Tuple[int, int]:
+        """
+        Extracts the precision and scale from a DECIMAL/NUMERIC/DEC type string.
+
+        Returns: (precision, scale)
+
+        Examples:
+            DECIMAL -> (10, 0)
+            DECIMAL(10) -> (10, 0)
+            DECIMAL(10,2) -> (10, 2)
+            NUMERIC(20,5) -> (20, 5)
+            DEC(18,6) -> (18, 6)
+        """
+        match = _DECIMAL_PATTERN.fullmatch(type_str.strip())
+        if match is None:
+            raise ValueError(f"Invalid decimal type: {type_str}")
+
+        precision = match.group(2)
+        scale = match.group(3)
+
+        if precision is None:
+            return 10, 0
+
+        if scale is None:
+            return int(precision), 0
+
+        return int(precision), int(scale)
+
+    @staticmethod
+    def _get_compact_byte_length(val: int) -> int:
+        if val == 0:
+            return 1
+
+        if val > 0:
+            bits = val.bit_length()
+        else:
+            bits = (~val).bit_length()
+
+        return bits // 8 + 1
