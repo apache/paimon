@@ -29,9 +29,10 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
 
 /** A {@link FormatTableSplitEnumerator} whose partitions are managed by the catalog. */
@@ -55,6 +58,11 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CatalogFormatTableSplitEnumerator.class);
+
+    private static final int LIST_POOL_MAX_THREADS = 128;
+    private static final ThreadPoolExecutor LIST_POOL =
+            ThreadPoolUtils.createCachedThreadPool(
+                    LIST_POOL_MAX_THREADS, "FORMAT-TABLE-LIST-THREAD-POOL");
 
     private final FormatTablePartitionManager partitionManager;
 
@@ -67,7 +75,8 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
     }
 
     @Override
-    List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter) {
+    List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter)
+            throws IOException {
         List<Pair<LinkedHashMap<String, String>, Path>> partitions =
                 findPartitions(partitionFilter);
         List<Split> splits = new ArrayList<>();
@@ -76,6 +85,10 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
         }
 
         FileIO fileIO = table.fileIO();
+        // Establish the filesystem on the caller thread so the listing workers reuse a filesystem
+        // created under the caller's security context, matching how a FileStore scan reads the
+        // snapshot on the caller thread before its parallel manifest reads.
+        fileIO.exists(new Path(table.location()));
         Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
                 pair -> {
                     BinaryRow partitionRow = toPartitionRow(pair.getKey());
@@ -92,8 +105,12 @@ final class CatalogFormatTableSplitEnumerator extends FormatTableSplitEnumerator
                                 "Failed to list files for partition " + pair.getValue(), e);
                     }
                 };
-        int parallelism = Math.max(1, coreOptions.formatTableScanListParallelism());
-        ManifestReadThreadPool.randomlyExecuteSequentialReturn(lister, partitions, parallelism)
+        int parallelism =
+                Math.min(
+                        LIST_POOL_MAX_THREADS,
+                        Math.max(1, coreOptions.formatTableScanListParallelism()));
+        ExecutorService executor = new SemaphoredDelegatingExecutor(LIST_POOL, parallelism, false);
+        ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, lister, partitions)
                 .forEachRemaining(splits::add);
         return splits;
     }
