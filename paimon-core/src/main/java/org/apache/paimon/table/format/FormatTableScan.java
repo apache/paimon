@@ -25,7 +25,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
@@ -51,16 +50,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-
-import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
@@ -68,7 +63,6 @@ public class FormatTableScan implements InnerTableScan {
     final FormatTable table;
     final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
-    @Nullable private final FormatTablePartitionManager partitionManager;
     private final FormatTableSplitEnumerator splitEnumerator;
     @Nullable private final Integer limit;
 
@@ -80,8 +74,8 @@ public class FormatTableScan implements InnerTableScan {
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.partitionManager = table.partitionManager();
-        this.splitEnumerator = new FormatTableSplitEnumerator(table, coreOptions, partitionManager);
+        this.splitEnumerator =
+                FormatTableSplitEnumerator.create(table, coreOptions, table.partitionManager());
     }
 
     @Override
@@ -97,48 +91,7 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
-        if (partitionManager != null) {
-            List<Partition> partitions =
-                    partitionManager.listPartitions(Collections.emptyMap(), null);
-            if (partitions.isEmpty()) {
-                splitEnumerator.warnIfFilesystemPartitionsExist();
-            }
-            boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
-            List<PartitionEntry> entries = new ArrayList<>(partitions.size());
-            Set<Map<String, String>> seen = new HashSet<>(partitions.size());
-            for (Partition partition : partitions) {
-                if (!seen.add(partition.spec())) {
-                    continue;
-                }
-                entries.add(
-                        new PartitionEntry(
-                                toPartitionRow(
-                                        splitEnumerator.normalizeSpec(
-                                                partition.spec(), onlyValueInPath)),
-                                partition.recordCount(),
-                                partition.fileSizeInBytes(),
-                                partition.fileCount(),
-                                partition.lastFileCreationTime(),
-                                partition.totalBuckets()));
-            }
-            return entries;
-        }
-        List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
-                searchPartSpecAndPaths(
-                        table.fileIO(),
-                        new Path(table.location()),
-                        table.partitionKeys().size(),
-                        table.partitionKeys(),
-                        coreOptions.formatTablePartitionOnlyValueInPath(),
-                        null,
-                        table.partitionType(),
-                        table.defaultPartName());
-        List<PartitionEntry> partitionEntries = new ArrayList<>();
-        for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
-            BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
-        }
-        return partitionEntries;
+        return splitEnumerator.listPartitionEntries();
     }
 
     @Override
