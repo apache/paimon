@@ -1235,10 +1235,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(64)
                     .withDescription(
-                            "The parallelism of listing partition files during format table split "
-                                    + "planning for catalog-managed (internal) tables. External "
-                                    + "(filesystem-discovered) tables always list serially and ignore "
-                                    + "this option.");
+                            "The parallelism of listing partition files during split planning for "
+                                    + "a Format Table with catalog-managed partitions.");
 
     public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")

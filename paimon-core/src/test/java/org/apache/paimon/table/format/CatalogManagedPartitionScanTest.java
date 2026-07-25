@@ -53,6 +53,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
@@ -509,8 +512,8 @@ class CatalogManagedPartitionScanTest {
     }
 
     @Test
-    void testInternalParallelListingMatchesSerialAndIsDeterministic() throws Exception {
-        TrackingLocalFileIO fileIO = new TrackingLocalFileIO();
+    void testCatalogPartitionListingRunsInParallelAndPreservesOrder() throws Exception {
+        ParallelTrackingLocalFileIO fileIO = new ParallelTrackingLocalFileIO();
         Path tablePath = new Path(tempDir.toUri());
         List<Partition> partitions = new ArrayList<>();
         List<Path> expected = new ArrayList<>();
@@ -519,29 +522,22 @@ class CatalogManagedPartitionScanTest {
             expected.add(writeDataFile(fileIO, tablePath, "year=2025/month=" + m));
         }
 
-        List<Path> serial =
-                plannedFiles(
-                        new FormatTableScan(
-                                        managedStringTable(fileIO, tablePath, partitions, 1),
-                                        null,
-                                        null)
-                                .plan()
-                                .splits());
         List<Path> parallel =
                 plannedFiles(
                         new FormatTableScan(
-                                        managedStringTable(fileIO, tablePath, partitions, 8),
+                                        stringPartitionTable(
+                                                fileIO, tablePath, recordingCatalog(partitions), 8),
                                         null,
                                         null)
                                 .plan()
                                 .splits());
 
-        assertThat(parallel).containsExactlyElementsOf(serial);
         assertThat(parallel).containsExactlyElementsOf(expected);
+        assertThat(fileIO.maxConcurrentListings()).isGreaterThan(1);
     }
 
     @Test
-    void testInternalMissingPartitionDirectoryTreatedAsEmpty() throws Exception {
+    void testParallelListingSkipsMissingCatalogRegisteredPartition() throws Exception {
         InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
         Path tablePath = new Path(tempDir.toUri());
         List<Partition> partitions =
@@ -549,13 +545,13 @@ class CatalogManagedPartitionScanTest {
                         partition("2025", "10"), partition("2025", "11"), partition("2025", "12"));
         Path oct = writeDataFile(fileIO, tablePath, "year=2025/month=10");
         Path dec = writeDataFile(fileIO, tablePath, "year=2025/month=12");
-        // month=11 is registered but its directory is missing -> FileNotFound -> treated as empty.
         fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
 
         List<Path> files =
                 plannedFiles(
                         new FormatTableScan(
-                                        managedStringTable(fileIO, tablePath, partitions, 4),
+                                        stringPartitionTable(
+                                                fileIO, tablePath, recordingCatalog(partitions), 4),
                                         null,
                                         null)
                                 .plan()
@@ -565,37 +561,58 @@ class CatalogManagedPartitionScanTest {
     }
 
     @Test
-    void testInternalListingIoErrorFailsWholeScan() throws Exception {
+    void testCatalogPartitionListingIoErrorFailsWholeScan() throws Exception {
         InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
         Path tablePath = new Path(tempDir.toUri());
         List<Partition> partitions =
                 Arrays.asList(partition("2025", "10"), partition("2025", "11"));
         writeDataFile(fileIO, tablePath, "year=2025/month=10");
         writeDataFile(fileIO, tablePath, "year=2025/month=11");
-        // A real (non-FileNotFound) listing error must fail the whole scan, not truncate.
         fileIO.failListFilesContaining("month=11", new IOException("boom"));
 
-        FormatTable table = managedStringTable(fileIO, tablePath, partitions, 4);
+        FormatTable table =
+                stringPartitionTable(fileIO, tablePath, recordingCatalog(partitions), 4);
         assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseInstanceOf(IOException.class)
+                .hasRootCauseMessage("boom");
     }
 
     @Test
-    void testExternalMissingDirectoryStillFailsScan() throws Exception {
+    void testFilesystemDiscoveredMissingDirectoryStillFailsScan() throws Exception {
         InjectingLocalFileIO fileIO = new InjectingLocalFileIO();
         Path tablePath = new Path(tempDir.toUri());
         writeDataFile(fileIO, tablePath, "year=2025/month=10");
         writeDataFile(fileIO, tablePath, "year=2025/month=11");
-        // External tables (partitionManager == null) keep the rethrow-on-missing behavior.
         fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
 
         FormatTable table = createStringPartitionTable(fileIO, tablePath, null);
         assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseInstanceOf(FileNotFoundException.class);
     }
 
-    private FormatTable managedStringTable(
-            LocalFileIO fileIO, Path tablePath, List<Partition> partitions, int parallelism) {
+    @Test
+    void testListParallelismDoesNotChangeFilesystemDiscoveredScanning() throws Exception {
+        SerialTrackingLocalFileIO fileIO = new SerialTrackingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        List<Path> expected = new ArrayList<>();
+        for (int month = 10; month <= 12; month++) {
+            expected.add(writeDataFile(fileIO, tablePath, "year=2025/month=" + month));
+        }
+
+        FormatTable table = stringPartitionTable(fileIO, tablePath, null, 8);
+        List<Path> files = plannedFiles(new FormatTableScan(table, null, null).plan().splits());
+
+        assertThat(files).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(fileIO.maxConcurrentListings()).isOne();
+    }
+
+    private FormatTable stringPartitionTable(
+            LocalFileIO fileIO,
+            Path tablePath,
+            @Nullable FormatTablePartitionManager partitionManager,
+            int parallelism) {
         RowType rowType =
                 RowType.builder()
                         .field("year", DataTypes.STRING())
@@ -613,8 +630,62 @@ class CatalogManagedPartitionScanTest {
                 .location(tablePath.toString())
                 .format(FormatTable.Format.CSV)
                 .options(options)
-                .partitionManager(recordingCatalog(partitions))
+                .partitionManager(partitionManager)
                 .build();
+    }
+
+    private static class ParallelTrackingLocalFileIO extends LocalFileIO {
+
+        private final CountDownLatch concurrentListings = new CountDownLatch(2);
+        private final AtomicInteger activeListings = new AtomicInteger();
+        private final AtomicInteger maxConcurrentListings = new AtomicInteger();
+
+        @Override
+        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+            int active = activeListings.incrementAndGet();
+            maxConcurrentListings.updateAndGet(current -> Math.max(current, active));
+            concurrentListings.countDown();
+            try {
+                if (!concurrentListings.await(10, TimeUnit.SECONDS)) {
+                    throw new IOException("Partition file listings did not run concurrently");
+                }
+                return super.listFiles(path, recursive);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for concurrent listings", e);
+            } finally {
+                activeListings.decrementAndGet();
+            }
+        }
+
+        private int maxConcurrentListings() {
+            return maxConcurrentListings.get();
+        }
+    }
+
+    private static class SerialTrackingLocalFileIO extends LocalFileIO {
+
+        private final AtomicInteger activeListings = new AtomicInteger();
+        private final AtomicInteger maxConcurrentListings = new AtomicInteger();
+
+        @Override
+        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+            int active = activeListings.incrementAndGet();
+            maxConcurrentListings.updateAndGet(current -> Math.max(current, active));
+            try {
+                Thread.sleep(50);
+                return super.listFiles(path, recursive);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while tracking file listings", e);
+            } finally {
+                activeListings.decrementAndGet();
+            }
+        }
+
+        private int maxConcurrentListings() {
+            return maxConcurrentListings.get();
+        }
     }
 
     private static class InjectingLocalFileIO extends LocalFileIO {
