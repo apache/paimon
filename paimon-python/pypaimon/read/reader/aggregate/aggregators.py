@@ -563,8 +563,10 @@ class FieldProductAgg(FieldAggregator):
             return accumulator if input_field is None else input_field
 
         if self._base_type in _DECIMAL_TYPES:
+            mul = Decimal.multiply(accumulator, input_field, self._precision)
+
             value = Decimal.from_big_decimal(
-                accumulator * input_field,
+                mul,
                 self._precision,
                 self._scale,
             )
@@ -609,58 +611,67 @@ class FieldProductAgg(FieldAggregator):
             "type {} not support in {}".format(self._base_type, self.__class__.__name__)
         )
 
-    def retract(self, accumulator: Any, input_field: Any) -> Any:
-        if accumulator is None or input_field is None:
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
             return accumulator
 
         if self._base_type in _DECIMAL_TYPES:
+            div = Decimal.divide(accumulator, retract_field, self._precision)
+
             value = Decimal.from_big_decimal(
-                accumulator / input_field,
+                div,
                 self._precision,
                 self._scale,
             )
             return None if value is None else value.to_big_decimal()
 
         elif self._base_type == "TINYINT":
-            value = int(accumulator / input_field)
+            value = int(accumulator / retract_field)
             if value > _BYTE_MAX or value < _BYTE_MIN:
                 raise ArithmeticError(
-                    "byte overflow: {} / {} = {}".format(accumulator, input_field, value)
+                    "byte overflow: {} / {} = {}".format(accumulator, retract_field, value)
                 )
             return value
 
         elif self._base_type == "SMALLINT":
-            value = int(accumulator / input_field)
+            value = int(accumulator / retract_field)
             if value > _SHORT_MAX or value < _SHORT_MIN:
                 raise ArithmeticError(
-                    "short overflow: {} / {} = {}".format(accumulator, input_field, value)
+                    "short overflow: {} / {} = {}".format(accumulator, retract_field, value)
                 )
             return value
 
         elif self._base_type in _INT_TYPES:
-            if accumulator == _INT_MIN and input_field == -1:
+            if accumulator == _INT_MIN and retract_field == -1:
                 raise ArithmeticError(
-                    "int overflow: {} / {}".format(accumulator, input_field)
+                    "int overflow: {} / {}".format(accumulator, retract_field)
                 )
-            return int(accumulator / input_field)
+            return int(accumulator / retract_field)
 
         elif self._base_type == "BIGINT":
-            if accumulator == _LONG_MIN and input_field == -1:
+            if accumulator == _LONG_MIN and retract_field == -1:
                 raise ArithmeticError(
-                    "long overflow: {} / {}".format(accumulator, input_field)
+                    "long overflow: {} / {}".format(accumulator, retract_field)
                 )
 
             # Java integer division truncates toward zero, while Python's "//"
             # floors toward negative infinity. Divide absolute values first, then
             # restore the sign to match Java semantics without converting through
             # float (which would lose precision for BIGINT values).
-            if (accumulator >= 0) == (input_field >= 0):
-                return abs(accumulator) // abs(input_field)
+            if (accumulator >= 0) == (retract_field >= 0):
+                return abs(accumulator) // abs(retract_field)
             else:
-                return -(abs(accumulator) // abs(input_field))
+                return -(abs(accumulator) // abs(retract_field))
 
         elif self._base_type in _FLOAT_TYPES:
-            return accumulator / input_field
+            if retract_field == 0.0:
+                if accumulator == 0.0:
+                    return float("nan")
+                elif accumulator > 0:
+                    return float("inf")
+                else:
+                    return float("-inf")
+            return accumulator / retract_field
 
         raise ValueError(
             "type {} not support in {}".format(self._base_type, self.__class__.__name__)
