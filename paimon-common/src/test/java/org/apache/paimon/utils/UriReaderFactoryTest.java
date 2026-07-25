@@ -19,6 +19,9 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.IsolatedDirectoryFileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.UriReader.FileUriReader;
 import org.apache.paimon.utils.UriReader.HttpUriReader;
@@ -36,6 +39,7 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UriReaderFactory}. */
 public class UriReaderFactoryTest {
@@ -69,6 +73,19 @@ public class UriReaderFactoryTest {
     }
 
     @Test
+    public void testInvalidUriDoesNotLeakCredentials() {
+        assertThatThrownBy(
+                        () -> factory.create("https://alice:secret@host/bad path?sig=QUERY_SECRET"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasNoCause()
+                .satisfies(
+                        e -> {
+                            assertThat(String.valueOf(e)).doesNotContain("secret");
+                            assertThat(String.valueOf(e)).doesNotContain("QUERY_SECRET");
+                        });
+    }
+
+    @Test
     public void testCreateHttpsUriReader() {
         UriReader reader = factory.create("https://example.com/file.txt");
         assertThat(reader).isInstanceOf(HttpUriReader.class);
@@ -78,6 +95,29 @@ public class UriReaderFactoryTest {
     public void testCreateFileUriReader() {
         UriReader reader = factory.create("file:///path/to/file.txt");
         assertThat(reader).isInstanceOf(FileUriReader.class);
+    }
+
+    @Test
+    public void testProvidedFileIOSurvivesSerialization() throws Exception {
+        java.nio.file.Path file = tempPath.resolve("file.txt");
+        Files.write(file, new byte[] {1, 2});
+
+        Options options = new Options();
+        options.set(IsolatedDirectoryFileIO.ROOT_DIR, new Path(tempPath.toUri()).toString());
+        IsolatedDirectoryFileIO fileIO = new IsolatedDirectoryFileIO();
+        fileIO.configure(CatalogContext.create(options));
+
+        String fileUri = file.toUri().toString();
+        UriReaderFactory originalFactory = UriReaderFactory.fromFileIO(fileIO);
+        UriReader originalReader = originalFactory.create(fileUri);
+        UriReaderFactory fileIOFactory = InstantiationUtil.clone(originalFactory);
+        UriReader deserializedReader = fileIOFactory.create(fileUri);
+
+        assertThat(deserializedReader).isNotSameAs(originalReader);
+        try (SeekableInputStream inputStream = deserializedReader.newInputStream(fileUri)) {
+            assertThat(inputStream.read()).isEqualTo(1);
+            assertThat(inputStream.read()).isEqualTo(2);
+        }
     }
 
     @Test

@@ -883,6 +883,37 @@ class ParquetFiltersTest {
     }
 
     @Test
+    public void testTimestampFileUnitMismatchCannotPushDown() {
+        Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000);
+
+        RowType millisReadType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "ts1", new TimestampType(3))));
+        MessageType microsFileSchema =
+                new MessageType(
+                        "paimon_schema",
+                        Types.required(PrimitiveTypeName.INT64)
+                                .as(
+                                        LogicalTypeAnnotation.timestampType(
+                                                false, LogicalTypeAnnotation.TimeUnit.MICROS))
+                                .named("ts1"));
+        test(microsFileSchema, new PredicateBuilder(millisReadType).equal(0, value), "", false);
+
+        RowType microsReadType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "ts1", new TimestampType(6))));
+        MessageType millisFileSchema =
+                new MessageType(
+                        "paimon_schema",
+                        Types.required(PrimitiveTypeName.INT64)
+                                .as(
+                                        LogicalTypeAnnotation.timestampType(
+                                                false, LogicalTypeAnnotation.TimeUnit.MILLIS))
+                                .named("ts1"));
+        test(millisFileSchema, new PredicateBuilder(microsReadType).equal(0, value), "", false);
+    }
+
+    @Test
     public void testLocalZonedTimestampMillis() {
         // precision <= 3 uses milliseconds (INT64)
         int precision = 3;

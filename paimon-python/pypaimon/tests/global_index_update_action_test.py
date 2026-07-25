@@ -126,6 +126,25 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         self.assertIn("'age'", str(ctx.exception))
         self.assertIn("Conflicted columns: ['age']", str(ctx.exception))
 
+    def test_ignore_action_skips_global_index_handling(self):
+        options = CoreOptions.from_dict({
+            CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(): "IGNORE",
+        })
+        table = _Table(options)
+
+        with mock.patch(
+                "pypaimon.write.global_index_update_checker."
+                "scan_global_index_entries") as scan:
+            messages = apply_global_index_update_action(
+                table,
+                object(),
+                ["name"],
+                {()},
+            )
+
+        self.assertEqual([], messages)
+        scan.assert_not_called()
+
     def test_drop_partition_index_builds_deletes_for_affected_partition(self):
         options = CoreOptions.from_dict({
             CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(): "DROP_PARTITION_INDEX",

@@ -129,3 +129,48 @@ def blob_array_column_to_file_array(
         else pa.list_(value_field)
     )
     return pa.array(rows, type=target_type)
+
+
+def blob_map_column_to_file_array(
+    column: pa.Array,
+    io_config_bytes: bytes | None = None,
+) -> pa.Array:
+    """Convert a map of serialized BlobDescriptors to a map of File structs."""
+    if not pa.types.is_map(column.type):
+        raise TypeError(f"Expected a map column, but got {column.type}.")
+
+    rows = []
+    for row in column:
+        if row is None or not row.is_valid:
+            rows.append(None)
+            continue
+
+        files = []
+        for key, raw in row.as_py():
+            if raw is None:
+                files.append((key, None))
+                continue
+            uri, offset, length = _deserialize_one(raw)
+            files.append((
+                key,
+                {
+                    "url": uri,
+                    "io_config": io_config_bytes,
+                    file_range_position_field(): offset,
+                    file_range_size_field(): length,
+                },
+            ))
+        rows.append(files)
+
+    item_field = pa.field(
+        column.type.item_field.name,
+        FILE_PHYSICAL_TYPE,
+        nullable=column.type.item_field.nullable,
+        metadata=column.type.item_field.metadata,
+    )
+    target_type = pa.map_(
+        column.type.key_field,
+        item_field,
+        keys_sorted=column.type.keys_sorted,
+    )
+    return pa.array(rows, type=target_type)

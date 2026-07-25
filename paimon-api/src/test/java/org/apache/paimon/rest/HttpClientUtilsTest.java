@@ -18,9 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.utils.SensitiveConfigUtils;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -179,6 +182,51 @@ public class HttpClientUtilsTest {
     }
 
     @Test
+    public void testInvalidUriExceptionDoesNotLeakCredentials() {
+        String uri = "https://alice:secret@host/bad path?sig=QUERY_SECRET";
+        for (ThrowableAssert.ThrowingCallable call :
+                new ThrowableAssert.ThrowingCallable[] {
+                    () -> HttpClientUtils.exists(uri), () -> HttpClientUtils.getAsInputStream(uri)
+                }) {
+            assertThatThrownBy(call)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasNoCause()
+                    .matches(e -> HttpClientUtils.isInvalidUriException(e))
+                    .satisfies(
+                            e -> {
+                                assertThat(String.valueOf(e)).doesNotContain("secret");
+                                assertThat(String.valueOf(e)).doesNotContain("QUERY_SECRET");
+                            });
+        }
+    }
+
+    @Test
+    public void testExecuteFailureDoesNotLeakRedirectLocation() {
+        String secretLocation = url("/redirect") + "?sig=REDIRECT_SECRET";
+        registerHandler(
+                "/redirect",
+                exchange -> {
+                    exchange.getResponseHeaders().add("Location", secretLocation);
+                    respond(exchange, 302, new byte[0]);
+                });
+
+        for (ThrowableAssert.ThrowingCallable call :
+                new ThrowableAssert.ThrowingCallable[] {
+                    () -> HttpClientUtils.getAsInputStream(url("/redirect")),
+                    () -> HttpClientUtils.exists(url("/redirect"))
+                }) {
+            assertThatThrownBy(call)
+                    .isInstanceOf(IOException.class)
+                    .hasNoCause()
+                    .satisfies(
+                            e -> {
+                                assertThat(String.valueOf(e)).doesNotContain("REDIRECT_SECRET");
+                                assertThat(e.getMessage()).doesNotContain("sig=");
+                            });
+        }
+    }
+
+    @Test
     public void testGetAsInputStreamDoesNotLeakConnectionsOnRepeatedNotFound() throws Exception {
         registerHandler(
                 "/missing",
@@ -223,6 +271,11 @@ public class HttpClientUtilsTest {
         assertThat(
                         HttpClientUtils.isInvalidUriException(
                                 new IllegalArgumentException("Illegal character in path")))
+                .isTrue();
+        // The shared invalid-URI exception must classify uniformly across modules.
+        assertThat(
+                        HttpClientUtils.isInvalidUriException(
+                                SensitiveConfigUtils.invalidUri("https://host/bad path")))
                 .isTrue();
         assertThat(
                         HttpClientUtils.isInvalidUriException(

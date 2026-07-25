@@ -818,6 +818,21 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    public static final ConfigOption<Long> TARGET_FILE_ROW_NUM =
+            key("target-file-row-num")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription(
+                            "Target number of rows per newly written data file; a file rolls when "
+                                    + "this or target-file-size is reached, whichever comes first. "
+                                    + "Enforced at bundle granularity, so a bundled write may exceed it "
+                                    + "by up to one bundle. Only constrains files at write time: "
+                                    + "compaction is size-based and may merge into larger files, and "
+                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "per-file rows for wide columns to avoid data-evolution OOM. "
+                                    + "PyPaimon file-store writers do not support this option and "
+                                    + "fail fast when it is enabled. Disabled by default.");
+
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
                     .doubleType()
@@ -1850,7 +1865,11 @@ public class CoreOptions implements Serializable {
                             "Whether to create this table as a partitioned table in metastore.\n"
                                     + "For example, if you want to list all partitions of a Paimon table in Hive, "
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
-                                    + "This config option does not affect the default filesystem metastore.");
+                                    + "This config option does not affect the default filesystem metastore.\n"
+                                    + "For an internal format table in a REST catalog, it also makes the "
+                                    + "catalog own the table's partitions: a scan reads the partitions "
+                                    + "registered there and a write registers the ones it wrote, instead of "
+                                    + "listing the table directory.");
 
     public static final ConfigOption<String> METASTORE_TAG_TO_PARTITION =
             key("metastore.tag-to-partition")
@@ -2500,7 +2519,8 @@ public class CoreOptions implements Serializable {
                             .enumType(GlobalIndexColumnUpdateAction.class)
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
-                                    "Defines the action to take when an update modifies columns that are covered by a global index.");
+                                    "Defines the action to take when an update modifies columns that are covered by a global index. "
+                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
 
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
@@ -2585,6 +2605,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
+
+    public static final ConfigOption<String> BLOB_DESCRIPTOR_SOURCE_TABLE =
+            key(BLOB_DESCRIPTOR_PREFIX + "source-table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The source table whose FileIO is used to read descriptor-backed BLOB "
+                                    + "content and copy it into the target table's managed BLOB "
+                                    + "storage. The table must belong to the current catalog and can "
+                                    + "include a branch suffix, for example db.table$branch_rt. This "
+                                    + "option is not supported for target tables without a catalog "
+                                    + "loader, including external tables in REST catalogs. When set, "
+                                    + "other blob-descriptor.* FileIO options are ignored.");
 
     public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
             key("blob-write-null-on-missing-file")
@@ -3305,6 +3338,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(TARGET_FILE_SIZE)
                 .orElse(hasPrimaryKey ? VALUE_128_MB : VALUE_256_MB)
                 .getBytes();
+    }
+
+    public long targetFileRowNum() {
+        return options.get(TARGET_FILE_ROW_NUM);
     }
 
     public long blobTargetFileSize() {
@@ -5389,7 +5426,10 @@ public class CoreOptions implements Serializable {
         THROW_ERROR,
 
         /** Drop all global index entries for the whole partitions affected by the update. */
-        DROP_PARTITION_INDEX
+        DROP_PARTITION_INDEX,
+
+        /** Leave existing global index entries unchanged when indexed columns are updated. */
+        IGNORE
     }
 
     /** Search mode for global index queries. */

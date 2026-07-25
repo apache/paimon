@@ -90,6 +90,7 @@ class StartupMode(str, Enum):
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+    IGNORE = "IGNORE"
 
 
 class GlobalIndexSearchMode(str, Enum):
@@ -153,6 +154,7 @@ class CoreOptions:
     NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
     COUNT_LIMIT = "count-limit"
+    MERGE_MAP_TS_FIELD = "ts-field"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -386,6 +388,17 @@ class CoreOptions:
         .memory_type()
         .no_default_value()
         .with_description("The target file size for data files.")
+    )
+
+    TARGET_FILE_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("target-file-row-num")
+        .long_type()
+        .default_value((1 << 63) - 1)
+        .with_description(
+            "Target number of rows per newly written data file. PyPaimon format-table "
+            "writers split files at this limit; file-store writers fail fast when "
+            "this option is enabled."
+        )
     )
 
     BLOB_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -786,7 +799,8 @@ class CoreOptions:
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
         .with_description(
             "Defines the action to take when an update modifies columns that "
-            "are covered by a global index."
+            "are covered by a global index. IGNORE leaves existing index files "
+            "unchanged and may make the index stale."
         )
     )
 
@@ -1113,6 +1127,9 @@ class CoreOptions:
                                 MemorySize.of_mebi_bytes(
                                     128 if has_primary_key else 256) if default is None else MemorySize.parse(
                                     default)).get_bytes()
+
+    def target_file_row_num(self):
+        return self.options.get(CoreOptions.TARGET_FILE_ROW_NUM)
 
     def blob_target_file_size(self, default=None):
         """
@@ -1595,6 +1612,15 @@ class CoreOptions:
             )
             .int_type()
             .default_value(2147483647)  # Integer.MAX_VALUE
+        )
+
+    def field_merge_map_ts_field(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_TS_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
         )
 
     @property

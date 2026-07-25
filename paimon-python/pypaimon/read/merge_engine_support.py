@@ -63,8 +63,10 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "sum", "max", "min",
     "bool_or", "bool_and",
     "listagg",
-    "nested_update",
+    "nested_update", "nested_partial_update",
     "collect",
+    "merge_map_with_keytime",
+    "merge_map",
     "theta_sketch",
 ])
 _FIELDS_PREFIX = "fields."
@@ -212,7 +214,7 @@ def check_supported(table) -> None:
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
                 "and other aggregators (product / listagg / collect / "
-                "merge_map* / nested_update* / theta_sketch / "
+                "nested_update* / theta_sketch / "
                 "hll_sketch / roaring_bitmap_*) are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),

@@ -29,9 +29,9 @@ import org.apache.paimon.spark.commands.{EncoderSerDeGroup, PostponeFixBucketPro
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.{ScanPlanHelper, SparkRowUtils}
 import org.apache.paimon.spark.write.{PaimonDataWrite, WriteTaskResult}
-import org.apache.paimon.table.{BucketMode, FileStoreTable, PostponeUtils}
+import org.apache.paimon.table.{BlobDescriptorReaderFactory, BucketMode, FileStoreTable, PostponeUtils}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
-import org.apache.paimon.utils.{BlobDescriptorUtils, SerializationUtils}
+import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.HashPartitioner
 import org.apache.spark.rdd.RDD
@@ -85,14 +85,10 @@ case class SparkPostponeCompactProcedure(
   private def newDataWrite(
       realTable: FileStoreTable,
       rowKindColIdx: Int,
-      postponePartitionBucketComputer: SparkPostponeCompactProcedure.PostponePartitionBucketComputer)
-      : PaimonDataWrite = {
+      postponePartitionBucketComputer: SparkPostponeCompactProcedure.PostponePartitionBucketComputer,
+      uriReaderFactoryForBlobDescriptor: UriReaderFactory): PaimonDataWrite = {
     val rowType = table.rowType()
     val coreOptions = table.coreOptions()
-    val catalogContextForBlobDescriptor =
-      BlobDescriptorUtils.getCatalogContext(
-        table.catalogEnvironment().catalogContext(),
-        coreOptions.toConfiguration)
 
     val dataWrite = PaimonDataWrite(
       realTable.newBatchWriteBuilder,
@@ -101,7 +97,7 @@ case class SparkPostponeCompactProcedure(
       writeRowTracking = coreOptions.dataEvolutionEnabled(),
       Option.apply(coreOptions.fullCompactionDeltaCommits()),
       None,
-      catalogContextForBlobDescriptor,
+      uriReaderFactoryForBlobDescriptor,
       Some(postponePartitionBucketComputer)
     )
     dataWrite
@@ -146,6 +142,7 @@ case class SparkPostponeCompactProcedure(
       LOG.info("Postpone bucket and real Level-0 buckets are empty, no compact job to execute.")
       return
     }
+    val uriReaderFactory = BlobDescriptorReaderFactory.create(table)
 
     val rowWorkAndKind: (RDD[SparkPostponeCompactProcedure.PostponeCompactWork], Int) =
       if (splits.isEmpty) {
@@ -175,13 +172,10 @@ case class SparkPostponeCompactProcedure(
           .toDF()
         val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
         val rowType = table.rowType()
-        val catalogContext = BlobDescriptorUtils.getCatalogContext(
-          table.catalogEnvironment().catalogContext(),
-          table.coreOptions().toConfiguration)
         val rowWorks = dataFrame.rdd.mapPartitions {
           rows =>
             val extractor = realTable.createRowKeyExtractor()
-            val toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, catalogContext)
+            val toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, uriReaderFactory)
             rows.map {
               row =>
                 extractor.setRecord(toPaimonRow(row))
@@ -229,7 +223,11 @@ case class SparkPostponeCompactProcedure(
           Iterator.empty
         } else {
           val dataWrite =
-            newDataWrite(realTable, rowWorkAndKind._2, postponePartitionBucketComputer)
+            newDataWrite(
+              realTable,
+              rowWorkAndKind._2,
+              postponePartitionBucketComputer,
+              uriReaderFactory)
           dataWrite.write.withWriteRestore(
             new FileSystemWriteRestore(
               realTable.coreOptions(),

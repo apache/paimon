@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -80,8 +81,25 @@ public interface BaseAppendDeleteFileMaintainer {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX).stream()
                         .filter(e -> e.partition().equals(partition))
                         .collect(Collectors.toList());
+        return forUnawareAppend(indexFileHandler, partition, manifestEntries);
+    }
+
+    /**
+     * Creates an unaware-bucket maintainer which owns only the provided index files.
+     *
+     * <p>This overload is used by parallel rewrite-group writers. Each old deletion-vector index
+     * file must be owned by exactly one writer; a writer for new anchors receives an empty list.
+     */
+    static AppendDeleteFileMaintainer forUnawareAppend(
+            IndexFileHandler indexFileHandler,
+            BinaryRow partition,
+            List<IndexManifestEntry> manifestEntries) {
         Map<String, DeletionFile> deletionFiles = new HashMap<>();
         for (IndexManifestEntry file : manifestEntries) {
+            checkArgument(
+                    file.partition().equals(partition),
+                    "Index file %s belongs to a different partition.",
+                    file.indexFile().fileName());
             LinkedHashMap<String, DeletionVectorMeta> dvMetas = file.indexFile().dvRanges();
             checkNotNull(dvMetas);
             for (DeletionVectorMeta dvMeta : dvMetas.values()) {

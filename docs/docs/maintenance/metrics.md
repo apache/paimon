@@ -33,11 +33,11 @@ There are three types of metrics provided in the Paimon metric system, `Gauge`, 
 - `Counter`: Used to count values by incrementing and decrementing.
 - `Histogram`: Measure the statistical distribution of a set of values including the min, max, mean, standard deviation and percentile.
 
-Paimon has supported built-in metrics to measure operations of **commits**, **scans**, **writes** and **compactions**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
+Paimon has supported built-in metrics to measure operations of **commits**, **scans**, **writes**, **compactions** and **lookups**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
 
 ## Metrics List
 
-Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics, blob fetch metrics and compaction metrics.
+Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics, blob fetch metrics, compaction metrics and lookup metrics.
 
 ### Scan Metrics
 
@@ -79,6 +79,32 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>lastScanResultedTableFiles</td>
             <td>Gauge</td>
             <td>Resulted table files in the last scan.</td>
+        </tr>
+    </tbody>
+</table>
+
+### Lookup Metrics
+
+Lookup metrics are available for local partial lookup. They are reported at lookup invocation granularity. <code>partialLookupRemoteAccessCount</code> counts a lookup invocation once when at least one lookup file must be created from table storage because it is not available in the local cache. It counts lookup invocations, not individual OSS or table-storage I/O operations.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>partialLookupCount</td>
+            <td>Counter</td>
+            <td>Total number of partial lookup invocations.</td>
+        </tr>
+        <tr>
+            <td>partialLookupRemoteAccessCount</td>
+            <td>Counter</td>
+            <td>Number of partial lookup invocations that created at least one lookup file from table storage because it was not available in the local cache. This is not an individual I/O count.</td>
         </tr>
     </tbody>
 </table>
@@ -438,6 +464,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
             <td>Scan Metrics</td>
             <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
             <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
+        </tr>
+        <tr>
+            <td>Lookup Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;lookup_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.lookup</td>
         </tr>
         <tr>
             <td>Commit Metrics</td>

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Row ranges covered and not covered by global index files."""
+"""Global-index coverage for data-evolution tables."""
 
 from typing import Collection, Dict, List, Optional, Union
 
@@ -27,7 +27,7 @@ from pypaimon.schema.data_types import DataField
 from pypaimon.utils.range import Range
 
 
-class GlobalIndexCoverage:
+class DataEvolutionGlobalIndexCoverage:
     """Computes global-index coverage by field id."""
 
     def __init__(
@@ -107,8 +107,8 @@ class GlobalIndexCoverage:
         return Range.sort_and_merge_overlap(unindexed, True)
 
     def _data_ranges_by_data_files(self) -> List[Range]:
-        if hasattr(self._table, "data_ranges_for_global_index_coverage"):
-            return self._table.data_ranges_for_global_index_coverage(
+        if hasattr(self._table, "data_ranges_for_data_evolution_global_index_coverage"):
+            return self._table.data_ranges_for_data_evolution_global_index_coverage(
                 self._snapshot,
                 self._partition_filter,
             )

@@ -947,6 +947,44 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testRenameSharedShreddingMapColumn(String format) throws Exception {
+        createTable(format, 2, "metrics");
+
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(SchemaChange.renameColumn("metrics", "renamed_metrics")),
+                false);
+
+        Table table = catalog.getTable(identifier(format));
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "renamed_metrics");
+
+        Map<String, String> options = table.options();
+        assertThat(options).doesNotContainKey("fields.metrics.map.storage-layout");
+        assertThat(options)
+                .containsEntry("fields.renamed_metrics.map.storage-layout", "shared-shredding")
+                .containsEntry("fields.renamed_metrics.map.shared-shredding.max-columns", "2");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testDropSharedShreddingMapColumn(String format) throws Exception {
+        createTable(format, 2, "metrics", "labels");
+
+        catalog.alterTable(
+                identifier(format),
+                Collections.singletonList(SchemaChange.dropColumn("metrics")),
+                false);
+
+        Table table = catalog.getTable(identifier(format));
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "labels");
+
+        Map<String, String> options = table.options();
+        assertThat(options).doesNotContainKey("fields.metrics.map.storage-layout");
+        assertThat(options).doesNotContainKey("fields.metrics.map.shared-shredding.max-columns");
+    }
+
     private Table createTable(String format, String... sharedShreddingFields) throws Exception {
         return createTable(format, 2, sharedShreddingFields);
     }

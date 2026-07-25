@@ -575,6 +575,39 @@ def test_explain_scan_reports_array_blob_fallback(catalog_options):
     assert all(split.reader_mode == READER_MODE_PYPAIMON_FALLBACK for split in result.splits)
 
 
+@requires_blob
+def test_explain_scan_reports_map_blob_fallback(catalog_options):
+    map_blob_type = pa.map_(pa.string(), pa.large_binary())
+    pa_schema = pa.schema([
+        ("id", pa.int64()),
+        ("payloads", map_blob_type),
+    ])
+    _, table = _create_table(
+        catalog_options,
+        "explain_map_blob_fallback",
+        pa_schema,
+        options={
+            "bucket": "-1",
+            "file.format": "parquet",
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+        },
+    )
+    _write_arrow(table, pa.table({
+        "id": [1],
+        "payloads": pa.array([{"key": b"hello"}], type=map_blob_type),
+    }, schema=pa_schema))
+
+    result = _explain_table(table, catalog_options=catalog_options, verbose=True)
+
+    assert result.pypaimon_fallback_split_count == result.paimon_scan.split_count
+    assert result.pypaimon_fallback_split_count > 0
+    assert result.native_parquet_split_count == 0
+    assert result.fallback_reasons["blob columns present"] == result.pypaimon_fallback_split_count
+    assert result.splits is not None
+    assert all(split.reader_mode == READER_MODE_PYPAIMON_FALLBACK for split in result.splits)
+
+
 def test_explain_scan_reports_deletion_vector_fallback(catalog_options, monkeypatch):
     pa_schema = pa.schema([
         ("id", pa.int64()),

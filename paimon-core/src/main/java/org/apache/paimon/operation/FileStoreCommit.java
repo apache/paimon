@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -61,10 +62,10 @@ public interface FileStoreCommit extends AutoCloseable {
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
      */
-    int overwritePartition(
-            Map<String, String> partition,
-            ManifestCommittable committable,
-            Map<String, String> properties);
+    int overwritePartition(Map<String, String> partition, ManifestCommittable committable);
+
+    /** Overwrite from manifest committable and specified partitions. */
+    int overwriteStaticPartitions(List<BinaryRow> partitions, ManifestCommittable committable);
 
     /**
      * Drop multiple partitions. The {@link Snapshot.CommitKind} of generated snapshot is {@link

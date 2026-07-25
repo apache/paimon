@@ -125,6 +125,10 @@ public class DataConverter {
     }
 
     public static MapData fromPaimon(InternalMap map, DataType mapType) {
+        return fromPaimon(map, mapType, false);
+    }
+
+    public static MapData fromPaimon(InternalMap map, DataType mapType, boolean blobAsDescriptor) {
         DataType keyType;
         DataType valueType;
         if (mapType instanceof MapType) {
@@ -137,8 +141,18 @@ public class DataConverter {
             throw new UnsupportedOperationException("Unsupported type: " + mapType);
         }
 
+        if (valueType.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BLOB) {
+            InternalArray keys = map.keyArray();
+            for (int i = 0; i < keys.size(); i++) {
+                if (keys.isNullAt(i)) {
+                    throw new IllegalArgumentException(
+                            "Spark MAP<X, BLOB> does not support null keys.");
+                }
+            }
+        }
+
         return new ArrayBasedMapData(
                 fromPaimonArrayElementType(map.keyArray(), keyType),
-                fromPaimonArrayElementType(map.valueArray(), valueType));
+                fromPaimonArrayElementType(map.valueArray(), valueType, blobAsDescriptor));
     }
 }

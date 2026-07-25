@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -56,6 +57,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean isStreamingMode;
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
+
+    @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
     protected TableWriteImpl<?> write;
 
@@ -103,15 +106,26 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
+    public void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {
+        this.blobDescriptorReaderFactory = uriReaderFactory;
+    }
+
+    @Override
     @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
-        return write.writeAndReturn(rowData);
+        return write.writeAndReturn(withBlobDescriptorReader(rowData));
     }
 
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
-        return write.writeAndReturn(rowData, bucket);
+        return write.writeAndReturn(withBlobDescriptorReader(rowData), bucket);
+    }
+
+    private InternalRow withBlobDescriptorReader(InternalRow rowData) {
+        return blobDescriptorReaderFactory == null
+                ? rowData
+                : new BlobDescriptorResolvingRow(rowData, blobDescriptorReaderFactory);
     }
 
     @Override

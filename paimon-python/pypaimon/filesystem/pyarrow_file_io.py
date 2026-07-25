@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -61,6 +62,9 @@ class PyArrowFileIO(FileIO):
         self._oss_bucket = None
         _oss_impl = self.properties.get(OssOptions.OSS_IMPL)
         self._use_jindo = False
+        self._legacy_bucket_checked = False
+        self._legacy_bucket_error = None
+        self._legacy_bucket_lock = threading.Lock()
 
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
@@ -86,6 +90,16 @@ class PyArrowFileIO(FileIO):
             self.filesystem = self._initialize_gcs_fs()
         else:
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # threading.Lock cannot be pickled; recreated in __setstate__.
+        state.pop("_legacy_bucket_lock", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._legacy_bucket_lock = threading.Lock()
 
     @staticmethod
     def parse_location(location: str):
@@ -388,6 +402,11 @@ class PyArrowFileIO(FileIO):
         return file_info
 
     def list_status(self, path: str):
+        if self._legacy_oss_mode():
+            raise RuntimeError(
+                "Listing OSS directories is not supported with PyArrow < 16 "
+                "(it parses the first key segment as a bucket). Upgrade to "
+                "pyarrow >= 16, or install pyjindosdk and set fs.oss.impl=jindo.")
         path_str = self.to_filesystem_path(path)
         selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)
@@ -396,7 +415,16 @@ class PyArrowFileIO(FileIO):
         file_infos = self.list_status(path)
         return [info for info in file_infos if info.type == pafs.FileType.Directory]
 
+    def _legacy_oss_mode(self) -> bool:
+        """OSS in bucket-in-endpoint mode (PyArrow < 16): paths are key-only
+        (the bucket is embedded in endpoint_override), but PyArrow still
+        parses the first key segment as a bucket, so bucket-level operations
+        target the wrong bucket."""
+        return self._is_oss and self._oss_bucket_in_endpoint and not self._use_jindo
+
     def exists(self, path: str) -> bool:
+        # Legacy OSS mode limitation: directories always report NotFound
+        # (see _legacy_oss_mode); plain objects are probed correctly.
         path_str = self.to_filesystem_path(path)
         return self._get_file_info(path_str).type != pafs.FileType.NotFound
 
@@ -438,16 +466,58 @@ class PyArrowFileIO(FileIO):
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
 
-        if file_info.type == pafs.FileType.NotFound:
-            self.filesystem.create_dir(path_str, recursive=True)
-            return True
         if file_info.type == pafs.FileType.Directory:
             return True
-        elif file_info.type == pafs.FileType.File:
+        if file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
+
+        if self._legacy_oss_mode():
+            # create_dir would CreateBucket the first key segment and corrupt
+            # the parent directory; object stores need no directories. Only
+            # validate that the real bucket exists.
+            self._check_legacy_bucket_exists()
+            return True
 
         self.filesystem.create_dir(path_str, recursive=True)
         return True
+
+    def _check_legacy_bucket_exists(self):
+        """Raise if the real OSS bucket does not exist (legacy mode only).
+
+        PyArrow < 16 folds NoSuchBucket into the same NotFound as a missing
+        key, so probe the bucket root anonymously, at most once per
+        instance (the lock serializes concurrent writers). Reject only on
+        an OSS NoSuchBucket error body - a bare 404 may come from a proxy
+        or custom endpoint. Any probe setup or transport failure
+        (Requests-only TLS/proxy settings do not apply to PyArrow's S3
+        client) is indeterminate: fail open."""
+        with self._legacy_bucket_lock:
+            if not self._legacy_bucket_checked:
+                self._legacy_bucket_error = self._probe_legacy_bucket()
+                self._legacy_bucket_checked = True
+            if self._legacy_bucket_error:
+                raise OSError(self._legacy_bucket_error)
+
+    def _probe_legacy_bucket(self) -> Optional[str]:
+        """Return an error message if the bucket definitely does not exist."""
+        import requests
+
+        endpoint = self.properties.get(OssOptions.OSS_ENDPOINT) or ""
+        scheme, _, host = endpoint.rpartition("://")
+        url = f"{scheme or 'https'}://{self._oss_bucket}.{host}/"
+        try:
+            response = requests.get(url, timeout=5, allow_redirects=False, stream=True)
+            try:
+                status = response.status_code
+                body = next(response.iter_content(2048), b"") if status == 404 else b""
+            finally:
+                response.close()
+        except (requests.RequestException, OSError):
+            return None
+        if status == 404 and b"NoSuchBucket" in body:
+            return (f"OSS bucket '{self._oss_bucket}' does not exist "
+                    f"(NoSuchBucket from {url})")
+        return None
 
     def rename(self, src: str, dst: str) -> bool:
         dst_str = self.to_filesystem_path(dst)

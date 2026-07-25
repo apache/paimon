@@ -42,6 +42,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -65,6 +66,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
@@ -94,6 +96,8 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedFormatTablePartitions;
+import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedPartitionOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
@@ -567,8 +571,13 @@ public class RESTCatalog implements Catalog {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
-            createExternalTablePathIfNotExist(schema);
             tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            validateCreateTable(schema, dataTokenEnabled);
+            // Defaults participate in the catalog-managed partition combination, so validate
+            // the effective options rather than only the explicit ones.
+            validateCatalogManagedFormatTablePartitions(
+                    identifier, schema.options(), schema.options().containsKey(PATH.key()));
+            createExternalTablePathIfNotExist(schema);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
@@ -645,8 +654,14 @@ public class RESTCatalog implements Catalog {
         checkNotBranch(identifier, "replaceTable");
         checkNotSystemTable(identifier, "replaceTable");
         validateCreateTable(newSchema, dataTokenEnabled);
+        tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+        validateCreateTable(newSchema, dataTokenEnabled);
+        // Defaults participate in the catalog-managed partition combination, so validate the
+        // effective options rather than only the explicit ones. Externality is not validated
+        // client-side here: a round-tripped schema of an internal table may carry the synthetic
+        // path option, and the server remains the authority for replace semantics.
+        validateCatalogManagedPartitionOptions(newSchema.options());
         try {
-            tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
             api.replaceTable(identifier, newSchema);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -758,9 +773,9 @@ public class RESTCatalog implements Catalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        if (isCatalogManagedFormatTable(table)) {
-            // Managed format table: metadata-only unregistration on the server. Data deletion is
-            // the caller's responsibility (performed with the table FileIO afterwards).
+        if (hasCatalogManagedPartitions(table)) {
+            // Unregistering is metadata-only on the server; deleting the data is the caller's
+            // job, done with the table FileIO afterwards.
             try {
                 api.dropPartitions(identifier, partitions, true);
             } catch (NoSuchResourceException e) {
@@ -772,7 +787,7 @@ public class RESTCatalog implements Catalog {
             }
             return;
         }
-        // Non-managed tables keep the default truncate-based data semantics.
+        // Every other table keeps the default truncate-based data semantics.
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.truncatePartitions(partitions);
         } catch (Exception e) {
@@ -790,7 +805,7 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
             Table table = getTable(identifier);
-            if (isCatalogManagedFormatTable(table)) {
+            if (hasCatalogManagedPartitions(table)) {
                 throw e;
             }
             return listPartitionsFromFileSystem(table);
@@ -812,10 +827,36 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
             Table table = getTable(identifier);
-            if (isCatalogManagedFormatTable(table)) {
+            if (hasCatalogManagedPartitions(table)) {
                 throw e;
             }
             return new PagedList<>(listPartitionsFromFileSystem(table), null);
+        }
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByFilterPaged(
+                    identifier,
+                    JsonSerdeUtil.toFlatJson(predicate),
+                    maxResults,
+                    pageToken,
+                    partitionNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // HTTP 501 is transport detail; callers only see the Catalog-level capability.
+            throw new UnsupportedOperationException(
+                    "The REST server does not support listing partitions by filter.", e);
         }
     }
 
@@ -831,7 +872,7 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
             Table table = getTable(identifier);
-            if (isCatalogManagedFormatTable(table)) {
+            if (hasCatalogManagedPartitions(table)) {
                 throw e;
             }
             return listPartitionsFromFileSystem(table, partitions);
@@ -1323,9 +1364,13 @@ public class RESTCatalog implements Catalog {
         return api;
     }
 
-    private static boolean isCatalogManagedFormatTable(Table table) {
-        return table instanceof FormatTable
-                && new CoreOptions(table.options()).partitionedTableInMetastore();
+    /**
+     * Whether the catalog owns this table's partitions, which is exactly whether loading it
+     * produced a partition manager. Reading the option instead would be a second answer to the same
+     * question, and the two can disagree on a table built outside the catalog.
+     */
+    private static boolean hasCatalogManagedPartitions(Table table) {
+        return table instanceof FormatTable && ((FormatTable) table).partitionManager() != null;
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {

@@ -20,7 +20,8 @@ from parameterized import parameterized
 import pyarrow as pa
 
 from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
-                                        RowType, VectorType, PyarrowFieldParser)
+                                        RowType, VectorType, PyarrowFieldParser,
+                                        is_blob_file_type)
 
 
 class DataTypesTest(unittest.TestCase):
@@ -90,6 +91,43 @@ class DataTypesTest(unittest.TestCase):
     def test_map_type(self):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")
+
+    def test_map_nullability_dict_roundtrip(self):
+        for map_nullable in (True, False):
+            for value_nullable in (True, False):
+                original = MapType(
+                    map_nullable,
+                    AtomicType("STRING", nullable=False),
+                    AtomicType("INT", nullable=value_nullable),
+                )
+
+                self.assertEqual(MapType.from_dict(original.to_dict()), original)
+
+        legacy = MapType(
+            True,
+            AtomicType("STRING", nullable=False),
+            AtomicType("INT"),
+        ).to_dict()
+        legacy.pop("nullable")
+        self.assertTrue(MapType.from_dict(legacy).nullable)
+
+    def test_map_blob_value_nullability_roundtrip(self):
+        for value_nullable in (True, False):
+            paimon_type = MapType(
+                True,
+                AtomicType("STRING", nullable=False),
+                AtomicType("BLOB", nullable=value_nullable),
+            )
+
+            arrow_type = PyarrowFieldParser.from_paimon_type(paimon_type)
+
+            self.assertFalse(arrow_type.key_field.nullable)
+            self.assertEqual(arrow_type.item_field.nullable, value_nullable)
+            self.assertEqual(
+                PyarrowFieldParser.to_paimon_type(arrow_type, nullable=True),
+                paimon_type,
+            )
+            self.assertTrue(is_blob_file_type(paimon_type))
 
     def test_vector_type(self):
         vector_type = VectorType(True, AtomicType("FLOAT"), 3)

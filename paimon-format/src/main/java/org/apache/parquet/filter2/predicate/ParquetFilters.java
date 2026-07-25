@@ -56,6 +56,7 @@ import org.apache.parquet.filter2.predicate.Operators.FloatColumn;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
@@ -320,6 +321,7 @@ public class ParquetFilters {
                 return Binary.fromReusedByteArray((byte[]) value);
             } else if (value instanceof Timestamp) {
                 Timestamp timestamp = (Timestamp) value;
+                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
                 int precision = getTimestampPrecision(type);
                 if (precision <= 3) {
                     // milliseconds
@@ -383,6 +385,51 @@ public class ParquetFilters {
 
     private static PrimitiveType decimalPrimitiveType(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
+        PrimitiveType primitiveType = primitiveType(fieldRef, fileSchema, caseSensitive);
+        LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
+        if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
+
+        DecimalLogicalTypeAnnotation decimalLogicalType =
+                (DecimalLogicalTypeAnnotation) logicalType;
+        if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
+            throw new UnsupportedOperationException();
+        }
+        return primitiveType;
+    }
+
+    private static PrimitiveType timestampPrimitiveType(
+            FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
+        PrimitiveType primitiveType = primitiveType(fieldRef, fileSchema, caseSensitive);
+        if (primitiveType.getPrimitiveTypeName() != PrimitiveType.PrimitiveTypeName.INT64) {
+            throw new UnsupportedOperationException();
+        }
+
+        LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
+        if (logicalType == null) {
+            return primitiveType;
+        }
+        if (!(logicalType instanceof TimestampLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
+
+        TimestampLogicalTypeAnnotation timestampType = (TimestampLogicalTypeAnnotation) logicalType;
+        int precision = getTimestampPrecision(fieldRef.type());
+        LogicalTypeAnnotation.TimeUnit expectedUnit =
+                precision <= 3
+                        ? LogicalTypeAnnotation.TimeUnit.MILLIS
+                        : LogicalTypeAnnotation.TimeUnit.MICROS;
+        boolean expectedAdjustedToUtc = fieldRef.type() instanceof LocalZonedTimestampType;
+        if (timestampType.getUnit() != expectedUnit
+                || timestampType.isAdjustedToUTC() != expectedAdjustedToUtc) {
+            throw new UnsupportedOperationException();
+        }
+        return primitiveType;
+    }
+
+    private static PrimitiveType primitiveType(
+            FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
         Type matched = null;
         // Paimon predicates currently reference top-level fields only. Nested field
         // predicates are rejected before reaching the format reader.
@@ -399,18 +446,7 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
 
-        PrimitiveType primitiveType = matched.asPrimitiveType();
-        LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
-        if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
-            throw new UnsupportedOperationException();
-        }
-
-        DecimalLogicalTypeAnnotation decimalLogicalType =
-                (DecimalLogicalTypeAnnotation) logicalType;
-        if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
-            throw new UnsupportedOperationException();
-        }
-        return primitiveType;
+        return matched.asPrimitiveType();
     }
 
     private static int getTimestampPrecision(org.apache.paimon.types.DataType type) {
@@ -523,6 +559,7 @@ public class ParquetFilters {
         public Operators.Column<?> visit(TimestampType timestampType) {
             int precision = timestampType.getPrecision();
             if (precision <= 6) {
+                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
                 return FilterApi.longColumn(name);
             }
             // precision > 6 uses INT96, not supported for filter pushdown
@@ -533,6 +570,7 @@ public class ParquetFilters {
         public Operators.Column<?> visit(LocalZonedTimestampType localZonedTimestampType) {
             int precision = localZonedTimestampType.getPrecision();
             if (precision <= 6) {
+                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
                 return FilterApi.longColumn(name);
             }
             // precision > 6 uses INT96, not supported for filter pushdown

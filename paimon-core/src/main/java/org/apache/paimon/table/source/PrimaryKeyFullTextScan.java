@@ -57,13 +57,6 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
     @Nullable private final PartitionPredicate partitionFilter;
     @Nullable private final Snapshot pinnedSnapshot;
 
-    public PrimaryKeyFullTextScan(
-            FileStoreTable table,
-            PrimaryKeyIndexDefinition definition,
-            @Nullable PartitionPredicate partitionFilter) {
-        this(table, definition, partitionFilter, null);
-    }
-
     PrimaryKeyFullTextScan(
             FileStoreTable table,
             PrimaryKeyIndexDefinition definition,

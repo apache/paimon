@@ -483,10 +483,10 @@ class FileScanner:
         if not self.table.options.global_index_enabled():
             return None
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 
         try:
-            scanner = GlobalIndexScanner.create(
+            scanner = DataEvolutionGlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
                 predicate=self.predicate,

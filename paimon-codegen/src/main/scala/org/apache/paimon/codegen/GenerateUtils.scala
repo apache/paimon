@@ -248,7 +248,7 @@ object GenerateUtils {
       leftTerm: String,
       rightTerm: String): String = {
     val keyArrayType = new ArrayType(mapType.getKeyType)
-    val valueArrayType = new ArrayType(mapType.getKeyType)
+    val valueArrayType = new ArrayType(mapType.getValueType)
     generateMapDataCompare(ctx, nullsIsLast, leftTerm, rightTerm, keyArrayType, valueArrayType)
   }
 

@@ -214,6 +214,42 @@ public class AuditLogTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadBaseTableAfterAuditLogDoesNotIncludeSequenceNumber() throws Exception {
+        String tableName = "audit_table_share_check";
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
+        FileIO fileIO = LocalFileIO.create();
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, tablePath),
+                        Schema.newBuilder()
+                                .column("pk", DataTypes.INT())
+                                .column("pt", DataTypes.INT())
+                                .column("col1", DataTypes.INT())
+                                .partitionKeys("pt")
+                                .primaryKey("pk", "pt")
+                                .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                                .option("bucket", "1")
+                                .option(
+                                        CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(),
+                                        "true")
+                                .build());
+        FileStoreTable baseTable =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        writeTestData(baseTable);
+
+        // Wrap in AuditLogTable, this should NOT mutate the shared underlying options map.
+        AuditLogTable auditLogTable = new AuditLogTable(baseTable);
+        assertThat(auditLogTable.rowType().getFieldNames())
+                .containsExactly("rowkind", "_SEQUENCE_NUMBER", "pk", "pt", "col1");
+
+        // Base table row type must remain unchanged - no leaked `_SEQUENCE_NUMBER` field.
+        assertThat(baseTable.rowType().getFieldNames()).containsExactly("pk", "pt", "col1");
+        assertThat(baseTable.options())
+                .doesNotContainKey(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key());
+    }
+
+    @Test
     public void testReadSequenceNumberWithAlterTable() throws Exception {
         String tableName = "audit_table_alter_seq";
         // Create table without sequence-number option

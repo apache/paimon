@@ -29,6 +29,7 @@ import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.spark.data.SparkInternalRow
+import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.read.VectorSearchResultUtils
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
@@ -42,7 +43,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAsSelect, DescribeRelation, DropPartitions, LogicalPlan, RepairTable, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
@@ -160,6 +161,51 @@ case class PaimonStrategy(spark: SparkSession)
             isExtended) :: Nil
         case _ => Nil
       }
+
+    case AddPartitions(r @ ResolvedTable(_, _, table: PaimonFormatTable, _), parts, ifNotExists) =>
+      PaimonAddFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifNotExists,
+        recacheTable(r)) :: Nil
+
+    // Spark's DataSourceV2Strategy rejects RepairTable for every v2 table; Format Tables with
+    // catalog-managed partitions support it through the sync engine, so intercept here (extension
+    // strategies run first). Tables using filesystem partition discovery fall through and keep
+    // the upstream rejection.
+    case RepairTable(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          enableAddPartitions,
+          enableDropPartitions) if table.hasCatalogManagedPartitions =>
+      PaimonRepairFormatTablePartitionsExec(
+        table,
+        enableAddPartitions,
+        enableDropPartitions,
+        recacheTable(r)) :: Nil
+
+    case DropPartitions(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          parts,
+          ifExists,
+          purge) =>
+      PaimonDropFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifExists,
+        purge,
+        recacheTable(r)) :: Nil
+
+    case PaimonDropPartitions(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          parts,
+          ifExists,
+          purge) =>
+      PaimonDropFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifExists,
+        purge,
+        recacheTable(r)) :: Nil
 
     case PaimonDropPartitions(
           r @ ResolvedTable(_, _, table: SparkTable, _),

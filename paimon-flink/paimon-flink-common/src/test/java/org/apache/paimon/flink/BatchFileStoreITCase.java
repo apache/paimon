@@ -1310,6 +1310,25 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadBaseTableAfterAuditLogWithSequenceNumberEnabled() {
+        // Regression test: reading `t$audit_log` must not leak the internal
+        // KEY_VALUE_SEQUENCE_NUMBER_ENABLED option into subsequent reads of the base table.
+        sql(
+                "CREATE TABLE test_table_reuse (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b) "
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_reuse VALUES (1, 2)");
+        sql("INSERT INTO test_table_reuse VALUES (3, 4)");
+
+        // First read the audit log
+        assertThat(sql("SELECT * FROM `test_table_reuse$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Then read the base table - must not include _SEQUENCE_NUMBER column.
+        assertThat(sql("SELECT * FROM `test_table_reuse`"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 3), Row.of(3, 4, 7));
+    }
+
+    @Test
     public void testAuditLogTableWithSequenceNumberAlterTable() {
         // Create primary key table without sequence-number option
         sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
