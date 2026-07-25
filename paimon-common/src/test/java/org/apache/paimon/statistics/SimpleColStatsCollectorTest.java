@@ -27,6 +27,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -191,6 +192,22 @@ public class SimpleColStatsCollectorTest {
         SimpleColStats stats = collector.result();
         assertThat(stats.min()).isNotSameAs(str);
         assertThat(stats.max()).isNotSameAs(str);
+    }
+
+    @Test
+    public void testFullBinaryMinMax() {
+        Serializer<Object> serializer =
+                (Serializer) InternalSerializers.create(new VarBinaryType());
+        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
+        collector.collect(new byte[] {1, 2, 3}, serializer);
+        collector.collect(new byte[] {(byte) 200}, serializer);
+        collector.collect(new byte[] {0}, serializer);
+        collector.collect(null, serializer);
+
+        SimpleColStats stats = collector.result();
+        assertThat((byte[]) stats.min()).isEqualTo(new byte[] {0});
+        assertThat((byte[]) stats.max()).isEqualTo(new byte[] {(byte) 200});
+        assertThat(stats.nullCount()).isEqualTo(1L);
     }
 
     @Test
