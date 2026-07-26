@@ -229,10 +229,203 @@ def _write_table(
     table: FileStoreTable,
     mode: str = "append",
 ) -> "daft.DataFrame":
-    """Write a Daft DataFrame to a Paimon table object."""
-    from pypaimon.daft.daft_datasink import PaimonDataSink
+    """Write a Daft DataFrame to a Paimon table object.
 
-    return df.write_sink(PaimonDataSink(table, mode))
+    Primary-key HASH modes materialize each ``(partition, bucket)`` group in
+    one Daft worker to guarantee a single Paimon writer owner. A large fixed
+    bucket can therefore become a single-worker memory/CPU hot spot. Dynamic
+    buckets are normally bounded by ``dynamic-bucket.target-row-num``. Each
+    group also returns its commit-message list in one pickled binary cell, so
+    groups producing many files can create large task results.
+    """
+    from pypaimon.daft.daft_datasink import (
+        COMMIT_MESSAGES_COLUMN,
+        PaimonCommitDataSink,
+        PaimonDataSink,
+        make_dynamic_bucket_assignment_udf,
+        make_dynamic_routing_udf,
+        make_fixed_bucket_udf,
+        make_group_write_udf,
+    )
+    from pypaimon.table.bucket_mode import BucketMode
+    from pypaimon.index.dynamic_bucket import SHORT_MAX_VALUE
+
+    if not table.is_primary_key_table:
+        return df.write_sink(PaimonDataSink(table, mode))
+
+    _validate_write_column_names(df, table)
+    bucket_mode = table.bucket_mode()
+    if bucket_mode == BucketMode.POSTPONE_MODE:
+        return df.write_sink(PaimonDataSink(table, mode))
+    if bucket_mode == BucketMode.CROSS_PARTITION:
+        raise ValueError(
+            "CROSS_PARTITION primary-key Daft writes require a persistent "
+            "global primary-key index, which PyPaimon does not yet support"
+        )
+
+    import daft
+
+    data_columns = [daft.col(name) for name in table.field_names]
+    commit_column = _pick_internal_column(
+        df.column_names, COMMIT_MESSAGES_COLUMN
+    )
+    commit_sink = PaimonCommitDataSink(table, mode, commit_column)
+
+    if bucket_mode == BucketMode.HASH_FIXED:
+        bucket_column = _pick_internal_column(
+            df.column_names + [commit_column], "__paimon_bucket__"
+        )
+        bucket_udf = make_fixed_bucket_udf(table)
+        with_bucket = df.with_column(
+            bucket_column,
+            bucket_udf(*data_columns),
+        )
+        group_keys = list(table.partition_keys) + [bucket_column]
+        group_write = make_group_write_udf(
+            table,
+            mode,
+            commit_sink.commit_user,
+            precomputed_bucket=True,
+        )
+        prepared = with_bucket.groupby(*group_keys).map_groups(
+            group_write(
+                *data_columns,
+                daft.col(bucket_column),
+            ).alias(commit_column)
+        )
+        return prepared.write_sink(commit_sink)
+
+    if bucket_mode == BucketMode.HASH_DYNAMIC:
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        base_snapshot_id = (
+            latest_snapshot.id if latest_snapshot is not None else 0
+        )
+        input_partitions = df.num_partitions() or 1
+        max_buckets = table.options.dynamic_bucket_max_buckets()
+        # Bucket ids are stored as Java shorts and Paimon allocates ids in
+        # [0, Short.MAX_VALUE), so every assigner must own at least one id.
+        num_assigners = min(max(1, input_partitions), SHORT_MAX_VALUE)
+        if max_buckets > 0:
+            num_assigners = min(num_assigners, max_buckets)
+        num_channels = num_assigners
+
+        assigner_column = _pick_internal_column(
+            df.column_names + [commit_column], "__paimon_assigner__"
+        )
+        bucket_column = _pick_internal_column(
+            df.column_names + [commit_column, assigner_column],
+            "__paimon_bucket__",
+        )
+        key_hash_column = _pick_internal_column(
+            df.column_names + [
+                commit_column,
+                assigner_column,
+                bucket_column,
+            ],
+            "__paimon_key_hash__",
+        )
+        new_mapping_column = _pick_internal_column(
+            df.column_names + [
+                commit_column,
+                assigner_column,
+                bucket_column,
+                key_hash_column,
+            ],
+            "__paimon_new_mapping__",
+        )
+        base_snapshot_column = _pick_internal_column(
+            df.column_names + [
+                commit_column,
+                assigner_column,
+                bucket_column,
+                key_hash_column,
+                new_mapping_column,
+            ],
+            "__paimon_base_snapshot__",
+        )
+        routing_udf = make_dynamic_routing_udf(
+            table,
+            num_channels,
+            num_assigners,
+            assigner_column,
+            key_hash_column,
+        )
+        with_routing = df.select(
+            *data_columns,
+            routing_udf(*data_columns),
+        )
+        bucket_assignment_udf = make_dynamic_bucket_assignment_udf(
+            table,
+            num_channels,
+            num_assigners,
+            bucket_column,
+            key_hash_column,
+            new_mapping_column,
+            base_snapshot_column,
+            ignore_existing=mode == "overwrite",
+            base_snapshot_id=base_snapshot_id,
+        )
+        assigner_group_keys = list(table.partition_keys) + [assigner_column]
+        with_bucket = with_routing.groupby(*assigner_group_keys).map_groups(
+            bucket_assignment_udf(
+                *data_columns,
+                daft.col(assigner_column),
+                daft.col(key_hash_column),
+            )
+        )
+        # After a parallelism change, keys handled by different current
+        # assigners can restore to the same historical bucket. Regroup by the
+        # final bucket so exactly one file writer owns it in this commit.
+        group_write = make_group_write_udf(
+            table,
+            mode,
+            commit_sink.commit_user,
+            precomputed_bucket=True,
+            base_snapshot_id=base_snapshot_id,
+        )
+        group_keys = list(table.partition_keys) + [bucket_column]
+        prepared = with_bucket.groupby(*group_keys).map_groups(
+            group_write(
+                *data_columns,
+                daft.col(bucket_column),
+                daft.col(key_hash_column),
+                daft.col(new_mapping_column),
+                daft.col(base_snapshot_column),
+            ).alias(commit_column)
+        )
+        return prepared.write_sink(commit_sink)
+
+    raise ValueError(
+        f"Unsupported primary-key bucket mode for Daft writes: {bucket_mode.name}"
+    )
+
+
+def _validate_write_column_names(df: "daft.DataFrame", table: FileStoreTable) -> None:
+    input_names = list(df.column_names)
+    target_names = list(table.field_names)
+    if len(set(input_names)) != len(input_names):
+        raise ValueError(
+            f"Cannot write to Paimon with duplicate input field names: {input_names}"
+        )
+    missing = [name for name in target_names if name not in input_names]
+    extra = [name for name in input_names if name not in target_names]
+    if missing or extra:
+        details = []
+        if missing:
+            details.append(f"missing fields: {missing}")
+        if extra:
+            details.append(f"extra fields: {extra}")
+        raise ValueError(f"Paimon write schema mismatch: {'; '.join(details)}")
+
+
+def _pick_internal_column(existing_names, preferred: str) -> str:
+    existing = set(existing_names)
+    if preferred not in existing:
+        return preferred
+    suffix = 1
+    while f"{preferred}_{suffix}" in existing:
+        suffix += 1
+    return f"{preferred}_{suffix}"
 
 
 def read_paimon(

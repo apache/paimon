@@ -38,7 +38,10 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
-from pypaimon.write.commit.conflict_detection import ConflictDetection
+from pypaimon.write.commit.conflict_detection import (
+    CommitConflictError,
+    ConflictDetection,
+)
 from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesProvider
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
@@ -150,6 +153,9 @@ class FileStoreCommit:
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
             index_adds.extend(msg.index_adds)
+        hash_index_base_snapshot = self._hash_index_base_snapshot(
+            commit_messages
+        )
 
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
@@ -185,6 +191,9 @@ class FileStoreCommit:
             allow_rollback = True
         if self.conflict_detection.has_global_index_additions(index_adds):
             detect_conflicts = True
+        if self.conflict_detection.has_hash_index_changes(
+                index_adds + index_deletes):
+            detect_conflicts = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
@@ -193,7 +202,8 @@ class FileStoreCommit:
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
-                         index_adds=index_adds)
+                         index_adds=index_adds,
+                         hash_index_base_snapshot=hash_index_base_snapshot)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -216,8 +226,20 @@ class FileStoreCommit:
             partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
         changelog_entries = self._collect_changelog_entries(commit_messages)
+        index_adds = [
+            entry for message in commit_messages for entry in message.index_adds
+        ]
+        index_deletes = [
+            entry for message in commit_messages for entry in message.index_deletes
+        ]
+        hash_index_base_snapshot = self._hash_index_base_snapshot(
+            commit_messages
+        )
 
         if not skip_overwrite:
+            index_deletes = self._overwrite_hash_index_deletes(
+                partition_filter, index_deletes
+            )
             provider = self._overwrite_changes_provider(partition_filter, commit_messages)
             self._try_commit(
                 commit_kind="OVERWRITE",
@@ -226,7 +248,51 @@ class FileStoreCommit:
                 changelog_entries=changelog_entries,
                 detect_conflicts=True,
                 allow_rollback=False,
+                index_deletes=index_deletes,
+                index_adds=index_adds,
+                hash_index_base_snapshot=hash_index_base_snapshot,
             )
+
+    @staticmethod
+    def _hash_index_base_snapshot(
+        commit_messages: List[CommitMessage],
+    ) -> Optional[int]:
+        # Include data-only dynamic-bucket upserts. Their existing mappings
+        # are stable across append commits, but a concurrent overwrite may
+        # rebuild the HASH index and move a key to another bucket.
+        base_snapshots = [
+            getattr(message, "hash_index_base_snapshot", None)
+            for message in commit_messages
+            if getattr(message, "hash_index_base_snapshot", None) is not None
+        ]
+        return min(base_snapshots) if base_snapshots else None
+
+    def _overwrite_hash_index_deletes(self, partition_filter, deletes):
+        """Delete HASH indexes for every partition replaced by overwrite."""
+        from pypaimon.index.dynamic_bucket import HASH_INDEX
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+        from pypaimon.table.bucket_mode import BucketMode
+
+        if self.table.bucket_mode() != BucketMode.HASH_DYNAMIC:
+            return deletes
+
+        by_file_name = {entry.index_file.file_name: entry for entry in deletes}
+        snapshot = self.snapshot_manager.get_latest_snapshot()
+        for entry in IndexFileHandler(self.table).scan(snapshot):
+            if entry.index_file.index_type != HASH_INDEX:
+                continue
+            if partition_filter is not None and not partition_filter.test(
+                entry.partition
+            ):
+                continue
+            by_file_name[entry.index_file.file_name] = IndexManifestEntry(
+                kind=1,
+                partition=entry.partition,
+                bucket=entry.bucket,
+                index_file=entry.index_file,
+            )
+        return list(by_file_name.values())
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
@@ -289,7 +355,8 @@ class FileStoreCommit:
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
-                    index_adds=None, changelog_entries=None):
+                    index_adds=None, changelog_entries=None,
+                    hash_index_base_snapshot=None):
 
         retry_count = 0
         retry_result = None
@@ -314,6 +381,7 @@ class FileStoreCommit:
                 allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
+                hash_index_base_snapshot=hash_index_base_snapshot,
             )
 
             if result.is_success():
@@ -369,10 +437,26 @@ class FileStoreCommit:
                          detect_conflicts: bool = False,
                          allow_rollback: bool = False,
                          index_deletes=None,
-                         index_adds=None) -> CommitResult:
+                         index_adds=None,
+                         hash_index_base_snapshot=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
+
+        latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
+        if (
+            hash_index_base_snapshot is not None
+            and latest_snapshot_id != hash_index_base_snapshot
+        ):
+            conflict = RuntimeError(
+                "HASH index assignment conflict detected: assigned from "
+                "snapshot {}, but the latest snapshot is {}.".format(
+                    hash_index_base_snapshot, latest_snapshot_id
+                )
+            )
+            if retry_result is None:
+                raise CommitConflictError(str(conflict)) from conflict
+            raise conflict
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
@@ -388,9 +472,10 @@ class FileStoreCommit:
         # Base entries for conflict detection. On retry, reuse the previous
         # attempt's base + read only the incremental changes (mirrors Java).
         base_data_files = None
-        if detect_conflicts and latest_snapshot is not None:
+        if detect_conflicts:
             incremental = None
-            if (retry_result is not None
+            if (latest_snapshot is not None
+                    and retry_result is not None
                     and retry_result.latest_snapshot is not None
                     and retry_result.base_data_files is not None):
                 incremental = self.commit_scanner.read_incremental_changes(
@@ -403,11 +488,13 @@ class FileStoreCommit:
                 if incremental:
                     base_data_files.extend(incremental)
                     base_data_files = FileEntry.merge_entries(base_data_files)
-            else:
+            elif latest_snapshot is not None:
                 # First attempt, or incremental could not be built (missing
                 # snapshot): scan the changed partitions in full.
                 base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
                     latest_snapshot, commit_entries, index_entries)
+            else:
+                base_data_files = []
 
             conflict_exception = self.conflict_detection.check_conflicts(
                 latest_snapshot,
@@ -423,6 +510,13 @@ class FileStoreCommit:
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
                         return RetryResult(None, conflict_exception)
+                if retry_result is None:
+                    raise CommitConflictError(
+                        str(conflict_exception)
+                    ) from conflict_exception
+                # A previous attempt may have committed despite returning an
+                # error. Preserve the generic, uncertain-result semantics so
+                # callers do not delete files which a snapshot may reference.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
