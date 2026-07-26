@@ -35,6 +35,8 @@ error rather than a silent fallback.
 
 from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
+from _datasketches import compact_theta_sketch, theta_union
+
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.read.reader.aggregate import register_aggregator
@@ -65,6 +67,7 @@ NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
 NAME_COLLECT = "collect"
 NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 NAME_MERGE_MAP = "merge_map"
+NAME_THETA_SKETCH = "theta_sketch"
 
 
 # Base SQL type names treated as numeric for sum/product-style
@@ -1063,6 +1066,45 @@ class FieldMergeMapAgg(FieldAggregator):
         return keys
 
 
+class FieldThetaSketchAgg(FieldAggregator):
+    """Aggregator for ThetaSketch."""
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if _atomic_base_name(field_type) not in ("VARBINARY", "BYTES"):
+            raise ValueError(
+                "Data type for theta sketch column must be 'VarBinaryType' but was '{}'.".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        if not isinstance(accumulator, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch accumulator must be bytes, got {}".format(type(accumulator))
+            )
+
+        if not isinstance(input_field, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch input must be bytes, got {}".format(type(input_field))
+            )
+
+        if isinstance(accumulator, bytearray):
+            accumulator = bytes(accumulator)
+        if isinstance(input_field, bytearray):
+            input_field = bytes(input_field)
+
+        sketch1 = compact_theta_sketch.deserialize(accumulator)
+        sketch2 = compact_theta_sketch.deserialize(input_field)
+
+        union = theta_union()
+        union.update(sketch1)
+        union.update(sketch2)
+
+        return union.get_result().serialize()
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -1150,4 +1192,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_MERGE_MAP, _build_no_type_check(FieldMergeMapAgg, NAME_MERGE_MAP)
+)
+register_aggregator(
+    NAME_THETA_SKETCH, _build_no_type_check(FieldThetaSketchAgg, NAME_THETA_SKETCH)
 )

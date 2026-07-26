@@ -30,6 +30,8 @@ from decimal import Decimal
 from functools import reduce
 from typing import List
 
+from _datasketches import update_theta_sketch
+
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp
 from pypaimon.read.reader.aggregate import create_field_aggregator
@@ -50,6 +52,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldCollectAgg,
     FieldMergeMapWithKeyTimeAgg,
     FieldMergeMapAgg,
+    FieldThetaSketchAgg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
 from pypaimon.table.row.generic_row import GenericRow
@@ -2104,6 +2107,32 @@ class FieldMergeMapAggTest(unittest.TestCase):
 
         acc = agg.retract(acc, [{'key': 1, 'value': 'A'}, {'key': 3, 'value': 'C'}])
         self.assertEqual(acc, {2: "B"})
+
+
+class FieldThetaSketchAggTest(unittest.TestCase):
+    @staticmethod
+    def sketch_of(*values: int) -> bytes:
+        sketch = update_theta_sketch()
+
+        for value in values:
+            sketch.update(value)
+
+        return sketch.compact().serialize()
+
+    def test_field_theta_sketch_agg(self):
+        agg = _make("theta_sketch", "VARBINARY(20)")
+        self.assertIsInstance(agg, FieldThetaSketchAgg)
+
+        input_val = self.sketch_of(1)
+        acc1 = self.sketch_of(2, 3)
+        acc2 = self.sketch_of(1, 2, 3)
+
+        self.assertIsNone(agg.agg(None, None))
+
+        self.assertEqual(agg.agg(None, input_val), input_val)
+        self.assertEqual(agg.agg(acc1, None), acc1)
+        self.assertEqual(agg.agg(acc1, input_val), acc2)
+        self.assertEqual(agg.agg(acc2, input_val), acc2)
 
 
 class RegistrationTest(unittest.TestCase):
