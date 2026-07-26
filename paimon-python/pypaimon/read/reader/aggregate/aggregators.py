@@ -44,6 +44,7 @@ from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
 
 # aggregator input type hints variables
 Record = Union[InternalRow, Dict[str, Any]]
@@ -69,6 +70,7 @@ NAME_COLLECT = "collect"
 NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 NAME_MERGE_MAP = "merge_map"
 NAME_THETA_SKETCH = "theta_sketch"
+NAME_RBM32 = "rbm32"
 
 
 # Integer range limits used for overflow checking.
@@ -146,6 +148,18 @@ def _check_array_row(name: str, field_type: DataType) -> ArrayType:
             .format(name, field_type)
         )
 
+    return field_type
+
+
+def _check_roaring_bitmap(name: str, field_type: DataType):
+    """Check field_type is VarBinaryType and return the VarBinaryType."""
+
+    base = _atomic_base_name(field_type)
+    if base not in ("VARBINARY", "BYTES"):
+        raise ValueError(
+            "Data type for {} column must be 'VARBINARY' or 'BYTES' but was "
+            "'{}'.".format(name, field_type)
+        )
     return field_type
 
 
@@ -1410,6 +1424,21 @@ class FieldThetaSketchAgg(FieldAggregator):
         return union.get_result().serialize()
 
 
+class FieldRoaringBitmap32Agg(FieldAggregator):
+    """roaring bitmap 32 aggregate a field of a row."""
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        try:
+            acc = RoaringBitmap.deserialize(accumulator)
+            input_bitmap = RoaringBitmap.deserialize(input_field)
+            return RoaringBitmap.or_(acc, input_bitmap).serialize()
+        except Exception as ex:
+            raise RuntimeError("Unable to se/deserialize roaring bitmap.") from ex
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -1448,6 +1477,13 @@ def _build_field_options(cls, identifier: str):
     """
     def _factory(field_type, field_name, options):
         return cls(identifier, field_type, field_name, options)
+    return _factory
+
+
+def _build_roaring_bitmap(cls, identifier: str):
+    def _factory(field_type, field_name, options):
+        _check_roaring_bitmap(identifier, field_type)
+        return cls(identifier, field_type)
     return _factory
 
 
@@ -1501,4 +1537,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_THETA_SKETCH, _build_no_type_check(FieldThetaSketchAgg, NAME_THETA_SKETCH)
+)
+register_aggregator(
+    NAME_RBM32, _build_roaring_bitmap(FieldRoaringBitmap32Agg, NAME_RBM32)
 )
