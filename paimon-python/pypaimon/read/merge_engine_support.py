@@ -215,7 +215,7 @@ def check_supported(table) -> None:
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
-                "and other aggregators (hll_sketch / roaring_bitmap_*) "
+                "and other aggregators (hll_sketch / rbm64) "
                 "are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
