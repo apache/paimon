@@ -17,6 +17,7 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
@@ -69,7 +70,7 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
                 options.global_index_scalar_search_mode())
 
     def test_falls_back_when_scalar_mode_has_no_value(self):
-        options = unittest.mock.Mock()
+        options = mock.Mock()
         options.get.side_effect = [None, GlobalIndexSearchMode.DETAIL]
         self.assertEqual(
             GlobalIndexSearchMode.DETAIL,
