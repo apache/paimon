@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -73,13 +74,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests file index and predicate push down in {@link
- * org.apache.paimon.operation.DataEvolutionSplitRead}.
+ * org.apache.paimon.operation.DataEvolutionSplitRead}, on two levels.
  *
- * <p>Readers are created directly from the splits, without {@link TableRead#executeFilter()}, so an
- * empty result proves that the reader itself pruned the rows. Filter values are always picked
- * inside the min/max range of the column, otherwise the group level stats pruning in {@link
- * org.apache.paimon.operation.DataEvolutionFileStoreScan} would drop the split before the reader
- * ever sees it.
+ * <p>{@link #readWithFilter} creates the readers directly from the splits, without {@link
+ * TableRead#executeFilter()}, so an empty result proves that the reader itself pruned the rows.
+ *
+ * <p>{@link #query} reads the whole plan through {@link TableRead#executeFilter()}, the residual
+ * filter both Flink and Spark keep on top of the push down, so it returns the answer a query gives.
+ * Those tests assert the rows themselves, and compare them with {@link #fullScanFiltered}: the push
+ * down is an optimization and must never change the result. A row count alone can not say that, it
+ * passes just as well when nothing is pushed down at all.
+ *
+ * <p>A filter on a column that is not part of the read type has no {@link #query} counterpart:
+ * {@link TableRead#executeFilter()} can not project such a predicate onto the read row and silently
+ * keeps every row, so only the split level assertion says anything.
+ *
+ * <p>Filter values are always picked inside the min/max range of the column, otherwise the group
+ * level stats pruning in {@link org.apache.paimon.operation.DataEvolutionFileStoreScan} would drop
+ * the split before the reader ever sees it.
  */
 public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
@@ -106,6 +118,20 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testQuerySingleFileWithFileIndex() throws Exception {
+        FileStoreTable table = createTable("single_file_query", bloomOptions("f1", "1 B"));
+        writeAllColumns(table, ROW_COUNT);
+
+        Predicate filter = equalF1(f1(50));
+        List<InternalRow> rows = query(table, filter);
+        // the push down is an optimization, it must not change the answer
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, filter));
+        assertRow(assertSingleRow(rows), 50);
+
+        assertThat(query(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
     public void testMergedGroupSkippedByFileIndex() throws Exception {
         // an embedded index, the default threshold keeps it in the manifest
         FileStoreTable table = createTable("merged_group", Collections.emptyMap());
@@ -128,6 +154,21 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testQueryMergedGroup() throws Exception {
+        FileStoreTable table = createTable("merged_group_query", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bloomOptions("f2", null));
+        assertMergedGroup(table);
+
+        // the group is read whole, the residual filter has to cut it down to the matching row
+        Predicate filter = equalF2(f2(50));
+        List<InternalRow> rows = query(table, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, filter));
+        assertRow(assertSingleRow(rows), 50);
+
+        assertThat(query(table, equalF2(MISSING_F2))).isEmpty();
+    }
+
+    @Test
     public void testBitmapIndexSelectsMatchingRowsOnly() throws Exception {
         FileStoreTable table = createTable("bitmap", bitmapOptions("f1"));
         writeAllColumns(table, ROW_COUNT);
@@ -139,6 +180,19 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertAligned(rows);
 
         assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
+    public void testQueryWithBitmapIndex() throws Exception {
+        FileStoreTable table = createTable("bitmap_query", bitmapOptions("f1"));
+        writeAllColumns(table, ROW_COUNT);
+
+        Predicate filter = equalF1(f1(50));
+        List<InternalRow> rows = query(table, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, filter));
+        assertRow(assertSingleRow(rows), 50);
+
+        assertThat(query(table, equalF1(MISSING_F1))).isEmpty();
     }
 
     @Test
@@ -160,6 +214,26 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testQueryAfterColumnRename() throws Exception {
+        FileStoreTable table = createTable("renamed_query", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bloomOptions("f2", null));
+        catalog.alterTable(
+                identifier("renamed_query"), SchemaChange.renameColumn("f2", "f3"), false);
+
+        FileStoreTable renamed = getTable(identifier("renamed_query"));
+        PredicateBuilder builder = new PredicateBuilder(renamed.rowType());
+        int f3 = renamed.rowType().getFieldIndex("f3");
+
+        Predicate filter = builder.equal(f3, BinaryString.fromString(f2(50)));
+        List<InternalRow> rows = query(renamed, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(renamed, filter));
+        assertRow(assertSingleRow(rows), 50);
+
+        assertThat(query(renamed, builder.equal(f3, BinaryString.fromString(MISSING_F2))))
+                .isEmpty();
+    }
+
+    @Test
     public void testFileIndexReadDisabled() throws Exception {
         Map<String, String> options = bloomOptions("f1", "1 B");
         options.put(CoreOptions.FILE_INDEX_READ_ENABLED.key(), "false");
@@ -167,6 +241,22 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeAllColumns(table, ROW_COUNT);
 
         assertThat(readWithFilter(table, equalF1(MISSING_F1))).hasSize(ROW_COUNT);
+    }
+
+    @Test
+    public void testQueryWithFileIndexReadDisabled() throws Exception {
+        Map<String, String> options = bloomOptions("f1", "1 B");
+        options.put(CoreOptions.FILE_INDEX_READ_ENABLED.key(), "false");
+        FileStoreTable table = createTable("index_disabled_query", options);
+        writeAllColumns(table, ROW_COUNT);
+
+        // the index only decides how much is read, never what the query answers
+        Predicate filter = equalF1(f1(50));
+        List<InternalRow> rows = query(table, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, filter));
+        assertRow(assertSingleRow(rows), 50);
+
+        assertThat(query(table, equalF1(MISSING_F1))).isEmpty();
     }
 
     @Test
@@ -225,15 +315,44 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testQueryComposesBitmapWithDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("bitmap_dv_query", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 50);
+
+        assertThat(query(table, equalF1(f1(50)))).isEmpty();
+
+        FileStoreTable other = createTable("bitmap_dv_other_query", options);
+        writeAllColumns(other, ROW_COUNT);
+        deleteRows(other, 51);
+
+        Predicate filter = equalF1(f1(50));
+        List<InternalRow> rows = query(other, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(other, filter));
+        assertRow(assertSingleRow(rows), 50);
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
 
         // f1 was rewritten by a newer file (c*); the old file still holds a* and a bloom index that
         // knows nothing about c*, so its index must not veto the group
-        List<InternalRow> rows = readWithFilter(table, equalF1(c1(50)));
-        assertThat(rows).hasSize(ROW_COUNT);
-        assertThat(rows).anyMatch(row -> c1(50).equals(row.getString(1).toString()));
+        Predicate filter = equalF1(c1(50));
+        List<InternalRow> rows = query(table, filter);
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, filter));
+
+        InternalRow row = assertSingleRow(rows);
+        assertThat(row.getInt(0)).isEqualTo(50);
+        assertThat(row.getString(1).toString()).isEqualTo(c1(50));
+        // no file of the group wrote f2
+        assertThat(row.isNullAt(2)).isTrue();
+
+        // and the overwritten value must be gone, the column merge has to take f1 from the new file
+        assertThat(query(table, equalF1(f1(50)))).isEmpty();
     }
 
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */
@@ -423,11 +542,64 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         return rows;
     }
 
+    /**
+     * Reads the whole plan the way an engine does, with the residual filter on top of the push
+     * down.
+     */
+    private List<InternalRow> query(FileStoreTable table, Predicate predicate) throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder = latest.newReadBuilder().withFilter(predicate);
+        return collect(
+                readBuilder.newRead().executeFilter(),
+                readBuilder.newScan().plan(),
+                latest.rowType());
+    }
+
+    /** What {@link #query} has to return: a full scan filtered in memory, with no push down. */
+    private List<InternalRow> fullScanFiltered(FileStoreTable table, Predicate predicate)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder = latest.newReadBuilder();
+        List<InternalRow> rows = new ArrayList<>();
+        for (InternalRow row :
+                collect(readBuilder.newRead(), readBuilder.newScan().plan(), latest.rowType())) {
+            if (predicate.test(row)) {
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Materializes as {@link BinaryRow}, the reader hands out row implementations without a value
+     * based equals.
+     */
+    private static List<InternalRow> collect(TableRead read, TableScan.Plan plan, RowType rowType)
+            throws Exception {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = read.createReader(plan)) {
+            reader.forEachRemaining(row -> rows.add(serializer.toBinaryRow(row).copy()));
+        }
+        return rows;
+    }
+
     private void assertMergedGroup(FileStoreTable table) throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
         List<Split> splits = latest.newReadBuilder().newScan().plan().splits();
         assertThat(splits).hasSize(1);
         assertThat(((DataSplit) splits.get(0)).dataFiles()).hasSize(2);
+    }
+
+    private static InternalRow assertSingleRow(List<InternalRow> rows) {
+        assertThat(rows).hasSize(1);
+        return rows.get(0);
+    }
+
+    private static void assertRow(InternalRow row, int i) {
+        assertThat(row.getInt(0)).isEqualTo(i);
+        assertThat(row.getString(1).toString()).isEqualTo(f1(i));
+        assertThat(row.getString(2).toString()).isEqualTo(f2(i));
     }
 
     private static void assertAligned(List<InternalRow> rows) {
