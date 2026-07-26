@@ -1103,6 +1103,41 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFastVectorModeLimitsScalarFallbackToVectorCoverage() throws Exception {
+        catalog.createTable(
+                identifier("fast_vector_partial_coverage_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "fast")
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_vector_partial_coverage_table"));
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i - 8), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, Arrays.copyOf(vectors, 5), new Range(0, 4));
+        buildAndCommitBTreeIndex(table, new int[] {2, 3, 4}, new Range(2, 4));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(0, 1));
+    }
+
+    @Test
     public void testFullModeFilterWithoutScalarIndexMustNotLetVectorIndexPolluteTopK()
             throws Exception {
         catalog.createTable(

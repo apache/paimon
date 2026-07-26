@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
@@ -163,6 +164,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
+        vector_search_mode = self._table.options.vector_index_search_mode()
         raw_row_ranges = DataEvolutionGlobalIndexCoverage(
             self._table,
             snapshot,
@@ -170,7 +172,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             vector_index_files,
         ).unindexed_ranges(
             vector_column.id,
-            search_mode=self._table.options.vector_index_search_mode(),
+            search_mode=vector_search_mode,
         )
         scalar_index_files = [
             f for f in all_index_files
@@ -178,18 +180,24 @@ class DataEvolutionVectorScan(VectorSearchScan):
             and f.global_index_meta.index_field_id != vector_column.id
         ]
         if self._filter is not None:
+            scalar_unindexed_ranges = DataEvolutionGlobalIndexCoverage(
+                self._table,
+                snapshot,
+                partition_filter,
+                scalar_index_files,
+            ).unindexed_ranges(
+                self._table.fields,
+                self._filter,
+                search_mode=self._table.options.scalar_index_search_mode(),
+            )
+            if vector_search_mode == GlobalIndexSearchMode.FAST:
+                scalar_unindexed_ranges = Range.and_(
+                    scalar_unindexed_ranges,
+                    Range.sort_and_merge_overlap(
+                        list(vector_by_range.keys()), True),
+                )
             raw_row_ranges = Range.sort_and_merge_overlap(
-                raw_row_ranges
-                + DataEvolutionGlobalIndexCoverage(
-                    self._table,
-                    snapshot,
-                    partition_filter,
-                    scalar_index_files,
-                ).unindexed_ranges(
-                    self._table.fields,
-                    self._filter,
-                    search_mode=self._table.options.scalar_index_search_mode(),
-                ),
+                raw_row_ranges + scalar_unindexed_ranges,
                 True,
             )
         if raw_row_ranges:

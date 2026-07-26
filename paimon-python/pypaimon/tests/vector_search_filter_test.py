@@ -1402,6 +1402,43 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertFalse(any(isinstance(split, RawVectorSearchSplit)
                              for split in splits))
 
+    def test_fast_vector_mode_limits_scalar_fallback_to_vector_coverage(self):
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        entries = [
+            _entry(None, field_id=1, index_type="lumina-vector-ann",
+                   file_name="vec.index", row_range_start=0,
+                   row_range_end=4),
+            _entry(None, field_id=0, index_type="btree",
+                   file_name="id.index", row_range_start=2,
+                   row_range_end=4),
+        ]
+        table = _StubTable(fields=[self.id_field, self.embedding_field],
+                           entries=entries)
+        table.options = CoreOptions(Options({
+            "vector-index.search-mode": "fast",
+            "scalar-index.search-mode": "full",
+        }))
+        _patch_snapshot(self, entries, types.SimpleNamespace(next_row_id=10))
+        filter_pred = Predicate(method="greaterOrEqual", index=0, field="id",
+                                literals=[5])
+
+        splits = (
+            VectorSearchBuilderImpl(table)
+            .with_vector_column("embedding")
+            .with_query_vector([1.0, 0.0, 0.0, 0.0])
+            .with_limit(3)
+            .with_filter(filter_pred)
+            .new_vector_search_scan()
+            .scan()
+            .splits()
+        )
+
+        raw = [split for split in splits
+               if isinstance(split, RawVectorSearchSplit)]
+        self.assertEqual(1, len(raw))
+        self.assertEqual([Range(0, 1)], raw[0].row_ranges)
+
     def test_full_mode_scan_adds_raw_split_for_uncovered_scalar_filter(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
 
