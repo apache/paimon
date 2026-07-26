@@ -39,6 +39,14 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
 
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LATERAL_JOIN_PARALLELISM =
+            key("vector-search.lateral-join.parallelism")
+                    .intType()
+                    .defaultValue(16)
+                    .withDescription(
+                            "Parallelism used to repartition a single-partition LIMIT input before "
+                                    + "executing a lateral vector search.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()

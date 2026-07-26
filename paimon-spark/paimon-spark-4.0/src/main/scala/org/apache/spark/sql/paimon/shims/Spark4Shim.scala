@@ -39,6 +39,7 @@ import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
+import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
@@ -242,6 +243,14 @@ class Spark4Shim extends SparkShim {
       isStreaming: Boolean): CTERelationRef = {
     CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
   }
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      numPartitions: Int): Distribution =
+    ClusteredDistribution(
+      expressions,
+      requireAllClusterKeys = false,
+      requiredNumPartitions = Some(numPartitions))
 
   override def supportsHashAggregate(
       aggregateBufferAttributes: Seq[Attribute],

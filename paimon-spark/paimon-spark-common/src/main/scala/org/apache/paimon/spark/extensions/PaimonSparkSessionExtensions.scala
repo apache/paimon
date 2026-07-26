@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.extensions
 
 import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions, RewriteUpsertTable}
-import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable, PushDownLateralVectorSearchFilter}
+import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable, PushDownLateralVectorSearchFilter, RepartitionLateralVectorSearchInput}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
@@ -104,6 +104,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // TODO: Enable MAP selected-key pushdown after core reader supports
     // __PAIMON_MAP_SELECTED_KEYS read type.
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
+    extensions.injectOptimizerRule(_ => RepartitionLateralVectorSearchInput)
     extensions.injectOptimizerRule(_ => PushDownLateralVectorSearchFilter)
 
     // planner extensions
