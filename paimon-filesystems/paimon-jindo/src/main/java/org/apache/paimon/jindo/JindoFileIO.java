@@ -230,8 +230,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             }
         }
         if (!allowCache) {
-            fsMap.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
-            fsMap.clear();
+            closeFileSystems(fsMap);
+            closeFileSystems(jindoCacheFsMap);
         }
     }
 
@@ -245,6 +245,14 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
 
         @Override
         void close();
+    }
+
+    private static void closeFileSystems(Map<String, Pair<JindoHadoopSystem, String>> fileSystems) {
+        if (fileSystems == null) {
+            return;
+        }
+        fileSystems.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
+        fileSystems.clear();
     }
 
     private static class CacheKey {

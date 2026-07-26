@@ -45,8 +45,12 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Date;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -273,11 +277,69 @@ public class JindoFileIOTest {
         }
     }
 
+    @Test
+    void closeClosesDirectAndCacheFileSystems() {
+        JindoFileIO fileIO = createNonCachingFileIO();
+        TrackingJindoHadoopSystem directFileSystem = new TrackingJindoHadoopSystem();
+        TrackingJindoHadoopSystem cacheFileSystem = new TrackingJindoHadoopSystem();
+        fileIO.fsMap = new ConcurrentHashMap<>();
+        fileIO.fsMap.put("test-bucket", Pair.of(directFileSystem, "test"));
+        fileIO.jindoCacheFsMap = new ConcurrentHashMap<>();
+        fileIO.jindoCacheFsMap.put("test-bucket", Pair.of(cacheFileSystem, "test"));
+
+        fileIO.close();
+
+        assertThat(directFileSystem.closeCount.get()).isOne();
+        assertThat(cacheFileSystem.closeCount.get()).isOne();
+        assertThat(fileIO.fsMap).isEmpty();
+        assertThat(fileIO.jindoCacheFsMap).isEmpty();
+
+        assertThatCode(fileIO::close).doesNotThrowAnyException();
+        assertThat(directFileSystem.closeCount.get()).isOne();
+        assertThat(cacheFileSystem.closeCount.get()).isOne();
+    }
+
+    @Test
+    void closeHandlesCacheOnlyFileSystem() {
+        JindoFileIO fileIO = createNonCachingFileIO();
+        TrackingJindoHadoopSystem cacheFileSystem = new TrackingJindoHadoopSystem();
+        fileIO.jindoCacheFsMap = new ConcurrentHashMap<>();
+        fileIO.jindoCacheFsMap.put("test-bucket", Pair.of(cacheFileSystem, "test"));
+
+        assertThatCode(fileIO::close).doesNotThrowAnyException();
+
+        assertThat(cacheFileSystem.closeCount.get()).isOne();
+        assertThat(fileIO.jindoCacheFsMap).isEmpty();
+    }
+
+    private JindoFileIO createNonCachingFileIO() {
+        Options options = new Options();
+        options.set(FILE_IO_ALLOW_CACHE, false);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(options));
+        return fileIO;
+    }
+
     private static String sha256Hex(byte[] bytes) throws Exception {
         StringBuilder result = new StringBuilder();
         for (byte value : MessageDigest.getInstance("SHA-256").digest(bytes)) {
             result.append(String.format("%02x", value & 0xff));
         }
         return result.toString();
+    }
+
+    private static class TrackingJindoHadoopSystem extends JindoHadoopSystem {
+
+        private final AtomicInteger closeCount = new AtomicInteger();
+
+        @Override
+        public String getScheme() {
+            return "test";
+        }
+
+        @Override
+        public void close() {
+            closeCount.incrementAndGet();
+        }
     }
 }
