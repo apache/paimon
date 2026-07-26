@@ -38,6 +38,12 @@ def _cast(type_name, value):
     return cast_value_to_string(value, AtomicType(type_name))
 
 
+def _f32(value):
+    # a FLOAT is widened to float64 on the way in, as the reader does
+    widened = struct.unpack("<f", struct.pack("<f", value))[0]
+    return _cast("FLOAT", widened)
+
+
 class RowToStringTest(unittest.TestCase):
 
     def test_none_row(self):
@@ -67,15 +73,54 @@ class RowToStringTest(unittest.TestCase):
     def test_decimal_keeps_its_scale(self):
         self.assertEqual("1.50", _cast("DECIMAL(10, 2)", Decimal("1.50")))
 
-    def test_double(self):
+    def test_double_decimal_range(self):
         self.assertEqual("1.5", _cast("DOUBLE", 1.5))
         self.assertEqual("1.0", _cast("DOUBLE", 1.0))
+        self.assertEqual("0.001", _cast("DOUBLE", 0.001))
+        self.assertEqual("123456.0", _cast("DOUBLE", 123456.0))
+        self.assertEqual("9999999.0", _cast("DOUBLE", 9999999.0))
+        self.assertEqual("-1.5", _cast("DOUBLE", -1.5))
+
+    def test_double_scientific_matches_java(self):
+        # Java Double.toString: upper case E, no + sign, no zero padding
+        self.assertEqual("1.0E7", _cast("DOUBLE", 1e7))
+        self.assertEqual("1.0E-5", _cast("DOUBLE", 1e-5))
+        self.assertEqual("1.0E-4", _cast("DOUBLE", 1e-4))
+        self.assertEqual("1.0E20", _cast("DOUBLE", 1e20))
+        self.assertEqual("1.0E-20", _cast("DOUBLE", 1e-20))
+        self.assertEqual("1.23456789E300", _cast("DOUBLE", 1.23456789e300))
+        self.assertEqual("1.23456789012345E14",
+                         _cast("DOUBLE", 123456789012345.0))
+
+    def test_double_signed_zero(self):
+        self.assertEqual("0.0", _cast("DOUBLE", 0.0))
+        self.assertEqual("-0.0", _cast("DOUBLE", -0.0))
+
+    def test_double_non_finite_matches_java(self):
+        self.assertEqual("NaN", _cast("DOUBLE", float("nan")))
+        self.assertEqual("Infinity", _cast("DOUBLE", float("inf")))
+        self.assertEqual("-Infinity", _cast("DOUBLE", float("-inf")))
 
     def test_float_prints_the_shortest_float32_form(self):
         # a float32 0.1 widened to float64 is 0.10000000149011612
-        widened = struct.unpack("<f", struct.pack("<f", 0.1))[0]
-        self.assertEqual("0.1", _cast("FLOAT", widened))
-        self.assertEqual("1.0", _cast("FLOAT", 1.0))
+        self.assertEqual("0.1", _f32(0.1))
+        self.assertEqual("1.0", _f32(1.0))
+        self.assertEqual("12345.678", _f32(12345.678))
+
+    def test_float_scientific_matches_java(self):
+        self.assertEqual("1.0E7", _f32(1e7))
+        self.assertEqual("1.0E-5", _f32(1e-5))
+        self.assertEqual("1.0E-4", _f32(1e-4))
+        self.assertEqual("3.4E38", _f32(3.4e38))
+        self.assertEqual("0.001", _f32(1e-3))
+        self.assertEqual("9999999.0", _f32(9999999.0))
+        self.assertEqual("-1.5", _f32(-1.5))
+
+    def test_float_signed_zero_and_non_finite(self):
+        self.assertEqual("0.0", _f32(0.0))
+        self.assertEqual("-0.0", _f32(-0.0))
+        self.assertEqual("NaN", _f32(float("nan")))
+        self.assertEqual("Infinity", _f32(float("inf")))
 
     def test_binary_is_decoded_as_utf8(self):
         self.assertEqual("ab", _cast("BYTES", b"ab"))

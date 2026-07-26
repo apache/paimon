@@ -21,7 +21,9 @@ Mirrors ``RowToStringCastRule`` and the per type ``*ToStringCastRule`` rules of
 ``paimon-common``, so system tables show the same text in both languages.
 """
 
+import math
 import struct
+from decimal import Decimal
 from typing import Any, Optional
 
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
@@ -50,7 +52,9 @@ def cast_value_to_string(value: Any, data_type) -> str:
     if type_name in ("BOOLEAN", "BOOL"):
         return "true" if value else "false"
     if type_name in ("FLOAT", "REAL"):
-        return _format_float(value)
+        return _format_java_float(value, True)
+    if type_name == "DOUBLE":
+        return _format_java_float(value, False)
     if (type_name.startswith("BINARY") or type_name.startswith("VARBINARY")
             or type_name == "BYTES"):
         return bytes(value).decode("utf-8", "replace")
@@ -102,23 +106,60 @@ def _format_time(value, precision: int) -> str:
     return text + "." + (digits.rstrip("0") or digits[:1])
 
 
-def _format_float(value) -> str:
-    """Format like ``Float.toString``: shortest text that round trips as float32.
+def _format_java_float(value, is_float32: bool) -> str:
+    """Format like Java ``Float.toString`` / ``Double.toString``.
 
-    ``repr`` would print the float64 the reader widened the value to, turning
-    ``0.1f`` into ``0.10000000149011612``.
+    Finds the shortest decimal that round trips, then lays it out with Java's
+    rules: plain decimal when ``1 <= D <= 7`` or ``-2 <= D <= 0`` (writing
+    ``value = 0.<digits> x 10^D``), otherwise ``d.dddEexp`` with an upper case
+    ``E``, a sign only when negative, and no zero padded exponent. The shortest
+    form differs from a pre JDK 19 JVM only at the denormal extremes
+    (``1.0E-45`` vs ``1.4E-45``), which partition stats never hold.
     """
-    try:
-        packed = struct.pack("<f", value)
-    except (OverflowError, struct.error):
-        return repr(value)
-    text = repr(value)
-    for digits in range(1, 10):
-        candidate = "%.{}g".format(digits) % value
-        if struct.pack("<f", float(candidate)) == packed:
-            text = candidate
-            break
-    # Java always prints a decimal point for a finite float
-    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
-        return text + ".0"
-    return text
+    if value != value:
+        return "NaN"
+    if value == math.inf:
+        return "Infinity"
+    if value == -math.inf:
+        return "-Infinity"
+    sign = "-" if math.copysign(1.0, value) < 0 else ""
+    if value == 0.0:
+        return sign + "0.0"
+    digits, decimal_exp = _shortest_digits(abs(value), is_float32)
+    n = len(digits)
+    if 0 < decimal_exp <= 7:
+        if decimal_exp >= n:
+            body = digits + "0" * (decimal_exp - n) + ".0"
+        else:
+            body = digits[:decimal_exp] + "." + digits[decimal_exp:]
+    elif -3 < decimal_exp <= 0:
+        body = "0." + "0" * (-decimal_exp) + digits
+    else:
+        body = digits[0] + "." + (digits[1:] or "0") + "E" + str(decimal_exp - 1)
+    return sign + body
+
+
+def _shortest_digits(magnitude, is_float32: bool):
+    """Return ``(digits, D)`` with ``magnitude = 0.<digits> x 10^D``.
+
+    ``digits`` carries no leading or trailing zeros. ``repr`` already yields the
+    shortest float64 form; for float32 the shortest ``%g`` that round trips
+    through four bytes is used, so a widened ``0.1f`` renders as ``0.1``.
+    """
+    if is_float32:
+        packed = struct.pack("<f", magnitude)
+        text = repr(magnitude)
+        for precision in range(1, 10):
+            candidate = "%.{}g".format(precision) % magnitude
+            if struct.pack("<f", float(candidate)) == packed:
+                text = candidate
+                break
+    else:
+        text = repr(magnitude)
+    _, digit_tuple, exp = Decimal(text).as_tuple()
+    digits = list(digit_tuple)
+    while len(digits) > 1 and digits[-1] == 0:
+        digits.pop()
+        exp += 1
+    digit_str = "".join(map(str, digits))
+    return digit_str, exp + len(digit_str)
