@@ -734,8 +734,7 @@ class CoreOptions:
         .default_value(GlobalIndexSearchMode.FAST)
         .with_description(
             "Search mode for vector and full-text global index queries. "
-            "An explicitly configured value is also used by scalar index "
-            "queries when 'scalar-index.search-mode' is not set. "
+            "Scalar index queries use 'scalar-index.search-mode'. "
             "Supported values are 'fast', 'full', and 'detail'."
         )
     )
@@ -747,8 +746,6 @@ class CoreOptions:
         .with_description(
             "Search mode for scalar (sorted/bitmap) global index queries. "
             "Defaults to 'full' to include rows not covered by the index. "
-            "An explicitly configured 'global-index.search-mode' is used "
-            "when this option is not set. "
             "Supported values are 'fast', 'full', and 'detail'."
         )
     )
@@ -1388,11 +1385,7 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def global_index_scalar_search_mode(self):
-        if self.options.contains(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE):
-            return self.options.get(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE)
-        if self.options.contains(CoreOptions.GLOBAL_INDEX_SEARCH_MODE):
-            return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
-        return GlobalIndexSearchMode.FULL
+        return self.options.get(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

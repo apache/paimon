@@ -57,19 +57,16 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             GlobalIndexSearchMode.FAST, options.global_index_search_mode())
 
     def test_scalar_option_override(self):
-        options = CoreOptions(Options({"scalar-index.search-mode": "detail"}))
-        self.assertEqual(
-            GlobalIndexSearchMode.DETAIL, options.global_index_scalar_search_mode())
-
-    def test_inherits_explicit_global_index_search_mode(self):
-        options = CoreOptions(Options({"global-index.search-mode": "detail"}))
-        self.assertEqual(
-            GlobalIndexSearchMode.DETAIL, options.global_index_scalar_search_mode())
-
-    def test_inherits_explicit_global_fast_mode(self):
-        options = CoreOptions(Options({"global-index.search-mode": "fast"}))
+        options = CoreOptions(Options({"scalar-index.search-mode": "fast"}))
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.global_index_scalar_search_mode())
+
+    def test_does_not_inherit_global_index_search_mode(self):
+        for mode in ("fast", "detail"):
+            options = CoreOptions(Options({"global-index.search-mode": mode}))
+            self.assertEqual(
+                GlobalIndexSearchMode.FULL,
+                options.global_index_scalar_search_mode())
 
     def test_scalar_key_wins_over_global_index_key(self):
         options = CoreOptions(Options({

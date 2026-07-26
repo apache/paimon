@@ -223,6 +223,9 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             def global_index_enabled(self):
                 return True
 
+            def global_index_scalar_search_mode(self):
+                return GlobalIndexSearchMode.FULL
+
         class _Table:
             options = _Options()
 

@@ -22,7 +22,6 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
@@ -499,13 +498,7 @@ class FileScanner:
                 result = scanner.scan(self.predicate)
                 if result is None:
                     return None
-                scalar_mode_getter = getattr(
-                    self.table.options, "global_index_scalar_search_mode", None)
-                scalar_mode = (
-                    scalar_mode_getter()
-                    if scalar_mode_getter is not None
-                    else GlobalIndexSearchMode.FULL
-                )
+                scalar_mode = self.table.options.global_index_scalar_search_mode()
                 return result.or_(
                     scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
         except Exception:
