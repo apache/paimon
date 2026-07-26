@@ -20,7 +20,6 @@ package org.apache.paimon.data.shredding;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
-import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
 import org.apache.paimon.options.Options;
@@ -35,12 +34,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Creates per-file shared-shredding MAP write plans. */
 public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFactory {
 
-    private static final int INFER_BUFFER_ROW_COUNT = 1;
-
     private final RowType logicalRowType;
     private final Map<String, Integer> fieldToMaxColumns;
     private final Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy;
-    private final Map<String, Integer> fieldToPosition;
+    private final MapSharedShreddingContext context;
 
     public MapSharedShreddingWritePlanFactory(RowType logicalRowType, Options options) {
         this.logicalRowType = logicalRowType;
@@ -50,12 +47,11 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
         this.fieldToMaxColumns =
                 MapSharedShreddingUtils.buildColumnToNumColumns(shreddingFields, coreOptions);
         this.fieldToColumnPlacementPolicy = new LinkedHashMap<>();
-        this.fieldToPosition = new LinkedHashMap<>();
         for (String field : shreddingFields) {
             fieldToColumnPlacementPolicy.put(
                     field, coreOptions.mapSharedShreddingColumnPlacementPolicy(field));
-            fieldToPosition.put(field, logicalRowType.getFieldIndex(field));
         }
+        this.context = new MapSharedShreddingContext(fieldToMaxColumns);
     }
 
     @Override
@@ -70,39 +66,29 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
 
     @Override
     public boolean shouldInferWritePlan() {
-        return shouldCreateWritePlan();
+        return false;
     }
 
     @Override
     public int inferBufferRowCount() {
-        return INFER_BUFFER_ROW_COUNT;
+        return 0;
     }
 
     @Override
     public ShreddingWritePlan createWritePlan(List<InternalRow> sampleRows) {
         checkArgument(shouldCreateWritePlan(), "MAP shared-shredding write plan is not active.");
-
-        Map<String, Integer> fieldToNumColumns = new LinkedHashMap<>();
-        for (Map.Entry<String, Integer> entry : fieldToMaxColumns.entrySet()) {
-            int maxColumns = entry.getValue();
-            int numColumns = maxColumns;
-            if (!sampleRows.isEmpty()) {
-                int fieldPosition = fieldToPosition.get(entry.getKey());
-                int maxRowWidth = 0;
-                int sampleCount = Math.min(sampleRows.size(), INFER_BUFFER_ROW_COUNT);
-                for (int i = 0; i < sampleCount; i++) {
-                    InternalRow row = sampleRows.get(i);
-                    InternalMap map =
-                            row.isNullAt(fieldPosition) ? null : row.getMap(fieldPosition);
-                    maxRowWidth = Math.max(maxRowWidth, map == null ? 0 : map.size());
-                }
-                numColumns = Math.max(1, Math.min(maxRowWidth, maxColumns));
-            }
-            fieldToNumColumns.put(entry.getKey(), numColumns);
-        }
-
-        // TODO: Infer the column count from recent file metadata instead of current-file samples.
         return new MapSharedShreddingWritePlan(
-                logicalRowType, fieldToNumColumns, fieldToColumnPlacementPolicy);
+                logicalRowType, context.computeNextK(), fieldToColumnPlacementPolicy);
+    }
+
+    @Override
+    public void onFileCompleted(ShreddingWritePlan writePlan) {
+        checkArgument(
+                writePlan instanceof MapSharedShreddingWritePlan,
+                "Unexpected MAP shared-shredding write plan: %s",
+                writePlan.getClass().getName());
+        ((MapSharedShreddingWritePlan) writePlan)
+                .fileMaxRowWidths()
+                .forEach(context::reportFileStats);
     }
 }

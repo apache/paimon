@@ -509,7 +509,7 @@ public class AppendOnlyWriterTest {
                                 nameToId("a", 0, "b", 1),
                                 fieldToColumns(0, columns(0), 1, columns(0)),
                                 overflowFields(),
-                                1,
+                                3,
                                 1));
     }
 
@@ -528,7 +528,7 @@ public class AppendOnlyWriterTest {
 
         assertThat(readSharedShreddingFieldMeta(context, file, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -557,17 +557,18 @@ public class AppendOnlyWriterTest {
 
         assertThat(readSharedShreddingFieldMeta(context, nullFile, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
         assertThat(readSharedShreddingFieldMeta(context, emptyFile, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
         assertThat(readSharedShreddingFieldMeta(context, valuesFile, "tags"))
                 .isEqualTo(
                         sharedShreddingMeta(
                                 nameToId("a", 0, "b", 1, "c", 2, "d", 3),
-                                fieldToColumns(0, columns(0), 1, columns(0), 2, columns(0)),
-                                overflowFields(3),
-                                1,
+                                fieldToColumns(
+                                        0, columns(0), 1, columns(0), 2, columns(0), 3, columns(1)),
+                                overflowFields(),
+                                3,
                                 2));
     }
 
@@ -613,9 +614,9 @@ public class AppendOnlyWriterTest {
                 .isEqualTo(
                         sharedShreddingMeta(
                                 nameToId("a", 0, "b", 1, "c", 2),
-                                fieldToColumns(0, columns(0), 1, columns(1)),
-                                overflowFields(2),
-                                2,
+                                fieldToColumns(0, columns(0), 1, columns(1), 2, columns(2)),
+                                overflowFields(),
+                                3,
                                 3));
     }
 
@@ -658,7 +659,7 @@ public class AppendOnlyWriterTest {
                                 nameToId("a", 0),
                                 fieldToColumns(0, columns(0)),
                                 overflowFields(),
-                                1,
+                                3,
                                 1));
     }
 

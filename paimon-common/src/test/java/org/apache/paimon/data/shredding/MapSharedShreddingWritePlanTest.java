@@ -82,7 +82,7 @@ class MapSharedShreddingWritePlanTest {
     }
 
     @Test
-    void testFactoryInfersColumnCountFromFirstRow() {
+    void testFactoryUsesMaxColumnCountForFirstFile() {
         RowType logicalType =
                 DataTypes.ROW(
                         DataTypes.FIELD(
@@ -90,8 +90,8 @@ class MapSharedShreddingWritePlanTest {
         MapSharedShreddingWritePlanFactory factory = createFactory(logicalType, 4);
 
         assertThat(factory.shouldCreateWritePlan()).isTrue();
-        assertThat(factory.shouldInferWritePlan()).isTrue();
-        assertThat(factory.inferBufferRowCount()).isEqualTo(1);
+        assertThat(factory.shouldInferWritePlan()).isFalse();
+        assertThat(factory.inferBufferRowCount()).isZero();
         assertThat(
                         factory.createWritePlan(
                                         Collections.singletonList(
@@ -100,26 +100,31 @@ class MapSharedShreddingWritePlanTest {
                                 .physicalRowType())
                 .isEqualTo(
                         MapSharedShreddingUtils.logicalToPhysicalSchema(
-                                logicalType, Collections.singletonMap("tags", 3)));
+                                logicalType, Collections.singletonMap("tags", 4)));
     }
 
     @Test
-    void testFactoryCapsInferredColumnCountAtMaxColumns() {
+    void testFactoryUsesCompletedFileStatisticsForNextFile() {
         RowType logicalType =
                 DataTypes.ROW(
                         DataTypes.FIELD(
                                 0, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
-        MapSharedShreddingWritePlanFactory factory = createFactory(logicalType, 2);
+        MapSharedShreddingWritePlanFactory factory = createFactory(logicalType, 8);
 
-        assertThat(
-                        factory.createWritePlan(
-                                        Collections.singletonList(
-                                                GenericRow.of(
-                                                        stringKeyMap("a", 1, "b", 2, "c", 3))))
-                                .physicalRowType())
+        ShreddingWritePlan firstPlan = factory.createWritePlan(Collections.emptyList());
+        firstPlan.toPhysicalRow(GenericRow.of(stringKeyMap("a", 1, "b", 2))).getRow(0, 10);
+        firstPlan.toPhysicalRow(GenericRow.of(stringKeyMap("c", 3, "d", 4, "e", 5))).getRow(0, 10);
+        factory.onFileCompleted(firstPlan);
+
+        ShreddingWritePlan secondPlan = factory.createWritePlan(Collections.emptyList());
+        assertThat(firstPlan.physicalRowType())
                 .isEqualTo(
                         MapSharedShreddingUtils.logicalToPhysicalSchema(
-                                logicalType, Collections.singletonMap("tags", 2)));
+                                logicalType, Collections.singletonMap("tags", 8)));
+        assertThat(secondPlan.physicalRowType())
+                .isEqualTo(
+                        MapSharedShreddingUtils.logicalToPhysicalSchema(
+                                logicalType, Collections.singletonMap("tags", 3)));
     }
 
     @Test

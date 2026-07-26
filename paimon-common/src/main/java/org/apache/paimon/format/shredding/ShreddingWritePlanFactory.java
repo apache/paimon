@@ -36,4 +36,12 @@ public interface ShreddingWritePlanFactory {
     int inferBufferRowCount();
 
     ShreddingWritePlan createWritePlan(List<InternalRow> sampleRows);
+
+    /**
+     * Reports that a file using the given write plan has been closed successfully.
+     *
+     * <p>Implementations may use this callback to advance rolling-writer-scoped state. A factory is
+     * used sequentially by one rolling writer and is not thread-safe.
+     */
+    default void onFileCompleted(ShreddingWritePlan writePlan) {}
 }
