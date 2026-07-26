@@ -2075,6 +2075,8 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
         """A normal full-row predicate ``pt == 2`` must (a) be auto-split
         into _partition_filter with indices re-based to the partition-only
         row, and (b) drop pt=1 entries during manifest pruning."""
+        _patch_snapshot(
+            self, self.entries, types.SimpleNamespace(next_row_id=10))
         pb = PredicateBuilder(self.table.fields)
         builder = (VectorSearchBuilderImpl(self.table)
                    .with_vector_column("embedding")
@@ -2082,6 +2084,7 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
                    .with_limit(3)
                    .with_filter(pb.equal("pt", 2)))
 
+        self.assertIsNone(builder._filter)
         # Partition filter's leaf index points into the partition-only row.
         self.assertEqual("pt", builder._partition_filter.field)
         self.assertEqual(0, builder._partition_filter.index)
@@ -2091,8 +2094,91 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
         self.assertEqual(["vec-pt2.index"],
                          [f.file_name for f in splits[0].vector_index_files])
 
+    def test_partition_only_filter_is_not_scalar_prefilter(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        self.table.options = CoreOptions(Options({
+            "scalar-index.search-mode": "fast",
+        }))
+        _patch_snapshot(
+            self, self.entries, types.SimpleNamespace(next_row_id=10))
+        searches = []
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader:
+                def visit_vector_search(self_inner, search):
+                    searches.append(search)
+                    scores = {} if (search.include_row_ids is not None and
+                                    search.include_row_ids.is_empty()) else {0: 1.0}
+                    return _completed_future(
+                        DictBasedScoredIndexResult(scores))
+
+                def visit_batch_vector_search(self_inner, search):
+                    searches.append(search)
+                    scores = {} if (search.include_row_ids is not None and
+                                    search.include_row_ids.is_empty()) else {0: 1.0}
+                    return _completed_future([
+                        DictBasedScoredIndexResult(scores)
+                        for _ in range(search.vector_count)
+                    ])
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        partition_filter = PredicateBuilder(self.table.fields).equal("pt", 2)
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            direct = (
+                VectorSearchBuilderImpl(self.table)
+                .with_vector_column("embedding")
+                .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                .with_limit(3)
+                .with_filter(partition_filter)
+                .execute_local()
+            )
+            batch = (
+                BatchVectorSearchBuilderImpl(self.table)
+                .with_vector_column("embedding")
+                .with_query_vectors([[1.0, 0.0, 0.0, 0.0]])
+                .with_limit(3)
+                .with_filter(partition_filter)
+                .execute_batch_local()
+            )
+
+        self.assertEqual([5], list(direct.results()))
+        self.assertEqual([[5]], [list(result.results()) for result in batch])
+        self.assertTrue(all(search.include_row_ids is None for search in searches))
+
+    def test_with_filter_keeps_only_data_conjuncts_as_scalar_filter(self):
+        pb = PredicateBuilder(self.table.fields)
+        builder = VectorSearchBuilderImpl(self.table).with_filter(
+            PredicateBuilder.and_predicates([
+                pb.equal("pt", 2),
+                pb.greater_or_equal("id", 5),
+            ]))
+
+        self.assertEqual("pt", builder._partition_filter.field)
+        self.assertEqual("id", builder._filter.field)
+
+        cross_field_or = PredicateBuilder.or_predicates([
+            pb.equal("pt", 2),
+            pb.greater_or_equal("id", 5),
+        ])
+        builder = VectorSearchBuilderImpl(self.table).with_filter(cross_field_or)
+        self.assertIsNone(builder._partition_filter)
+        self.assertIs(cross_field_or, builder._filter)
+
     def test_with_partition_filter_rejects_non_partition_field(self):
-        """Non-partition conjuncts would be silently dropped by the extractor,
+        """Non-partition conjuncts would be silently dropped by the splitter,
         producing wrong results; the API must refuse them up front."""
         pb = PredicateBuilder(self.table.fields)
         builder = VectorSearchBuilderImpl(self.table)

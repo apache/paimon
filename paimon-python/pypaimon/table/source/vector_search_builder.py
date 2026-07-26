@@ -132,21 +132,19 @@ class AbstractVectorSearchBuilderImpl:
         # type: (Predicate) -> VectorSearchBuilder
         if predicate is None:
             return self
-        if self._filter is None:
-            self._filter = predicate
-        else:
-            self._filter = PredicateBuilder.and_predicates([self._filter, predicate])
-        # split out the partition-only conjuncts and store them as _partition_filter for
-        # manifest pruning. Non-partition conjuncts remain in self._filter;
-        # the silent drop of non-partition conjuncts *in the extracted copy*
-        # is intentional — nothing is lost overall.
-        extracted = self._extract_partition_only_conjuncts(predicate)
-        if extracted is not None:
+        partition_filter, data_filter = self._split_partition_filter(predicate)
+        if partition_filter is not None:
             if self._partition_filter is None:
-                self._partition_filter = extracted
+                self._partition_filter = partition_filter
             else:
                 self._partition_filter = PredicateBuilder.and_predicates(
-                    [self._partition_filter, extracted])
+                    [self._partition_filter, partition_filter])
+        if data_filter is not None:
+            if self._filter is None:
+                self._filter = data_filter
+            else:
+                self._filter = PredicateBuilder.and_predicates(
+                    [self._filter, data_filter])
         return self
 
     def with_partition_filter(self, partition_filter):
@@ -175,25 +173,26 @@ class AbstractVectorSearchBuilderImpl:
         )
         return self
 
-    def _extract_partition_only_conjuncts(self, predicate):
-        """AND-split ``predicate``, keep conjuncts that reference ONLY
-        partition keys, and rebuild their leaf indices against the
-        partition-only row by field name (so the caller's PredicateBuilder
-        convention — full-row or partition-row — doesn't matter).
-        """
+    def _split_partition_filter(self, predicate):
+        """Split partition-only and data conjuncts."""
         partition_keys = list(self._table.partition_keys or [])
         if not partition_keys:
-            return None
+            return None, predicate
         from pypaimon.read.push_down_utils import _split_and, _get_all_fields
         partition_key_set = set(partition_keys)
         pk_to_idx = {name: idx for idx, name in enumerate(partition_keys)}
-        kept = [p for p in _split_and(predicate)
-                if _get_all_fields(p).issubset(partition_key_set)]
-        if not kept:
-            return None
-        rebuilt = [self._rebuild_leaf_indices_by_name(p, pk_to_idx)
-                   for p in kept]
-        return PredicateBuilder.and_predicates(rebuilt)
+        partition_parts = []
+        data_parts = []
+        for part in _split_and(predicate):
+            if _get_all_fields(part).issubset(partition_key_set):
+                partition_parts.append(
+                    self._rebuild_leaf_indices_by_name(part, pk_to_idx))
+            else:
+                data_parts.append(part)
+        return (
+            PredicateBuilder.and_predicates(partition_parts),
+            PredicateBuilder.and_predicates(data_parts),
+        )
 
     @classmethod
     def _rebuild_leaf_indices_by_name(cls, predicate, pk_to_idx):
