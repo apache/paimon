@@ -254,6 +254,45 @@ public class InferVariantShreddingSchemaTest {
     }
 
     @Test
+    void testAdaptiveInferenceWidensScalarSelectedFromPriorEvidence() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"first", "second"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 6, 50, 0.1), 10, 0.1, 0.05);
+
+        RowType initialSchema =
+                session.inferSchema(
+                        Arrays.asList(
+                                GenericRow.of(
+                                        GenericVariant.fromJson("{\"a\":1,\"b\":2}"),
+                                        GenericVariant.fromJson("{\"historical\":12345}"))));
+        assertThat(initialSchema.getField("first").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT()},
+                                        new String[] {"a", "b"})));
+        assertThat(initialSchema.getField("second").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.VARIANT()));
+        session.commitPendingInference();
+
+        RowType adaptiveSchema =
+                session.inferSchema(
+                        Arrays.asList(GenericRow.of(GenericVariant.fromJson("1"), null)));
+        assertThat(adaptiveSchema.getField("first").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.BIGINT()));
+        assertThat(adaptiveSchema.getField("second").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BIGINT()},
+                                        new String[] {"historical"})));
+    }
+
+    @Test
     void testInferSchemaWithDeepNesting() {
         // Schema: row<v: variant>
         RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});

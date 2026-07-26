@@ -657,7 +657,7 @@ public class InferVariantShreddingSchema {
     private DataType selectScalarType(
             DataType combined, DataType current, DataType previousSelected) {
         if (current == null) {
-            return previousSelected == null ? combined : previousSelected;
+            return previousSelected == null ? widenScalarType(combined) : previousSelected;
         }
         if (previousSelected == null) {
             return widenScalarType(current);
