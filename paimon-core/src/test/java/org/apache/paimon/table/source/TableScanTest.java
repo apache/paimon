@@ -404,6 +404,9 @@ public class TableScanTest extends ScannerTestBase {
         // The option must not change an ordinary Core scan.
         assertThat(postponeTable.newScan().plan().splits()).hasSize(3);
         assertThat(postponeTable.newScan().withLimit(1).plan().splits()).hasSize(1);
+        long realOnlySnapshotId = postponeTable.snapshotManager().latestSnapshotId();
+        PostponeMergeReadBuilder realOnlyBuilder =
+                PostponeMergeReadBuilder.createSnapshotBound(postponeTable, null).get();
         assertThat(PostponeMergeReadBuilder.create(postponeTable, null)).isEmpty();
 
         StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
@@ -413,10 +416,18 @@ public class TableScanTest extends ScannerTestBase {
         postponeWrite.close();
         postponeCommit.close();
 
+        // A snapshot-bound builder must not pick up postpone files committed after its selection.
+        PostponeMergePlan realOnlyPlan = realOnlyBuilder.plan();
+        assertThat(realOnlyPlan.postponeSplits()).isEmpty();
+        assertThat(realOnlyPlan.realSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(realOnlySnapshotId));
+
         FileStoreTable compactedFullTable =
                 postponeTable.copy(
                         Collections.singletonMap(CoreOptions.SCAN_MODE.key(), "compacted-full"));
         assertThat(PostponeMergeReadBuilder.create(compactedFullTable, null)).isEmpty();
+        assertThat(PostponeMergeReadBuilder.createSnapshotBound(compactedFullTable, null))
+                .isEmpty();
 
         // A postpone record may update any value, so real-file value statistics are unsafe.
         Predicate valueFilter = builder.equal(2, 100L);
@@ -562,15 +573,27 @@ public class TableScanTest extends ScannerTestBase {
         postponeWrite.close();
         postponeCommit.close();
 
-        PostponeMergePlan plan =
-                PostponeMergeReadBuilder.create(postponeTable, null)
-                        .get()
-                        .withDefaultBucketNum(4)
-                        .plan();
+        PostponeMergeReadBuilder readBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null).get().withDefaultBucketNum(1);
+        PostponeMergePlan initialPlan = readBuilder.plan();
+        assertThat(initialPlan.numPotentialBuckets()).isEqualTo(3);
+
+        PostponeMergePlan plan = readBuilder.reroute(initialPlan, 4);
 
         // Partition 1 uses its known bucket, partition 2 is real-only, and the new partition 3
         // may route to any of the four default buckets.
         assertThat(plan.numPotentialBuckets()).isEqualTo(6);
+
+        FileStoreTable explicitDefaultTable =
+                postponeTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "2"));
+        PostponeMergeReadBuilder explicitDefaultBuilder =
+                PostponeMergeReadBuilder.create(explicitDefaultTable, null).get();
+        PostponeMergePlan explicitDefaultPlan = explicitDefaultBuilder.plan();
+        assertThat(explicitDefaultPlan.numPotentialBuckets()).isEqualTo(4);
+        assertThat(explicitDefaultBuilder.reroute(explicitDefaultPlan, 8).numPotentialBuckets())
+                .isEqualTo(4);
     }
 
     @Test

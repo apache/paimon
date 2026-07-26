@@ -157,14 +157,14 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   override def estimateStatistics: Statistics = {
-    planPostponeMerge(SparkSession.active.sparkContext.defaultParallelism) match {
-      case Some(plan) =>
-        PaimonStatistics(
-          plan.corePlan.splits().asScala.toArray,
-          readTableRowType,
-          table.rowType(),
-          table.statistics())
-      case None => super.estimateStatistics
+    if (postponeMergeOnRead.enabled) {
+      val splits =
+        planPostponeMerge(SparkSession.active.sparkContext.defaultParallelism)
+          .map(_.corePlan.splits().asScala.toArray)
+          .getOrElse(Array.empty[Split])
+      PaimonStatistics(splits, readTableRowType, table.rowType(), table.statistics())
+    } else {
+      super.estimateStatistics
     }
   }
 

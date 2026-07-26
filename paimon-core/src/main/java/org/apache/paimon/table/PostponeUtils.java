@@ -55,6 +55,7 @@ import java.util.Set;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for postpone table. */
 public class PostponeUtils {
@@ -137,12 +138,21 @@ public class PostponeUtils {
             @Nullable PartitionPredicate partitionFilter) {
         Map<BinaryRow, Integer> knownNumBuckets =
                 getKnownNumBuckets(table, snapshotId, partitionFilter);
-        Long targetRowNumPerBucket =
-                table.coreOptions().postponeTargetRowNumPerBucket().orElse(null);
         Map<BinaryRow, Long> postponeRowCounts =
-                targetRowNumPerBucket == null
+                !table.coreOptions().postponeTargetRowNumPerBucket().isPresent()
                         ? Collections.emptyMap()
                         : getPostponeRowCounts(table, snapshotId, partitionFilter);
+        return createPostponeBucketAssigner(
+                table, knownNumBuckets, postponeRowCounts, defaultParallelism);
+    }
+
+    private static PostponeBucketAssigner createPostponeBucketAssigner(
+            FileStoreTable table,
+            Map<BinaryRow, Integer> knownNumBuckets,
+            Map<BinaryRow, Long> postponeRowCounts,
+            int defaultParallelism) {
+        Long targetRowNumPerBucket =
+                table.coreOptions().postponeTargetRowNumPerBucket().orElse(null);
         int defaultBucketNum =
                 table.coreOptions()
                                 .toConfiguration()
@@ -158,6 +168,14 @@ public class PostponeUtils {
             long snapshotId,
             int defaultParallelism,
             @Nullable PartitionPredicate partitionFilter) {
+        return createPostponeBucketRouter(
+                table,
+                createPostponeBucketAssigner(
+                        table, snapshotId, defaultParallelism, partitionFilter));
+    }
+
+    private static PostponeBucketRouter createPostponeBucketRouter(
+            FileStoreTable table, PostponeBucketAssigner bucketAssigner) {
         List<String> trimmedPrimaryKeys = table.schema().trimmedPrimaryKeys();
         int[] bucketKeyMapping =
                 table.schema().bucketKeys().stream()
@@ -174,8 +192,7 @@ public class PostponeUtils {
                         PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR.keyFields(
                                 table.schema()));
         return new PostponeBucketRouter(
-                createPostponeBucketAssigner(
-                        table, snapshotId, defaultParallelism, partitionFilter),
+                bucketAssigner,
                 keyType,
                 table.schema().logicalBucketKeyType(),
                 bucketKeyMapping,
@@ -376,6 +393,11 @@ public class PostponeUtils {
                     postponeRowCounts,
                     defaultBucketNum);
         }
+
+        private PostponeBucketAssigner withDefaultBucketNum(int newDefaultBucketNum) {
+            return new PostponeBucketAssigner(
+                    knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, newDefaultBucketNum);
+        }
     }
 
     /** Snapshot-bound routing metadata for postpone records. */
@@ -417,6 +439,17 @@ public class PostponeUtils {
 
         public int numBuckets(BinaryRow partition) {
             return bucketAssigner.assign(partition);
+        }
+
+        public PostponeBucketRouter withDefaultBucketNum(int newDefaultBucketNum) {
+            checkArgument(
+                    newDefaultBucketNum > 0, "Default postpone bucket number must be positive.");
+            return new PostponeBucketRouter(
+                    bucketAssigner.withDefaultBucketNum(newDefaultBucketNum),
+                    keyType,
+                    bucketKeyType,
+                    bucketKeyMapping,
+                    bucketFunctionType);
         }
     }
 

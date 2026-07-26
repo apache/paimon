@@ -201,10 +201,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
-                        sourceBuilder
-                                .sourceParallelism(inferSourceParallelism(env))
-                                .env(env)
-                                .build(),
+                        PostponeMergeOnRead.usesCustomSource(table)
+                                ? sourceBuilder.env(env).build()
+                                : sourceBuilder
+                                        .sourceParallelism(inferSourceParallelism(env))
+                                        .env(env)
+                                        .build(),
                 tableIdentifier.asSummaryString(),
                 table);
     }
@@ -245,6 +247,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             throw new UnsupportedOperationException(
                     "Currently, lookup dim table only support FileStoreTable but is "
                             + table.getClass().getName());
+        }
+
+        if (PostponeMergeOnRead.configured(table)) {
+            throw new UnsupportedOperationException(
+                    "Option 'postpone.merge-on-read' is not supported for lookup reads.");
         }
 
         if (limit != null) {
@@ -331,6 +338,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             List<AggregateExpression> aggregateExpressions,
             DataType producedDataType) {
         if (isUnbounded()) {
+            return false;
+        }
+
+        if (PostponeMergeOnRead.configured(table)) {
             return false;
         }
 

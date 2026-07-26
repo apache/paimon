@@ -87,6 +87,46 @@ public final class PostponeMergeReadBuilder implements Serializable {
             return Optional.empty();
         }
 
+        PostponeMergeReadBuilder builder = new PostponeMergeReadBuilder(table, snapshot);
+        builder.withPartitionFilter(partitionFilter);
+        if (!builder.hasPostponeFiles()) {
+            return Optional.empty();
+        }
+
+        validateReadMode(table);
+        return Optional.of(builder);
+    }
+
+    /**
+     * Creates a builder bound to the snapshot selected now, including when that snapshot contains
+     * no postpone files.
+     *
+     * <p>Execution engines which enable merge-on-read should use this method to avoid probing one
+     * snapshot and then falling back to an ordinary source which may select a newer snapshot.
+     */
+    public static Optional<PostponeMergeReadBuilder> createSnapshotBound(
+            FileStoreTable table, @Nullable PartitionPredicate partitionFilter) {
+        checkArgument(
+                table.bucketMode() == BucketMode.POSTPONE_MODE && !table.primaryKeys().isEmpty(),
+                "Postpone merge read requires a primary-key postpone bucket table.");
+
+        // Let the ordinary compacted-full scanner select its snapshot.
+        if (table.coreOptions().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL) {
+            return Optional.empty();
+        }
+
+        validateReadMode(table);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        if (snapshot == null) {
+            return Optional.empty();
+        }
+
+        PostponeMergeReadBuilder builder = new PostponeMergeReadBuilder(table, snapshot);
+        builder.withPartitionFilter(partitionFilter);
+        return Optional.of(builder);
+    }
+
+    private boolean hasPostponeFiles() {
         SnapshotReader postponeReader =
                 table.newSnapshotReader()
                         .withSnapshot(snapshot)
@@ -94,14 +134,7 @@ public final class PostponeMergeReadBuilder implements Serializable {
         if (partitionFilter != null) {
             postponeReader.withPartitionFilter(partitionFilter);
         }
-        if (!postponeReader.readFileIterator().hasNext()) {
-            return Optional.empty();
-        }
-
-        validateReadMode(table);
-        PostponeMergeReadBuilder builder = new PostponeMergeReadBuilder(table, snapshot);
-        builder.withPartitionFilter(partitionFilter);
-        return Optional.of(builder);
+        return postponeReader.readFileIterator().hasNext();
     }
 
     private PostponeMergeReadBuilder withPartitionFilter(
@@ -187,6 +220,18 @@ public final class PostponeMergeReadBuilder implements Serializable {
                         mergeReadType);
         maybeCreateReadProtectionTag(snapshot.id());
         return plan;
+    }
+
+    /** Rebuilds only the routing metadata of an existing plan with a new default bucket number. */
+    public PostponeMergePlan reroute(PostponeMergePlan plan, int newDefaultBucketNum) {
+        checkArgument(newDefaultBucketNum > 0, "Default postpone bucket number must be positive.");
+        if (table.coreOptions()
+                .toConfiguration()
+                .contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)) {
+            return plan;
+        }
+        defaultBucketNum = newDefaultBucketNum;
+        return plan.withDefaultBucketNum(defaultBucketNum);
     }
 
     @Nullable

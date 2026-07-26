@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
 import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
@@ -26,8 +27,9 @@ import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+
+import scala.collection.JavaConverters._
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
 
@@ -160,15 +162,12 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
         checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "base-1"), Row(2, "base-2")))
         val plan = sql("SELECT * FROM t").queryExecution.executedPlan.toString()
-        assert(!plan.contains("PostponeMergeOnRead"), plan)
+        assert(plan.contains("PostponeMergeOnRead"), plan)
 
         val aggregate = sql("SELECT count(*) FROM t")
         checkAnswer(aggregate, Seq(Row(2L)))
-        assert(
-          aggregate.queryExecution.executedPlan.collect {
-            case _: BaseAggregateExec => true
-          }.isEmpty,
-          aggregate.queryExecution.executedPlan)
+        val aggregatePlan = aggregate.queryExecution.executedPlan.toString()
+        assert(aggregatePlan.contains("HashAggregate"), aggregatePlan)
       }
 
       sql("CREATE TABLE normal_t (k INT, v STRING) USING paimon")
@@ -281,6 +280,57 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         val compactedFull = sql("SELECT * FROM t ORDER BY k")
         checkAnswer(compactedFull, Seq(Row(1, "base-1"), Row(2, "base-2")))
         assert(!compactedFull.queryExecution.executedPlan.toString.contains("PostponeMergeOnRead"))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark combines postpone and deletion-vector merge on read") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'deletion-vectors.merge-on-read' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base-1'), (2, 'base-2'), (3, 'base-3'), (4, 'base-4')")
+      sql("CALL sys.compact(table => 't')")
+      sql("INSERT INTO t VALUES (1, 'real-1'), (5, 'real-5')")
+      sql("CALL sys.compact(table => 't')")
+      assert(deletionVectorCardinality("t") > 0)
+
+      sql("INSERT INTO t VALUES (2, 'postpone-2'), (3, 'postpone-3'), (6, 'postpone-6')")
+      sql("DELETE FROM t WHERE k = 4")
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY k"),
+        Seq(
+          Row(1, "real-1"),
+          Row(2, "base-2"),
+          Row(3, "base-3"),
+          Row(4, "base-4"),
+          Row(5, "real-5")))
+
+      withSparkSQLConf(
+        "spark.paimon.postpone.merge-on-read" -> "true",
+        "spark.paimon.deletion-vectors.merge-on-read" -> "true") {
+        val query = sql("SELECT * FROM t ORDER BY k")
+        checkAnswer(
+          query,
+          Seq(
+            Row(1, "real-1"),
+            Row(2, "postpone-2"),
+            Row(3, "postpone-3"),
+            Row(5, "real-5"),
+            Row(6, "postpone-6")))
+        checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(5L)))
+        assert(query.queryExecution.executedPlan.toString.contains("PostponeMergeOnRead"))
       }
     }
   }
@@ -406,7 +456,66 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         val ordinaryPlan =
           sql("SELECT * FROM t WHERE pt = 'b'").queryExecution.executedPlan.toString
         assert(mergePlan.contains("PostponeMergeOnRead"), mergePlan)
-        assert(!ordinaryPlan.contains("PostponeMergeOnRead"), ordinaryPlan)
+        assert(ordinaryPlan.contains("PostponeMergeOnRead"), ordinaryPlan)
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read pins the selected snapshot") {
+    withTable("real_t", "empty_t") {
+      sql("""
+            |CREATE TABLE real_t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO real_t VALUES (1, 'base')")
+
+      sql("""
+            |CREATE TABLE empty_t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        val pinnedReal = sql("SELECT * FROM real_t ORDER BY k")
+        val pinnedRealScan = pinnedReal.queryExecution.optimizedPlan.collectFirst {
+          case relation: DataSourceV2ScanRelation if relation.scan.isInstanceOf[PaimonScan] =>
+            relation.scan.asInstanceOf[PaimonScan]
+        }.get
+        assert(
+          pinnedRealScan
+            .planPostponeMerge(spark.sparkContext.defaultParallelism)
+            .isDefined)
+
+        withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+          sql("INSERT INTO real_t VALUES (1, 'new'), (2, 'added')")
+        }
+        checkAnswer(pinnedReal, Seq(Row(1, "base")))
+        checkAnswer(sql("SELECT * FROM real_t ORDER BY k"), Seq(Row(1, "new"), Row(2, "added")))
+
+        val pinnedEmpty = sql("SELECT * FROM empty_t")
+        val pinnedEmptyScan = pinnedEmpty.queryExecution.optimizedPlan.collectFirst {
+          case relation: DataSourceV2ScanRelation if relation.scan.isInstanceOf[PaimonScan] =>
+            relation.scan.asInstanceOf[PaimonScan]
+        }.get
+        assert(
+          pinnedEmptyScan
+            .planPostponeMerge(spark.sparkContext.defaultParallelism)
+            .isEmpty)
+
+        sql("INSERT INTO empty_t VALUES (1, 'committed-later')")
+        checkAnswer(pinnedEmpty, Seq.empty)
+        checkAnswer(sql("SELECT * FROM empty_t"), Seq(Row(1, "committed-later")))
       }
     }
   }
@@ -741,6 +850,19 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         Seq(Row(-2))
       )
     }
+  }
+
+  private def deletionVectorCardinality(tableName: String): Long = {
+    val table = loadTable(tableName)
+    table
+      .store()
+      .newIndexFileHandler()
+      .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
+      .asScala
+      .flatMap(entry => Option(entry.indexFile().dvRanges()).toSeq)
+      .flatMap(_.values().asScala)
+      .flatMap(meta => Option(meta.cardinality()).map(_.longValue()))
+      .sum
   }
 }
 

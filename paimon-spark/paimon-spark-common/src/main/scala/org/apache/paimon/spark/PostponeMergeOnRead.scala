@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
@@ -45,9 +46,13 @@ final private[spark] class PostponeMergeOnRead(scan: PaimonBaseScan) {
 
   @transient private var mergePlan: MergePlan = _
 
-  def enabled: Boolean = mergeReadBuilder.isDefined
+  def enabled: Boolean = PostponeMergeOnRead.usesCustomSource(scan.table)
 
   def plan(defaultBucketNum: Int): Option[MergePlan] = synchronized {
+    if (!enabled) {
+      return None
+    }
+
     mergeReadBuilder.map {
       builder =>
         if (mergePlan == null) {
@@ -86,6 +91,15 @@ private[spark] object PostponeMergeOnRead {
     }
   }
 
+  private[spark] def usesCustomSource(table: Table): Boolean = {
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        configured(fileStoreTable) &&
+        fileStoreTable.coreOptions().startupMode() != CoreOptions.StartupMode.COMPACTED_FULL
+      case _ => false
+    }
+  }
+
   private[spark] def createReadBuilder(
       table: Table,
       partitionFilters: Array[PartitionPredicate]): Option[PostponeMergeReadBuilder] = {
@@ -94,7 +108,7 @@ private[spark] object PostponeMergeOnRead {
         val partitionFilter =
           if (partitionFilters.isEmpty) null
           else PartitionPredicate.and(partitionFilters.toList.asJava)
-        val result = PostponeMergeReadBuilder.create(fileStoreTable, partitionFilter)
+        val result = PostponeMergeReadBuilder.createSnapshotBound(fileStoreTable, partitionFilter)
         if (result.isPresent) Some(result.get) else None
       case _ => None
     }

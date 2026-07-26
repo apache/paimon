@@ -50,7 +50,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAs
 import org.apache.spark.sql.catalyst.plans.physical.{Distribution, UnspecifiedDistribution}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{FilterExec, GlobalLimitExec, PaimonDescribeTableExec, ProjectExec, SparkPlan, SparkStrategy, UnaryExecNode}
+import org.apache.spark.sql.execution.{FilterExec, GlobalLimitExec, LeafExecNode, PaimonDescribeTableExec, ProjectExec, SparkPlan, SparkStrategy, UnaryExecNode}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
@@ -72,7 +72,7 @@ case class PaimonStrategy(spark: SparkSession)
 
     case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
-        case scan: PaimonScan if PostponeMergeOnRead.enabled(scan.table) =>
+        case scan: PaimonScan if PostponeMergeOnRead.usesCustomSource(scan.table) =>
           scan.planPostponeMerge(spark.sparkContext.defaultParallelism) match {
             case Some(mergePlan) =>
               val inputScan = PostponeMergeInputScan(mergePlan)
@@ -96,7 +96,8 @@ case class PaimonStrategy(spark: SparkSession)
               val filtered =
                 filters.reduceLeftOption(And).map(FilterExec(_, merge)).getOrElse(merge)
               ProjectExec(projects, filtered) :: Nil
-            case None => Nil
+            case None =>
+              ProjectExec(projects, EmptyPostponeMergeExec(relation.output)) :: Nil
           }
         case _ => Nil
       }
@@ -326,6 +327,11 @@ case class PaimonStrategy(spark: SparkSession)
     val v2Relation = DataSourceV2Relation.create(r.table, Some(r.catalog), Some(r.identifier))
     SparkShimLoader.shim.classicApi.recacheByPlan(spark, v2Relation)
   }
+}
+
+private case class EmptyPostponeMergeExec(output: Seq[Attribute]) extends LeafExecNode {
+
+  override protected def doExecute(): RDD[InternalRow] = sparkContext.emptyRDD[InternalRow]
 }
 
 case class LateralVectorSearchExec(
