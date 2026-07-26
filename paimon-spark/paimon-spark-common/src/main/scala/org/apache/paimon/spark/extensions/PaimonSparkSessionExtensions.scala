@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, 
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
-import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
+import org.apache.paimon.spark.execution.adaptive.{DisablePostponeCarrierShuffleCoalescing, DisableUnnecessaryPaimonBucketedScan}
 
 import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -100,7 +100,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // optimization rules
     extensions.injectOptimizerRule(spark => ReplacePaimonFunctions(spark))
-    extensions.injectOptimizerRule(_ => OptimizeMetadataOnlyDeleteFromPaimonTable)
+    extensions.injectOptimizerRule(spark => OptimizeMetadataOnlyDeleteFromPaimonTable(spark))
     // TODO: Enable MAP selected-key pushdown after core reader supports
     // __PAIMON_MAP_SELECTED_KEYS read type.
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
@@ -114,6 +114,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // query stage preparation
     extensions.injectQueryStagePrepRule(_ => DisableUnnecessaryPaimonBucketedScan)
+    extensions.injectQueryStagePrepRule(_ => DisablePostponeCarrierShuffleCoalescing)
   }
 
   /**

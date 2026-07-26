@@ -25,6 +25,9 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import org.junit.jupiter.api.Test;
@@ -50,6 +53,7 @@ public class PostponeUtilsTest {
     @Test
     public void testGetKnownNumBucketsFromSnapshot() {
         BinaryRow partition = partition(1);
+        PartitionPredicate partitionFilter = mock(PartitionPredicate.class);
         SimpleFileEntry entry = mock(SimpleFileEntry.class);
         when(entry.partition()).thenReturn(partition);
         when(entry.totalBuckets()).thenReturn(4);
@@ -61,14 +65,17 @@ public class PostponeUtilsTest {
         FileStoreTable table = mock(FileStoreTable.class);
         when(table.store()).thenReturn(store);
 
-        assertThat(PostponeUtils.getKnownNumBuckets(table, 5L)).containsEntry(partition, 4);
+        assertThat(PostponeUtils.getKnownNumBuckets(table, 5L, partitionFilter))
+                .containsEntry(partition, 4);
         verify(scan).withSnapshot(5L);
         verify(scan).onlyReadRealBuckets();
+        verify(scan).withPartitionFilter(partitionFilter);
     }
 
     @Test
     public void testGetPostponeRowCountsFromSnapshot() {
         BinaryRow partition = partition(1);
+        PartitionPredicate partitionFilter = mock(PartitionPredicate.class);
         DataFileMeta file = mock(DataFileMeta.class);
         when(file.rowCount()).thenReturn(10L);
         ManifestEntry entry = mock(ManifestEntry.class);
@@ -80,9 +87,11 @@ public class PostponeUtilsTest {
         FileStoreTable table = mock(FileStoreTable.class);
         when(table.newSnapshotReader()).thenReturn(reader);
 
-        assertThat(PostponeUtils.getPostponeRowCounts(table, 5L)).containsEntry(partition, 10L);
+        assertThat(PostponeUtils.getPostponeRowCounts(table, 5L, partitionFilter))
+                .containsEntry(partition, 10L);
         verify(reader).withSnapshot(5L);
         verify(reader).withBucket(BucketMode.POSTPONE_BUCKET);
+        verify(reader).withPartitionFilter(partitionFilter);
     }
 
     @Test
@@ -109,6 +118,80 @@ public class PostponeUtilsTest {
         assertThat(buckets.get(0).totalBuckets()).isEqualTo(2);
         verify(scan).withSnapshot(5L);
         verify(scan).onlyReadRealBuckets();
+    }
+
+    @Test
+    public void testGroupPostponeFilesByPartitionAndWriter() {
+        BinaryRow partition1 = partition(1);
+        BinaryRow partition2 = partition(2);
+        DataFileMeta writer1Newest = dataFile("data-u-c-s-1-w-newest", 20L);
+        DataFileMeta writer2 = dataFile("data-u-c-s-2-w-only", 5L);
+        DataFileMeta sameWriteIdFromAnotherCommit = dataFile("data-u-other-s-1-w-only", 15L);
+        DataFileMeta writer1First = dataFile("data-u-c-s-1-w-first", 10L);
+        DataFileMeta otherPartition = dataFile("data-u-c-s-1-w-other-partition", 1L);
+        List<DataSplit> splits =
+                Arrays.asList(
+                        dataSplit(partition1, writer1Newest, writer2, sameWriteIdFromAnotherCommit),
+                        dataSplit(partition1, writer1First),
+                        dataSplit(partition2, otherPartition));
+
+        List<DataSplit> grouped = PostponeUtils.groupPostponeFiles(splits);
+
+        assertThat(grouped).hasSize(4);
+        assertThat(grouped.get(0).partition()).isEqualTo(partition1);
+        assertThat(grouped.get(0).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-c-s-1-w-first", "data-u-c-s-1-w-newest");
+        assertThat(grouped.get(1).partition()).isEqualTo(partition1);
+        assertThat(grouped.get(1).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-c-s-2-w-only");
+        assertThat(grouped.get(2).partition()).isEqualTo(partition1);
+        assertThat(grouped.get(2).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-other-s-1-w-only");
+        assertThat(grouped.get(3).partition()).isEqualTo(partition2);
+        assertThat(grouped.get(3).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-c-s-1-w-other-partition");
+    }
+
+    @Test
+    public void testGroupPostponeFilesKeepsScanOrderForEqualCreationTime() {
+        BinaryRow partition = partition(1);
+        DataFileMeta first = dataFile("data-u-c-s-1-w-z", 10L);
+        DataFileMeta second = dataFile("data-u-c-s-1-w-a", 10L);
+
+        List<DataSplit> grouped =
+                PostponeUtils.groupPostponeFiles(
+                        Arrays.asList(dataSplit(partition, first), dataSplit(partition, second)));
+
+        assertThat(grouped).hasSize(1);
+        assertThat(grouped.get(0).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-c-s-1-w-z", "data-u-c-s-1-w-a");
+    }
+
+    @Test
+    public void testGroupPostponeFilesKeepsDeletionFilesAligned() {
+        BinaryRow partition = partition(1);
+        DataFileMeta newest = dataFile("data-u-c-s-1-w-newest", 20L);
+        DataFileMeta first = dataFile("data-u-c-s-1-w-first", 10L);
+        DeletionFile newestDeletion = mock(DeletionFile.class);
+        DeletionFile firstDeletion = mock(DeletionFile.class);
+
+        List<DataSplit> grouped =
+                PostponeUtils.groupPostponeFiles(
+                        Arrays.asList(
+                                dataSplit(partition, newest, newestDeletion),
+                                dataSplit(partition, first, firstDeletion)));
+
+        assertThat(grouped).hasSize(1);
+        assertThat(grouped.get(0).dataFiles())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-u-c-s-1-w-first", "data-u-c-s-1-w-newest");
+        assertThat(grouped.get(0).deletionFiles().orElseThrow(AssertionError::new))
+                .containsExactly(firstDeletion, newestDeletion);
     }
 
     @Test
@@ -201,5 +284,34 @@ public class PostponeUtilsTest {
         when(entry.totalBuckets()).thenReturn(totalBuckets);
         when(entry.level()).thenReturn(level);
         return entry;
+    }
+
+    private static DataFileMeta dataFile(String name, long creationTime) {
+        DataFileMeta file = mock(DataFileMeta.class);
+        when(file.fileName()).thenReturn(name);
+        when(file.creationTimeEpochMillis()).thenReturn(creationTime);
+        return file;
+    }
+
+    private static DataSplit dataSplit(BinaryRow partition, DataFileMeta... files) {
+        return DataSplit.builder()
+                .withPartition(partition)
+                .withBucket(BucketMode.POSTPONE_BUCKET)
+                .withBucketPath("postpone")
+                .withTotalBuckets(BucketMode.POSTPONE_BUCKET)
+                .withDataFiles(Arrays.asList(files))
+                .build();
+    }
+
+    private static DataSplit dataSplit(
+            BinaryRow partition, DataFileMeta file, DeletionFile deletionFile) {
+        return DataSplit.builder()
+                .withPartition(partition)
+                .withBucket(BucketMode.POSTPONE_BUCKET)
+                .withBucketPath("postpone")
+                .withTotalBuckets(BucketMode.POSTPONE_BUCKET)
+                .withDataFiles(Collections.singletonList(file))
+                .withDataDeletionFiles(Collections.singletonList(deletionFile))
+                .build();
     }
 }
