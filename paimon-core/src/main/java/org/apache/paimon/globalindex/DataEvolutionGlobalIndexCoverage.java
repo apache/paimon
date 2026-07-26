@@ -58,19 +58,6 @@ public class DataEvolutionGlobalIndexCoverage {
             FileStoreTable table,
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
-            Collection<IndexFileMeta> indexFiles) {
-        this(
-                table,
-                snapshot,
-                partitionFilter,
-                indexFiles,
-                table.coreOptions().scalarIndexSearchMode());
-    }
-
-    public DataEvolutionGlobalIndexCoverage(
-            FileStoreTable table,
-            @Nullable Snapshot snapshot,
-            @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
         this.table = table;

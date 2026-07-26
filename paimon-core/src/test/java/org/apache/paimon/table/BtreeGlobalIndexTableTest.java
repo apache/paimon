@@ -312,7 +312,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         table,
                         snapshot,
                         PartitionPredicate.ALWAYS_TRUE,
-                        Collections.singletonList(sourceBacked));
+                        Collections.singletonList(sourceBacked),
+                        table.coreOptions().scalarIndexSearchMode());
         assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
@@ -342,7 +343,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         DataEvolutionGlobalIndexCoverage coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table, snapshot, PartitionPredicate.ALWAYS_TRUE, mixedIndexes);
+                        table,
+                        snapshot,
+                        PartitionPredicate.ALWAYS_TRUE,
+                        mixedIndexes,
+                        table.coreOptions().scalarIndexSearchMode());
         assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
