@@ -2177,6 +2177,61 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
         self.assertIsNone(builder._partition_filter)
         self.assertIs(cross_field_or, builder._filter)
 
+    def test_partition_filters_accumulate_in_any_order(self):
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        _patch_snapshot(
+            self, self.entries, types.SimpleNamespace(next_row_id=10))
+        pb = PredicateBuilder(self.table.fields)
+        auto_filter = pb.equal("pt", 2)
+        explicit_filter = pb.equal("pt", 1)
+
+        for builder_class in (
+                VectorSearchBuilderImpl, BatchVectorSearchBuilderImpl):
+            builders = [
+                builder_class(self.table)
+                .with_vector_column("embedding")
+                .with_filter(auto_filter)
+                .with_partition_filter(explicit_filter),
+                builder_class(self.table)
+                .with_vector_column("embedding")
+                .with_partition_filter(explicit_filter)
+                .with_filter(auto_filter),
+            ]
+            for builder in builders:
+                self.assertEqual(
+                    [], builder.new_vector_search_scan().scan().splits())
+
+    def test_none_partition_filter_is_noop(self):
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        _patch_snapshot(
+            self, self.entries, types.SimpleNamespace(next_row_id=10))
+        partition_filter = PredicateBuilder(self.table.fields).equal("pt", 2)
+
+        for builder_class in (
+                VectorSearchBuilderImpl, BatchVectorSearchBuilderImpl):
+            builders = [
+                builder_class(self.table)
+                .with_vector_column("embedding")
+                .with_partition_filter(partition_filter)
+                .with_partition_filter(None),
+                builder_class(self.table)
+                .with_vector_column("embedding")
+                .with_partition_filter(None)
+                .with_partition_filter(partition_filter),
+            ]
+            for builder in builders:
+                splits = builder.new_vector_search_scan().scan().splits()
+                self.assertEqual(1, len(splits))
+                self.assertEqual(
+                    ["vec-pt2.index"],
+                    [f.file_name for f in splits[0].vector_index_files])
+
     def test_with_partition_filter_rejects_non_partition_field(self):
         """Non-partition conjuncts would be silently dropped by the splitter,
         producing wrong results; the API must refuse them up front."""

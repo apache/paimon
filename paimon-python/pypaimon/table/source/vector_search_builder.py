@@ -134,11 +134,7 @@ class AbstractVectorSearchBuilderImpl:
             return self
         partition_filter, data_filter = self._split_partition_filter(predicate)
         if partition_filter is not None:
-            if self._partition_filter is None:
-                self._partition_filter = partition_filter
-            else:
-                self._partition_filter = PredicateBuilder.and_predicates(
-                    [self._partition_filter, partition_filter])
+            self._add_partition_filter(partition_filter)
         if data_filter is not None:
             if self._filter is None:
                 self._filter = data_filter
@@ -150,7 +146,6 @@ class AbstractVectorSearchBuilderImpl:
     def with_partition_filter(self, partition_filter):
         # type: (Predicate) -> VectorSearchBuilder
         if partition_filter is None:
-            self._partition_filter = None
             return self
         # Strict: every referenced field must be a partition key, otherwise a
         # non-partition conjunct would be silently dropped (with_filter has
@@ -167,10 +162,11 @@ class AbstractVectorSearchBuilderImpl:
                 "Partition filter must reference only partition keys "
                 "(%s); got non-partition field(s): %s"
                 % (partition_keys, sorted(extras)))
-        self._partition_filter = self._rebuild_leaf_indices_by_name(
-            partition_filter,
-            {name: idx for idx, name in enumerate(partition_keys)},
-        )
+        self._add_partition_filter(
+            self._rebuild_leaf_indices_by_name(
+                partition_filter,
+                {name: idx for idx, name in enumerate(partition_keys)},
+            ))
         return self
 
     def _split_partition_filter(self, predicate):
@@ -193,6 +189,15 @@ class AbstractVectorSearchBuilderImpl:
             PredicateBuilder.and_predicates(partition_parts),
             PredicateBuilder.and_predicates(data_parts),
         )
+
+    def _add_partition_filter(self, partition_filter):
+        if partition_filter is None:
+            return
+        if self._partition_filter is None:
+            self._partition_filter = partition_filter
+        else:
+            self._partition_filter = PredicateBuilder.and_predicates(
+                [self._partition_filter, partition_filter])
 
     @classmethod
     def _rebuild_leaf_indices_by_name(cls, predicate, pk_to_idx):
