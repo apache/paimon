@@ -1385,7 +1385,10 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def global_index_scalar_search_mode(self):
-        return self.options.get(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE)
+        scalar_mode = self.options.get(CoreOptions.GLOBAL_INDEX_SCALAR_SEARCH_MODE)
+        if scalar_mode is not None:
+            return scalar_mode
+        return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

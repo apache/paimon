@@ -68,6 +68,13 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
                 GlobalIndexSearchMode.FULL,
                 options.global_index_scalar_search_mode())
 
+    def test_falls_back_when_scalar_mode_has_no_value(self):
+        options = unittest.mock.Mock()
+        options.get.side_effect = [None, GlobalIndexSearchMode.DETAIL]
+        self.assertEqual(
+            GlobalIndexSearchMode.DETAIL,
+            CoreOptions(options).global_index_scalar_search_mode())
+
     def test_scalar_key_wins_over_global_index_key(self):
         options = CoreOptions(Options({
             "scalar-index.search-mode": "detail",
