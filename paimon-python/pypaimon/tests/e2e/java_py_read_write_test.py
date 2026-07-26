@@ -463,15 +463,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     def test_read_btree_raw_fallback(self):
         table = self.catalog.get_table('default.test_btree_raw_fallback')
-        fast_builder = table.new_read_builder()
+        fast_table = table.copy({'scalar-index.search-mode': 'fast'})
+        fast_builder = fast_table.new_read_builder()
         fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
         fast_builder.with_filter(fast_predicate)
         fast_result = fast_builder.new_read().to_arrow(
             fast_builder.new_scan().plan().splits())
         self.assertEqual(0, fast_result.num_rows)
 
-        full_table = table.copy({'global-index.search-mode': 'full'})
-        read_builder = full_table.new_read_builder()
+        read_builder = table.new_read_builder()
         read_builder.with_filter(
             read_builder.new_predicate_builder().equal('k', 'k4'))
         actual = read_builder.new_read().to_arrow(

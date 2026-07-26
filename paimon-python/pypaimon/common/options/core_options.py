@@ -734,7 +734,8 @@ class CoreOptions:
         .default_value(GlobalIndexSearchMode.FAST)
         .with_description(
             "Search mode for vector and full-text global index queries. "
-            "Scalar index queries use 'scalar-index.search-mode'. "
+            "An explicitly configured value is also used by scalar index "
+            "queries when 'scalar-index.search-mode' is not set. "
             "Supported values are 'fast', 'full', and 'detail'."
         )
     )
@@ -746,6 +747,8 @@ class CoreOptions:
         .with_description(
             "Search mode for scalar (sorted/bitmap) global index queries. "
             "Defaults to 'full' to include rows not covered by the index. "
+            "An explicitly configured 'global-index.search-mode' is used "
+            "when this option is not set. "
             "Supported values are 'fast', 'full', and 'detail'."
         )
     )
