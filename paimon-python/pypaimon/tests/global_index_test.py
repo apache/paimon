@@ -249,6 +249,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             [Range(1, 1), Range(5, 6)],
             result.results().to_range_list(),
         )
+        fake_scanner.unindexed_rows.assert_called_once_with(
+            predicate, search_mode=GlobalIndexSearchMode.FULL)
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner
