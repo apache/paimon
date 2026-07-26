@@ -80,8 +80,8 @@ class _CoverageOptions:
     def __init__(self, mode):
         self.options = Options({"global-index.search-mode": mode})
 
-    def global_index_search_mode(self):
-        return CoreOptions(self.options).global_index_search_mode()
+    def scalar_index_search_mode(self):
+        return CoreOptions(self.options).scalar_index_search_mode()
 
 
 class _CoverageTable:
@@ -223,7 +223,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             def global_index_enabled(self):
                 return True
 
-            def global_index_scalar_search_mode(self):
+            def scalar_index_search_mode(self):
                 return GlobalIndexSearchMode.FULL
 
         class _Table:

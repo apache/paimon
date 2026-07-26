@@ -146,7 +146,11 @@ public class DataEvolutionVectorScan implements VectorScan {
 
         List<Range> rawRowRanges =
                 new DataEvolutionGlobalIndexCoverage(
-                                table, snapshot, partitionFilter, vectorIndexFiles)
+                                table,
+                                snapshot,
+                                partitionFilter,
+                                vectorIndexFiles,
+                                table.coreOptions().vectorIndexSearchMode())
                         .unindexedRanges(vectorColumn.id());
         if (filter != null) {
             rawRowRanges =
@@ -157,7 +161,8 @@ public class DataEvolutionVectorScan implements VectorScan {
                                                     table,
                                                     snapshot,
                                                     partitionFilter,
-                                                    scalarIndexFiles(allIndexFiles))
+                                                    scalarIndexFiles(allIndexFiles),
+                                                    table.coreOptions().scalarIndexSearchMode())
                                             .unindexedRanges(table.rowType(), filter)),
                             true);
         }

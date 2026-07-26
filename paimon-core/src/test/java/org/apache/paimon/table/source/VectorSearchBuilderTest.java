@@ -366,7 +366,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         catalog.createTable(
                 identifier("full_search_raw_only_cosine_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
                         .option("test.vector.metric", "cosine")
                         .build(),
                 false);
@@ -1067,12 +1067,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
     @Test
     public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
         catalog.createTable(
-                identifier("full_search_partial_scalar_unindexed_table"),
-                vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
-                        .build(),
+                identifier("default_scalar_full_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
                 false);
-        FileStoreTable table = getTable(identifier("full_search_partial_scalar_unindexed_table"));
+        FileStoreTable table = getTable(identifier("default_scalar_full_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1144,9 +1142,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFastModePartialScalarPreFilterOnlyUsesIndexedRows() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
+    public void testFastScalarModePartialPreFilterOnlyUsesIndexedRows() throws Exception {
+        catalog.createTable(
+                identifier("fast_scalar_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_scalar_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {

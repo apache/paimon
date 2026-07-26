@@ -18,6 +18,7 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
@@ -129,6 +130,22 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
 
         self.assertIsInstance(
             builder("fast").new_full_text_read(), PrimaryKeyFullTextRead)
+        schema = TableSchema(
+            fields=fields,
+            options={
+                "pk-full-text.index.columns": "content",
+                "global-index.search-mode": "full",
+                "full-text-index.search-mode": "fast",
+            })
+        table = SimpleNamespace(
+            fields=fields, table_schema=schema, partition_keys=[])
+        self.assertIsInstance(
+            FullTextSearchBuilderImpl(table)
+            .with_query("content", "paimon")
+            .with_limit(2)
+            .new_full_text_read(),
+            PrimaryKeyFullTextRead,
+        )
         for mode in ("full", "detail"):
             with self.subTest(mode=mode), self.assertRaisesRegex(
                     NotImplementedError, "only supports the FAST"):
@@ -194,7 +211,8 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
 
     def test_pk_vector_refine_factor_overflow_is_rejected_before_search(self):
         table = SimpleNamespace(options=SimpleNamespace(
-            primary_key_vector_index_type=lambda column: "ivf-pq"))
+            primary_key_vector_index_type=lambda column: "ivf-pq",
+            vector_index_search_mode=lambda: GlobalIndexSearchMode.FAST))
         reader = PrimaryKeyVectorRead(
             table, 2147483647, DataField(1, "embedding", AtomicType("VECTOR(1)")),
             [0.0], options={"ivf.refine_factor": "2"})
@@ -204,6 +222,25 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         plan = PrimaryKeyVectorScanPlan(1, [])
         with self.assertRaisesRegex(ValueError, "limit overflow"):
             reader.read_plan(plan)
+
+    def test_pk_vector_raw_fallback_uses_vector_search_mode(self):
+        from pypaimon.table.source.primary_key_vector_scan import (
+            PrimaryKeyVectorScanPlan)
+
+        field = DataField(1, "embedding", AtomicType("VECTOR(1)"))
+        plan = PrimaryKeyVectorScanPlan(1, [])
+        for mode, expected_calls in (
+                (GlobalIndexSearchMode.FAST, 0),
+                (GlobalIndexSearchMode.FULL, 1),
+                (GlobalIndexSearchMode.DETAIL, 1)):
+            table = SimpleNamespace(options=SimpleNamespace(
+                primary_key_vector_index_type=lambda column: "ivf-pq",
+                vector_index_search_mode=lambda mode=mode: mode))
+            reader = PrimaryKeyVectorRead(table, 1, field, [0.0])
+            with self.subTest(mode=mode), mock.patch.object(
+                    reader, "_raw_candidates", return_value=[]) as raw_candidates:
+                reader.read_plan(plan)
+                self.assertEqual(expected_calls, raw_candidates.call_count)
 
     def test_full_text_payload_planner_rejects_duplicate_and_stale_levels(self):
         files = [SimpleNamespace(file_name="a.parquet", row_count=2, level=1)]

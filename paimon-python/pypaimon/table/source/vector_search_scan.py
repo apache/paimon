@@ -168,7 +168,10 @@ class DataEvolutionVectorScan(VectorSearchScan):
             snapshot,
             partition_filter,
             vector_index_files,
-        ).unindexed_ranges(vector_column.id)
+        ).unindexed_ranges(
+            vector_column.id,
+            search_mode=self._table.options.vector_index_search_mode(),
+        )
         scalar_index_files = [
             f for f in all_index_files
             if f.global_index_meta is not None
@@ -182,7 +185,11 @@ class DataEvolutionVectorScan(VectorSearchScan):
                     snapshot,
                     partition_filter,
                     scalar_index_files,
-                ).unindexed_ranges(self._table.fields, self._filter),
+                ).unindexed_ranges(
+                    self._table.fields,
+                    self._filter,
+                    search_mode=self._table.options.scalar_index_search_mode(),
+                ),
                 True,
             )
         if raw_row_ranges:

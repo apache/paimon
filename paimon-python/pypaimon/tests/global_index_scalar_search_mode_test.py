@@ -17,7 +17,6 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest import mock
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
@@ -52,37 +51,35 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
 
     def test_default_values(self):
         options = CoreOptions(Options.from_none())
+        self.assertIsNone(options.global_index_search_mode())
         self.assertEqual(
-            GlobalIndexSearchMode.FULL, options.global_index_scalar_search_mode())
+            GlobalIndexSearchMode.FULL, options.scalar_index_search_mode())
         self.assertEqual(
-            GlobalIndexSearchMode.FAST, options.global_index_search_mode())
-
-    def test_scalar_option_override(self):
-        options = CoreOptions(Options({"scalar-index.search-mode": "fast"}))
+            GlobalIndexSearchMode.FAST, options.vector_index_search_mode())
         self.assertEqual(
-            GlobalIndexSearchMode.FAST, options.global_index_scalar_search_mode())
+            GlobalIndexSearchMode.FAST, options.full_text_index_search_mode())
 
-    def test_does_not_inherit_global_index_search_mode(self):
-        for mode in ("fast", "detail"):
-            options = CoreOptions(Options({"global-index.search-mode": mode}))
-            self.assertEqual(
-                GlobalIndexSearchMode.FULL,
-                options.global_index_scalar_search_mode())
+    def test_legacy_global_mode_is_family_fallback(self):
+        options = CoreOptions(Options({"global-index.search-mode": "detail"}))
+        for getter in (
+                options.scalar_index_search_mode,
+                options.vector_index_search_mode,
+                options.full_text_index_search_mode):
+            self.assertEqual(GlobalIndexSearchMode.DETAIL, getter())
 
-    def test_falls_back_when_scalar_mode_has_no_value(self):
-        options = mock.Mock()
-        options.get.side_effect = [None, GlobalIndexSearchMode.DETAIL]
-        self.assertEqual(
-            GlobalIndexSearchMode.DETAIL,
-            CoreOptions(options).global_index_scalar_search_mode())
-
-    def test_scalar_key_wins_over_global_index_key(self):
+    def test_family_modes_override_global_mode(self):
         options = CoreOptions(Options({
-            "scalar-index.search-mode": "detail",
-            "global-index.search-mode": "fast",
+            "global-index.search-mode": "detail",
+            "scalar-index.search-mode": "fast",
+            "vector-index.search-mode": "full",
+            "full-text-index.search-mode": "fast",
         }))
         self.assertEqual(
-            GlobalIndexSearchMode.DETAIL, options.global_index_scalar_search_mode())
+            GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
+        self.assertEqual(
+            GlobalIndexSearchMode.FULL, options.vector_index_search_mode())
+        self.assertEqual(
+            GlobalIndexSearchMode.FAST, options.full_text_index_search_mode())
 
     def test_coverage_honours_search_mode_override(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
@@ -90,7 +87,9 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             [], coverage.unindexed_ranges(1, search_mode=GlobalIndexSearchMode.FAST))
         full = coverage.unindexed_ranges(1, search_mode=GlobalIndexSearchMode.FULL)
         self.assertEqual([(100, 199)], [(r.from_, r.to) for r in full])
-        self.assertEqual([], coverage.unindexed_ranges(1))
+        self.assertEqual(
+            [(100, 199)],
+            [(r.from_, r.to) for r in coverage.unindexed_ranges(1)])
 
     def test_scanner_applies_passed_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
@@ -99,11 +98,11 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             scanner, None, search_mode=GlobalIndexSearchMode.FULL)
         self.assertEqual([(100, 199)], _ranges(result))
 
-    def test_scanner_default_is_general_mode(self):
+    def test_scanner_default_is_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
         scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
         result = DataEvolutionGlobalIndexScanner.unindexed_rows(scanner, None)
-        self.assertEqual([], _ranges(result))
+        self.assertEqual([(100, 199)], _ranges(result))
 
 
 if __name__ == "__main__":

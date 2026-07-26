@@ -190,7 +190,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                     (FileStoreTable)
                             table.copy(
                                     Collections.singletonMap(
-                                            CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
+                                            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(),
                                             searchMode));
             GlobalIndexResult result =
                     nonFastModeTable

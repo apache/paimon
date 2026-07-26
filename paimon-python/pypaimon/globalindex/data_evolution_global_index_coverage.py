@@ -91,7 +91,7 @@ class DataEvolutionGlobalIndexCoverage:
         search_mode: Optional[GlobalIndexSearchMode] = None,
     ) -> List[Range]:
         if search_mode is None:
-            search_mode = _global_index_search_mode(self._table)
+            search_mode = _scalar_index_search_mode(self._table)
         if search_mode == GlobalIndexSearchMode.FAST:
             return []
         next_row_id = getattr(self._snapshot, "next_row_id", None)
@@ -144,13 +144,13 @@ class DataEvolutionGlobalIndexCoverage:
         return self._partition_filter.test(entry.partition)
 
 
-def _global_index_search_mode(table):
+def _scalar_index_search_mode(table):
     options = getattr(table, "options", None)
     if options is None:
-        return GlobalIndexSearchMode.FAST
-    if hasattr(options, "global_index_search_mode"):
-        return options.global_index_search_mode()
-    return CoreOptions(Options.from_none()).global_index_search_mode()
+        return GlobalIndexSearchMode.FULL
+    if hasattr(options, "scalar_index_search_mode"):
+        return options.scalar_index_search_mode()
+    return CoreOptions(Options.from_none()).scalar_index_search_mode()
 
 
 def _is_field_id_collection(fields_or_field_id):
