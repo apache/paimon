@@ -21,6 +21,7 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +49,9 @@ public class TestJindoCacheEnable {
         }
         if (setRpcAddress) {
             options.set(JINDO_CACHE_RPC_ADDRESS, "test-rpc-address:8080");
+        } else {
+            options.set("fs.oss.endpoint", "test-dlf-cache-endpoint");
+            options.set("fs.oss.direct.endpoint", "test-oss-endpoint");
         }
         if (cacheWhitelist != null) {
             options.set(IO_CACHE_WHITELIST_PATH, cacheWhitelist);
@@ -130,12 +134,12 @@ public class TestJindoCacheEnable {
     }
 
     @Test
-    public void testCacheDisabledWhenRpcAddressMissing() {
+    public void testDlfCacheEnabledWhenRpcAddressMissing() {
         CatalogContext context = createCatalogContext(true, "meta,read,write", false, null);
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
 
-        verifyCacheFlags(fileIO, false, false, false);
+        verifyCacheFlags(fileIO, true, true, true);
     }
 
     @Test
@@ -176,5 +180,20 @@ public class TestJindoCacheEnable {
                 .isTrue();
         assertThat(fileIO.shouldCache(new Path("oss://test-bucket/database/table/dir/file")))
                 .isTrue();
+    }
+
+    @Test
+    public void testSerialization() throws Exception {
+        CatalogContext context = createCatalogContext(true, "read", false, null);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        JindoFileIO cloned = InstantiationUtil.clone(fileIO);
+        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
+
+        assertThat(cloned.hadoopOptions(path, "read").get("fs.oss.endpoint"))
+                .isEqualTo("test-dlf-cache-endpoint");
+        assertThat(cloned.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("test-oss-endpoint");
     }
 }

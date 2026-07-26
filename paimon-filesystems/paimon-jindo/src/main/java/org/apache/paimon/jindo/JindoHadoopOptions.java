@@ -26,12 +26,15 @@ import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
 /** Jindo {@link JindoHadoopOptions}. */
-public class JindoHadoopOptions {
+public class JindoHadoopOptions implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private static final Logger LOG = LoggerFactory.getLogger(JindoHadoopOptions.class);
 
     private Options hadoopOptions;
