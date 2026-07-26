@@ -638,6 +638,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * data files are considered: {@link #mergeRangesAndSort} guarantees they all span the row id
      * range of the whole group, while a blob or vector-store file only covers a sub range and can
      * not prove anything for the other rows.
+     *
+     * <p>A column can be written by several files of the group; the column merge takes each field
+     * from the newest file that wrote it and older copies are dead. Files arrive newest first
+     * ({@link #mergeRangesAndSort}), so each file's index is evaluated only over the columns it is
+     * the newest writer of. A stale value in an older file must not veto a group whose winning file
+     * matches, mirroring the winner selection in {@link DataEvolutionFileStoreScan#evolutionStats}.
      */
     private boolean skipByFileIndex(List<DataFileMeta> files, DataFilePathFactory pathFactory)
             throws IOException {
@@ -645,13 +651,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             return false;
         }
 
+        Set<Integer> claimedFieldIds = new HashSet<>();
         for (DataFileMeta file : files) {
             if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
                 continue;
             }
 
             TableSchema dataSchema = schemaFetcher.apply(file.schemaId()).project(file.writeCols());
-            List<Predicate> dataFilters = devolveFilters(dataSchema);
+            // columns this file wrote but a newer file already won: their values here are stale
+            Set<String> overwrittenCols = new HashSet<>();
+            for (DataField field : dataSchema.fields()) {
+                if (!claimedFieldIds.add(field.id())) {
+                    overwrittenCols.add(field.name());
+                }
+            }
+
+            List<Predicate> dataFilters =
+                    excludePredicateWithFields(devolveFilters(dataSchema), overwrittenCols);
             if (dataFilters.isEmpty()) {
                 continue;
             }

@@ -224,6 +224,18 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(rows.get(0).getInt(0)).isEqualTo(50);
     }
 
+    @Test
+    public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
+        FileStoreTable table = createTable("overwritten", Collections.emptyMap());
+        writeThenOverwriteF1(table, ROW_COUNT);
+
+        // f1 was rewritten by a newer file (c*); the old file still holds a* and a bloom index that
+        // knows nothing about c*, so its index must not veto the group
+        List<InternalRow> rows = readWithFilter(table, equalF1(c1(50)));
+        assertThat(rows).hasSize(ROW_COUNT);
+        assertThat(rows).anyMatch(row -> c1(50).equals(row.getString(1).toString()));
+    }
+
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */
     private void deleteRows(FileStoreTable table, long... positions) throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
@@ -355,6 +367,37 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         }
     }
 
+    /**
+     * Writes f0/f1 (a*) with a bloom index on f1, then overwrites f1 with c* in a second file that
+     * shares the same row id range and has a higher sequence number, so the column merge takes f1
+     * from the newer file.
+     */
+    private void writeThenOverwriteF1(FileStoreTable table, int count) throws Exception {
+        RowType writeType0 = table.rowType().project(Arrays.asList("f0", "f1"));
+        BatchWriteBuilder builder = table.copy(bloomOptions("f1", null)).newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType0);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString(f1(i))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        long firstRowId = latest.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType writeType1 = table.rowType().project(Collections.singletonList("f1"));
+        builder = latest.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString(c1(i))));
+            }
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, firstRowId);
+            commit.commit(commitables);
+        }
+    }
+
     private List<InternalRow> readWithFilter(FileStoreTable table, Predicate predicate)
             throws Exception {
         return readWithFilter(table, predicate, null);
@@ -413,5 +456,9 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
     private static String f2(int i) {
         return String.format("b%03d", i);
+    }
+
+    private static String c1(int i) {
+        return String.format("c%03d", i);
     }
 }
