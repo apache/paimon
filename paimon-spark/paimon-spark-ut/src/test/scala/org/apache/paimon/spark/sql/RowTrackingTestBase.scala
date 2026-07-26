@@ -1035,6 +1035,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
               |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
               |  'row-tracking.enabled' = 'true',
               |  'data-evolution.enabled' = 'true',
+              |  'scalar-index.search-mode' = 'fast',
               |  'btree-index.records-per-range' = '1000')
               |""".stripMargin)
         sql("INSERT INTO t VALUES (1, 'old', 10)")
@@ -1062,6 +1063,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
             |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
             |  'row-tracking.enabled' = 'true',
             |  'data-evolution.enabled' = 'true',
+            |  'scalar-index.search-mode' = 'fast',
             |  'btree-index.records-per-range' = '1000')
             |""".stripMargin)
       sql("INSERT INTO t VALUES (1, 'old', 10)")

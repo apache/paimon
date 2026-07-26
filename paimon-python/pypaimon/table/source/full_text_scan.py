@@ -122,7 +122,10 @@ class DataEvolutionFullTextScan(FullTextScan):
                 snapshot,
                 partition_filter,
                 all_index_files,
-            ).unindexed_ranges(list(text_column_ids))
+            ).unindexed_ranges(
+                list(text_column_ids),
+                search_mode=self._table.options.full_text_index_search_mode(),
+            )
             if raw_row_ranges:
                 splits.append(RawFullTextSearchSplit(raw_row_ranges))
 

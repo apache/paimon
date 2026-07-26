@@ -2714,10 +2714,26 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> GLOBAL_INDEX_SEARCH_MODE =
             key("global-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .noDefaultValue()
+                    .withDescription("Fallback search mode for global index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
+            key("scalar-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .withDescription("Search mode for scalar index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
+            key("vector-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription(
-                            "Search mode for global index queries. "
-                                    + "Supported values are 'fast', 'full', and 'detail'.");
+                    .withDescription("Search mode for vector index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> FULL_TEXT_INDEX_SEARCH_MODE =
+            key("full-text-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription("Search mode for full-text index queries.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
@@ -4324,8 +4340,30 @@ public class CoreOptions implements Serializable {
         return options.get(GLOBAL_INDEX_ENABLED);
     }
 
+    @Nullable
     public GlobalIndexSearchMode globalIndexSearchMode() {
         return options.get(GLOBAL_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode vectorIndexSearchMode() {
+        return indexSearchMode(VECTOR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode fullTextIndexSearchMode() {
+        return indexSearchMode(FULL_TEXT_INDEX_SEARCH_MODE);
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode) {
+        if (options.contains(familySearchMode)) {
+            return options.get(familySearchMode);
+        }
+        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
+                .orElseGet(() -> options.get(familySearchMode));
     }
 
     public Integer globalIndexThreadNum() {

@@ -119,7 +119,7 @@ Level-1-or-higher data level. Data compaction replaces the affected level archiv
 archive can cover multiple ordered source files; its row IDs concatenate their physical row
 positions.
 
-Primary-key full-text search currently supports only `global-index.search-mode=fast`. Level-0 and
+Primary-key full-text search currently supports only `full-text-index.search-mode=fast`. Level-0 and
 other uncovered files are not searched; their rows become searchable after compaction publishes
 an eligible data file and persistent archive. Search applies each source file's deletion vector,
 preserves native relevance scores, and selects a global Top-K. Only Hybrid search rewrites route

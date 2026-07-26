@@ -273,7 +273,7 @@ class TableUpdate:
             return self.table
 
         dynamic_options = {
-            CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key():
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
                 GlobalIndexSearchMode.FULL.value,
             CoreOptions.SCAN_MODE.key(): StartupMode.DEFAULT.value,
             CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),

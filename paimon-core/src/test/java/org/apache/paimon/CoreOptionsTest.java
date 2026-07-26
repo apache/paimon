@@ -108,6 +108,39 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testIndexSearchModes() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+
+        conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+
+        conf.set(CoreOptions.SCALAR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FAST);
+        conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+    }
+
+    @Test
     public void testBlobSplitByFileSizeDefault() {
         Options conf = new Options();
         conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);

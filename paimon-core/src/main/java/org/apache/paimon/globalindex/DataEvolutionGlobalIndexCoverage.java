@@ -51,6 +51,7 @@ public class DataEvolutionGlobalIndexCoverage {
     private final FileStoreTable table;
     @Nullable private final Snapshot snapshot;
     @Nullable private final PartitionPredicate partitionFilter;
+    private final GlobalIndexSearchMode searchMode;
     private final Map<Integer, List<Range>> coverageByField;
 
     public DataEvolutionGlobalIndexCoverage(
@@ -58,9 +59,24 @@ public class DataEvolutionGlobalIndexCoverage {
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
+        this(
+                table,
+                snapshot,
+                partitionFilter,
+                indexFiles,
+                table.coreOptions().scalarIndexSearchMode());
+    }
+
+    public DataEvolutionGlobalIndexCoverage(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode) {
         this.table = table;
         this.snapshot = snapshot;
         this.partitionFilter = partitionFilter;
+        this.searchMode = checkNotNull(searchMode);
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -83,7 +99,6 @@ public class DataEvolutionGlobalIndexCoverage {
     }
 
     public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
-        GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }

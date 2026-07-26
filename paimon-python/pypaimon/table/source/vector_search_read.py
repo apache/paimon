@@ -190,7 +190,10 @@ class AbstractVectorSearchReadImpl:
             include = result.results()
             include = RoaringBitmap64.or_(
                 include,
-                scanner.unindexed_rows(self._filter).results())
+                scanner.unindexed_rows(
+                    self._filter,
+                    search_mode=self._table.options.scalar_index_search_mode(),
+                ).results())
             return RoaringBitmap64.and_(include, raw_rows)
         finally:
             scanner.close()
