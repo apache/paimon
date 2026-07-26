@@ -171,15 +171,15 @@ public class DataEvolutionFullTextRead implements FullTextRead {
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
             Optional<ScoredGlobalIndexResult> next = f.join();
             if (next.isPresent()) {
-                result = result.or(next.get());
+                results.add(next.get());
             }
         }
 
-        return result;
+        return ScoredGlobalIndexResult.merge(results);
     }
 
     @Nullable
