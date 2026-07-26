@@ -97,7 +97,7 @@ class PaimonScanBuilder(val table: InnerTable)
 
   // Spark does not support push down aggregation for streaming scan.
   override def pushAggregation(aggregation: Aggregation): Boolean = {
-    if (PostponeMergeOnRead.createReadBuilder(table, pushedPartitionFilters).isDefined) {
+    if (PostponeMergeOnRead.usesCustomSource(table)) {
       return false
     }
 
