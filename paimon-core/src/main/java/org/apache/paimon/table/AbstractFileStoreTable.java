@@ -666,6 +666,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void deleteTag(String tagName) {
+        List<String> referencingBranches = branchManager().branchesCreatedFromTag(tagName);
+        if (!referencingBranches.isEmpty()) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot delete tag '%s' because it is still referenced by branches: %s. "
+                                    + "Please delete these branches first.",
+                            tagName, referencingBranches));
+        }
         tagManager()
                 .deleteTag(
                         tagName,
@@ -744,7 +752,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public BranchManager branchManager() {
         if (catalogEnvironment.catalogLoader() != null
                 && catalogEnvironment.supportsVersionManagement()) {
-            return new CatalogBranchManager(catalogEnvironment.catalogLoader(), identifier());
+            return new CatalogBranchManager(
+                    catalogEnvironment.catalogLoader(), identifier(), fileIO, path);
         }
         return new FileSystemBranchManager(
                 fileIO,

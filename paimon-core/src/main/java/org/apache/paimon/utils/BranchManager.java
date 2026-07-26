@@ -22,6 +22,7 @@ import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
@@ -64,6 +65,16 @@ public interface BranchManager {
     void renameBranch(String fromBranch, String toBranch);
 
     List<String> branches();
+
+    /**
+     * Get all branches that were created based on the given tag.
+     *
+     * @param tagName the name of the tag to check
+     * @return list of branch names that reference the given tag
+     */
+    default List<String> branchesCreatedFromTag(String tagName) {
+        return Collections.emptyList();
+    }
 
     default boolean branchExists(String branchName) {
         return branches().contains(branchName);

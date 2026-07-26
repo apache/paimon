@@ -211,6 +211,10 @@ public class LocalOrphanFilesCleanTest {
         expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, snapshotCount - expired);
         table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
 
+        table.deleteBranch("branch1");
+        String branchPathPrefix = branchPath(tablePath, "branch1").toString();
+        manuallyAddedFiles.removeIf(path -> path.toString().startsWith(branchPathPrefix));
+
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
         deleteTags = randomlyPick(allTags);
@@ -313,6 +317,10 @@ public class LocalOrphanFilesCleanTest {
         expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, snapshotCount - expired);
         expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, snapshotCount - expired);
         table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
+
+        table.deleteBranch("branch1");
+        String branchPathPrefix = branchPath(tablePath, "branch1").toString();
+        manuallyAddedFiles.removeIf(path -> path.toString().startsWith(branchPathPrefix));
 
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
