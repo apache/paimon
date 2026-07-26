@@ -32,13 +32,13 @@ the 9 most commonly-used value aggregators: ``primary_key`` /
 the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """
-
 from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
 from _datasketches import compact_theta_sketch, theta_union
 
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
+from pypaimon.data.decimal import Decimal
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
 from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
@@ -57,6 +57,7 @@ NAME_LAST_NON_NULL_VALUE = "last_non_null_value"
 NAME_FIRST_VALUE = "first_value"
 NAME_FIRST_NON_NULL_VALUE = "first_non_null_value"
 NAME_SUM = "sum"
+NAME_PRODUCT = "product"
 NAME_MAX = "max"
 NAME_MIN = "min"
 NAME_BOOL_OR = "bool_or"
@@ -70,6 +71,16 @@ NAME_MERGE_MAP = "merge_map"
 NAME_THETA_SKETCH = "theta_sketch"
 
 
+# Integer range limits used for overflow checking.
+_BYTE_MIN = -128
+_BYTE_MAX = 127
+_SHORT_MIN = -32768
+_SHORT_MAX = 32767
+_INT_MIN = -(1 << 31)
+_INT_MAX = (1 << 31) - 1
+_LONG_MIN = -(1 << 63)
+_LONG_MAX = (1 << 63) - 1
+
 # Base SQL type names treated as numeric for sum/product-style
 # aggregators. NUMERIC / DEC are SQL synonyms accepted by the parser;
 # treat them the same as DECIMAL.
@@ -77,6 +88,16 @@ _NUMERIC_BASE_TYPES = frozenset([
     "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
     "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "DEC",
 ])
+
+# SQL type names treated as decimal. NUMERIC / DEC are SQL
+# synonyms accepted by the parser; treat them the same as DECIMAL.
+_DECIMAL_TYPES = frozenset({"DECIMAL", "NUMERIC", "DEC"})
+
+# SQL type names treated as integer.
+_INT_TYPES = frozenset({"INT", "INTEGER"})
+
+# SQL type names treated as floating-point.
+_FLOAT_TYPES = frozenset({"FLOAT", "DOUBLE"})
 
 
 def _atomic_base_name(field_type: DataType):
@@ -346,17 +367,301 @@ class FieldFirstNonNullValueAgg(FieldAggregator):
 
 
 class FieldSumAgg(FieldAggregator):
-    """Numeric sum. ``None`` on either side returns the non-null
-    operand. Python's native ``+`` works uniformly for int / float /
-    Decimal — the values produced by the pyarrow read path already
-    arrive as the right Python primitive for the column's SQL type, so
-    no per-type branching is needed.
     """
+    Numeric sum aggregator.
+
+    Returns the non-null operand if either side is ``None``. Performs
+    overflow checking for integral types and preserves decimal
+    precision and scale for DECIMAL values.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
             return accumulator if input_field is None else input_field
-        return accumulator + input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.add(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator + input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator + input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator + input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator + input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator + input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return self._negative(retract_field) if accumulator is None else accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.subtract(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator - retract_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator - retract_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator - retract_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} - {}".format(accumulator, retract_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator - retract_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} - {}".format(accumulator,  retract_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator - retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def _negative(self, value: Any) -> Any:
+        if value is None:
+            return None
+
+        if self._base_type in _DECIMAL_TYPES:
+            return -value
+
+        elif self._base_type == "TINYINT":
+            result = -value
+            if result < _BYTE_MIN or result > _BYTE_MAX:
+                raise ArithmeticError("byte overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type == "SMALLINT":
+            result = -value
+            if result < _SHORT_MIN or result > _SHORT_MAX:
+                raise ArithmeticError("short overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type in _INT_TYPES:
+            result = -value
+            if result < _INT_MIN or result > _INT_MAX:
+                raise ArithmeticError("int overflow: -{}".format(value))
+            return result
+
+        elif self._base_type == "BIGINT":
+            result = -value
+            if result < _LONG_MIN or result > _LONG_MAX:
+                raise ArithmeticError("long overflow: -{}".format(value))
+            return result
+
+        elif self._base_type in _FLOAT_TYPES:
+            return -value
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+
+class FieldProductAgg(FieldAggregator):
+    """
+    Numeric product aggregator.
+
+    Null values are ignored and the non-null operand is returned.
+    Otherwise, returns the product of accumulator and input value.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return accumulator if input_field is None else input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            mul = Decimal.multiply(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                mul,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator * input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator * input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator * input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator * input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator * input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            div = Decimal.divide(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                div,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = int(accumulator / retract_field)
+            if value > _BYTE_MAX or value < _BYTE_MIN:
+                raise ArithmeticError(
+                    "byte overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = int(accumulator / retract_field)
+            if value > _SHORT_MAX or value < _SHORT_MIN:
+                raise ArithmeticError(
+                    "short overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            if accumulator == _INT_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "int overflow: {} / {}".format(accumulator, retract_field)
+                )
+            return int(accumulator / retract_field)
+
+        elif self._base_type == "BIGINT":
+            if accumulator == _LONG_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "long overflow: {} / {}".format(accumulator, retract_field)
+                )
+
+            # Java integer division truncates toward zero, while Python's "//"
+            # floors toward negative infinity. Divide absolute values first, then
+            # restore the sign to match Java semantics without converting through
+            # float (which would lose precision for BIGINT values).
+            if (accumulator >= 0) == (retract_field >= 0):
+                return abs(accumulator) // abs(retract_field)
+            else:
+                return -(abs(accumulator) // abs(retract_field))
+
+        elif self._base_type in _FLOAT_TYPES:
+            if retract_field == 0.0:
+                if accumulator == 0.0:
+                    return float("nan")
+                elif accumulator > 0:
+                    return float("inf")
+                else:
+                    return float("-inf")
+            return accumulator / retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
 
 
 class FieldMaxAgg(FieldAggregator):
@@ -1167,6 +1472,7 @@ register_aggregator(
     _build_no_type_check(FieldFirstNonNullValueAgg, NAME_FIRST_NON_NULL_VALUE),
 )
 register_aggregator(NAME_SUM, _build_numeric(FieldSumAgg, NAME_SUM))
+register_aggregator(NAME_PRODUCT, _build_numeric(FieldProductAgg, NAME_PRODUCT))
 register_aggregator(NAME_MAX, _build_no_type_check(FieldMaxAgg, NAME_MAX))
 register_aggregator(NAME_MIN, _build_no_type_check(FieldMinAgg, NAME_MIN))
 register_aggregator(
