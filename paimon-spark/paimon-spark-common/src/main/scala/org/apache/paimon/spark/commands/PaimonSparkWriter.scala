@@ -550,16 +550,16 @@ case class PaimonSparkWriter(
     val unpartitionedTableHasKnownNumBuckets =
       tableSchema.partitionKeys().isEmpty &&
         knownNumBuckets.containsKey(BinaryRow.EMPTY_ROW)
-    val collectBucketStats =
+    val inferBucketNumFromData =
       maxNumBuckets != 1 && !unpartitionedTableHasKnownNumBuckets
-    if (collectBucketStats) {
+    if (inferBucketNumFromData) {
       df.persist()
     }
 
     try {
       val defaultNumBuckets = Math.min(df.rdd.getNumPartitions, maxNumBuckets)
       val inferredNumBuckets: Map[BinaryRow, Int] =
-        if (collectBucketStats) {
+        if (inferBucketNumFromData) {
           val targetRowNum = coreOptions.postponeTargetRowNumPerBucket()
           val postponeRowCounts = PostponeUtils.getPostponeRowCounts(table)
           val dataStats =
@@ -590,10 +590,10 @@ case class PaimonSparkWriter(
         knownNumBuckets.getOrDefault(
           partition,
           Integer.valueOf(inferredNumBuckets.getOrElse(partition, defaultNumBuckets)))
-      PostponeBucketAssignment(partitionBucketComputer, collectBucketStats)
+      PostponeBucketAssignment(partitionBucketComputer, inferBucketNumFromData)
     } catch {
       case e: Throwable =>
-        if (collectBucketStats) {
+        if (inferBucketNumFromData) {
           df.unpersist()
         }
         throw e
