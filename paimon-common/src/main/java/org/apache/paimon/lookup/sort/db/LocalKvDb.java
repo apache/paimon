@@ -44,7 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.function.Supplier;
+import java.util.function.LongFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -81,6 +81,9 @@ public class LocalKvDb implements Closeable {
     /** Maximum number of levels in the LSM tree. */
     static final int MAX_LEVELS = 4;
 
+    /** Marker used when an SST's entry count cannot be estimated before writing. */
+    static final long UNKNOWN_NUM_ENTRIES = -1;
+
     /**
      * Estimated per-entry memory overhead in the MemTable's TreeMap, beyond the raw key/value
      * bytes. This accounts for:
@@ -99,7 +102,7 @@ public class LocalKvDb implements Closeable {
     private final File dataDirectory;
     private final String uuid;
     private final SortLookupStoreFactory storeFactory;
-    private final Supplier<BloomFilterWriter> bloomFilterWriterSupplier;
+    private final LongFunction<BloomFilterWriter> bloomFilterWriterFactory;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
     private final long maxSstFileSize;
@@ -127,7 +130,7 @@ public class LocalKvDb implements Closeable {
     private LocalKvDb(
             File dataDirectory,
             SortLookupStoreFactory storeFactory,
-            Supplier<BloomFilterWriter> bloomFilterWriterSupplier,
+            LongFunction<BloomFilterWriter> bloomFilterWriterFactory,
             Comparator<MemorySlice> keyComparator,
             long memTableFlushThreshold,
             long maxSstFileSize,
@@ -136,7 +139,7 @@ public class LocalKvDb implements Closeable {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
-        this.bloomFilterWriterSupplier = bloomFilterWriterSupplier;
+        this.bloomFilterWriterFactory = bloomFilterWriterFactory;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
         this.maxSstFileSize = maxSstFileSize;
@@ -153,7 +156,7 @@ public class LocalKvDb implements Closeable {
                 new LsmCompactor(
                         keyComparator,
                         storeFactory,
-                        bloomFilterWriterSupplier,
+                        bloomFilterWriterFactory,
                         maxSstFileSize,
                         level0FileNumCompactTrigger,
                         sizeRatio,
@@ -245,9 +248,12 @@ public class LocalKvDb implements Closeable {
      *
      * @param sortedEntries an iterator of key-value pairs in sorted order (by the DB's key
      *     comparator)
+     * @param numEntries number of entries in the iterator
      */
-    public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries) throws IOException {
+    public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries, long numEntries)
+            throws IOException {
         ensureOpen();
+        checkArgument(numEntries >= 0, "numEntries must be non-negative.");
         if (!memTable.isEmpty() || getSstFileCount() > 0) {
             throw new IllegalStateException(
                     "bulkLoad requires an empty database (no memTable entries and no SST files)");
@@ -263,26 +269,42 @@ public class LocalKvDb implements Closeable {
         MemorySlice currentFileMaxKey = null;
         MemorySlice previousFileMaxKey = null;
         long currentBatchSize = 0;
+        long loadedEntries = 0;
+        long loadedBytes = 0;
 
         try {
             while (sortedEntries.hasNext()) {
+                checkArgument(
+                        loadedEntries < numEntries,
+                        "The iterator contains more entries than numEntries (%s).",
+                        numEntries);
                 Map.Entry<byte[], byte[]> entry = sortedEntries.next();
                 byte[] key = entry.getKey();
                 byte[] value = entry.getValue();
                 MemorySlice currentKey = MemorySlice.wrap(key);
+                long entrySize = (long) key.length + value.length;
 
                 if (currentWriter == null) {
                     currentSstFile = newSstFile();
+                    long expectedEntries =
+                            estimateBulkLoadSstEntries(
+                                    numEntries - loadedEntries,
+                                    loadedEntries,
+                                    loadedBytes,
+                                    entrySize);
                     currentWriter =
                             storeFactory.createWriter(
-                                    currentSstFile, bloomFilterWriterSupplier.get());
+                                    currentSstFile,
+                                    bloomFilterWriterFactory.apply(expectedEntries));
                     currentFileMinKey = currentKey;
                     currentBatchSize = 0;
                 }
 
                 currentWriter.put(key, value);
                 currentFileMaxKey = currentKey;
-                currentBatchSize += key.length + value.length;
+                currentBatchSize += entrySize;
+                loadedEntries++;
+                loadedBytes += entrySize;
 
                 if (currentBatchSize >= maxSstFileSize) {
                     currentWriter.close();
@@ -312,6 +334,12 @@ public class LocalKvDb implements Closeable {
                         previousFileMaxKey,
                         targetLevel);
             }
+
+            checkArgument(
+                    loadedEntries == numEntries,
+                    "The iterator contains %s entries, but numEntries is %s.",
+                    loadedEntries,
+                    numEntries);
         } catch (IOException | RuntimeException e) {
             if (currentWriter != null) {
                 try {
@@ -327,6 +355,26 @@ public class LocalKvDb implements Closeable {
 
         LOG.info(
                 "Bulk-loaded {} SST files directly to level {}", bulkLoadFiles.size(), targetLevel);
+    }
+
+    private long estimateBulkLoadSstEntries(
+            long remainingEntries, long loadedEntries, long loadedBytes, long firstEntrySize) {
+        long averageEntrySize =
+                loadedEntries == 0 ? firstEntrySize : divideRoundUp(loadedBytes, loadedEntries);
+        long estimatedEntries =
+                Math.max(1, divideRoundUp(maxSstFileSize, Math.max(1, averageEntrySize)));
+        // Leave headroom for entries smaller than the observed average. Underestimating is safe,
+        // but increases the actual Bloom filter false-positive probability.
+        long headroom = divideRoundUp(estimatedEntries, 4);
+        estimatedEntries =
+                Long.MAX_VALUE - estimatedEntries < headroom
+                        ? Long.MAX_VALUE
+                        : estimatedEntries + headroom;
+        return Math.min(remainingEntries, estimatedEntries);
+    }
+
+    private static long divideRoundUp(long dividend, long divisor) {
+        return dividend / divisor + (dividend % divisor == 0 ? 0 : 1);
     }
 
     private MemorySlice addBulkLoadSstFile(
@@ -560,7 +608,7 @@ public class LocalKvDb implements Closeable {
             throws IOException {
         File sstFile = newSstFile();
         SortLookupStoreWriter writer =
-                storeFactory.createWriter(sstFile, bloomFilterWriterSupplier.get());
+                storeFactory.createWriter(sstFile, bloomFilterWriterFactory.apply(data.size()));
         MemorySlice minKey = null;
         MemorySlice maxKey = null;
         long tombstoneCount = 0;
@@ -703,15 +751,19 @@ public class LocalKvDb implements Closeable {
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
                             keyComparator, cacheManager, blockSize, compressOptions);
-            Supplier<BloomFilterWriter> bloomFilterWriterSupplier =
+            LongFunction<BloomFilterWriter> bloomFilterWriterFactory =
                     bloomFilterEnabled
-                            ? () -> BloomFilterWriter.dynamic(bloomFilterFpp)
-                            : () -> null;
+                            ? expectedEntries ->
+                                    expectedEntries > 0
+                                            ? BloomFilterWriter.fixed(
+                                                    expectedEntries, bloomFilterFpp)
+                                            : BloomFilterWriter.dynamic(bloomFilterFpp)
+                            : expectedEntries -> null;
 
             return new LocalKvDb(
                     dataDirectory,
                     factory,
-                    bloomFilterWriterSupplier,
+                    bloomFilterWriterFactory,
                     keyComparator,
                     memTableFlushThreshold,
                     maxSstFileSize,

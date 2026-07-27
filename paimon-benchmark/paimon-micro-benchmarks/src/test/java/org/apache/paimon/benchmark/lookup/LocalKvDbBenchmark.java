@@ -83,7 +83,7 @@ public class LocalKvDbBenchmark {
                 () -> {
                     File directory = new File(tempDir.toFile(), "bulk-load-" + UUID.randomUUID());
                     try (LocalKvDb db = createDb(directory)) {
-                        db.bulkLoad(entries(RECORD_COUNT));
+                        db.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
                         byte[] result = db.get(key(RECORD_COUNT / 2 * 2));
                         if (result == null) {
                             throw new IllegalStateException("Expected lookup hit.");
@@ -106,7 +106,7 @@ public class LocalKvDbBenchmark {
         byte[][] missKeys = queryKeys(true);
 
         try (LocalKvDb db = createDb(directory)) {
-            db.bulkLoad(entries(RECORD_COUNT));
+            db.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
 
             Benchmark benchmark =
                     new Benchmark(
@@ -133,7 +133,7 @@ public class LocalKvDbBenchmark {
         try (LocalKvDb localDb = createDb(localDirectory);
                 RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
             long localLoadStart = System.nanoTime();
-            localDb.bulkLoad(entries(RECORD_COUNT));
+            localDb.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
             long localLoadNanos = System.nanoTime() - localLoadStart;
             long rocksLoadStart = System.nanoTime();
             rocksDb.bulkLoad(entries(RECORD_COUNT));
@@ -171,7 +171,7 @@ public class LocalKvDbBenchmark {
         byte[][] values = updateValues();
 
         try (LocalKvDb db = createDb(directory)) {
-            db.bulkLoad(entries(RECORD_COUNT));
+            db.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
 
             Benchmark benchmark =
                     new Benchmark(
@@ -196,7 +196,7 @@ public class LocalKvDbBenchmark {
 
         try (LocalKvDb localDb = createDb(localDirectory);
                 RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
-            localDb.bulkLoad(entries(RECORD_COUNT));
+            localDb.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
             rocksDb.bulkLoad(entries(RECORD_COUNT));
 
             Benchmark benchmark =

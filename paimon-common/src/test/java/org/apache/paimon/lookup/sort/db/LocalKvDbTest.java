@@ -51,7 +51,15 @@ public class LocalKvDbTest {
     }
 
     private LocalKvDb createDb() {
-        return LocalKvDb.builder(dataDirectory)
+        return createDb(dataDirectory);
+    }
+
+    private LocalKvDb createDb(String directory) {
+        return createDb(new File(tempDir.toFile(), directory));
+    }
+
+    private LocalKvDb createDb(File directory) {
+        return LocalKvDb.builder(directory)
                 .memTableFlushThreshold(1024)
                 .blockSize(256)
                 .level0FileNumCompactTrigger(4)
@@ -1387,7 +1395,7 @@ public class LocalKvDbTest {
                                 key.getBytes(UTF_8), value.getBytes(UTF_8)));
             }
 
-            db.bulkLoad(entries.iterator());
+            db.bulkLoad(entries.iterator(), entries.size());
 
             // All data at deepest level, no L0 files
             Assertions.assertEquals(0, db.getLevelFileCount(0));
@@ -1424,7 +1432,7 @@ public class LocalKvDbTest {
                                 key.getBytes(UTF_8), value.getBytes(UTF_8)));
             }
 
-            db.bulkLoad(entries.iterator());
+            db.bulkLoad(entries.iterator(), entries.size());
 
             // Multiple SST files should be created at the deepest level
             int deepestLevelFiles = db.getLevelFileCount(LocalKvDb.MAX_LEVELS - 1);
@@ -1449,10 +1457,33 @@ public class LocalKvDbTest {
     public void testBulkLoadEmptyIterator() throws IOException {
         try (LocalKvDb db = createDb()) {
             List<Map.Entry<byte[], byte[]>> empty = new ArrayList<>();
-            db.bulkLoad(empty.iterator());
+            db.bulkLoad(empty.iterator(), empty.size());
 
             Assertions.assertEquals(0, db.getSstFileCount());
             Assertions.assertNull(getString(db, "any-key"));
+        }
+    }
+
+    @Test
+    public void testBulkLoadValidatesEntryCount() throws IOException {
+        List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+        entries.add(entry("key-00001", "value-1"));
+        entries.add(entry("key-00002", "value-2"));
+
+        try (LocalKvDb db = createDb("bulk-load-low-entry-count")) {
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size() - 1));
+            Assertions.assertTrue(exception.getMessage().contains("more entries"));
+        }
+
+        try (LocalKvDb db = createDb("bulk-load-high-entry-count")) {
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size() + 1));
+            Assertions.assertTrue(exception.getMessage().contains("numEntries"));
         }
     }
 
@@ -1473,7 +1504,8 @@ public class LocalKvDbTest {
 
             IllegalArgumentException exception =
                     Assertions.assertThrows(
-                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+                            IllegalArgumentException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size()));
             Assertions.assertTrue(exception.getMessage().contains("sorted"));
             Assertions.assertEquals(0, db.getSstFileCount());
         }
@@ -1498,7 +1530,8 @@ public class LocalKvDbTest {
 
             IllegalArgumentException exception =
                     Assertions.assertThrows(
-                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+                            IllegalArgumentException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size()));
             Assertions.assertTrue(exception.getMessage().contains("ranges"));
             Assertions.assertEquals(0, db.getSstFileCount());
         } finally {
@@ -1530,7 +1563,8 @@ public class LocalKvDbTest {
 
             IllegalArgumentException exception =
                     Assertions.assertThrows(
-                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+                            IllegalArgumentException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size()));
             Assertions.assertTrue(exception.getMessage().contains("comparator"));
         }
     }
@@ -1547,7 +1581,7 @@ public class LocalKvDbTest {
                         new AbstractMap.SimpleImmutableEntry<>(
                                 key.getBytes(UTF_8), value.getBytes(UTF_8)));
             }
-            db.bulkLoad(entries.iterator());
+            db.bulkLoad(entries.iterator(), entries.size());
 
             // Now use normal put to add/overwrite data
             putString(db, "key-00000", "overwritten");
@@ -1621,7 +1655,8 @@ public class LocalKvDbTest {
                             "key".getBytes(UTF_8), "value".getBytes(UTF_8)));
 
             Assertions.assertThrows(
-                    IllegalStateException.class, () -> db.bulkLoad(entries.iterator()));
+                    IllegalStateException.class,
+                    () -> db.bulkLoad(entries.iterator(), entries.size()));
         }
     }
 

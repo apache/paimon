@@ -132,6 +132,7 @@ public class ClusteringKeyIndex implements Closeable {
             keyFieldGetters[i] = InternalRow.createFieldGetter(keyType.getTypeAt(i), i);
         }
         try {
+            long numEntries = 0;
             for (DataFileMeta file : restoreFiles) {
                 if (file.level() == 0) {
                     continue;
@@ -155,6 +156,7 @@ public class ClusteringKeyIndex implements Closeable {
                             }
                             combinedRow.setField(valueFieldIndex, valueBytes);
                             sortBuffer.write(combinedRow);
+                            numEntries++;
                         }
                         batch.releaseBatch();
                     }
@@ -199,7 +201,7 @@ public class ClusteringKeyIndex implements Closeable {
                         }
                     };
 
-            kvDb.bulkLoad(entryIterator);
+            kvDb.bulkLoad(entryIterator, numEntries);
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {

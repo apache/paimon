@@ -39,8 +39,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.function.Supplier;
+import java.util.function.LongFunction;
 
+import static org.apache.paimon.lookup.sort.db.LocalKvDb.UNKNOWN_NUM_ENTRIES;
 import static org.apache.paimon.lookup.sort.db.LocalKvDb.isTombstone;
 
 /**
@@ -71,7 +72,7 @@ public class LsmCompactor {
 
     private final Comparator<MemorySlice> keyComparator;
     private final SortLookupStoreFactory storeFactory;
-    private final Supplier<BloomFilterWriter> bloomFilterWriterSupplier;
+    private final LongFunction<BloomFilterWriter> bloomFilterWriterFactory;
     private final long maxOutputFileSize;
     private final int level0FileNumCompactTrigger;
     private final int sizeRatioPercent;
@@ -80,14 +81,14 @@ public class LsmCompactor {
     public LsmCompactor(
             Comparator<MemorySlice> keyComparator,
             SortLookupStoreFactory storeFactory,
-            Supplier<BloomFilterWriter> bloomFilterWriterSupplier,
+            LongFunction<BloomFilterWriter> bloomFilterWriterFactory,
             long maxOutputFileSize,
             int level0FileNumCompactTrigger,
             int sizeRatioPercent,
             FileDeleter fileDeleter) {
         this.keyComparator = keyComparator;
         this.storeFactory = storeFactory;
-        this.bloomFilterWriterSupplier = bloomFilterWriterSupplier;
+        this.bloomFilterWriterFactory = bloomFilterWriterFactory;
         this.maxOutputFileSize = maxOutputFileSize;
         this.level0FileNumCompactTrigger = level0FileNumCompactTrigger;
         this.sizeRatioPercent = sizeRatioPercent;
@@ -525,7 +526,8 @@ public class LsmCompactor {
                     currentSstFile = fileSupplier.newSstFile();
                     currentWriter =
                             storeFactory.createWriter(
-                                    currentSstFile, bloomFilterWriterSupplier.get());
+                                    currentSstFile,
+                                    bloomFilterWriterFactory.apply(UNKNOWN_NUM_ENTRIES));
                     currentFileMinKey = entry.key;
                     currentBatchSize = 0;
                     currentTombstoneCount = 0;
