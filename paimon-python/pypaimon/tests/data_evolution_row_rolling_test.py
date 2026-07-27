@@ -104,9 +104,8 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([50], [f.row_count for f in files])
 
     def test_oversized_row_rolls_by_itself(self):
-        # Each row exceeds target-file-size, so the size trigger rolls every row
-        # by itself even though target-file-row-num is larger (an oversized first
-        # row must not be bundled with the rows that follow).
+        # Each row exceeds target-file-size: the size trigger rolls every row by
+        # itself even though target-file-row-num is larger.
         table = self._create({
             **self.de_options,
             'target-file-row-num': '3',
