@@ -2788,7 +2788,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent threads for global index I/O.");
+                            "The maximum number of concurrent threads for global index I/O. "
+                                    + "Must be greater than 0.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
