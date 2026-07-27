@@ -46,12 +46,18 @@ def _null_safe_partition_key(partition_values) -> tuple:
 
 
 @dataclass
-class _LiveRowRange:
-    """A physical half-open range containing ``live_rows`` visible rows."""
+class _PhysicalRowSlice:
+    """A half-open physical row slice containing visible rows."""
 
-    start: int
-    end: int
-    live_rows: int
+    start_inclusive: int
+    end_exclusive: int
+    live_row_count: int
+
+    def to_closed_row_id_range(self, first_row_id: int) -> Range:
+        return Range(
+            first_row_id + self.start_inclusive,
+            first_row_id + self.end_exclusive - 1,
+        )
 
 
 class _LiveRowRangeSlicer:
@@ -77,7 +83,7 @@ class _LiveRowRangeSlicer:
         self._last_deleted_position = None
         self._next_deleted_position = self._advance_deleted_position()
 
-    def take(self, expected_live_rows: int) -> Optional[_LiveRowRange]:
+    def take(self, expected_live_rows: int) -> Optional[_PhysicalRowSlice]:
         if expected_live_rows <= 0:
             raise ValueError(
                 f"expected_live_rows must be positive, got {expected_live_rows}"
@@ -111,7 +117,7 @@ class _LiveRowRangeSlicer:
                 # immediately after the boundary to this range so the next
                 # range starts at a live row (or EOF).
                 self._skip_deleted_positions_at_cursor()
-                return _LiveRowRange(
+                return _PhysicalRowSlice(
                     start,
                     self._physical_position,
                     live_rows,
@@ -123,7 +129,7 @@ class _LiveRowRangeSlicer:
 
         if live_rows == 0:
             return None
-        return _LiveRowRange(start, self._physical_position, live_rows)
+        return _PhysicalRowSlice(start, self._physical_position, live_rows)
 
     def _skip_deleted_positions_at_cursor(self) -> None:
         while (
@@ -201,6 +207,8 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
         self._deletion_vector_cache = {}
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
+        """TODO: Lazily initialize DataSplits to avoid creating too many objects."""
+
         if not file_entries:
             return []
 
@@ -375,18 +383,25 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                     current_rows = 0
                     avail = self.chunk_size
 
-                live_range = slicer.take(avail)
-                if live_range is None:
+                physical_slice = slicer.take(avail)
+                if physical_slice is None:
                     break
 
-                if live_range.start == 0 and live_range.end == file.row_count:
+                if (
+                    physical_slice.start_inclusive == 0
+                    and physical_slice.end_exclusive == file.row_count
+                ):
                     current.append(_FileSegment(file, None, None))
                 else:
                     current.append(
-                        _FileSegment(file, live_range.start, live_range.end)
+                        _FileSegment(
+                            file,
+                            physical_slice.start_inclusive,
+                            physical_slice.end_exclusive,
+                        )
                     )
 
-                current_rows += live_range.live_rows
+                current_rows += physical_slice.live_row_count
 
         if current:
             chunks.append(current)
@@ -522,15 +537,12 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                     current_rows = 0
                     avail = self.chunk_size
 
-                live_range = slicer.take(avail)
-                if live_range is None:
+                physical_slice = slicer.take(avail)
+                if physical_slice is None:
                     break
-                seg_range = Range(
-                    first_row_id + live_range.start,
-                    first_row_id + live_range.end - 1,
-                )
+                seg_range = physical_slice.to_closed_row_id_range(first_row_id)
                 current.append(_AlignedGroupSegment(group_files, seg_range))
-                current_rows += live_range.live_rows
+                current_rows += physical_slice.live_row_count
 
         if current:
             chunks.append(current)

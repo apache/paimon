@@ -166,14 +166,36 @@ class LiveRowRangeSlicerTest(unittest.TestCase):
         first = slicer.take(3)
         second = slicer.take(3)
 
-        self.assertEqual((first.start, first.end, first.live_rows), (0, 6, 3))
-        self.assertEqual((second.start, second.end, second.live_rows), (6, 10, 3))
+        self.assertEqual(
+            (
+                first.start_inclusive,
+                first.end_exclusive,
+                first.live_row_count,
+            ),
+            (0, 6, 3),
+        )
+        self.assertEqual(
+            (
+                second.start_inclusive,
+                second.end_exclusive,
+                second.live_row_count,
+            ),
+            (6, 10, 3),
+        )
+        self.assertEqual(first.to_closed_row_id_range(100), Range(100, 105))
         self.assertIsNone(slicer.take(3))
 
     def test_returns_smaller_tail_and_skips_fully_deleted_source(self):
         tail_slicer = _LiveRowRangeSlicer(6, iter([1, 4]))
         tail = tail_slicer.take(10)
-        self.assertEqual((tail.start, tail.end, tail.live_rows), (0, 6, 4))
+        self.assertEqual(
+            (
+                tail.start_inclusive,
+                tail.end_exclusive,
+                tail.live_row_count,
+            ),
+            (0, 6, 4),
+        )
         self.assertIsNone(tail_slicer.take(1))
 
         deleted_slicer = _LiveRowRangeSlicer(3, iter([0, 1, 2]))
@@ -276,6 +298,63 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
                 [deletion_file],
             )
         read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_two_deletion_vector_files_share_one_live_row_chunk(self):
+        # Each file contributes 5 - 2 = 3 live rows, so both should fit
+        # exactly in one six-row chunk.
+        entries = [
+            _mock_entry([], 0, 'f1', 5),
+            _mock_entry([], 0, 'f2', 5),
+        ]
+        first_deletion_file = DeletionFile(
+            'dv.index',
+            10,
+            20,
+            cardinality=2,
+        )
+        second_deletion_file = DeletionFile(
+            'dv.index',
+            30,
+            20,
+            cardinality=2,
+        )
+        deletion_files_map = {
+            ((), 0): {
+                'f1': first_deletion_file,
+                'f2': second_deletion_file,
+            }
+        }
+        deletion_vectors = {
+            first_deletion_file: _bitmap_deletion_vector(1, 3),
+            second_deletion_file: _bitmap_deletion_vector(0, 4),
+        }
+        gen = _make_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
+        ) as read:
+            splits = gen.create_splits(entries)
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], DataSplit)
+        self.assertEqual(
+            [file.file_name for file in splits[0].files],
+            ['f1', 'f2'],
+        )
+        self.assertEqual(
+            splits[0].data_deletion_files,
+            [first_deletion_file, second_deletion_file],
+        )
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(
+            {mock_call.args[1] for mock_call in read.call_args_list},
+            {first_deletion_file, second_deletion_file},
+        )
 
     def test_planning_cache_reuses_same_deletion_vector_descriptor(self):
         entries = [
@@ -783,6 +862,70 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             self.assertEqual(deletion_by_name['anchor.parquet'], deletion_file)
             self.assertIsNone(deletion_by_name['field.blob'])
         read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_multiple_deletion_vector_groups_share_one_live_row_chunk(self):
+        # The groups contribute 3 live rows each despite spanning 5 and 6
+        # physical rows, so both should become segments of the same chunk.
+        entries = [
+            _mock_de_entry([], 0, 'g0.parquet', 100, 5),
+            _mock_de_entry([], 0, 'g1.parquet', 200, 6),
+        ]
+        first_deletion_file = DeletionFile(
+            'dv.index',
+            10,
+            20,
+            cardinality=2,
+        )
+        second_deletion_file = DeletionFile(
+            'dv.index',
+            30,
+            20,
+            cardinality=3,
+        )
+        deletion_files_map = {
+            ((), 0): {
+                'g0.parquet': first_deletion_file,
+                'g1.parquet': second_deletion_file,
+            }
+        }
+        deletion_vectors = {
+            first_deletion_file: _bitmap_deletion_vector(1, 3),
+            second_deletion_file: _bitmap_deletion_vector(0, 2, 5),
+        }
+        gen = _make_de_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
+        ) as read:
+            splits = gen.create_splits(entries)
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(
+            [
+                (row_range.from_, row_range.to)
+                for row_range in splits[0].row_ranges()
+            ],
+            [(100, 104), (200, 205)],
+        )
+        self.assertEqual(
+            [file.file_name for file in splits[0].files],
+            ['g0.parquet', 'g1.parquet'],
+        )
+        self.assertEqual(
+            splits[0].data_deletion_files,
+            [first_deletion_file, second_deletion_file],
+        )
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(
+            {mock_call.args[1] for mock_call in read.call_args_list},
+            {first_deletion_file, second_deletion_file},
+        )
 
     def test_deterministic_same_seed(self):
         entries = [_mock_de_entry([], 0, f'g{i:02d}.parquet', i * 100, 100) for i in range(20)]
