@@ -30,33 +30,37 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-/** Writer for collecting key hashes and writing an SST Bloom filter. */
-public interface BloomFilterWriter {
-
-    static BloomFilterWriter fixed(long expectedEntries, double falsePositiveProbability) {
-        return new FixedBloomFilterWriter(expectedEntries, falsePositiveProbability);
-    }
-
-    static BloomFilterWriter dynamic(double falsePositiveProbability) {
-        return new DynamicBloomFilterWriter(falsePositiveProbability);
-    }
-
-    void addHash(int hash);
-
-    @Nullable
-    BloomFilterHandle write(PositionOutputStream out) throws IOException;
-}
-
-/** Shared Bloom filter serialization. */
-final class BloomFilterWriterUtils {
+/** Writes a built Bloom filter to an SST file. */
+public final class BloomFilterWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(BloomFilterWriter.class);
 
-    private BloomFilterWriterUtils() {}
+    private final BloomFilter.Builder builder;
 
-    static BloomFilterHandle write(PositionOutputStream out, BloomFilter.Builder bloomFilter)
-            throws IOException {
-        MemorySegment buffer = bloomFilter.getBuffer();
+    private BloomFilterWriter(BloomFilter.Builder builder) {
+        this.builder = builder;
+    }
+
+    public static BloomFilterWriter fixed(long expectedEntries, double falsePositiveProbability) {
+        return new BloomFilterWriter(
+                BloomFilter.fixedBuilder(expectedEntries, falsePositiveProbability));
+    }
+
+    public static BloomFilterWriter dynamic(double falsePositiveProbability) {
+        return new BloomFilterWriter(BloomFilter.dynamicBuilder(falsePositiveProbability));
+    }
+
+    public void addHash(int hash) {
+        builder.addHash(hash);
+    }
+
+    @Nullable
+    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
+        BloomFilter bloomFilter = builder.build();
+        if (bloomFilter == null) {
+            return null;
+        }
+        MemorySegment buffer = bloomFilter.getMemorySegment();
         BloomFilterHandle handle =
                 new BloomFilterHandle(out.getPos(), buffer.size(), bloomFilter.expectedEntries());
         MemorySlice slice = MemorySlice.wrap(buffer);

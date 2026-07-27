@@ -44,9 +44,10 @@ public class FileBasedBloomFilterTest {
     @Test
     public void testProbe() throws IOException {
         MemorySegment segment = MemorySegment.wrap(new byte[1000]);
-        BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
+        BloomFilter bloomFilter = new BloomFilter(100, segment.size());
+        bloomFilter.setMemorySegment(segment, 0);
         int[] inputs = CommonTestUtils.generateRandomInts(100);
-        Arrays.stream(inputs).forEach(i -> builder.addHash(Integer.hashCode(i)));
+        Arrays.stream(inputs).forEach(i -> bloomFilter.addHash(Integer.hashCode(i)));
         org.apache.paimon.fs.Path filePath =
                 new org.apache.paimon.fs.Path(writeFile(segment.getArray()).getAbsolutePath());
         FileIO fileIO = LocalFileIO.create();

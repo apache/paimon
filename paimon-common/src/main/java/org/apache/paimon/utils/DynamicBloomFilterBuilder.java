@@ -16,29 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.sst;
-
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.utils.BloomFilter;
+package org.apache.paimon.utils;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Bloom filter writer which sizes the filter from the actual number of entries. */
-final class DynamicBloomFilterWriter implements BloomFilterWriter {
+/** Bloom filter builder sized from the actual number of entries. */
+final class DynamicBloomFilterBuilder implements BloomFilter.Builder {
 
     private static final int INITIAL_HASH_CAPACITY = 1024;
 
     private final double falsePositiveProbability;
 
     @Nullable private int[] hashes;
+    @Nullable private BloomFilter bloomFilter;
     private int hashCount;
 
-    DynamicBloomFilterWriter(double falsePositiveProbability) {
+    DynamicBloomFilterBuilder(double falsePositiveProbability) {
         checkArgument(
                 falsePositiveProbability > 0 && falsePositiveProbability < 1,
                 "Bloom filter false positive probability must be between 0 and 1.");
@@ -57,17 +54,23 @@ final class DynamicBloomFilterWriter implements BloomFilterWriter {
         hashes[hashCount++] = hash;
     }
 
+    @Nullable
     @Override
-    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
-        if (hashes == null || hashCount == 0) {
+    public BloomFilter build() {
+        if (bloomFilter != null || hashes == null) {
+            return bloomFilter;
+        }
+        if (hashCount == 0) {
+            hashes = null;
             return null;
         }
 
-        BloomFilter.Builder bloomFilter = BloomFilter.builder(hashCount, falsePositiveProbability);
+        BloomFilter.Builder builder = BloomFilter.fixedBuilder(hashCount, falsePositiveProbability);
         for (int i = 0; i < hashCount; i++) {
-            bloomFilter.addHash(hashes[i]);
+            builder.addHash(hashes[i]);
         }
         hashes = null;
-        return BloomFilterWriterUtils.write(out, bloomFilter);
+        bloomFilter = builder.build();
+        return bloomFilter;
     }
 }
