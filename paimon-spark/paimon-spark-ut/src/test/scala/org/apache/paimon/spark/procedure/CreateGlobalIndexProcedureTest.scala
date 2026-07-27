@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.data.BinaryString
-import org.apache.paimon.globalindex.{GlobalIndexScanner, KeySerializer, ReversedKeySerializer, SortedIndexFileMeta}
+import org.apache.paimon.globalindex.{DataEvolutionGlobalIndexScanner, KeySerializer, ReversedKeySerializer, SortedIndexFileMeta}
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.memory.MemorySlice
 import org.apache.paimon.predicate.PredicateBuilder
@@ -346,7 +346,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       val nameIdx = table.rowType().getFieldIndex("name")
       val predicateBuilder = new PredicateBuilder(table.rowType())
       val scannerOpt =
-        GlobalIndexScanner.create(
+        DataEvolutionGlobalIndexScanner.create(
           table,
           new java.util.HashSet[IndexFileMeta](reverseEntries.asJava))
       assert(scannerOpt.isPresent)
