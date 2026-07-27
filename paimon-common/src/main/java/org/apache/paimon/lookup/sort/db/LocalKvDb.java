@@ -114,7 +114,7 @@ public class LocalKvDb implements Closeable {
     private final long memTableFlushThreshold;
     private final long maxSstFileSize;
     private final LsmLevels levels;
-    private final LsmCompactionCoordinator compaction;
+    private final LsmCompactor compaction;
 
     /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
     private TreeMap<MemorySlice, byte[]> memTable;
@@ -152,9 +152,9 @@ public class LocalKvDb implements Closeable {
         this.readerCache = new HashMap<>();
         this.fileSequence = new AtomicLong();
         this.closed = false;
-        LsmCompactionCoordinator.CompactorFactory compactorFactory =
+        LsmCompactor.CompactorFactory compactorFactory =
                 fileDeleter ->
-                        new LsmCompactor(
+                        new UniversalCompactor(
                                 keyComparator,
                                 storeFactory,
                                 bloomFilterBuilderFactory,
@@ -704,6 +704,7 @@ public class LocalKvDb implements Closeable {
 
         /** Set the level 0 file number that triggers compaction. Default is 4. */
         public Builder level0FileNumCompactTrigger(int fileNum) {
+            checkArgument(fileNum > 0, "level0FileNumCompactTrigger must be positive.");
             this.level0FileNumCompactTrigger = fileNum;
             return this;
         }

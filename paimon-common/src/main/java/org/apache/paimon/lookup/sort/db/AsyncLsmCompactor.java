@@ -28,7 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /** Coordinates asynchronous compaction, failure propagation, backpressure, and shutdown. */
-class AsyncLsmCompactor extends LsmCompactionCoordinator {
+class AsyncLsmCompactor extends LsmCompactor {
 
     private final ExecutorService executor;
 
@@ -38,8 +38,8 @@ class AsyncLsmCompactor extends LsmCompactionCoordinator {
             LsmLevels levels,
             CompactorFactory compactorFactory,
             int levelZeroFileCountTrigger,
-            LsmCompactor.FileSupplier fileSupplier,
-            LsmCompactor.FileDeleter fileDeleter,
+            UniversalCompactor.FileSupplier fileSupplier,
+            UniversalCompactor.FileDeleter fileDeleter,
             ExecutorService executor) {
         super(levels, compactorFactory, levelZeroFileCountTrigger, fileSupplier, fileDeleter);
         this.executor = executor;

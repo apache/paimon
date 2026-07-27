@@ -1502,6 +1502,16 @@ public class LocalKvDbTest {
     }
 
     @Test
+    public void testLevel0FileNumCompactTriggerValidation() {
+        LocalKvDb.Builder builder =
+                LocalKvDb.builder(new File(tempDir.toFile(), "invalid-compact-trigger-db"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> builder.level0FileNumCompactTrigger(0));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> builder.level0FileNumCompactTrigger(-1));
+    }
+
+    @Test
     public void testBulkLoadFailsOnUnsortedEntries() throws IOException {
         try (LocalKvDb db = createDb()) {
             List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();

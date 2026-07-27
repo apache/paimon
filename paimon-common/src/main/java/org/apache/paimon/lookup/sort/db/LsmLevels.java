@@ -136,7 +136,7 @@ class LsmLevels {
             List<List<SstFileMetadata>> originalLevels,
             List<List<SstFileMetadata>> compactedLevels,
             List<File> compactedFiles,
-            LsmCompactor.FileDeleter fileDeleter)
+            UniversalCompactor.FileDeleter fileDeleter)
             throws IOException {
         Set<File> originalFiles = filesInLevels(originalLevels);
 

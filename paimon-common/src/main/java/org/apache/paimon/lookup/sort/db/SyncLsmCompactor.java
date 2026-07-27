@@ -21,14 +21,14 @@ package org.apache.paimon.lookup.sort.db;
 import java.io.IOException;
 
 /** Runs compaction synchronously in the thread which flushes the MemTable. */
-class SyncLsmCompactor extends LsmCompactionCoordinator {
+class SyncLsmCompactor extends LsmCompactor {
 
     SyncLsmCompactor(
             LsmLevels levels,
             CompactorFactory compactorFactory,
             int levelZeroFileCountTrigger,
-            LsmCompactor.FileSupplier fileSupplier,
-            LsmCompactor.FileDeleter fileDeleter) {
+            UniversalCompactor.FileSupplier fileSupplier,
+            UniversalCompactor.FileDeleter fileDeleter) {
         super(levels, compactorFactory, levelZeroFileCountTrigger, fileSupplier, fileDeleter);
     }
 
