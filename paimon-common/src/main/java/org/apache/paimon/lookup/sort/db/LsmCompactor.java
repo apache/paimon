@@ -55,8 +55,6 @@ abstract class LsmCompactor {
 
     abstract void await() throws IOException;
 
-    abstract void close() throws IOException;
-
     final void fullCompact() throws IOException {
         checkFailure();
         await();

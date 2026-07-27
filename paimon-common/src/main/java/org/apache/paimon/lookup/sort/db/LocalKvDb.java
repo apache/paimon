@@ -27,7 +27,6 @@ import org.apache.paimon.lookup.sort.SortLookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
-import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,12 +45,10 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A simple LSM-Tree based KV database built on top of {@link SortLookupStoreFactory}.
@@ -67,11 +64,11 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *     └──────────────────────────────────────────────┘
  * </pre>
  *
- * <p>By default, compaction is scheduled on a background thread when the number of sorted runs
- * exceeds a threshold. It can also run synchronously during flush as a fallback. Runs are selected
- * for merging based on size ratios between adjacent runs, following RocksDB's Universal Compaction
- * strategy. MemTable flushes remain synchronous; asynchronous writes wait for background compaction
- * only when too many Level-0 files accumulate.
+ * <p>By default, compaction runs synchronously when the number of sorted runs exceeds a threshold.
+ * When a compaction executor is configured, compaction is scheduled on that executor. Runs are
+ * selected for merging based on size ratios between adjacent runs, following RocksDB's Universal
+ * Compaction strategy. MemTable flushes remain synchronous; asynchronous writes wait for background
+ * compaction only when too many Level-0 files accumulate.
  *
  * <p>Note: No WAL is implemented. Data in the MemTable will be lost on crash.
  *
@@ -137,7 +134,6 @@ public class LocalKvDb implements Closeable {
             long maxSstFileSize,
             int level0FileNumCompactTrigger,
             int sizeRatio,
-            boolean asyncCompact,
             @Nullable ExecutorService compactionExecutor) {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -163,20 +159,20 @@ public class LocalKvDb implements Closeable {
                                 sizeRatio,
                                 fileDeleter);
         this.compaction =
-                asyncCompact
-                        ? new AsyncLsmCompactor(
+                compactionExecutor == null
+                        ? new SyncLsmCompactor(
+                                levels,
+                                compactorFactory,
+                                level0FileNumCompactTrigger,
+                                this::newSstFile,
+                                this::closeAndDeleteSstFile)
+                        : new AsyncLsmCompactor(
                                 levels,
                                 compactorFactory,
                                 level0FileNumCompactTrigger,
                                 this::newSstFile,
                                 this::closeAndDeleteSstFile,
-                                checkNotNull(compactionExecutor))
-                        : new SyncLsmCompactor(
-                                levels,
-                                compactorFactory,
-                                level0FileNumCompactTrigger,
-                                this::newSstFile,
-                                this::closeAndDeleteSstFile);
+                                compactionExecutor);
     }
 
     /** Close the cached reader for the given SST file (if any) and delete the file from disk. */
@@ -526,12 +522,6 @@ public class LocalKvDb implements Closeable {
         } catch (IOException e) {
             failure = addOrSuppress(failure, e);
         } finally {
-            try {
-                compaction.close();
-            } catch (IOException e) {
-                failure = addOrSuppress(failure, e);
-            }
-
             levels.runWithWriteLock(
                     () -> {
                         for (SortLookupStoreReader reader : readerCache.values()) {
@@ -671,7 +661,6 @@ public class LocalKvDb implements Closeable {
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
         private boolean bloomFilterEnabled = true;
         private double bloomFilterFpp = 0.1;
-        private boolean asyncCompact = true;
         @Nullable private ExecutorService compactionExecutor;
 
         Builder(File dataDirectory) {
@@ -740,14 +729,12 @@ public class LocalKvDb implements Closeable {
             return this;
         }
 
-        /** Enable or disable asynchronous compaction. Enabled by default. */
-        public Builder asyncCompact(boolean asyncCompact) {
-            this.asyncCompact = asyncCompact;
-            return this;
-        }
-
-        @VisibleForTesting
-        Builder compactionExecutor(ExecutorService compactionExecutor) {
+        /**
+         * Set the executor for asynchronous compaction. Compaction runs synchronously when no
+         * executor is configured. The executor remains owned by the caller and is not shut down
+         * when the database is closed.
+         */
+        public Builder compactionExecutor(@Nullable ExecutorService compactionExecutor) {
             this.compactionExecutor = compactionExecutor;
             return this;
         }
@@ -787,15 +774,6 @@ public class LocalKvDb implements Closeable {
                                                     expectedEntries, bloomFilterFpp)
                                             : BloomFilter.dynamicBuilder(bloomFilterFpp)
                             : expectedEntries -> null;
-            ExecutorService executor = null;
-            if (asyncCompact) {
-                executor =
-                        compactionExecutor == null
-                                ? Executors.newSingleThreadExecutor(
-                                        new ExecutorThreadFactory("local-kv-db-compaction"))
-                                : compactionExecutor;
-            }
-
             return new LocalKvDb(
                     dataDirectory,
                     factory,
@@ -805,8 +783,7 @@ public class LocalKvDb implements Closeable {
                     maxSstFileSize,
                     level0FileNumCompactTrigger,
                     sizeRatio,
-                    asyncCompact,
-                    executor);
+                    compactionExecutor);
         }
     }
 

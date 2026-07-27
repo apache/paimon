@@ -45,7 +45,4 @@ class SyncLsmCompactor extends LsmCompactor {
 
     @Override
     void await() {}
-
-    @Override
-    void close() {}
 }

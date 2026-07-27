@@ -64,24 +64,20 @@ public class LocalKvDbAsyncCompactionTest {
     }
 
     @Test
-    void testAutomaticCompactionRunsSynchronouslyWhenDisabled() throws Exception {
-        ManuallyTriggeredExecutor unusedExecutor = new ManuallyTriggeredExecutor();
-        try (LocalKvDb db = createSyncDb("synchronous", unusedExecutor)) {
+    void testAutomaticCompactionRunsSynchronouslyByDefault() throws Exception {
+        try (LocalKvDb db = createSyncDb("synchronous")) {
             putAndFlush(db, "shared", "v1");
             putAndFlush(db, "shared", "v2");
             putAndFlush(db, "shared", "v3");
 
-            assertThat(unusedExecutor.numQueuedTasks()).isZero();
             assertThat(db.getLevelFileCount(0)).isZero();
             assertThat(get(db, "shared")).isEqualTo("v3");
         }
-        assertThat(unusedExecutor.isShutdown()).isFalse();
     }
 
     @Test
     void testSynchronousCompactionFailureIsPropagatedByFlush() throws Exception {
-        ManuallyTriggeredExecutor unusedExecutor = new ManuallyTriggeredExecutor();
-        LocalKvDb db = createSyncDb("synchronous-failure", unusedExecutor);
+        LocalKvDb db = createSyncDb("synchronous-failure");
         putAndFlush(db, "shared", "v1");
         putAndFlush(db, "shared", "v2");
 
@@ -91,7 +87,6 @@ public class LocalKvDbAsyncCompactionTest {
 
         assertThatThrownBy(() -> putAndFlush(db, "shared", "v3")).isInstanceOf(IOException.class);
         assertThatThrownBy(db::close).isInstanceOf(IOException.class);
-        assertThat(unusedExecutor.isShutdown()).isFalse();
     }
 
     @Test
@@ -118,7 +113,7 @@ public class LocalKvDbAsyncCompactionTest {
             compactionExecutor.runNext();
             closeFuture.get(10, TimeUnit.SECONDS);
 
-            assertThat(compactionExecutor.isShutdown()).isTrue();
+            assertThat(compactionExecutor.isShutdown()).isFalse();
         } finally {
             closeExecutor.shutdownNow();
             if (!closeFuture.isDone()) {
@@ -144,7 +139,7 @@ public class LocalKvDbAsyncCompactionTest {
 
         assertThatThrownBy(db::awaitCompaction).isInstanceOf(IOException.class);
         assertThatThrownBy(db::close).isInstanceOf(IOException.class);
-        assertThat(compactionExecutor.isShutdown()).isTrue();
+        assertThat(compactionExecutor.isShutdown()).isFalse();
     }
 
     @Test
@@ -194,14 +189,12 @@ public class LocalKvDbAsyncCompactionTest {
                 .build();
     }
 
-    private LocalKvDb createSyncDb(String name, ExecutorService unusedExecutor) {
+    private LocalKvDb createSyncDb(String name) {
         return LocalKvDb.builder(new File(tempDir.toFile(), name))
                 .memTableFlushThreshold(1024 * 1024)
                 .blockSize(256)
                 .level0FileNumCompactTrigger(3)
                 .compressOptions(new CompressOptions("none", 1))
-                .asyncCompact(false)
-                .compactionExecutor(unusedExecutor)
                 .build();
     }
 

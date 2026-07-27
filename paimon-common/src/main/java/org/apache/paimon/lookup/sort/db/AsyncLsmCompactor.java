@@ -25,9 +25,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
-/** Coordinates asynchronous compaction, failure propagation, backpressure, and shutdown. */
+/** Coordinates asynchronous compaction, failure propagation, and backpressure. */
 class AsyncLsmCompactor extends LsmCompactor {
 
     private final ExecutorService executor;
@@ -88,20 +87,6 @@ class AsyncLsmCompactor extends LsmCompactor {
         }
         awaitFuture(future);
         clearFuture(future);
-    }
-
-    @Override
-    void close() throws IOException {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            executor.shutdownNow();
-            throw new IOException("Interrupted while closing.", e);
-        }
     }
 
     private void clearFuture(Future<?> future) {

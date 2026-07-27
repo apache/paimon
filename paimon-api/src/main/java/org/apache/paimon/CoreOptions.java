@@ -2454,14 +2454,6 @@ public class CoreOptions implements Serializable {
                                     + "producing files that are internally ordered. "
                                     + "'local-sort' is cheaper and sufficient for Parquet lookup optimizations.");
 
-    public static final ConfigOption<Boolean> LOCAL_KV_DB_ASYNC_COMPACT =
-            key("local-kv-db.async-compact")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Whether to compact the local key-value database asynchronously. "
-                                    + "If disabled, compaction runs synchronously during flush.");
-
     public static final ConfigOption<MemorySize> LOCAL_KV_DB_BLOCK_SIZE =
             key("local-kv-db.block-size")
                     .memoryType()
@@ -2978,10 +2970,6 @@ public class CoreOptions implements Serializable {
 
     public boolean pkClusteringOverride() {
         return options.get(PK_CLUSTERING_OVERRIDE);
-    }
-
-    public boolean localKvDbAsyncCompact() {
-        return options.get(LOCAL_KV_DB_ASYNC_COMPACT);
     }
 
     public int localKvDbBlockSize() {
