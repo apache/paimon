@@ -1386,7 +1386,9 @@ class DataEvolutionSplitRead(SplitRead):
                 fields_files.append(DataBunch(file))
                 row_count = file.row_count
 
-        fields_files.extend(blob_bunch_map.values())
+        for bunch in blob_bunch_map.values():
+            bunch.finish()
+            fields_files.append(bunch)
         fields_files.extend(vector_bunch_map.values())
         return fields_files
 
