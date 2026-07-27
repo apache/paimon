@@ -18,15 +18,18 @@
 
 package org.apache.paimon.sst;
 
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.BloomFilter;
 
-/** Bloom filter writer backed by a pre-sized builder. */
-final class PreSizedBloomFilterWriter implements BloomFilterWriter {
+import java.io.IOException;
+
+/** Bloom filter writer sized from an expected number of entries. */
+final class FixedBloomFilterWriter implements BloomFilterWriter {
 
     private final BloomFilter.Builder bloomFilter;
 
-    PreSizedBloomFilterWriter(BloomFilter.Builder bloomFilter) {
-        this.bloomFilter = bloomFilter;
+    FixedBloomFilterWriter(long expectedEntries, double falsePositiveProbability) {
+        this.bloomFilter = BloomFilter.builder(expectedEntries, falsePositiveProbability);
     }
 
     @Override
@@ -35,7 +38,7 @@ final class PreSizedBloomFilterWriter implements BloomFilterWriter {
     }
 
     @Override
-    public BloomFilter.Builder finish() {
-        return bloomFilter;
+    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
+        return BloomFilterWriterUtils.write(out, bloomFilter);
     }
 }

@@ -24,7 +24,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.sst.BloomFilterWriter;
 
 import javax.annotation.Nullable;
 
@@ -44,31 +44,31 @@ import java.util.function.Function;
  */
 public interface LookupStoreFactory {
 
-    LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
+    LookupStoreWriter createWriter(File file, @Nullable BloomFilterWriter bloomFilterWriter)
             throws IOException;
 
     LookupStoreReader createReader(File file) throws IOException;
 
-    static Function<Long, BloomFilter.Builder> bfGenerator(Options options) {
-        Function<Long, BloomFilter.Builder> bfGenerator = rowCount -> null;
+    static Function<Long, BloomFilterWriter> bloomFilterWriterFactory(Options options) {
+        Function<Long, BloomFilterWriter> bloomFilterWriterFactory = rowCount -> null;
         if (options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_ENABLED)) {
             double bfFpp = options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_FPP);
-            bfGenerator =
+            bloomFilterWriterFactory =
                     rowCount -> {
                         if (rowCount > 0) {
-                            return BloomFilter.builder(rowCount, bfFpp);
+                            return BloomFilterWriter.fixed(rowCount, bfFpp);
                         }
                         return null;
                     };
         }
-        return bfGenerator;
+        return bloomFilterWriterFactory;
     }
 
     static LookupStoreFactory create(
             CoreOptions options, CacheManager cacheManager, Comparator<MemorySlice> keyComparator) {
         CompressOptions compression = options.lookupCompressOptions();
         return new SortLookupStoreFactory(
-                keyComparator, cacheManager, options.cachePageSize(), compression, -1);
+                keyComparator, cacheManager, options.cachePageSize(), compression);
     }
 
     /** Context between writer and reader. */

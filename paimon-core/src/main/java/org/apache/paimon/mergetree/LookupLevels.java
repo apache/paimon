@@ -30,8 +30,8 @@ import org.apache.paimon.mergetree.lookup.PersistProcessor;
 import org.apache.paimon.mergetree.lookup.RemoteFileDownloader;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.Pair;
@@ -68,7 +68,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-    private final Function<Long, BloomFilter.Builder> bfGenerator;
+    private final Function<Long, BloomFilterWriter> bloomFilterWriterFactory;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
     private final Object[] lookupFileLocks;
@@ -87,7 +87,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
-            Function<Long, BloomFilter.Builder> bfGenerator,
+            Function<Long, BloomFilterWriter> bloomFilterWriterFactory,
             Cache<String, LookupFile> lookupFileCache) {
         this.schemaFunction = schemaFunction;
         this.currentSchemaId = currentSchemaId;
@@ -99,7 +99,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
-        this.bfGenerator = bfGenerator;
+        this.bloomFilterWriterFactory = bloomFilterWriterFactory;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = ConcurrentHashMap.newKeySet();
         this.lookupFileLocks = new Object[LOOKUP_FILE_LOCK_STRIPES];
@@ -385,7 +385,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private void createSstFileFromDataFile(DataFileMeta file, File localFile) throws IOException {
         try (LookupStoreWriter kvWriter =
                         lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
+                                localFile, bloomFilterWriterFactory.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             PersistProcessor<T> processor =
                     getOrCreateProcessor(currentSchemaId, serializerFactory.version());

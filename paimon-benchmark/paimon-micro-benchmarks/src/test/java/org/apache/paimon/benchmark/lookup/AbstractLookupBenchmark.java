@@ -25,9 +25,9 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BloomFilter;
 
 import java.io.File;
 import java.io.IOException;
@@ -103,7 +103,8 @@ abstract class AbstractLookupBenchmark {
 
         String name = String.format("%s-%s", valueLength, bloomFilterEnabled);
         File file = new File(tempDir.toFile(), UUID.randomUUID() + "-" + name);
-        LookupStoreWriter writer = factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+        LookupStoreWriter writer =
+                factory.createWriter(file, createBloomFilter(bloomFilterEnabled));
         int i = 0;
         for (byte[] input : inputs) {
             if (sameValue) {
@@ -121,10 +122,10 @@ abstract class AbstractLookupBenchmark {
         return file.getAbsolutePath();
     }
 
-    private BloomFilter.Builder createBloomFiler(boolean enabled) {
+    private BloomFilterWriter createBloomFilter(boolean enabled) {
         if (!enabled) {
             return null;
         }
-        return BloomFilter.builder(5000000, 0.01);
+        return BloomFilterWriter.fixed(5000000, 0.01);
     }
 }

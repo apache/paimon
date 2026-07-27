@@ -27,7 +27,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.sst.BloomFilterWriter;
 
 import javax.annotation.Nullable;
 
@@ -42,19 +42,16 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     private final CacheManager cacheManager;
     private final int blockSize;
     @Nullable private final BlockCompressionFactory compressionFactory;
-    private final double bloomFilterFpp;
 
     public SortLookupStoreFactory(
             Comparator<MemorySlice> comparator,
             CacheManager cacheManager,
             int blockSize,
-            CompressOptions compression,
-            double bloomFilterFpp) {
+            CompressOptions compression) {
         this.comparator = comparator;
         this.cacheManager = cacheManager;
         this.blockSize = blockSize;
         this.compressionFactory = BlockCompressionFactory.create(compression);
-        this.bloomFilterFpp = bloomFilterFpp;
     }
 
     @Override
@@ -65,11 +62,10 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public SortLookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
-            throws IOException {
+    public SortLookupStoreWriter createWriter(
+            File file, @Nullable BloomFilterWriter bloomFilterWriter) throws IOException {
         Path filePath = new Path(file.getAbsolutePath());
         PositionOutputStream out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
-        return new SortLookupStoreWriter(
-                out, blockSize, bloomFilter, bloomFilterFpp, compressionFactory);
+        return new SortLookupStoreWriter(out, blockSize, bloomFilterWriter, compressionFactory);
     }
 }

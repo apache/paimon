@@ -18,10 +18,12 @@
 
 package org.apache.paimon.sst;
 
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.BloomFilter;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -55,9 +57,8 @@ final class DynamicBloomFilterWriter implements BloomFilterWriter {
         hashes[hashCount++] = hash;
     }
 
-    @Nullable
     @Override
-    public BloomFilter.Builder finish() {
+    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
         if (hashes == null || hashCount == 0) {
             return null;
         }
@@ -67,6 +68,6 @@ final class DynamicBloomFilterWriter implements BloomFilterWriter {
             bloomFilter.addHash(hashes[i]);
         }
         hashes = null;
-        return bloomFilter;
+        return BloomFilterWriterUtils.write(out, bloomFilter);
     }
 }

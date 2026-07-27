@@ -31,22 +31,31 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** Writer for collecting key hashes and writing an SST Bloom filter. */
-interface BloomFilterWriter {
+public interface BloomFilterWriter {
 
-    Logger LOG = LoggerFactory.getLogger(BloomFilterWriter.class);
+    static BloomFilterWriter fixed(long expectedEntries, double falsePositiveProbability) {
+        return new FixedBloomFilterWriter(expectedEntries, falsePositiveProbability);
+    }
+
+    static BloomFilterWriter dynamic(double falsePositiveProbability) {
+        return new DynamicBloomFilterWriter(falsePositiveProbability);
+    }
 
     void addHash(int hash);
 
     @Nullable
-    BloomFilter.Builder finish();
+    BloomFilterHandle write(PositionOutputStream out) throws IOException;
+}
 
-    @Nullable
-    default BloomFilterHandle write(PositionOutputStream out) throws IOException {
-        BloomFilter.Builder bloomFilter = finish();
-        if (bloomFilter == null) {
-            return null;
-        }
+/** Shared Bloom filter serialization. */
+final class BloomFilterWriterUtils {
 
+    private static final Logger LOG = LoggerFactory.getLogger(BloomFilterWriter.class);
+
+    private BloomFilterWriterUtils() {}
+
+    static BloomFilterHandle write(PositionOutputStream out, BloomFilter.Builder bloomFilter)
+            throws IOException {
         MemorySegment buffer = bloomFilter.getBuffer();
         BloomFilterHandle handle =
                 new BloomFilterHandle(out.getPos(), buffer.size(), bloomFilter.expectedEntries());

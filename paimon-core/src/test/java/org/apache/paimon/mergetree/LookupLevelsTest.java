@@ -46,13 +46,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
@@ -364,7 +364,7 @@ public class LookupLevelsTest {
                         fileName ->
                                 new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                         createLookupStoreFactory(),
-                        rowCount -> BloomFilter.builder(rowCount, 0.05),
+                        rowCount -> BloomFilterWriter.fixed(rowCount, 0.05),
                         LookupFile.createCache(Duration.ofHours(1), MemorySize.ofMebiBytes(10))) {
                     @Override
                     public LookupFile createLookupFile(DataFileMeta file) throws IOException {
@@ -461,8 +461,9 @@ public class LookupLevelsTest {
                         new LookupStoreFactory() {
                             @Override
                             public LookupStoreWriter createWriter(
-                                    File file, BloomFilter.Builder bloomFilter) throws IOException {
-                                return delegate.createWriter(file, bloomFilter);
+                                    File file, BloomFilterWriter bloomFilterWriter)
+                                    throws IOException {
+                                return delegate.createWriter(file, bloomFilterWriter);
                             }
 
                             @Override
@@ -491,8 +492,9 @@ public class LookupLevelsTest {
                         new LookupStoreFactory() {
                             @Override
                             public LookupStoreWriter createWriter(
-                                    File file, BloomFilter.Builder bloomFilter) throws IOException {
-                                return delegate.createWriter(file, bloomFilter);
+                                    File file, BloomFilterWriter bloomFilterWriter)
+                                    throws IOException {
+                                return delegate.createWriter(file, bloomFilterWriter);
                             }
 
                             @Override
@@ -536,7 +538,7 @@ public class LookupLevelsTest {
                 file -> createReaderFactory().createRecordReader(file),
                 localFileFactory,
                 lookupStoreFactory,
-                rowCount -> BloomFilter.builder(rowCount, 0.05),
+                rowCount -> BloomFilterWriter.fixed(rowCount, 0.05),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }
 
@@ -545,8 +547,7 @@ public class LookupLevelsTest {
                 new RowCompactedSerializer(keyType).createSliceComparator(),
                 new CacheManager(MemorySize.ofMebiBytes(1), 0),
                 4096,
-                new CompressOptions("none", 1),
-                -1);
+                new CompressOptions("none", 1));
     }
 
     private KeyValue kv(int key, int value) {

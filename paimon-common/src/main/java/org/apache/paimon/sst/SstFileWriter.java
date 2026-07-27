@@ -25,7 +25,6 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 
 import org.slf4j.Logger;
@@ -65,8 +64,7 @@ public class SstFileWriter {
     public SstFileWriter(
             PositionOutputStream out,
             int blockSize,
-            @Nullable BloomFilter.Builder bloomFilter,
-            double dynamicBloomFilterFpp,
+            @Nullable BloomFilterWriter bloomFilterWriter,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.out = out;
         this.blockSize = blockSize;
@@ -74,13 +72,7 @@ public class SstFileWriter {
         int expectedNumberOfBlocks = 1024;
         this.indexBlockWriter =
                 new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
-        if (bloomFilter != null) {
-            this.bloomFilterWriter = new PreSizedBloomFilterWriter(bloomFilter);
-        } else if (dynamicBloomFilterFpp > 0) {
-            this.bloomFilterWriter = new DynamicBloomFilterWriter(dynamicBloomFilterFpp);
-        } else {
-            this.bloomFilterWriter = null;
-        }
+        this.bloomFilterWriter = bloomFilterWriter;
         if (compressionFactory == null) {
             this.compressionType = BlockCompressionType.NONE;
             this.blockCompressor = null;

@@ -95,7 +95,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         // todo: we may enable bf to accelerate equal and in predicate in the future
-        this.writer = new SstFileWriter(out, blockSize, null, -1, compressionFactory);
+        this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
     }
 
     @Override

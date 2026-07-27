@@ -26,6 +26,7 @@ import org.apache.paimon.lookup.sort.SortLookupStoreReader;
 import org.apache.paimon.lookup.sort.SortLookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BloomFilterWriter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -97,6 +99,7 @@ public class LocalKvDb implements Closeable {
     private final File dataDirectory;
     private final String uuid;
     private final SortLookupStoreFactory storeFactory;
+    private final Supplier<BloomFilterWriter> bloomFilterWriterSupplier;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
     private final long maxSstFileSize;
@@ -124,6 +127,7 @@ public class LocalKvDb implements Closeable {
     private LocalKvDb(
             File dataDirectory,
             SortLookupStoreFactory storeFactory,
+            Supplier<BloomFilterWriter> bloomFilterWriterSupplier,
             Comparator<MemorySlice> keyComparator,
             long memTableFlushThreshold,
             long maxSstFileSize,
@@ -132,6 +136,7 @@ public class LocalKvDb implements Closeable {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
+        this.bloomFilterWriterSupplier = bloomFilterWriterSupplier;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
         this.maxSstFileSize = maxSstFileSize;
@@ -148,6 +153,7 @@ public class LocalKvDb implements Closeable {
                 new LsmCompactor(
                         keyComparator,
                         storeFactory,
+                        bloomFilterWriterSupplier,
                         maxSstFileSize,
                         level0FileNumCompactTrigger,
                         sizeRatio,
@@ -267,7 +273,9 @@ public class LocalKvDb implements Closeable {
 
                 if (currentWriter == null) {
                     currentSstFile = newSstFile();
-                    currentWriter = storeFactory.createWriter(currentSstFile, null);
+                    currentWriter =
+                            storeFactory.createWriter(
+                                    currentSstFile, bloomFilterWriterSupplier.get());
                     currentFileMinKey = currentKey;
                     currentBatchSize = 0;
                 }
@@ -551,7 +559,8 @@ public class LocalKvDb implements Closeable {
     private SstFileMetadata writeMemTableToSst(TreeMap<MemorySlice, byte[]> data)
             throws IOException {
         File sstFile = newSstFile();
-        SortLookupStoreWriter writer = storeFactory.createWriter(sstFile, null);
+        SortLookupStoreWriter writer =
+                storeFactory.createWriter(sstFile, bloomFilterWriterSupplier.get());
         MemorySlice minKey = null;
         MemorySlice maxKey = null;
         long tombstoneCount = 0;
@@ -693,15 +702,16 @@ public class LocalKvDb implements Closeable {
             }
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
-                            keyComparator,
-                            cacheManager,
-                            blockSize,
-                            compressOptions,
-                            bloomFilterEnabled ? bloomFilterFpp : -1);
+                            keyComparator, cacheManager, blockSize, compressOptions);
+            Supplier<BloomFilterWriter> bloomFilterWriterSupplier =
+                    bloomFilterEnabled
+                            ? () -> BloomFilterWriter.dynamic(bloomFilterFpp)
+                            : () -> null;
 
             return new LocalKvDb(
                     dataDirectory,
                     factory,
+                    bloomFilterWriterSupplier,
                     keyComparator,
                     memTableFlushThreshold,
                     maxSstFileSize,

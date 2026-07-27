@@ -31,11 +31,11 @@ import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sst.BlockEntry;
 import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
-import org.apache.paimon.utils.BloomFilter;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -239,15 +239,18 @@ public class SortLookupStoreTest {
     }
 
     private void writeData(int recordCount, boolean withBloomFilter) throws Exception {
-        BloomFilter.Builder bloomFilter = null;
+        BloomFilterWriter bloomFilterWriter = null;
         if (withBloomFilter) {
-            bloomFilter = BloomFilter.builder(recordCount, 0.05);
+            bloomFilterWriter = BloomFilterWriter.fixed(recordCount, 0.05);
         }
         BlockCompressionFactory compressionFactory = BlockCompressionFactory.create(compress);
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
                 SortLookupStoreWriter writer =
                         new SortLookupStoreWriter(
-                                outputStream, BLOCK_SIZE, bloomFilter, -1, compressionFactory); ) {
+                                outputStream,
+                                BLOCK_SIZE,
+                                bloomFilterWriter,
+                                compressionFactory); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             MemorySliceOutput valueOut = new MemorySliceOutput(4);
             long start = System.currentTimeMillis();

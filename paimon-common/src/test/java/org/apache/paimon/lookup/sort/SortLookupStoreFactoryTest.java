@@ -23,11 +23,11 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BloomFilter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -89,11 +89,10 @@ public class SortLookupStoreFactoryTest {
     public void testNormal() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
-                new SortLookupStoreFactory(
-                        Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
+                new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
 
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilter(bloomFilterEnabled));
         for (int i = 0; i < VALUE_COUNT; i++) {
             byte[] bytes = toBytes(i);
             writer.put(bytes, bytes);
@@ -118,11 +117,10 @@ public class SortLookupStoreFactoryTest {
     public void testEmpty() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
-                new SortLookupStoreFactory(
-                        Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
+                new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
 
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilter(bloomFilterEnabled));
         writer.close();
 
         SortLookupStoreReader reader = factory.createReader(file);
@@ -143,10 +141,9 @@ public class SortLookupStoreFactoryTest {
                         keySerializer.createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1), 0),
                         64 * 1024,
-                        compress,
-                        -1);
+                        compress);
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilter(bloomFilterEnabled));
         for (int i = 0; i < VALUE_COUNT; i++) {
             byte[] bytes = toBytes(keySerializer, row, i);
             writer.put(bytes, toBytes(i));
@@ -170,11 +167,11 @@ public class SortLookupStoreFactoryTest {
         reader.close();
     }
 
-    private BloomFilter.Builder createBloomFiler(boolean enabled) {
+    private BloomFilterWriter createBloomFilter(boolean enabled) {
         if (!enabled) {
             return null;
         }
-        return BloomFilter.builder(100, 0.01);
+        return BloomFilterWriter.fixed(100, 0.01);
     }
 
     private byte[] toBytes(RowCompactedSerializer serializer, GenericRow row, int i) {
