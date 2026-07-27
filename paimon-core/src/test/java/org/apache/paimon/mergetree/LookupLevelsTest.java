@@ -545,7 +545,8 @@ public class LookupLevelsTest {
                 new RowCompactedSerializer(keyType).createSliceComparator(),
                 new CacheManager(MemorySize.ofMebiBytes(1)),
                 4096,
-                new CompressOptions("none", 1));
+                new CompressOptions("none", 1),
+                -1);
     }
 
     private KeyValue kv(int key, int value) {

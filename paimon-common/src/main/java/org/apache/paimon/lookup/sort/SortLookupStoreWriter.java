@@ -60,18 +60,11 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
             PositionOutputStream out,
             int blockSize,
             @Nullable BloomFilter.Builder bloomFilter,
-            BlockCompressionFactory compressionFactory) {
-        this.out = out;
-        this.writer = new SstFileWriter(out, blockSize, bloomFilter, compressionFactory);
-    }
-
-    public SortLookupStoreWriter(
-            PositionOutputStream out,
-            int blockSize,
             double bloomFilterFpp,
             BlockCompressionFactory compressionFactory) {
         this.out = out;
-        this.writer = new SstFileWriter(out, blockSize, bloomFilterFpp, compressionFactory);
+        this.writer =
+                new SstFileWriter(out, blockSize, bloomFilter, bloomFilterFpp, compressionFactory);
     }
 
     @Override

@@ -78,13 +78,6 @@ on the clustering column.
 | `deletion-vectors.enabled` | Must be `true` (not required for `first-row` merge engine) |
 | `merge-engine` | `deduplicate` (default) or `first-row` only |
 
-## Performance Tuning
-
-The local primary-key index uses 4 KB blocks by default. You can change the block size with
-`local-kv-db.block-size`. Smaller blocks reduce read amplification for random point lookups
-when the index is larger than the memory cache, while larger blocks can reduce index overhead for
-more sequential workloads.
-
 ## When to Use
 
 PK Clustering Override is beneficial when:

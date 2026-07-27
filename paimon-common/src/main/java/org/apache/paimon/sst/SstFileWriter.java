@@ -72,22 +72,6 @@ public class SstFileWriter {
             PositionOutputStream out,
             int blockSize,
             @Nullable BloomFilter.Builder bloomFilter,
-            @Nullable BlockCompressionFactory compressionFactory) {
-        this(out, blockSize, bloomFilter, -1, compressionFactory);
-    }
-
-    public SstFileWriter(
-            PositionOutputStream out,
-            int blockSize,
-            double bloomFilterFpp,
-            @Nullable BlockCompressionFactory compressionFactory) {
-        this(out, blockSize, null, bloomFilterFpp, compressionFactory);
-    }
-
-    private SstFileWriter(
-            PositionOutputStream out,
-            int blockSize,
-            @Nullable BloomFilter.Builder bloomFilter,
             double dynamicBloomFilterFpp,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.out = out;
@@ -97,10 +81,10 @@ public class SstFileWriter {
         this.indexBlockWriter =
                 new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
         this.bloomFilter = bloomFilter;
-        this.dynamicBloomFilterFpp = dynamicBloomFilterFpp;
-        if (dynamicBloomFilterFpp > 0) {
+        this.dynamicBloomFilterFpp = bloomFilter == null ? dynamicBloomFilterFpp : -1;
+        if (this.dynamicBloomFilterFpp > 0) {
             checkArgument(
-                    dynamicBloomFilterFpp < 1,
+                    this.dynamicBloomFilterFpp < 1,
                     "Bloom filter false positive probability must be between 0 and 1.");
             this.bloomHashes = new int[INITIAL_BLOOM_HASH_CAPACITY];
         }

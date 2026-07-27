@@ -246,7 +246,7 @@ public class SortLookupStoreTest {
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
                 SortLookupStoreWriter writer =
                         new SortLookupStoreWriter(
-                                outputStream, BLOCK_SIZE, bloomFilter, compressionFactory); ) {
+                                outputStream, BLOCK_SIZE, bloomFilter, -1, compressionFactory); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             MemorySliceOutput valueOut = new MemorySliceOutput(4);
             long start = System.currentTimeMillis();

@@ -208,7 +208,8 @@ public class ContainsLevelsTest {
                         new RowCompactedSerializer(keyType).createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
                         4096,
-                        new CompressOptions("none", 1)),
+                        new CompressOptions("none", 1),
+                        -1),
                 rowCount -> BloomFilter.builder(rowCount, 0.01),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }

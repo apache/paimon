@@ -68,7 +68,7 @@ public interface LookupStoreFactory {
             CoreOptions options, CacheManager cacheManager, Comparator<MemorySlice> keyComparator) {
         CompressOptions compression = options.lookupCompressOptions();
         return new SortLookupStoreFactory(
-                keyComparator, cacheManager, options.cachePageSize(), compression);
+                keyComparator, cacheManager, options.cachePageSize(), compression, -1);
     }
 
     /** Context between writer and reader. */

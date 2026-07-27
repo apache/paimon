@@ -89,7 +89,8 @@ public class SortLookupStoreFactoryTest {
     public void testNormal() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         SortLookupStoreFactory factory =
-                new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
+                new SortLookupStoreFactory(
+                        Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
 
         SortLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
@@ -117,7 +118,8 @@ public class SortLookupStoreFactoryTest {
     public void testEmpty() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         SortLookupStoreFactory factory =
-                new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
+                new SortLookupStoreFactory(
+                        Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
 
         SortLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
@@ -141,7 +143,8 @@ public class SortLookupStoreFactoryTest {
                         keySerializer.createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
                         64 * 1024,
-                        compress);
+                        compress,
+                        -1);
         SortLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
         for (int i = 0; i < VALUE_COUNT; i++) {
