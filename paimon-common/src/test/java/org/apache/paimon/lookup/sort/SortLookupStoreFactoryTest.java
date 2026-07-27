@@ -87,7 +87,7 @@ public class SortLookupStoreFactoryTest {
 
     @TestTemplate
     public void testNormal() throws IOException {
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(
                         Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
@@ -116,7 +116,7 @@ public class SortLookupStoreFactoryTest {
 
     @TestTemplate
     public void testEmpty() throws IOException {
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(
                         Comparator.naturalOrder(), cacheManager, 1024, compress, -1);
@@ -141,7 +141,7 @@ public class SortLookupStoreFactoryTest {
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(
                         keySerializer.createSliceComparator(),
-                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        new CacheManager(MemorySize.ofMebiBytes(1), 0),
                         64 * 1024,
                         compress,
                         -1);

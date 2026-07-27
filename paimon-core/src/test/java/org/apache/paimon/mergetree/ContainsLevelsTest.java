@@ -206,7 +206,7 @@ public class ContainsLevelsTest {
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new SortLookupStoreFactory(
                         new RowCompactedSerializer(keyType).createSliceComparator(),
-                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        new CacheManager(MemorySize.ofMebiBytes(1), 0),
                         4096,
                         new CompressOptions("none", 1),
                         -1),

@@ -82,7 +82,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Common test class for BTreeIndexReader. */
 public abstract class AbstractIndexReaderTest {
-    protected static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB);
+    protected static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB, 0);
 
     protected DataType dataType;
     protected int dataNum;

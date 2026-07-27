@@ -543,7 +543,7 @@ public class LookupLevelsTest {
     private SortLookupStoreFactory createLookupStoreFactory() {
         return new SortLookupStoreFactory(
                 new RowCompactedSerializer(keyType).createSliceComparator(),
-                new CacheManager(MemorySize.ofMebiBytes(1)),
+                new CacheManager(MemorySize.ofMebiBytes(1), 0),
                 4096,
                 new CompressOptions("none", 1),
                 -1);

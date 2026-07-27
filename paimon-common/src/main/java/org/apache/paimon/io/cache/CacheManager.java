@@ -44,11 +44,6 @@ public class CacheManager {
     private final Cache dataCache;
     private final Cache indexCache;
 
-    @VisibleForTesting
-    public CacheManager(MemorySize maxMemorySize) {
-        this(maxMemorySize, 0);
-    }
-
     public CacheManager(MemorySize maxMemorySize, double highPriorityPoolRatio) {
         Preconditions.checkArgument(
                 highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,

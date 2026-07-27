@@ -61,7 +61,8 @@ public class SortLookupStoreTest {
 
     // 256 records per block
     private static final int BLOCK_SIZE = (10) * 256;
-    private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.ofMebiBytes(10));
+    private static final CacheManager CACHE_MANAGER =
+            new CacheManager(MemorySize.ofMebiBytes(10), 0);
     @TempDir java.nio.file.Path tempPath;
 
     private final boolean bloomFilterEnabled;

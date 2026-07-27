@@ -98,7 +98,7 @@ abstract class AbstractLookupBenchmark {
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        new CacheManager(MemorySize.ofMebiBytes(10), 0),
                         keySerializer.createSliceComparator());
 
         String name = String.format("%s-%s", valueLength, bloomFilterEnabled);

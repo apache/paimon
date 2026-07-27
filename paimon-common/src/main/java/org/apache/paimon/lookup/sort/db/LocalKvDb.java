@@ -689,7 +689,7 @@ public class LocalKvDb implements Closeable {
             }
 
             if (cacheManager == null) {
-                cacheManager = new CacheManager(MemorySize.ofMebiBytes(8));
+                cacheManager = new CacheManager(MemorySize.ofMebiBytes(8), 0);
             }
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
