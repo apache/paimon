@@ -73,14 +73,18 @@ and support different buckets for different partitions.
 By default, batch writes set `postpone.batch-write-fixed-bucket` to `true`
 and write records directly to real buckets.
 For a Spark batch write to a partition without real bucket files,
-you can configure `postpone.target-row-num-per-bucket` to calculate the bucket number
-from the incoming row count plus the row count of existing postpone files.
-The calculated bucket number is
-`ceil(row_count / postpone.target-row-num-per-bucket)`, is at least `1`,
-and is limited by `postpone.batch-write-fixed-bucket.max-parallelism`.
-Without this target, Spark uses the number of input writers, also limited by the maximum parallelism.
-Inferring from row counts adds a counting stage; Spark caches the batch so that counting and writing
-use the same input rows.
+Spark calculates the bucket number from the uncompressed Paimon `BinaryRow` serialized size.
+The target size is configured by `postpone.target-size-per-bucket` and defaults to `1 GB`.
+Existing postpone files do not record their uncompressed serialized size, so Spark estimates their
+size using their row count and the average serialized size of incoming rows in the same partition.
+You can instead configure `postpone.target-row-num-per-bucket` to calculate the bucket number
+from row counts; this option takes precedence over the target size.
+The calculated bucket number is at least `1` and is limited by
+`postpone.batch-write-fixed-bucket.max-parallelism`.
+The serialized size is measured before file encoding and compression, so it is not the exact
+ORC or Parquet size on storage.
+Inferring the data amount adds a statistics stage; Spark caches the batch so that inference and
+writing use the same input rows.
 
 When `postpone.batch-write-fixed-bucket` is `false`,
 records are first stored in the `bucket-postpone` directory of each partition

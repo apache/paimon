@@ -60,8 +60,10 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row(499500)))
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2), Row(3))
+        Seq(Row(0))
       )
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('postpone.target-size-per-bucket' = '8 kb')")
 
       // Write to existing partition, the bucket number should not change
       sql("""
@@ -73,7 +75,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{3}' ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2), Row(3))
+        Seq(Row(0))
       )
 
       // Write to new partition, the bucket number should change
@@ -86,7 +88,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{5}' ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2), Row(3), Row(4), Row(5))
+        Seq(Row(0), Row(1), Row(2))
       )
     }
   }
@@ -161,6 +163,63 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone bucket table: infer bucket number from serialized data size") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-size-per-bucket' = '32 kb'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |id AS k,
+            |CASE WHEN id < 100 THEN repeat('x', 100) ELSE repeat('x', 1000) END AS v,
+            |CASE WHEN id < 100 THEN 0 ELSE 1 END AS pt
+            |FROM range (0, 200)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}' ORDER BY bucket"),
+        Seq(Row(0))
+      )
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{1}' ORDER BY bucket"),
+        Seq(Row(0), Row(1), Row(2), Row(3))
+      )
+
+      // Estimate existing postpone data with the average serialized size of incoming rows.
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("""
+              |INSERT INTO t SELECT
+              |id AS k,
+              |repeat('x', 1000) AS v,
+              |2 AS pt
+              |FROM range (1000, 1100)
+              |""".stripMargin)
+      }
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |id AS k,
+            |repeat('x', 1000) AS v,
+            |2 AS pt
+            |FROM range (2000, 2100)
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{2}' ORDER BY bucket"),
+        Seq(Row(-2), Row(0), Row(1), Row(2), Row(3), Row(4), Row(5), Row(6))
+      )
+    }
+  }
+
   test("Postpone bucket table: write fix bucket then write postpone bucket") {
     withTable("t") {
       sql("""
@@ -186,7 +245,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row(499500)))
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2), Row(3))
+        Seq(Row(0))
       )
 
       // write postpone bucket
@@ -201,7 +260,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row(499500)))
         checkAnswer(
           sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-          Seq(Row(-2), Row(0), Row(1), Row(2), Row(3))
+          Seq(Row(-2), Row(0))
         )
       }
     }
@@ -675,7 +734,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row(499500)))
         checkAnswer(
           sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-          Seq(Row(-2), Row(0), Row(1), Row(2), Row(3), Row(4), Row(5))
+          Seq(Row(-2), Row(0))
         )
       }
 
@@ -691,7 +750,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row(124750)))
         checkAnswer(
           sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-          Seq(Row(0), Row(1), Row(2), Row(3), Row(4), Row(5))
+          Seq(Row(0))
         )
       }
     }
