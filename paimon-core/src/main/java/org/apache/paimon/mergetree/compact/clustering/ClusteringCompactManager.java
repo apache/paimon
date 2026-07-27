@@ -92,6 +92,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
             List<DataFileMeta> restoreFiles,
             long targetFileSize,
             long sortSpillBufferSize,
+            boolean localKvDbAsyncCompact,
             int localKvDbBlockSize,
             int pageSize,
             int maxNumFileHandles,
@@ -121,6 +122,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
         LocalKvDb kvDb =
                 LocalKvDb.builder(new File(ioManager.pickTempDir()))
                         .cacheManager(cacheManager)
+                        .asyncCompact(localKvDbAsyncCompact)
                         .blockSize(localKvDbBlockSize)
                         .keyComparator(new RowCompactedSerializer(keyType).createSliceComparator())
                         .build();

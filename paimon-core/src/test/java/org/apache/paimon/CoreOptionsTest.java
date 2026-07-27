@@ -267,4 +267,13 @@ public class CoreOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("local-kv-db.block-size");
     }
+
+    @Test
+    public void testLocalKvDbAsyncCompact() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).localKvDbAsyncCompact()).isTrue();
+
+        conf.set(CoreOptions.LOCAL_KV_DB_ASYNC_COMPACT, false);
+        assertThat(new CoreOptions(conf).localKvDbAsyncCompact()).isFalse();
+    }
 }

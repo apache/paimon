@@ -38,7 +38,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for asynchronous compaction in {@link LocalKvDb}. */
+/** Tests for asynchronous compaction and its synchronous fallback in {@link LocalKvDb}. */
 public class LocalKvDbAsyncCompactionTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -61,6 +61,37 @@ public class LocalKvDbAsyncCompactionTest {
             assertThat(db.getLevelFileCount(0)).isZero();
             assertThat(get(db, "shared")).isEqualTo("v3");
         }
+    }
+
+    @Test
+    void testAutomaticCompactionRunsSynchronouslyWhenDisabled() throws Exception {
+        ManuallyTriggeredExecutor unusedExecutor = new ManuallyTriggeredExecutor();
+        try (LocalKvDb db = createSyncDb("synchronous", unusedExecutor)) {
+            putAndFlush(db, "shared", "v1");
+            putAndFlush(db, "shared", "v2");
+            putAndFlush(db, "shared", "v3");
+
+            assertThat(unusedExecutor.numQueuedTasks()).isZero();
+            assertThat(db.getLevelFileCount(0)).isZero();
+            assertThat(get(db, "shared")).isEqualTo("v3");
+        }
+        assertThat(unusedExecutor.isShutdown()).isFalse();
+    }
+
+    @Test
+    void testSynchronousCompactionFailureIsPropagatedByFlush() throws Exception {
+        ManuallyTriggeredExecutor unusedExecutor = new ManuallyTriggeredExecutor();
+        LocalKvDb db = createSyncDb("synchronous-failure", unusedExecutor);
+        putAndFlush(db, "shared", "v1");
+        putAndFlush(db, "shared", "v2");
+
+        File[] sstFiles = new File(tempDir.toFile(), "synchronous-failure").listFiles();
+        assertThat(sstFiles).isNotNull().hasSize(2);
+        assertThat(sstFiles[0].delete()).isTrue();
+
+        assertThatThrownBy(() -> putAndFlush(db, "shared", "v3")).isInstanceOf(IOException.class);
+        assertThatThrownBy(db::close).isInstanceOf(IOException.class);
+        assertThat(unusedExecutor.isShutdown()).isFalse();
     }
 
     @Test
@@ -160,6 +191,17 @@ public class LocalKvDbAsyncCompactionTest {
                 .level0FileNumCompactTrigger(3)
                 .compressOptions(new CompressOptions("none", 1))
                 .compactionExecutor(compactionExecutor)
+                .build();
+    }
+
+    private LocalKvDb createSyncDb(String name, ExecutorService unusedExecutor) {
+        return LocalKvDb.builder(new File(tempDir.toFile(), name))
+                .memTableFlushThreshold(1024 * 1024)
+                .blockSize(256)
+                .level0FileNumCompactTrigger(3)
+                .compressOptions(new CompressOptions("none", 1))
+                .asyncCompact(false)
+                .compactionExecutor(unusedExecutor)
                 .build();
     }
 
