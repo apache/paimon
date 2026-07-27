@@ -730,7 +730,8 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, "   ")).isEmpty();
         assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, "pt=")).isEmpty();
         String separator = ";";
-        for (String partitions : Arrays.asList(separator + "pt=a", "pt=a;;pt=b")) {
+        for (String partitions :
+                Arrays.asList(separator + "pt=a", "pt=a" + separator + separator + "pt=b")) {
             assertThatThrownBy(() -> searchWithFilters("INVALID_PARTITIONS_T", 1, null, partitions))
                     .hasStackTraceContaining("must exactly match partition keys");
         }
