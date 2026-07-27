@@ -19,14 +19,24 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.sst.BloomFilterHandle;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bloom filter based on one memory segment. */
 public class BloomFilter {
+
+    private static final Logger LOG = LoggerFactory.getLogger(BloomFilter.class);
 
     private final BitSet bitSet;
     private final int numHashFunctions;
@@ -58,6 +68,15 @@ public class BloomFilter {
 
     public long expectedEntries() {
         return expectedEntries;
+    }
+
+    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
+        MemorySlice slice = bitSet.getMemorySlice();
+        BloomFilterHandle handle =
+                new BloomFilterHandle(out.getPos(), slice.length(), expectedEntries);
+        out.write(slice.getHeapMemory(), slice.offset(), slice.length());
+        LOG.info("Bloom filter size: {} bytes", slice.length());
+        return handle;
     }
 
     /**

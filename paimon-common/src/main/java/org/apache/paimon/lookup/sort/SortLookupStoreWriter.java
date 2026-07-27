@@ -24,8 +24,8 @@ import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BloomFilterHandle;
-import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.sst.SstFileWriter;
+import org.apache.paimon.utils.BloomFilter;
 
 import javax.annotation.Nullable;
 
@@ -59,10 +59,10 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
     public SortLookupStoreWriter(
             PositionOutputStream out,
             int blockSize,
-            @Nullable BloomFilterWriter bloomFilterWriter,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
             BlockCompressionFactory compressionFactory) {
         this.out = out;
-        this.writer = new SstFileWriter(out, blockSize, bloomFilterWriter, compressionFactory);
+        this.writer = new SstFileWriter(out, blockSize, bloomFilterBuilder, compressionFactory);
     }
 
     @Override

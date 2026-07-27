@@ -25,6 +25,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 
 import org.slf4j.Logger;
@@ -51,7 +52,7 @@ public class SstFileWriter {
     private final int blockSize;
     private final BlockWriter dataBlockWriter;
     private final BlockWriter indexBlockWriter;
-    @Nullable private final BloomFilterWriter bloomFilterWriter;
+    @Nullable private final BloomFilter.Builder bloomFilterBuilder;
     private final BlockCompressionType compressionType;
     @Nullable private final BlockCompressor blockCompressor;
 
@@ -64,7 +65,7 @@ public class SstFileWriter {
     public SstFileWriter(
             PositionOutputStream out,
             int blockSize,
-            @Nullable BloomFilterWriter bloomFilterWriter,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.out = out;
         this.blockSize = blockSize;
@@ -72,7 +73,7 @@ public class SstFileWriter {
         int expectedNumberOfBlocks = 1024;
         this.indexBlockWriter =
                 new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
-        this.bloomFilterWriter = bloomFilterWriter;
+        this.bloomFilterBuilder = bloomFilterBuilder;
         if (compressionFactory == null) {
             this.compressionType = BlockCompressionType.NONE;
             this.blockCompressor = null;
@@ -92,8 +93,8 @@ public class SstFileWriter {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         dataBlockWriter.add(key, value);
-        if (bloomFilterWriter != null) {
-            bloomFilterWriter.addHash(MurmurHashUtils.hashBytes(key));
+        if (bloomFilterBuilder != null) {
+            bloomFilterBuilder.addHash(MurmurHashUtils.hashBytes(key));
         }
 
         lastKey = key;
@@ -167,7 +168,11 @@ public class SstFileWriter {
 
     @Nullable
     public BloomFilterHandle writeBloomFilter() throws IOException {
-        return bloomFilterWriter == null ? null : bloomFilterWriter.write(out);
+        if (bloomFilterBuilder == null) {
+            return null;
+        }
+        BloomFilter bloomFilter = bloomFilterBuilder.build();
+        return bloomFilter == null ? null : bloomFilter.write(out);
     }
 
     @Nullable

@@ -24,7 +24,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.sst.BloomFilterWriter;
+import org.apache.paimon.utils.BloomFilter;
 
 import javax.annotation.Nullable;
 
@@ -44,24 +44,24 @@ import java.util.function.Function;
  */
 public interface LookupStoreFactory {
 
-    LookupStoreWriter createWriter(File file, @Nullable BloomFilterWriter bloomFilterWriter)
+    LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilterBuilder)
             throws IOException;
 
     LookupStoreReader createReader(File file) throws IOException;
 
-    static Function<Long, BloomFilterWriter> bloomFilterWriterFactory(Options options) {
-        Function<Long, BloomFilterWriter> bloomFilterWriterFactory = rowCount -> null;
+    static Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory(Options options) {
+        Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory = rowCount -> null;
         if (options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_ENABLED)) {
             double bfFpp = options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_FPP);
-            bloomFilterWriterFactory =
+            bloomFilterBuilderFactory =
                     rowCount -> {
                         if (rowCount > 0) {
-                            return BloomFilterWriter.fixed(rowCount, bfFpp);
+                            return BloomFilter.fixedBuilder(rowCount, bfFpp);
                         }
                         return null;
                     };
         }
-        return bloomFilterWriterFactory;
+        return bloomFilterBuilderFactory;
     }
 
     static LookupStoreFactory create(

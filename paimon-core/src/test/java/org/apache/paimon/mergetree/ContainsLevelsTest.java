@@ -43,13 +43,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.sst.BloomFilterWriter;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -209,7 +209,7 @@ public class ContainsLevelsTest {
                         new CacheManager(MemorySize.ofMebiBytes(1), 0),
                         4096,
                         new CompressOptions("none", 1)),
-                rowCount -> BloomFilterWriter.fixed(rowCount, 0.01),
+                rowCount -> BloomFilter.fixedBuilder(rowCount, 0.01),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }
 

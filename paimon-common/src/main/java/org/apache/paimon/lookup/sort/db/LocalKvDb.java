@@ -26,7 +26,7 @@ import org.apache.paimon.lookup.sort.SortLookupStoreReader;
 import org.apache.paimon.lookup.sort.SortLookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.sst.BloomFilterWriter;
+import org.apache.paimon.utils.BloomFilter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,7 +102,7 @@ public class LocalKvDb implements Closeable {
     private final File dataDirectory;
     private final String uuid;
     private final SortLookupStoreFactory storeFactory;
-    private final LongFunction<BloomFilterWriter> bloomFilterWriterFactory;
+    private final LongFunction<BloomFilter.Builder> bloomFilterBuilderFactory;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
     private final long maxSstFileSize;
@@ -130,7 +130,7 @@ public class LocalKvDb implements Closeable {
     private LocalKvDb(
             File dataDirectory,
             SortLookupStoreFactory storeFactory,
-            LongFunction<BloomFilterWriter> bloomFilterWriterFactory,
+            LongFunction<BloomFilter.Builder> bloomFilterBuilderFactory,
             Comparator<MemorySlice> keyComparator,
             long memTableFlushThreshold,
             long maxSstFileSize,
@@ -139,7 +139,7 @@ public class LocalKvDb implements Closeable {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
-        this.bloomFilterWriterFactory = bloomFilterWriterFactory;
+        this.bloomFilterBuilderFactory = bloomFilterBuilderFactory;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
         this.maxSstFileSize = maxSstFileSize;
@@ -156,7 +156,7 @@ public class LocalKvDb implements Closeable {
                 new LsmCompactor(
                         keyComparator,
                         storeFactory,
-                        bloomFilterWriterFactory,
+                        bloomFilterBuilderFactory,
                         maxSstFileSize,
                         level0FileNumCompactTrigger,
                         sizeRatio,
@@ -295,7 +295,7 @@ public class LocalKvDb implements Closeable {
                     currentWriter =
                             storeFactory.createWriter(
                                     currentSstFile,
-                                    bloomFilterWriterFactory.apply(expectedEntries));
+                                    bloomFilterBuilderFactory.apply(expectedEntries));
                     currentFileMinKey = currentKey;
                     currentBatchSize = 0;
                 }
@@ -608,7 +608,7 @@ public class LocalKvDb implements Closeable {
             throws IOException {
         File sstFile = newSstFile();
         SortLookupStoreWriter writer =
-                storeFactory.createWriter(sstFile, bloomFilterWriterFactory.apply(data.size()));
+                storeFactory.createWriter(sstFile, bloomFilterBuilderFactory.apply(data.size()));
         MemorySlice minKey = null;
         MemorySlice maxKey = null;
         long tombstoneCount = 0;
@@ -751,19 +751,19 @@ public class LocalKvDb implements Closeable {
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
                             keyComparator, cacheManager, blockSize, compressOptions);
-            LongFunction<BloomFilterWriter> bloomFilterWriterFactory =
+            LongFunction<BloomFilter.Builder> bloomFilterBuilderFactory =
                     bloomFilterEnabled
                             ? expectedEntries ->
                                     expectedEntries > 0
-                                            ? BloomFilterWriter.fixed(
+                                            ? BloomFilter.fixedBuilder(
                                                     expectedEntries, bloomFilterFpp)
-                                            : BloomFilterWriter.dynamic(bloomFilterFpp)
+                                            : BloomFilter.dynamicBuilder(bloomFilterFpp)
                             : expectedEntries -> null;
 
             return new LocalKvDb(
                     dataDirectory,
                     factory,
-                    bloomFilterWriterFactory,
+                    bloomFilterBuilderFactory,
                     keyComparator,
                     memTableFlushThreshold,
                     maxSstFileSize,

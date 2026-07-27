@@ -27,7 +27,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.sst.BloomFilterWriter;
+import org.apache.paimon.utils.BloomFilter;
 
 import javax.annotation.Nullable;
 
@@ -63,9 +63,9 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
 
     @Override
     public SortLookupStoreWriter createWriter(
-            File file, @Nullable BloomFilterWriter bloomFilterWriter) throws IOException {
+            File file, @Nullable BloomFilter.Builder bloomFilterBuilder) throws IOException {
         Path filePath = new Path(file.getAbsolutePath());
         PositionOutputStream out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
-        return new SortLookupStoreWriter(out, blockSize, bloomFilterWriter, compressionFactory);
+        return new SortLookupStoreWriter(out, blockSize, bloomFilterBuilder, compressionFactory);
     }
 }
