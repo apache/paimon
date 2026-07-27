@@ -94,7 +94,14 @@ public class FormatTablePartitionRepair {
     private static List<Map<String, String>> listFilesystemPartitionSpecs(FormatTable formatTable) {
         // Raw directory names rather than the table scan: the scan casts each value to its column
         // type and back (month=01 -> 1), producing specs that no longer name the real directory,
-        // while the write path registers the raw value.
+        // while the write path registers the raw value. That is also why no partition type is
+        // passed below: it would re-enable the cast this discovery deliberately avoids.
+        //
+        // The default partition name is still needed. In a value-only layout the null partition is
+        // a bare "__DEFAULT_PARTITION__" directory, which the generic hidden-directory rule ("_"
+        // prefix) skips unless the listing knows the name is meaningful. Without it a repair never
+        // registers the null partition, and a SYNC/DROP sees it as registered-but-deleted and
+        // unregisters a partition that still holds data.
         boolean onlyValueInPath =
                 new CoreOptions(formatTable.options()).formatTablePartitionOnlyValueInPath();
         List<Pair<LinkedHashMap<String, String>, Path>> found =
@@ -103,7 +110,10 @@ public class FormatTablePartitionRepair {
                         new Path(formatTable.location()),
                         formatTable.partitionKeys().size(),
                         formatTable.partitionKeys(),
-                        onlyValueInPath);
+                        onlyValueInPath,
+                        null,
+                        null,
+                        formatTable.defaultPartName());
         List<Map<String, String>> specs = new ArrayList<>(found.size());
         for (Pair<LinkedHashMap<String, String>, Path> pair : found) {
             PartitionPathUtils.validatePartitionSpecForPath(pair.getKey(), onlyValueInPath);
