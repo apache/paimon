@@ -63,7 +63,10 @@ public class LocalKvDbBenchmark {
             intProperty("local-kv-db.benchmark.sst-file-size-mb", 64);
     private static final int BLOCK_SIZE_KB = intProperty("local-kv-db.benchmark.block-size-kb", 4);
     private static final String COMPRESSION =
-            System.getProperties().getProperty("local-kv-db.benchmark.compression", "lz4");
+            System.getProperties()
+                    .getProperty(
+                            "local-kv-db.benchmark.compression",
+                            CompressOptions.defaultOptions().compress());
     private static final double BLOOM_FILTER_FPP =
             doubleProperty("local-kv-db.benchmark.bloom-filter-fpp", -1);
 
