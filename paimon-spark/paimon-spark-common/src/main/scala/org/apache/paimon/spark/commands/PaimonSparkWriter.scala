@@ -113,7 +113,6 @@ case class PaimonSparkWriter(
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
 
-    val inferPostponeBucketNum = postponeBatchWriteFixedBucket
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
       case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
@@ -122,7 +121,26 @@ case class PaimonSparkWriter(
           .withColumn(BUCKET_COL, lit(-1))
       case _ => data.withColumn(BUCKET_COL, lit(-1))
     }
-    if (inferPostponeBucketNum) {
+    val knownPostponeNumBuckets =
+      if (postponeBatchWriteFixedBucket) {
+        Some(PostponeUtils.getKnownNumBuckets(table))
+      } else {
+        None
+      }
+    val maxPostponeNumBuckets =
+      if (postponeBatchWriteFixedBucket) {
+        coreOptions.postponeBatchWriteFixedBucketMaxParallelism()
+      } else {
+        0
+      }
+    val unpartitionedTableHasKnownNumBuckets =
+      tableSchema.partitionKeys().isEmpty &&
+        knownPostponeNumBuckets.exists(_.containsKey(BinaryRow.EMPTY_ROW))
+    val collectPostponeBucketStats =
+      postponeBatchWriteFixedBucket &&
+        maxPostponeNumBuckets != 1 &&
+        !unpartitionedTableHasKnownNumBuckets
+    if (collectPostponeBucketStats) {
       withInitBucketCol.persist()
     }
 
@@ -132,33 +150,40 @@ case class PaimonSparkWriter(
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
       try {
         if (postponeBatchWriteFixedBucket) {
-          val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-          val maxNumBuckets = table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism
+          val knownNumBuckets = knownPostponeNumBuckets.get
+          val maxNumBuckets = maxPostponeNumBuckets
           val defaultPostponeNumBuckets =
             Math.min(withInitBucketCol.rdd.getNumPartitions, maxNumBuckets)
-          val targetRowNum = coreOptions.postponeTargetRowNumPerBucket()
-          val postponeRowCounts = PostponeUtils.getPostponeRowCounts(table)
-          val dataStats =
-            collectDataStatsByPartition(withInitBucketCol, collectSize = !targetRowNum.isPresent)
-          val inferredNumBuckets: Map[BinaryRow, Int] = dataStats.map {
-            case (partition, stats) =>
-              val postponeRowCount = postponeRowCounts.getOrDefault(partition, 0L)
-              val numBuckets =
-                if (targetRowNum.isPresent) {
-                  Math.min(
-                    PostponeUtils.computeBucketNumByRowCount(
-                      Math.addExact(stats.rowCount, postponeRowCount),
-                      targetRowNum.get()),
-                    maxNumBuckets)
-                } else {
-                  computeBucketNumBySize(
-                    stats,
-                    postponeRowCount,
-                    coreOptions.postponeTargetSizePerBucket(),
-                    maxNumBuckets)
-                }
-              partition -> numBuckets
-          }
+          val inferredNumBuckets: Map[BinaryRow, Int] =
+            if (collectPostponeBucketStats) {
+              val targetRowNum = coreOptions.postponeTargetRowNumPerBucket()
+              val postponeRowCounts = PostponeUtils.getPostponeRowCounts(table)
+              val dataStats =
+                collectDataStatsByPartition(
+                  withInitBucketCol,
+                  collectSize = !targetRowNum.isPresent)
+              dataStats.map {
+                case (partition, stats) =>
+                  val postponeRowCount = postponeRowCounts.getOrDefault(partition, 0L)
+                  val numBuckets =
+                    if (targetRowNum.isPresent) {
+                      Math.min(
+                        PostponeUtils.computeBucketNumByRowCount(
+                          Math.addExact(stats.rowCount, postponeRowCount),
+                          targetRowNum.get()),
+                        maxNumBuckets)
+                    } else {
+                      computeBucketNumBySize(
+                        stats,
+                        postponeRowCount,
+                        coreOptions.postponeTargetSizePerBucket(),
+                        maxNumBuckets)
+                    }
+                  partition -> numBuckets
+              }
+            } else {
+              Map.empty
+            }
           Some(
             (p: BinaryRow) =>
               knownNumBuckets.getOrDefault(
@@ -169,7 +194,7 @@ case class PaimonSparkWriter(
         }
       } catch {
         case e: Throwable =>
-          if (inferPostponeBucketNum) {
+          if (collectPostponeBucketStats) {
             withInitBucketCol.unpersist()
           }
           throw e
@@ -395,7 +420,7 @@ case class PaimonSparkWriter(
     try {
       WriteTaskResult.merge(written.collect())
     } finally {
-      if (inferPostponeBucketNum) {
+      if (collectPostponeBucketStats) {
         withInitBucketCol.unpersist()
       }
     }

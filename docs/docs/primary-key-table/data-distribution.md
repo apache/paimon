@@ -84,7 +84,8 @@ The calculated bucket number is at least `1` and is limited by
 The serialized size is measured before file encoding and compression, so it is not the exact
 ORC or Parquet size on storage.
 Inferring the data amount adds a statistics stage; Spark caches the batch so that inference and
-writing use the same input rows.
+writing use the same input rows. Spark skips this stage for an unpartitioned table that already
+has real bucket files, or when `postpone.batch-write-fixed-bucket.max-parallelism` is `1`.
 
 When `postpone.batch-write-fixed-bucket` is `false`,
 records are first stored in the `bucket-postpone` directory of each partition
