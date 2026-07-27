@@ -520,12 +520,18 @@ public class SortCompactCommitterTest {
         manifestCommittable.addFileCommittable(written);
 
         AtomicInteger abortCount = new AtomicInteger(0);
+        AtomicInteger abortCompactCount = new AtomicInteger(0);
         SortCompactCommitMessageRewriter rewriter =
                 new SortCompactCommitMessageRewriter(
                         table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits) {
                     @Override
                     public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
                         abortCount.incrementAndGet();
+                    }
+
+                    @Override
+                    public void abortCompactMessages(List<CommitMessage> compactMessages) {
+                        abortCompactCount.incrementAndGet();
                     }
                 };
 
@@ -545,6 +551,122 @@ public class SortCompactCommitterTest {
                             () -> committer.commit(Collections.singletonList(manifestCommittable)))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("commit failed");
+        }
+        assertThat(abortCount).hasValue(1);
+        // The rewritten compact messages carry new DV index files that the written messages do not,
+        // so a commit failure must abort them too (not just the written messages).
+        assertThat(abortCompactCount).hasValue(1);
+    }
+
+    @Test
+    public void testDeleteOnlyCommitFailureAbortsCompactMessages() throws Exception {
+        // Delete-only compact: writtenMessages is empty, but the rewritten compact messages still
+        // carry new DV index files from dvMaintainer.persist(). A commit failure must abort them
+        // rather than returning immediately (the previous writtenMessages.isEmpty() early return
+        // skipped cleanup entirely in this case).
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = createAppendStore(options);
+        store.commit(
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc")));
+        Map<String, List<Integer>> dvs = new HashMap<>();
+        dvs.put("data-0.orc", Arrays.asList(1, 3, 5));
+        dvs.put("data-1.orc", Arrays.asList(2, 4, 6));
+        store.commit(store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+
+        AtomicInteger abortWrittenCount = new AtomicInteger(0);
+        AtomicInteger abortCompactCount = new AtomicInteger(0);
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId == null ? 0L : baseSnapshotId, plan.dataSplits()) {
+                    @Override
+                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
+                        abortWrittenCount.incrementAndGet();
+                    }
+
+                    @Override
+                    public void abortCompactMessages(List<CommitMessage> compactMessages) {
+                        abortCompactCount.incrementAndGet();
+                    }
+                };
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            TableCommitImpl spiedCommit = spy(commit);
+            doThrow(new RuntimeException("commit failed"))
+                    .when(spiedCommit)
+                    .filterAndCommitMultiple(anyList(), eq(false));
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            spiedCommit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            rewriter);
+            assertThatThrownBy(
+                            () -> committer.filterAndCommit(Collections.emptyList(), false, false))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("commit failed");
+        }
+        // writtenMessages is empty for delete-only compact, so only the compact messages need
+        // aborting, but they MUST be aborted to clean up the new DV index files.
+        assertThat(abortCompactCount).hasValue(1);
+    }
+
+    @Test
+    public void testRewriteFailureAbortsWrittenMessages() throws Exception {
+        TestAppendFileStore store = createAppendStore(new HashMap<>());
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+
+        CommitMessageImpl written =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("sorted-0.orc"));
+        ManifestCommittable manifestCommittable = new ManifestCommittable(1L, 10L);
+        manifestCommittable.addFileCommittable(written);
+
+        AtomicInteger abortCount = new AtomicInteger(0);
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits) {
+                    @Override
+                    public List<CommitMessage> rewrite(List<CommitMessage> writtenMessages) {
+                        throw new RuntimeException("rewrite failed");
+                    }
+
+                    @Override
+                    public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
+                        abortCount.incrementAndGet();
+                    }
+                };
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            commit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            rewriter);
+            assertThatThrownBy(
+                            () -> committer.commit(Collections.singletonList(manifestCommittable)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("rewrite failed");
         }
         assertThat(abortCount).hasValue(1);
     }

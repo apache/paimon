@@ -177,32 +177,42 @@ public class SortCompactCommitMessageRewriter {
         }
 
         List<CommitMessage> result = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionEntry :
-                compactBeforeFiles.entrySet()) {
-            BinaryRow partition = partitionEntry.getKey();
-            Map<Integer, List<CommitMessageImpl>> writtenInPartition = grouped.get(partition);
-            for (Integer bucket : partitionEntry.getValue().keySet()) {
-                List<CommitMessageImpl> group = Collections.emptyList();
-                if (writtenInPartition != null) {
-                    List<CommitMessageImpl> writtenGroup = writtenInPartition.remove(bucket);
-                    if (writtenGroup != null) {
-                        group = writtenGroup;
+        try {
+            for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionEntry :
+                    compactBeforeFiles.entrySet()) {
+                BinaryRow partition = partitionEntry.getKey();
+                Map<Integer, List<CommitMessageImpl>> writtenInPartition = grouped.get(partition);
+                for (Integer bucket : partitionEntry.getValue().keySet()) {
+                    List<CommitMessageImpl> group = Collections.emptyList();
+                    if (writtenInPartition != null) {
+                        List<CommitMessageImpl> writtenGroup = writtenInPartition.remove(bucket);
+                        if (writtenGroup != null) {
+                            group = writtenGroup;
+                        }
                     }
+                    result.add(rewriteGroup(partition, bucket, group));
                 }
-                result.add(rewriteGroup(partition, bucket, group));
+                if (writtenInPartition != null && writtenInPartition.isEmpty()) {
+                    grouped.remove(partition);
+                }
             }
-            if (writtenInPartition != null && writtenInPartition.isEmpty()) {
-                grouped.remove(partition);
-            }
-        }
 
-        for (Map.Entry<BinaryRow, Map<Integer, List<CommitMessageImpl>>> partitionEntry :
-                grouped.entrySet()) {
-            BinaryRow partition = partitionEntry.getKey();
-            for (Map.Entry<Integer, List<CommitMessageImpl>> bucketEntry :
-                    partitionEntry.getValue().entrySet()) {
-                result.add(rewriteGroup(partition, bucketEntry.getKey(), bucketEntry.getValue()));
+            for (Map.Entry<BinaryRow, Map<Integer, List<CommitMessageImpl>>> partitionEntry :
+                    grouped.entrySet()) {
+                BinaryRow partition = partitionEntry.getKey();
+                for (Map.Entry<Integer, List<CommitMessageImpl>> bucketEntry :
+                        partitionEntry.getValue().entrySet()) {
+                    result.add(
+                            rewriteGroup(partition, bucketEntry.getKey(), bucketEntry.getValue()));
+                }
             }
+        } catch (RuntimeException e) {
+            // A partial rewrite may have already persisted new DV index files in result.
+            // The sorted output files in writtenMessages must also be aborted so callers
+            // (for example Flink's rewriteAll outside commit try/catch) do not leave orphans.
+            abortQuietly(result, e);
+            abortQuietly(writtenMessages, e);
+            throw e;
         }
         return result;
     }
@@ -319,16 +329,50 @@ public class SortCompactCommitMessageRewriter {
                 + ". Please retry the sort compact job after concurrent deletes/updates have finished.";
     }
 
-    /** Abort newly written files when sort compact rewrite or commit fails. */
+    /**
+     * Abort newly written files when sort compact rewrite or commit fails.
+     *
+     * <p>This only covers files tracked by the original append write messages. The new
+     * deletion-vector index files produced by {@code dvMaintainer.persist()} during {@link
+     * #rewrite} live in the rewritten compact messages and must be cleaned up via {@link
+     * #abortCompactMessages}.
+     */
     public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
-        if (writtenMessages.isEmpty()) {
+        abortMessages(writtenMessages);
+    }
+
+    /**
+     * Abort the rewritten compact messages, including the new deletion-vector index files produced
+     * by {@code dvMaintainer.persist()} during {@link #rewrite}.
+     *
+     * <p>These index files are not referenced by the original written messages, so aborting only
+     * the written messages (as failure cleanup used to do) orphans them. For delete-only compact
+     * the written messages are empty, so the rewritten compact messages are the only place the new
+     * DV index files are tracked. {@code commit.abort} only deletes new files ({@code
+     * compactAfter}, {@code newIndexFiles}); planned {@code compactBefore} files and {@code
+     * deletedIndexFiles} (still referenced by the latest snapshot) are left untouched.
+     */
+    public void abortCompactMessages(List<CommitMessage> compactMessages) {
+        abortMessages(compactMessages);
+    }
+
+    private void abortMessages(List<CommitMessage> messages) {
+        if (messages.isEmpty()) {
             return;
         }
         try (TableCommit commit = table.newCommit(ABORT_COMMIT_USER)) {
-            commit.abort(writtenMessages);
+            commit.abort(messages);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Failed to clean up sort compact write output before aborting commit.", e);
+        }
+    }
+
+    private void abortQuietly(List<CommitMessage> messages, RuntimeException cause) {
+        try {
+            abortMessages(messages);
+        } catch (Exception abortException) {
+            cause.addSuppressed(abortException);
         }
     }
 

@@ -135,11 +135,17 @@ public class SortCompactSparkCommitTest {
                                 Collections.emptyList()),
                         CompactIncrement.emptyIncrement());
         AtomicInteger abortCount = new AtomicInteger(0);
+        AtomicInteger abortCompactCount = new AtomicInteger(0);
         SortCompactCommitMessageRewriter rewriter =
                 new SortCompactCommitMessageRewriter(table, 0L, Collections.singletonList(split)) {
                     @Override
                     public void abortWrittenMessages(List<CommitMessage> writtenMessages) {
                         abortCount.incrementAndGet();
+                    }
+
+                    @Override
+                    public void abortCompactMessages(List<CommitMessage> compactMessages) {
+                        abortCompactCount.incrementAndGet();
                     }
                 };
 
@@ -156,6 +162,9 @@ public class SortCompactSparkCommitTest {
                 .hasMessageContaining("table commit failed");
 
         assertThat(abortCount).hasValue(1);
+        // The rewritten compact messages carry new DV index files that the written messages do not,
+        // so a commit failure must abort them too.
+        assertThat(abortCompactCount).hasValue(1);
     }
 
     @Test

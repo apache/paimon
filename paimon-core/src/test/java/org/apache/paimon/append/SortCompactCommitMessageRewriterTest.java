@@ -31,6 +31,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -846,6 +847,112 @@ public class SortCompactCommitMessageRewriterTest {
         assertThat(compact.compactIncrement().compactAfter()).isEmpty();
         assertThat(compact.compactIncrement().deletedIndexFiles()).isNotEmpty();
         assertThat(compact.compactIncrement().newIndexFiles()).isEmpty();
+    }
+
+    @Test
+    public void testAbortCompactMessagesCleansUpNewDeletionVectorFiles() throws Exception {
+        TestAppendFileStore store =
+                createAppendStore(
+                        tempDir,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+
+        // Two old data files sharing a single DV index file.
+        store.commit(
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc")));
+        Map<String, List<Integer>> dvs = new HashMap<>();
+        dvs.put("data-0.orc", Arrays.asList(1, 3, 5));
+        dvs.put("data-1.orc", Arrays.asList(2, 4, 6));
+        store.commit(store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        long baseSnapshotId = table.snapshotManager().latestSnapshotId();
+
+        // Plan sort compact for only data-0; data-1 stays, so its DV must be rewritten to a new
+        // index file by dvMaintainer.persist() during rewrite.
+        DataFileMeta old0 = newFile("data-0.orc", 0, 0, 100, 100);
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(old0))
+                        .build();
+
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId, Collections.singletonList(split));
+        List<CommitMessage> compactMessages = rewriter.rewrite(Collections.emptyList());
+
+        assertThat(compactMessages).hasSize(1);
+        CommitMessageImpl compact = (CommitMessageImpl) compactMessages.get(0);
+        assertThat(compact.compactIncrement().newIndexFiles())
+                .as("new DV index file rewriting data-1's deletion vector")
+                .hasSize(1);
+        assertThat(compact.compactIncrement().deletedIndexFiles())
+                .as("old shared DV index file marked for deletion")
+                .hasSize(1);
+
+        IndexFileMeta newDvFile = compact.compactIncrement().newIndexFiles().get(0);
+        IndexFileMeta oldSharedDvFile = compact.compactIncrement().deletedIndexFiles().get(0);
+        IndexPathFactory indexPathFactory =
+                table.store().pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET);
+        Path newDvPath = indexPathFactory.toPath(newDvFile);
+        Path oldSharedDvPath = indexPathFactory.toPath(oldSharedDvFile);
+        assertThat(table.fileIO().exists(newDvPath)).isTrue();
+        assertThat(table.fileIO().exists(oldSharedDvPath)).isTrue();
+
+        rewriter.abortCompactMessages(compactMessages);
+
+        // The new DV file is only referenced by the uncommitted compact messages, so abort cleans
+        // it up to avoid orphaned index files on retry.
+        assertThat(table.fileIO().exists(newDvPath)).isFalse();
+        // The old shared DV file is still referenced by the latest snapshot (the compact did not
+        // commit), so abort must not delete it.
+        assertThat(table.fileIO().exists(oldSharedDvPath)).isTrue();
+    }
+
+    @Test
+    public void testAbortWrittenMessagesCleansUpSortedDataFiles() throws Exception {
+        TestAppendFileStore store = createAppendStore(tempDir, Collections.emptyMap());
+        store.commit(
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("data-0.orc")));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        long baseSnapshotId = table.snapshotManager().latestSnapshotId();
+
+        DataFileMeta old = newFile("data-0.orc", 0, 0, 100, 100);
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(old))
+                        .build();
+
+        CommitMessageImpl written =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("sorted-0.orc"));
+        DataFileMeta sorted = written.newFilesIncrement().newFiles().get(0);
+        Path sortedPath =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0)
+                        .toPath(sorted);
+        assertThat(table.fileIO().exists(sortedPath)).isTrue();
+
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId, Collections.singletonList(split));
+        rewriter.abortWrittenMessages(Collections.singletonList(written));
+
+        assertThat(table.fileIO().exists(sortedPath)).isFalse();
     }
 
     @Test

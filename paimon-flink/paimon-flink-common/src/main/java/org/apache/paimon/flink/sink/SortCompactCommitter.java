@@ -68,7 +68,13 @@ public class SortCompactCommitter extends StoreCommitter {
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         List<CommitMessage> writtenMessages = collectWrittenMessages(committables);
-        List<ManifestCommittable> rewritten = rewriteAll(committables);
+        List<ManifestCommittable> rewritten;
+        try {
+            rewritten = rewriteAll(committables);
+        } catch (RuntimeException e) {
+            abortWrittenQuietly(writtenMessages, e);
+            throw e;
+        }
         long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
         try {
             super.commit(rewritten);
@@ -108,8 +114,14 @@ public class SortCompactCommitter extends StoreCommitter {
             return 0;
         }
 
-        List<ManifestCommittable> rewritten = rewriteAll(retryCommittables);
         List<CommitMessage> writtenMessages = collectWrittenMessages(retryCommittables);
+        List<ManifestCommittable> rewritten;
+        try {
+            rewritten = rewriteAll(retryCommittables);
+        } catch (RuntimeException e) {
+            abortWrittenQuietly(writtenMessages, e);
+            throw e;
+        }
         long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
         int committed;
         try {
@@ -127,7 +139,13 @@ public class SortCompactCommitter extends StoreCommitter {
             List<ManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
             boolean partitionMarkDoneRecoverFromState) {
-        List<ManifestCommittable> rewritten = rewriteAll(Collections.emptyList());
+        List<ManifestCommittable> rewritten;
+        try {
+            rewritten = rewriteAll(Collections.emptyList());
+        } catch (RuntimeException e) {
+            abortWrittenQuietly(Collections.emptyList(), e);
+            throw e;
+        }
         if (rewritten.isEmpty()) {
             return 0;
         }
@@ -211,19 +229,32 @@ public class SortCompactCommitter extends StoreCommitter {
             List<ManifestCommittable> rewrittenCommittables,
             long snapshotIdBeforeCommit,
             Exception cause) {
-        if (writtenMessages.isEmpty()) {
+        List<CommitMessage> compactMessages = compactMessagesFrom(rewrittenCommittables);
+        if (rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages)) {
             return;
         }
-        if (rewriter.isBatchCompactCommitSucceeded(
-                snapshotIdBeforeCommit, compactMessagesFrom(rewrittenCommittables))) {
-            return;
-        }
+        // Abort both the original written messages and the rewritten compact messages. The
+        // rewritten compact messages carry the new deletion-vector index files produced by
+        // dvMaintainer.persist() during rewrite, which are not referenced by the original written
+        // messages; aborting only the written messages would orphan them. For delete-only compact,
+        // writtenMessages is empty but compactMessages still carries the new DV index files, so it
+        // must be aborted (the previous writtenMessages.isEmpty() early return skipped cleanup
+        // entirely in that case).
         abortWrittenQuietly(writtenMessages, cause);
+        abortCompactQuietly(compactMessages, cause);
     }
 
     private void abortWrittenQuietly(List<CommitMessage> writtenMessages, Exception cause) {
         try {
             rewriter.abortWrittenMessages(writtenMessages);
+        } catch (Exception abortException) {
+            cause.addSuppressed(abortException);
+        }
+    }
+
+    private void abortCompactQuietly(List<CommitMessage> compactMessages, Exception cause) {
+        try {
+            rewriter.abortCompactMessages(compactMessages);
         } catch (Exception abortException) {
             cause.addSuppressed(abortException);
         }

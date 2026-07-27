@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.append.SortCompactCommitMessageRewriter;
 import org.apache.paimon.table.sink.CommitMessage;
 
+import java.util.Collections;
 import java.util.List;
 
 /** Commit orchestration for Spark sort compact writes. */
@@ -37,7 +38,7 @@ final class SortCompactSparkCommit {
         try {
             compactMessages = rewriter.rewrite(writtenMessages);
         } catch (Exception e) {
-            abortQuietly(rewriter, writtenMessages, e);
+            abortQuietly(rewriter, writtenMessages, Collections.emptyList(), e);
             throw new RuntimeException(e);
         }
 
@@ -49,7 +50,7 @@ final class SortCompactSparkCommit {
             // after a successful snapshot commit would delete files referenced by the COMPACT
             // snapshot and corrupt the table.
             if (!rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages)) {
-                abortQuietly(rewriter, writtenMessages, e);
+                abortQuietly(rewriter, writtenMessages, compactMessages, e);
             }
             throw e;
         }
@@ -64,9 +65,11 @@ final class SortCompactSparkCommit {
     private static void abortQuietly(
             SortCompactCommitMessageRewriter rewriter,
             List<CommitMessage> writtenMessages,
+            List<CommitMessage> compactMessages,
             Exception e) {
         try {
             rewriter.abortWrittenMessages(writtenMessages);
+            rewriter.abortCompactMessages(compactMessages);
         } catch (Exception abortException) {
             e.addSuppressed(abortException);
         }
