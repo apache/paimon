@@ -157,6 +157,41 @@ public class OSSFileIOTest {
     }
 
     @Test
+    public void testCreateBlobPresignedUrlUsesPublicEndpointWithoutChangingPath() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        BlobDescriptor descriptor =
+                new BlobDescriptor("oss://bucket/table/-internal.aliyuncs.com/source.blob", 0, 1);
+        when(client.headObject(eq("bucket"), contains("_bloburl_")))
+                .thenReturn(matchingMetadata(descriptor, "image/png"));
+        when(client.getEndpoint())
+                .thenReturn(URI.create("https://oss-cn-hangzhou-internal.aliyuncs.com"));
+        when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
+                .thenAnswer(
+                        invocation ->
+                                presignedUrl(
+                                        "https://bucket.oss-cn-hangzhou-internal.aliyuncs.com/"
+                                                + invocation.getArgument(1)
+                                                + "?Signature=test"));
+
+        URL url =
+                new URL(
+                        new TestOSSFileIO(client)
+                                .createBlobPresignedUrl(
+                                        new Path("oss://bucket/table"),
+                                        descriptor,
+                                        "png",
+                                        Duration.ofMinutes(5)));
+
+        assertThat(url.getHost()).isEqualTo("bucket.oss-cn-hangzhou.aliyuncs.com");
+        assertThat(url.getPath())
+                .isEqualTo(
+                        "/table/-internal.aliyuncs.com/_bloburl_"
+                                + sha256Hex(descriptor.serialize())
+                                + ".png");
+        assertThat(url.getQuery()).isEqualTo("Signature=test");
+    }
+
+    @Test
     public void testCreateBlobPresignedUrlControlsMultipartCount() throws Exception {
         OSSClient client = mock(OSSClient.class);
         BlobDescriptor descriptor =

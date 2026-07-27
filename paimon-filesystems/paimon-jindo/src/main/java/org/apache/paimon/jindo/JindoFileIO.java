@@ -226,16 +226,20 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     static OSSClient createBlobClient(Options options) {
+        String endpoint = options.get(OSS_ENDPOINT);
+        if (!endpoint.contains("://")) {
+            endpoint = "https://" + endpoint;
+        }
         String securityToken = options.get(OSS_SECURITY_TOKEN);
         OSSClientBuilder builder = new OSSClientBuilder();
         return (OSSClient)
                 (StringUtils.isNullOrWhitespaceOnly(securityToken)
                         ? builder.build(
-                                options.get(OSS_ENDPOINT),
+                                endpoint,
                                 options.get(OSS_ACCESS_KEY_ID),
                                 options.get(OSS_ACCESS_KEY_SECRET))
                         : builder.build(
-                                options.get(OSS_ENDPOINT),
+                                endpoint,
                                 options.get(OSS_ACCESS_KEY_ID),
                                 options.get(OSS_ACCESS_KEY_SECRET),
                                 securityToken));

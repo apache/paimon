@@ -47,7 +47,7 @@ public class JindoFileIOTest {
     @Test
     public void testCreateBlobClientUsesConfiguredSts() {
         Options options = new Options();
-        options.set("fs.oss.endpoint", "https://oss.example.com");
+        options.set("fs.oss.endpoint", "oss.example.com");
         options.set("fs.oss.accessKeyId", "access-key");
         options.set("fs.oss.accessKeySecret", "access-secret");
         options.set("fs.oss.securityToken", "security-token");
