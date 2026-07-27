@@ -27,12 +27,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -127,6 +131,177 @@ public class LocalKvDbTest {
 
             putString(db, "key1", "value2");
             Assertions.assertEquals("value2", getString(db, "key1"));
+        }
+    }
+
+    @Test
+    public void testRangeScanMergesMemTableAndLevels() throws IOException {
+        try (LocalKvDb db = createDb("range-scan-db")) {
+            List<Map.Entry<byte[], byte[]>> initial = new ArrayList<>();
+            initial.add(entry("a-1", "old-1"));
+            initial.add(entry("a-2", "old-2"));
+            initial.add(entry("b-1", "value-b"));
+            db.bulkLoad(initial.iterator(), initial.size());
+
+            putString(db, "a-1", "new-1");
+            db.flush();
+            deleteString(db, "a-2");
+            putString(db, "a-3", "new-3");
+
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=new-1", "a-3=new-3"), scanStrings(db, "a", "b"));
+            Assertions.assertTrue(db.rangeScan("b".getBytes(UTF_8), "b".getBytes(UTF_8)).isEmpty());
+            Assertions.assertEquals(
+                    Collections.singletonList("b-1=value-b"), scanStrings(db, "b", null));
+
+            db.flush();
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=new-1", "a-3=new-3"), scanStrings(db, "a", "b"));
+            db.compact();
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=new-1", "a-3=new-3"), scanStrings(db, "a", "b"));
+        }
+    }
+
+    @Test
+    public void testForEachInRangeAcrossMemTableAndSingleSst() throws IOException {
+        try (LocalKvDb db = createDb("range-consumer-db")) {
+            putString(db, "a-1", "value-1");
+            putString(db, "a-2", "value-2");
+            putString(db, "b-1", "value-b");
+
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=value-1", "a-2=value-2"), forEachStrings(db, "a", "b"));
+
+            db.flush();
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=value-1", "a-2=value-2"), forEachStrings(db, "a", "b"));
+
+            putString(db, "a-1", "updated-1");
+            deleteString(db, "a-2");
+            putString(db, "a-3", "value-3");
+            putString(db, "c-1", "value-c");
+            Assertions.assertEquals(
+                    Arrays.asList("a-1=updated-1", "a-3=value-3"), forEachStrings(db, "a", "b"));
+            Assertions.assertEquals(
+                    Collections.singletonList("c-1=value-c"), forEachStrings(db, "c", "d"));
+        }
+    }
+
+    @Test
+    public void testRangeIteratorDeduplicatesVersionsAcrossAllSources() throws IOException {
+        try (LocalKvDb db = createDb("range-iterator-db")) {
+            db.bulkLoad(
+                    Arrays.asList(entry("a", "base-a"), entry("b", "base-b"), entry("c", "base-c"))
+                            .iterator(),
+                    3);
+
+            putString(db, "a", "level-zero-a-1");
+            deleteString(db, "b");
+            putString(db, "d", "level-zero-d");
+            db.flush();
+
+            putString(db, "a", "level-zero-a-2");
+            deleteString(db, "c");
+            putString(db, "e", "level-zero-e");
+            db.flush();
+
+            putString(db, "a", "memtable-a");
+            deleteString(db, "d");
+            putString(db, "f", "memtable-f");
+
+            List<String> result = new ArrayList<>();
+            try (LocalKvDb.RangeIterator iterator =
+                    db.rangeIterator("a".getBytes(UTF_8), "g".getBytes(UTF_8))) {
+                Assertions.assertThrows(
+                        IllegalStateException.class, () -> putString(db, "x", "blocked"));
+                while (iterator.advanceNext()) {
+                    result.add(
+                            new String(iterator.getKey().copyBytes(), UTF_8)
+                                    + "="
+                                    + new String(iterator.getValue().copyBytes(), UTF_8));
+                }
+            }
+
+            Assertions.assertEquals(
+                    Arrays.asList("a=memtable-a", "e=level-zero-e", "f=memtable-f"), result);
+        }
+    }
+
+    @Test
+    public void testRangeIteratorRejectsBulkLoadWithoutLockUpgrade() throws IOException {
+        try (LocalKvDb db = createDb("range-iterator-bulk-load-db");
+                LocalKvDb.RangeIterator ignored =
+                        db.rangeIterator("a".getBytes(UTF_8), "b".getBytes(UTF_8))) {
+            List<Map.Entry<byte[], byte[]>> entries =
+                    Collections.singletonList(entry("a-1", "value-1"));
+
+            IllegalStateException exception =
+                    Assertions.assertThrows(
+                            IllegalStateException.class,
+                            () -> db.bulkLoad(entries.iterator(), entries.size()));
+            Assertions.assertTrue(exception.getMessage().contains("range iterator"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+        }
+    }
+
+    @Test
+    public void testRangeIteratorCrossesSstBlocks() throws IOException {
+        File directory = new File(tempDir.toFile(), "range-iterator-blocks");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .memTableFlushThreshold(1024 * 1024)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            List<Map.Entry<byte[], byte[]>> initial = new ArrayList<>();
+            for (int i = 0; i < 100; i++) {
+                initial.add(entry(String.format("key-%05d", i), String.format("value-%05d", i)));
+            }
+            db.bulkLoad(initial.iterator(), initial.size());
+
+            putString(db, "key-00020", "updated-20");
+            deleteString(db, "key-00030");
+            db.flush();
+            putString(db, "key-00040", "updated-40");
+
+            List<String> result = scanStrings(db, "key-00010", "key-00050");
+            Assertions.assertEquals(39, result.size());
+            Assertions.assertEquals("key-00010=value-00010", result.get(0));
+            Assertions.assertEquals("key-00020=updated-20", result.get(10));
+            Assertions.assertEquals("key-00031=value-00031", result.get(20));
+            Assertions.assertEquals("key-00040=updated-40", result.get(29));
+            Assertions.assertEquals("key-00049=value-00049", result.get(38));
+        }
+    }
+
+    @Test
+    public void testRangeIteratorDoesNotCacheReadersForOverlappingSsts() throws IOException {
+        int fileCount = 128;
+        File directory = new File(tempDir.toFile(), "range-iterator-many-ssts");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .level0FileNumCompactTrigger(fileCount + 1)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            for (int i = 0; i < fileCount; i++) {
+                putString(db, String.format("key-%05d", i), String.format("value-%05d", i));
+                db.flush();
+            }
+            Assertions.assertEquals(fileCount, db.getLevelFileCount(0));
+
+            int entryCount = 0;
+            try (LocalKvDb.RangeIterator iterator =
+                    db.rangeIterator("key-00000".getBytes(UTF_8), "key-99999".getBytes(UTF_8))) {
+                Assertions.assertEquals(0, db.getCachedReaderCount());
+                while (iterator.advanceNext()) {
+                    entryCount++;
+                }
+            }
+
+            Assertions.assertEquals(fileCount, entryCount);
+            Assertions.assertEquals(0, db.getCachedReaderCount());
         }
     }
 
@@ -1793,6 +1968,31 @@ public class LocalKvDbTest {
             return null;
         }
         return new String(bytes, UTF_8);
+    }
+
+    private static List<String> scanStrings(LocalKvDb db, String from, @Nullable String to)
+            throws IOException {
+        List<String> result = new ArrayList<>();
+        for (Map.Entry<byte[], byte[]> entry :
+                db.rangeScan(from.getBytes(UTF_8), to == null ? null : to.getBytes(UTF_8))) {
+            result.add(
+                    new String(entry.getKey(), UTF_8) + "=" + new String(entry.getValue(), UTF_8));
+        }
+        return result;
+    }
+
+    private static List<String> forEachStrings(LocalKvDb db, String from, @Nullable String to)
+            throws IOException {
+        List<String> result = new ArrayList<>();
+        db.forEachInRange(
+                from.getBytes(UTF_8),
+                to == null ? null : to.getBytes(UTF_8),
+                (key, value) ->
+                        result.add(
+                                new String(key.copyBytes(), UTF_8)
+                                        + "="
+                                        + new String(value.copyBytes(), UTF_8)));
+        return result;
     }
 
     private static void deleteString(LocalKvDb db, String key) throws IOException {

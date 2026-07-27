@@ -119,6 +119,56 @@ class LsmLevels {
         }
     }
 
+    /**
+     * Open a snapshot of all SST files which overlap the requested range.
+     *
+     * <p>Files are ordered from newer levels to older levels; Level-0 files are additionally
+     * ordered newest first. The read lock remains held until the returned snapshot is closed so a
+     * concurrent compaction cannot delete a file being iterated.
+     */
+    RangeSnapshot openRangeSnapshot(
+            MemorySlice fromInclusive,
+            @Nullable MemorySlice toExclusive,
+            Comparator<MemorySlice> keyComparator) {
+        lock.readLock().lock();
+        boolean success = false;
+        try {
+            List<File> files = new ArrayList<>();
+            for (int level = 0; level < maxLevels; level++) {
+                List<SstFileMetadata> levelFiles = levels.get(level);
+                if (levelFiles.isEmpty()) {
+                    continue;
+                }
+
+                if (level == 0) {
+                    for (SstFileMetadata metadata : levelFiles) {
+                        if (overlapsRange(metadata, fromInclusive, toExclusive, keyComparator)) {
+                            files.add(metadata.getFile());
+                        }
+                    }
+                    continue;
+                }
+
+                int firstFile = findFirstOverlappingFile(levelFiles, fromInclusive, keyComparator);
+                for (int i = firstFile; i < levelFiles.size(); i++) {
+                    SstFileMetadata metadata = levelFiles.get(i);
+                    if (toExclusive != null
+                            && keyComparator.compare(metadata.getMinKey(), toExclusive) >= 0) {
+                        break;
+                    }
+                    files.add(metadata.getFile());
+                }
+            }
+            RangeSnapshot snapshot = new RangeSnapshot(files);
+            success = true;
+            return snapshot;
+        } finally {
+            if (!success) {
+                lock.readLock().unlock();
+            }
+        }
+    }
+
     List<List<SstFileMetadata>> snapshot() {
         lock.readLock().lock();
         try {
@@ -263,6 +313,56 @@ class LsmLevels {
             }
         }
         return null;
+    }
+
+    private static int findFirstOverlappingFile(
+            List<SstFileMetadata> sortedFiles,
+            MemorySlice fromInclusive,
+            Comparator<MemorySlice> keyComparator) {
+        int low = 0;
+        int high = sortedFiles.size();
+        while (low < high) {
+            int mid = low + (high - low) / 2;
+            if (keyComparator.compare(sortedFiles.get(mid).getMaxKey(), fromInclusive) < 0) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
+    }
+
+    private static boolean overlapsRange(
+            SstFileMetadata metadata,
+            MemorySlice fromInclusive,
+            @Nullable MemorySlice toExclusive,
+            Comparator<MemorySlice> keyComparator) {
+        return keyComparator.compare(metadata.getMaxKey(), fromInclusive) >= 0
+                && (toExclusive == null
+                        || keyComparator.compare(metadata.getMinKey(), toExclusive) < 0);
+    }
+
+    /** SST files in a range protected from concurrent compaction until closed. */
+    final class RangeSnapshot implements AutoCloseable {
+
+        private final List<File> files;
+        private boolean closed;
+
+        private RangeSnapshot(List<File> files) {
+            this.files = files;
+        }
+
+        List<File> files() {
+            return files;
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                lock.readLock().unlock();
+            }
+        }
     }
 
     /** Callback for reading one SST file. */
