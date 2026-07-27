@@ -34,12 +34,10 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.paimon.sst.BlockHandle.writeBlockHandle;
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
 /**
@@ -49,16 +47,12 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 public class SstFileWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class.getName());
-    private static final int INITIAL_BLOOM_HASH_CAPACITY = 1024;
 
     private final PositionOutputStream out;
     private final int blockSize;
     private final BlockWriter dataBlockWriter;
     private final BlockWriter indexBlockWriter;
-    @Nullable private final BloomFilter.Builder bloomFilter;
-    private final double dynamicBloomFilterFpp;
-    @Nullable private int[] bloomHashes;
-    private int bloomHashCount;
+    @Nullable private final BloomFilterWriter bloomFilterWriter;
     private final BlockCompressionType compressionType;
     @Nullable private final BlockCompressor blockCompressor;
 
@@ -80,13 +74,12 @@ public class SstFileWriter {
         int expectedNumberOfBlocks = 1024;
         this.indexBlockWriter =
                 new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
-        this.bloomFilter = bloomFilter;
-        this.dynamicBloomFilterFpp = bloomFilter == null ? dynamicBloomFilterFpp : -1;
-        if (this.dynamicBloomFilterFpp > 0) {
-            checkArgument(
-                    this.dynamicBloomFilterFpp < 1,
-                    "Bloom filter false positive probability must be between 0 and 1.");
-            this.bloomHashes = new int[INITIAL_BLOOM_HASH_CAPACITY];
+        if (bloomFilter != null) {
+            this.bloomFilterWriter = new PreSizedBloomFilterWriter(bloomFilter);
+        } else if (dynamicBloomFilterFpp > 0) {
+            this.bloomFilterWriter = new DynamicBloomFilterWriter(dynamicBloomFilterFpp);
+        } else {
+            this.bloomFilterWriter = null;
         }
         if (compressionFactory == null) {
             this.compressionType = BlockCompressionType.NONE;
@@ -107,13 +100,8 @@ public class SstFileWriter {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         dataBlockWriter.add(key, value);
-        if (bloomFilter != null || bloomHashes != null) {
-            int keyHash = MurmurHashUtils.hashBytes(key);
-            if (bloomFilter != null) {
-                bloomFilter.addHash(keyHash);
-            } else {
-                addBloomHash(keyHash);
-            }
+        if (bloomFilterWriter != null) {
+            bloomFilterWriter.addHash(MurmurHashUtils.hashBytes(key));
         }
 
         lastKey = key;
@@ -187,31 +175,7 @@ public class SstFileWriter {
 
     @Nullable
     public BloomFilterHandle writeBloomFilter() throws IOException {
-        BloomFilter.Builder filterToWrite = bloomFilter;
-        if (bloomHashes != null && bloomHashCount > 0) {
-            filterToWrite = BloomFilter.builder(bloomHashCount, dynamicBloomFilterFpp);
-            for (int i = 0; i < bloomHashCount; i++) {
-                filterToWrite.addHash(bloomHashes[i]);
-            }
-            bloomHashes = null;
-        }
-
-        if (filterToWrite == null) {
-            return null;
-        }
-        MemorySegment buffer = filterToWrite.getBuffer();
-        BloomFilterHandle bloomFilterHandle =
-                new BloomFilterHandle(out.getPos(), buffer.size(), filterToWrite.expectedEntries());
-        writeSlice(MemorySlice.wrap(buffer));
-        LOG.info("Bloom filter size: {} bytes", filterToWrite.getBuffer().size());
-        return bloomFilterHandle;
-    }
-
-    private void addBloomHash(int hash) {
-        if (bloomHashCount == bloomHashes.length) {
-            bloomHashes = Arrays.copyOf(bloomHashes, Math.multiplyExact(bloomHashes.length, 2));
-        }
-        bloomHashes[bloomHashCount++] = hash;
+        return bloomFilterWriter == null ? null : bloomFilterWriter.write(out);
     }
 
     @Nullable
