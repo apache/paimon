@@ -117,6 +117,22 @@ class UserAgentTest(unittest.TestCase):
             api.rest_auth_function.init_header,
         )
 
+    def test_case_insensitive_user_agent_takes_precedence_over_legacy_key(self):
+        options = self._options()
+        options["header.user-agent"] = "custom-client/1.0"
+        options["header.HTTP_USER_AGENT"] = "legacy-client/1.0"
+
+        api = RESTApi(options, config_required=False)
+
+        self.assertEqual(
+            "custom-client/1.0",
+            api.rest_auth_function.init_header["User-Agent"],
+        )
+        self.assertNotIn(
+            "HTTP_USER_AGENT",
+            api.rest_auth_function.init_header,
+        )
+
     def test_canonical_user_agent_takes_precedence_over_other_casing(self):
         options = self._options()
         options["header.user-agent"] = "lowercase-client/1.0"

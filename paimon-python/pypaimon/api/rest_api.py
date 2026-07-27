@@ -118,20 +118,22 @@ class RESTApi:
         headers = RESTUtil.extract_prefix_map(options, cls.HEADER_PREFIX)
         user_agent_option = CatalogOptions.HTTP_USER_AGENT_HEADER
 
-        # Prefix extraction treats legacy keys as literal header names. Remove them and
-        # resolve the value through ConfigOption so the canonical key takes precedence.
+        # Prefix extraction treats legacy keys as literal header names. Remove them so
+        # they are considered only when no case-insensitive User-Agent key is present.
         for fallback_key in user_agent_option.fallback_keys():
             if fallback_key.startswith(cls.HEADER_PREFIX):
                 headers.pop(fallback_key[len(cls.HEADER_PREFIX):], None)
 
+        canonical_user_agent = headers.get(cls.USER_AGENT_HEADER)
         user_agent = None
         for header_name in list(headers):
             if header_name.lower() == cls.USER_AGENT_HEADER.lower():
                 user_agent = headers.pop(header_name)
 
-        configured_user_agent = options.get(user_agent_option)
-        if configured_user_agent is not None:
-            user_agent = configured_user_agent
+        if canonical_user_agent is not None:
+            user_agent = canonical_user_agent
+        elif user_agent is None:
+            user_agent = options.get(user_agent_option)
         if user_agent is not None:
             headers[cls.USER_AGENT_HEADER] = user_agent
         return headers
