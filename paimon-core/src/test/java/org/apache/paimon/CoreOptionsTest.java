@@ -248,4 +248,23 @@ public class CoreOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
     }
+
+    @Test
+    public void testLocalKvDbBlockSize() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("8 kb"));
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(8 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("2 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+    }
 }

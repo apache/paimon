@@ -65,6 +65,15 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
         this.writer = new SstFileWriter(out, blockSize, bloomFilter, compressionFactory);
     }
 
+    public SortLookupStoreWriter(
+            PositionOutputStream out,
+            int blockSize,
+            double bloomFilterFpp,
+            BlockCompressionFactory compressionFactory) {
+        this.out = out;
+        this.writer = new SstFileWriter(out, blockSize, bloomFilterFpp, compressionFactory);
+    }
+
     @Override
     public void put(byte[] key, byte[] value) throws IOException {
         writer.put(key, value);

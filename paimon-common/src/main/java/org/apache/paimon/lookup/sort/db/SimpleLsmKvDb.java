@@ -44,6 +44,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * A simple LSM-Tree based KV database built on top of {@link SortLookupStoreFactory}.
  *
@@ -591,12 +593,14 @@ public class SimpleLsmKvDb implements Closeable {
         private final File dataDirectory;
         private long memTableFlushThreshold = 64 * 1024 * 1024; // 64 MB
         private long maxSstFileSize = 8 * 1024 * 1024; // 8 MB
-        private int blockSize = 32 * 1024; // 32 KB
+        private int blockSize = 4 * 1024; // 4 KB
         private int level0FileNumCompactTrigger = 4;
         private int sizeRatio = 10;
         private CacheManager cacheManager;
         private CompressOptions compressOptions = CompressOptions.defaultOptions();
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
+        private boolean bloomFilterEnabled = true;
+        private double bloomFilterFpp = 0.1;
 
         Builder(File dataDirectory) {
             this.dataDirectory = dataDirectory;
@@ -614,7 +618,7 @@ public class SimpleLsmKvDb implements Closeable {
             return this;
         }
 
-        /** Set the SST block size in bytes. Default is 32 KB. */
+        /** Set the SST block size in bytes. Default is 4 KB. */
         public Builder blockSize(int blockSize) {
             this.blockSize = blockSize;
             return this;
@@ -648,6 +652,21 @@ public class SimpleLsmKvDb implements Closeable {
             return this;
         }
 
+        /** Enable or disable per-SST Bloom filters. Enabled by default. */
+        public Builder bloomFilterEnabled(boolean bloomFilterEnabled) {
+            this.bloomFilterEnabled = bloomFilterEnabled;
+            return this;
+        }
+
+        /** Set the Bloom filter false positive probability. Default is 0.1. */
+        public Builder bloomFilterFpp(double bloomFilterFpp) {
+            checkArgument(
+                    bloomFilterFpp > 0 && bloomFilterFpp < 1,
+                    "Bloom filter false positive probability must be between 0 and 1.");
+            this.bloomFilterFpp = bloomFilterFpp;
+            return this;
+        }
+
         /**
          * Set a custom key comparator. Default is unsigned lexicographic byte comparison.
          *
@@ -674,7 +693,11 @@ public class SimpleLsmKvDb implements Closeable {
             }
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
-                            keyComparator, cacheManager, blockSize, compressOptions);
+                            keyComparator,
+                            cacheManager,
+                            blockSize,
+                            compressOptions,
+                            bloomFilterEnabled ? bloomFilterFpp : -1);
 
             return new SimpleLsmKvDb(
                     dataDirectory,

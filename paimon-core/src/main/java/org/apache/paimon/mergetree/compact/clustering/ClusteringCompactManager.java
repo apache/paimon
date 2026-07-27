@@ -92,6 +92,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
             List<DataFileMeta> restoreFiles,
             long targetFileSize,
             long sortSpillBufferSize,
+            int localKvDbBlockSize,
             int pageSize,
             int maxNumFileHandles,
             int spillThreshold,
@@ -120,6 +121,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
         SimpleLsmKvDb kvDb =
                 SimpleLsmKvDb.builder(new File(ioManager.pickTempDir()))
                         .cacheManager(cacheManager)
+                        .blockSize(localKvDbBlockSize)
                         .keyComparator(new RowCompactedSerializer(keyType).createSliceComparator())
                         .build();
 

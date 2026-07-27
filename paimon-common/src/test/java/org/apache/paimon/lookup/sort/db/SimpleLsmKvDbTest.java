@@ -19,6 +19,7 @@
 package org.apache.paimon.lookup.sort.db;
 
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.lookup.sort.SortLookupStoreFooter;
 import org.apache.paimon.memory.MemorySlice;
 
 import org.junit.jupiter.api.Assertions;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -158,6 +160,53 @@ public class SimpleLsmKvDbTest {
             Assertions.assertEquals("first", getString(db, "alpha"));
             Assertions.assertEquals("second", getString(db, "beta"));
             Assertions.assertEquals("third", getString(db, "gamma"));
+        }
+    }
+
+    @Test
+    public void testBloomFilterForFlushAndCompaction() throws IOException {
+        try (SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bloom-db"))
+                        .memTableFlushThreshold(256)
+                        .maxSstFileSize(512)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(3)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            for (int batch = 0; batch < 5; batch++) {
+                for (int i = 0; i < 20; i++) {
+                    int key = batch * 20 + i;
+                    putString(db, String.format("key-%05d", key), String.format("value-%05d", key));
+                }
+                db.flush();
+            }
+
+            db.compact();
+            assertAllSstFilesHaveBloomFilter(new File(tempDir.toFile(), "bloom-db"));
+
+            for (int i = 0; i < 100; i++) {
+                Assertions.assertEquals(
+                        String.format("value-%05d", i),
+                        getString(db, String.format("key-%05d", i)));
+            }
+            Assertions.assertNull(getString(db, "key-missing"));
+        }
+    }
+
+    @Test
+    public void testBloomFilterCanBeDisabled() throws IOException {
+        File directory = new File(tempDir.toFile(), "no-bloom-db");
+        try (SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(directory)
+                        .blockSize(128)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .bloomFilterEnabled(false)
+                        .build()) {
+            putString(db, "key", "value");
+            db.flush();
+            assertAllSstFilesBloomFilter(directory, false);
+            Assertions.assertEquals("value", getString(db, "key"));
+            Assertions.assertNull(getString(db, "missing"));
         }
     }
 
@@ -1383,6 +1432,7 @@ public class SimpleLsmKvDbTest {
                     deepestLevelFiles > 1,
                     "Expected multiple SST files at deepest level, got " + deepestLevelFiles);
             Assertions.assertEquals(0, db.getLevelFileCount(0));
+            assertAllSstFilesHaveBloomFilter(new File(tempDir.toFile(), "bulk-multi-db"));
 
             // All keys should be readable
             for (int i = 0; i < 200; i++) {
@@ -1404,6 +1454,14 @@ public class SimpleLsmKvDbTest {
             Assertions.assertEquals(0, db.getSstFileCount());
             Assertions.assertNull(getString(db, "any-key"));
         }
+    }
+
+    @Test
+    public void testBloomFilterFppValidation() {
+        SimpleLsmKvDb.Builder builder =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "invalid-bloom-db"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> builder.bloomFilterFpp(0));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> builder.bloomFilterFpp(1));
     }
 
     @Test
@@ -1573,6 +1631,32 @@ public class SimpleLsmKvDbTest {
 
     private static Map.Entry<byte[], byte[]> entry(String key, String value) {
         return new AbstractMap.SimpleImmutableEntry<>(key.getBytes(UTF_8), value.getBytes(UTF_8));
+    }
+
+    private static void assertAllSstFilesHaveBloomFilter(File directory) throws IOException {
+        assertAllSstFilesBloomFilter(directory, true);
+    }
+
+    private static void assertAllSstFilesBloomFilter(File directory, boolean expected)
+            throws IOException {
+        File[] sstFiles = directory.listFiles((dir, name) -> name.endsWith(".db"));
+        Assertions.assertNotNull(sstFiles);
+        Assertions.assertTrue(sstFiles.length > 0);
+        for (File sstFile : sstFiles) {
+            byte[] bytes = new byte[SortLookupStoreFooter.ENCODED_LENGTH];
+            try (RandomAccessFile input = new RandomAccessFile(sstFile, "r")) {
+                input.seek(input.length() - bytes.length);
+                input.readFully(bytes);
+            }
+            SortLookupStoreFooter footer =
+                    SortLookupStoreFooter.readFooter(MemorySlice.wrap(bytes).toInput());
+            if (expected) {
+                Assertions.assertNotNull(footer.getBloomFilterHandle());
+                Assertions.assertTrue(footer.getBloomFilterHandle().expectedEntries() > 0);
+            } else {
+                Assertions.assertNull(footer.getBloomFilterHandle());
+            }
+        }
     }
 
     private static String getString(SimpleLsmKvDb db, String key) throws IOException {

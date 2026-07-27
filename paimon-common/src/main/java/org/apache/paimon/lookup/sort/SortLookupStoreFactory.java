@@ -42,16 +42,27 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     private final CacheManager cacheManager;
     private final int blockSize;
     @Nullable private final BlockCompressionFactory compressionFactory;
+    private final double bloomFilterFpp;
 
     public SortLookupStoreFactory(
             Comparator<MemorySlice> comparator,
             CacheManager cacheManager,
             int blockSize,
             CompressOptions compression) {
+        this(comparator, cacheManager, blockSize, compression, -1);
+    }
+
+    public SortLookupStoreFactory(
+            Comparator<MemorySlice> comparator,
+            CacheManager cacheManager,
+            int blockSize,
+            CompressOptions compression,
+            double bloomFilterFpp) {
         this.comparator = comparator;
         this.cacheManager = cacheManager;
         this.blockSize = blockSize;
         this.compressionFactory = BlockCompressionFactory.create(compression);
+        this.bloomFilterFpp = bloomFilterFpp;
     }
 
     @Override
@@ -66,6 +77,9 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
             throws IOException {
         Path filePath = new Path(file.getAbsolutePath());
         PositionOutputStream out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
-        return new SortLookupStoreWriter(out, blockSize, bloomFilter, compressionFactory);
+        if (bloomFilter != null || bloomFilterFpp <= 0) {
+            return new SortLookupStoreWriter(out, blockSize, bloomFilter, compressionFactory);
+        }
+        return new SortLookupStoreWriter(out, blockSize, bloomFilterFpp, compressionFactory);
     }
 }
