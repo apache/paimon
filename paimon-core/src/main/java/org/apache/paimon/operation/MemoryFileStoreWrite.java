@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
-import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
@@ -80,14 +79,9 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 options,
                 partitionType);
         this.options = options;
-        this.cacheManager = createCacheManager(options);
-    }
-
-    static CacheManager createCacheManager(CoreOptions options) {
-        Cache.CacheType cacheType =
-                options.pkClusteringOverride() ? Cache.CacheType.CAFFEINE : Cache.CacheType.GUAVA;
-        return new CacheManager(
-                cacheType, options.lookupCacheMaxMemory(), options.lookupCacheHighPrioPoolRatio());
+        this.cacheManager =
+                new CacheManager(
+                        options.lookupCacheMaxMemory(), options.lookupCacheHighPrioPoolRatio());
     }
 
     @Override

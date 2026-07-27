@@ -20,7 +20,6 @@ package org.apache.paimon.benchmark.lookup;
 
 import org.apache.paimon.benchmark.Benchmark;
 import org.apache.paimon.compression.CompressOptions;
-import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
@@ -63,11 +62,6 @@ public class LocalKvDbBenchmark {
     private static final int SST_FILE_SIZE_MB =
             intProperty("local-kv-db.benchmark.sst-file-size-mb", 64);
     private static final int BLOCK_SIZE_KB = intProperty("local-kv-db.benchmark.block-size-kb", 4);
-    private static final Cache.CacheType CACHE_TYPE =
-            Cache.CacheType.valueOf(
-                    System.getProperties()
-                            .getProperty("local-kv-db.benchmark.cache-type", "GUAVA")
-                            .toUpperCase(Locale.ROOT));
     private static final String COMPRESSION =
             System.getProperties().getProperty("local-kv-db.benchmark.compression", "lz4");
     private static final double BLOOM_FILTER_FPP =
@@ -322,9 +316,7 @@ public class LocalKvDbBenchmark {
                         .memTableFlushThreshold(MEMTABLE_SIZE_MB * 1024L * 1024L)
                         .maxSstFileSize(SST_FILE_SIZE_MB * 1024L * 1024L)
                         .blockSize(BLOCK_SIZE_KB * 1024)
-                        .cacheManager(
-                                new CacheManager(
-                                        CACHE_TYPE, MemorySize.ofMebiBytes(CACHE_SIZE_MB), 0))
+                        .cacheManager(new CacheManager(MemorySize.ofMebiBytes(CACHE_SIZE_MB), 0))
                         .compressOptions(new CompressOptions(COMPRESSION, 1))
                         .bloomFilterEnabled(BLOOM_FILTER_FPP > 0);
         if (BLOOM_FILTER_FPP > 0) {
@@ -442,11 +434,10 @@ public class LocalKvDbBenchmark {
     private static String benchmarkDescription() {
         return String.format(
                 Locale.ROOT,
-                "%d-records-%dB-value-%dMB-%s-cache-%dMB-memtable-%dMB-sst-%dKB-block-%s-bloom-%s",
+                "%d-records-%dB-value-%dMB-caffeine-cache-%dMB-memtable-%dMB-sst-%dKB-block-%s-bloom-%s",
                 RECORD_COUNT,
                 VALUE_SIZE,
                 CACHE_SIZE_MB,
-                CACHE_TYPE.name().toLowerCase(Locale.ROOT),
                 MEMTABLE_SIZE_MB,
                 SST_FILE_SIZE_MB,
                 BLOCK_SIZE_KB,

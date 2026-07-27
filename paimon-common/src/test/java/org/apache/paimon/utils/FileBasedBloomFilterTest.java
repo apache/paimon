@@ -20,16 +20,12 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
-import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.TestTemplate;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
@@ -38,26 +34,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
-import java.util.List;
 import java.util.UUID;
 
 /** Test for {@link FileBasedBloomFilter}. */
-@ExtendWith(ParameterizedTestExtension.class)
 public class FileBasedBloomFilterTest {
 
     @TempDir Path tempDir;
-    private final Cache.CacheType cacheType;
 
-    public FileBasedBloomFilterTest(Cache.CacheType cacheType) {
-        this.cacheType = cacheType;
-    }
-
-    @Parameters(name = "{0}")
-    public static List<Cache.CacheType> getVarSeg() {
-        return Arrays.asList(Cache.CacheType.CAFFEINE, Cache.CacheType.GUAVA);
-    }
-
-    @TestTemplate
+    @Test
     public void testProbe() throws IOException {
         MemorySegment segment = MemorySegment.wrap(new byte[1000]);
         BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
@@ -67,7 +51,7 @@ public class FileBasedBloomFilterTest {
                 new org.apache.paimon.fs.Path(writeFile(segment.getArray()).getAbsolutePath());
         FileIO fileIO = LocalFileIO.create();
 
-        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofMebiBytes(1), 0.1);
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0.1);
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
                         fileIO.newInputStream(filePath), filePath, cacheManager, 100, 0, 1000);
