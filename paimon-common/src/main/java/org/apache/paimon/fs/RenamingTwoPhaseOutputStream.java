@@ -20,6 +20,9 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.UUID;
 
@@ -29,6 +32,9 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RenamingTwoPhaseOutputStream.class);
+
     private static final String TEMP_DIR_NAME = "_temporary";
 
     private final Path targetPath;
@@ -136,7 +142,24 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         @Override
         public void clean(FileIO fileIO) {
-            fileIO.deleteDirectoryQuietly(tempPath.getParent());
+            fileIO.deleteQuietly(tempPath);
+            // '_temporary' is shared with every other writer of this directory, Paimon or not, so
+            // it can only be removed once nothing is staged there any more: deleting it outright
+            // would throw away the pending files of jobs that are still running.
+            Path stagingDir = tempPath.getParent();
+            if (stagingDir == null) {
+                return;
+            }
+            try {
+                FileStatus[] staged = fileIO.listStatus(stagingDir);
+                if (staged != null && staged.length == 0) {
+                    fileIO.deleteQuietly(stagingDir);
+                }
+            } catch (IOException e) {
+                // Already gone, or not listable: an empty staging directory left behind is
+                // skipped by readers anyway.
+                LOG.debug("Could not check whether {} is still in use", stagingDir, e);
+            }
         }
     }
 }

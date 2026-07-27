@@ -72,6 +72,42 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
+    void testCleanKeepsTheSharedStagingDirectory() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        // '_temporary' is shared with every other writer of this directory, Paimon or not: a
+        // concurrent job's pending files must survive this stream's cleanup.
+        Path otherWriterPending =
+                new Path(targetPath.getParent(), "_temporary/attempt_0001_m_000010_15/part-00010");
+        fileIO.writeFile(otherWriterPending, "concurrent", false);
+
+        committer.commit(fileIO);
+        committer.clean(fileIO);
+
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(otherWriterPending)).isTrue();
+        assertThat(fileIO.exists(new Path(targetPath.getParent(), "_temporary"))).isTrue();
+    }
+
+    @Test
+    void testCleanRemovesTheStagingDirectoryOnceEmpty() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        committer.commit(fileIO);
+        committer.clean(fileIO);
+
+        // Nothing else was staged, so the writer leaves no trace beyond its committed file.
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(new Path(targetPath.getParent(), "_temporary"))).isFalse();
+    }
+
+    @Test
     void testDiscard() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
