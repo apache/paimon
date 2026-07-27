@@ -16,37 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io.cache;
+package org.apache.paimon.lookup.sort.db;
 
-import org.apache.paimon.memory.MemorySegment;
+import java.io.IOException;
 
-import javax.annotation.Nullable;
+/** Runs compaction synchronously in the thread which flushes the MemTable. */
+class SyncLsmCompactor extends LsmCompactor {
 
-import java.util.Map;
-import java.util.function.Function;
-
-/** Cache interface in Paimon. */
-public interface Cache {
-    @Nullable
-    CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier);
-
-    void put(CacheKey key, CacheValue value);
-
-    void invalidate(CacheKey key);
-
-    void invalidateAll();
-
-    Map<CacheKey, CacheValue> asMap();
-
-    /** Value for cache. */
-    class CacheValue {
-
-        final MemorySegment segment;
-        final CacheCallback callback;
-
-        CacheValue(MemorySegment segment, CacheCallback callback) {
-            this.segment = segment;
-            this.callback = callback;
-        }
+    SyncLsmCompactor(
+            LsmLevels levels,
+            CompactorFactory compactorFactory,
+            int levelZeroFileCountTrigger,
+            UniversalCompactor.FileSupplier fileSupplier,
+            UniversalCompactor.FileDeleter fileDeleter) {
+        super(levels, compactorFactory, levelZeroFileCountTrigger, fileSupplier, fileDeleter);
     }
+
+    @Override
+    void scheduleIfNeeded() throws IOException {
+        compactUntilStable();
+    }
+
+    @Override
+    void applyBackpressure() {}
+
+    @Override
+    void checkFailure() {}
+
+    @Override
+    void await() {}
 }

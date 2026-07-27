@@ -66,7 +66,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Thread-safety tests for BTree global index readers. */
 public class BTreeThreadSafetyTest {
 
-    private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB);
+    private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB, 0);
 
     @TempDir java.nio.file.Path tempPath;
 

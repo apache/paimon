@@ -44,17 +44,7 @@ public class CacheManager {
     private final Cache dataCache;
     private final Cache indexCache;
 
-    @VisibleForTesting
-    public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.GUAVA, maxMemorySize, 0);
-    }
-
-    public CacheManager(MemorySize dataMaxMemorySize, double highPriorityPoolRatio) {
-        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPriorityPoolRatio);
-    }
-
-    public CacheManager(
-            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPriorityPoolRatio) {
+    public CacheManager(MemorySize maxMemorySize, double highPriorityPoolRatio) {
         Preconditions.checkArgument(
                 highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,
                 "The high priority pool ratio should in the range [0, 1).");
@@ -62,12 +52,11 @@ public class CacheManager {
                 MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPriorityPoolRatio));
         MemorySize dataCacheSize =
                 MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPriorityPoolRatio)));
-        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
+        this.dataCache = CacheBuilder.newBuilder().maximumWeight(dataCacheSize).build();
         if (highPriorityPoolRatio == 0) {
             this.indexCache = dataCache;
         } else {
-            this.indexCache =
-                    CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
+            this.indexCache = CacheBuilder.newBuilder().maximumWeight(indexCacheSize).build();
         }
         LOG.info(
                 "Initialize cache manager with data cache of {} and index cache of {}.",

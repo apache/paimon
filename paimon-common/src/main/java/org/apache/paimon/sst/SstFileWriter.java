@@ -52,7 +52,7 @@ public class SstFileWriter {
     private final int blockSize;
     private final BlockWriter dataBlockWriter;
     private final BlockWriter indexBlockWriter;
-    @Nullable private final BloomFilter.Builder bloomFilter;
+    @Nullable private final BloomFilter.Builder bloomFilterBuilder;
     private final BlockCompressionType compressionType;
     @Nullable private final BlockCompressor blockCompressor;
 
@@ -65,7 +65,7 @@ public class SstFileWriter {
     public SstFileWriter(
             PositionOutputStream out,
             int blockSize,
-            @Nullable BloomFilter.Builder bloomFilter,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.out = out;
         this.blockSize = blockSize;
@@ -73,7 +73,7 @@ public class SstFileWriter {
         int expectedNumberOfBlocks = 1024;
         this.indexBlockWriter =
                 new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
-        this.bloomFilter = bloomFilter;
+        this.bloomFilterBuilder = bloomFilterBuilder;
         if (compressionFactory == null) {
             this.compressionType = BlockCompressionType.NONE;
             this.blockCompressor = null;
@@ -93,8 +93,8 @@ public class SstFileWriter {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         dataBlockWriter.add(key, value);
-        if (bloomFilter != null) {
-            bloomFilter.addHash(MurmurHashUtils.hashBytes(key));
+        if (bloomFilterBuilder != null) {
+            bloomFilterBuilder.addHash(MurmurHashUtils.hashBytes(key));
         }
 
         lastKey = key;
@@ -168,15 +168,11 @@ public class SstFileWriter {
 
     @Nullable
     public BloomFilterHandle writeBloomFilter() throws IOException {
-        if (bloomFilter == null) {
+        if (bloomFilterBuilder == null) {
             return null;
         }
-        MemorySegment buffer = bloomFilter.getBuffer();
-        BloomFilterHandle bloomFilterHandle =
-                new BloomFilterHandle(out.getPos(), buffer.size(), bloomFilter.expectedEntries());
-        writeSlice(MemorySlice.wrap(buffer));
-        LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
-        return bloomFilterHandle;
+        BloomFilter bloomFilter = bloomFilterBuilder.build();
+        return bloomFilter == null ? null : bloomFilter.write(out);
     }
 
     @Nullable

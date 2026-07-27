@@ -2454,6 +2454,12 @@ public class CoreOptions implements Serializable {
                                     + "producing files that are internally ordered. "
                                     + "'local-sort' is cheaper and sufficient for Parquet lookup optimizations.");
 
+    public static final ConfigOption<MemorySize> LOCAL_KV_DB_BLOCK_SIZE =
+            key("local-kv-db.block-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription("Block size of the local key-value database.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2965,6 +2971,17 @@ public class CoreOptions implements Serializable {
 
     public boolean pkClusteringOverride() {
         return options.get(PK_CLUSTERING_OVERRIDE);
+    }
+
+    public int localKvDbBlockSize() {
+        long bytes = options.get(LOCAL_KV_DB_BLOCK_SIZE).getBytes();
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                LOCAL_KV_DB_BLOCK_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public String formatType() {

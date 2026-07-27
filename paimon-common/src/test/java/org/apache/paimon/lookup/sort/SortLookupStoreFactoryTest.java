@@ -87,12 +87,12 @@ public class SortLookupStoreFactoryTest {
 
     @TestTemplate
     public void testNormal() throws IOException {
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
 
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilterBuilder(bloomFilterEnabled));
         for (int i = 0; i < VALUE_COUNT; i++) {
             byte[] bytes = toBytes(i);
             writer.put(bytes, bytes);
@@ -115,12 +115,12 @@ public class SortLookupStoreFactoryTest {
 
     @TestTemplate
     public void testEmpty() throws IOException {
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0);
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
 
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilterBuilder(bloomFilterEnabled));
         writer.close();
 
         SortLookupStoreReader reader = factory.createReader(file);
@@ -139,11 +139,11 @@ public class SortLookupStoreFactoryTest {
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(
                         keySerializer.createSliceComparator(),
-                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        new CacheManager(MemorySize.ofMebiBytes(1), 0),
                         64 * 1024,
                         compress);
         SortLookupStoreWriter writer =
-                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+                factory.createWriter(file, createBloomFilterBuilder(bloomFilterEnabled));
         for (int i = 0; i < VALUE_COUNT; i++) {
             byte[] bytes = toBytes(keySerializer, row, i);
             writer.put(bytes, toBytes(i));
@@ -167,11 +167,11 @@ public class SortLookupStoreFactoryTest {
         reader.close();
     }
 
-    private BloomFilter.Builder createBloomFiler(boolean enabled) {
+    private BloomFilter.Builder createBloomFilterBuilder(boolean enabled) {
         if (!enabled) {
             return null;
         }
-        return BloomFilter.builder(100, 0.01);
+        return BloomFilter.fixedBuilder(100, 0.01);
     }
 
     private byte[] toBytes(RowCompactedSerializer serializer, GenericRow row, int i) {
