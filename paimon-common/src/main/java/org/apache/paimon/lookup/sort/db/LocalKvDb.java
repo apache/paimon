@@ -69,9 +69,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <p>This class is <b>not</b> thread-safe. External synchronization is required if accessed from
  * multiple threads.
  */
-public class SimpleLsmKvDb implements Closeable {
+public class LocalKvDb implements Closeable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SimpleLsmKvDb.class);
+    private static final Logger LOG = LoggerFactory.getLogger(LocalKvDb.class);
 
     /** Tombstone marker for deleted keys. */
     private static final byte[] TOMBSTONE = new byte[0];
@@ -121,7 +121,7 @@ public class SimpleLsmKvDb implements Closeable {
     private long fileSequence;
     private boolean closed;
 
-    private SimpleLsmKvDb(
+    private LocalKvDb(
             File dataDirectory,
             SortLookupStoreFactory storeFactory,
             Comparator<MemorySlice> keyComparator,
@@ -180,7 +180,7 @@ public class SimpleLsmKvDb implements Closeable {
     //  Builder
     // -------------------------------------------------------------------------
 
-    /** Create a builder for {@link SimpleLsmKvDb}. */
+    /** Create a builder for {@link LocalKvDb}. */
     public static Builder builder(File dataDirectory) {
         return new Builder(dataDirectory);
     }
@@ -469,7 +469,7 @@ public class SimpleLsmKvDb implements Closeable {
         }
         readerCache.clear();
 
-        LOG.info("SimpleLsmKvDb closed. Level stats: {}", getLevelStats());
+        LOG.info("LocalKvDb closed. Level stats: {}", getLevelStats());
     }
 
     /** Return the total number of SST files across all levels. */
@@ -579,7 +579,7 @@ public class SimpleLsmKvDb implements Closeable {
 
     private void ensureOpen() {
         if (closed) {
-            throw new IllegalStateException("SimpleLsmKvDb is already closed");
+            throw new IllegalStateException("LocalKvDb is already closed");
         }
     }
 
@@ -587,7 +587,7 @@ public class SimpleLsmKvDb implements Closeable {
     //  Builder
     // -------------------------------------------------------------------------
 
-    /** Builder for {@link SimpleLsmKvDb}. */
+    /** Builder for {@link LocalKvDb}. */
     public static class Builder {
 
         private final File dataDirectory;
@@ -678,8 +678,8 @@ public class SimpleLsmKvDb implements Closeable {
             return this;
         }
 
-        /** Build the {@link SimpleLsmKvDb} instance. */
-        public SimpleLsmKvDb build() {
+        /** Build the {@link LocalKvDb} instance. */
+        public LocalKvDb build() {
             if (!dataDirectory.exists()) {
                 boolean created = dataDirectory.mkdirs();
                 if (!created) {
@@ -699,7 +699,7 @@ public class SimpleLsmKvDb implements Closeable {
                             compressOptions,
                             bloomFilterEnabled ? bloomFilterFpp : -1);
 
-            return new SimpleLsmKvDb(
+            return new LocalKvDb(
                     dataDirectory,
                     factory,
                     keyComparator,

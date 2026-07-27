@@ -25,7 +25,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
-import org.apache.paimon.lookup.sort.db.SimpleLsmKvDb;
+import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileIOUtils;
@@ -49,28 +49,29 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Benchmark for {@link SimpleLsmKvDb}. */
-public class SimpleLsmKvDbBenchmark {
+/** Benchmark for {@link LocalKvDb}. */
+public class LocalKvDbBenchmark {
 
-    private static final int RECORD_COUNT = intProperty("simple-lsm.benchmark.records", 300_000);
+    private static final int RECORD_COUNT = intProperty("local-kv-db.benchmark.records", 300_000);
     private static final int OPERATION_COUNT =
-            intProperty("simple-lsm.benchmark.operations", 1_000_000);
-    private static final int VALUE_SIZE = intProperty("simple-lsm.benchmark.value-size", 64);
-    private static final int CACHE_SIZE_MB = intProperty("simple-lsm.benchmark.cache-size-mb", 128);
+            intProperty("local-kv-db.benchmark.operations", 1_000_000);
+    private static final int VALUE_SIZE = intProperty("local-kv-db.benchmark.value-size", 64);
+    private static final int CACHE_SIZE_MB =
+            intProperty("local-kv-db.benchmark.cache-size-mb", 128);
     private static final int MEMTABLE_SIZE_MB =
-            intProperty("simple-lsm.benchmark.memtable-size-mb", 64);
+            intProperty("local-kv-db.benchmark.memtable-size-mb", 64);
     private static final int SST_FILE_SIZE_MB =
-            intProperty("simple-lsm.benchmark.sst-file-size-mb", 64);
-    private static final int BLOCK_SIZE_KB = intProperty("simple-lsm.benchmark.block-size-kb", 4);
+            intProperty("local-kv-db.benchmark.sst-file-size-mb", 64);
+    private static final int BLOCK_SIZE_KB = intProperty("local-kv-db.benchmark.block-size-kb", 4);
     private static final Cache.CacheType CACHE_TYPE =
             Cache.CacheType.valueOf(
                     System.getProperties()
-                            .getProperty("simple-lsm.benchmark.cache-type", "GUAVA")
+                            .getProperty("local-kv-db.benchmark.cache-type", "GUAVA")
                             .toUpperCase(Locale.ROOT));
     private static final String COMPRESSION =
-            System.getProperties().getProperty("simple-lsm.benchmark.compression", "lz4");
+            System.getProperties().getProperty("local-kv-db.benchmark.compression", "lz4");
     private static final double BLOOM_FILTER_FPP =
-            doubleProperty("simple-lsm.benchmark.bloom-filter-fpp", -1);
+            doubleProperty("local-kv-db.benchmark.bloom-filter-fpp", -1);
 
     private static volatile long checksum;
 
@@ -79,7 +80,7 @@ public class SimpleLsmKvDbBenchmark {
     @Test
     public void testBulkLoad() {
         Benchmark benchmark =
-                new Benchmark("simple-lsm-bulk-load-" + benchmarkDescription(), RECORD_COUNT)
+                new Benchmark("local-kv-db-bulk-load-" + benchmarkDescription(), RECORD_COUNT)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         benchmark.addCase(
@@ -87,7 +88,7 @@ public class SimpleLsmKvDbBenchmark {
                 3,
                 () -> {
                     File directory = new File(tempDir.toFile(), "bulk-load-" + UUID.randomUUID());
-                    try (SimpleLsmKvDb db = createDb(directory)) {
+                    try (LocalKvDb db = createDb(directory)) {
                         db.bulkLoad(entries(RECORD_COUNT));
                         byte[] result = db.get(key(RECORD_COUNT / 2 * 2));
                         if (result == null) {
@@ -110,12 +111,12 @@ public class SimpleLsmKvDbBenchmark {
         byte[][] hitKeys = queryKeys(false);
         byte[][] missKeys = queryKeys(true);
 
-        try (SimpleLsmKvDb db = createDb(directory)) {
+        try (LocalKvDb db = createDb(directory)) {
             db.bulkLoad(entries(RECORD_COUNT));
 
             Benchmark benchmark =
                     new Benchmark(
-                                    "simple-lsm-point-lookup-" + benchmarkDescription(),
+                                    "local-kv-db-point-lookup-" + benchmarkDescription(),
                                     OPERATION_COUNT)
                             .setNumWarmupIters(2)
                             .setOutputPerIteration(true);
@@ -130,40 +131,40 @@ public class SimpleLsmKvDbBenchmark {
 
     @Test
     public void testPointLookupComparison() throws IOException {
-        File simpleDirectory = new File(tempDir.toFile(), "point-lookup-simple");
+        File localDirectory = new File(tempDir.toFile(), "point-lookup-local-kv-db");
         File rocksDirectory = new File(tempDir.toFile(), "point-lookup-rocks");
         byte[][] hitKeys = queryKeys(false);
         byte[][] missKeys = queryKeys(true);
 
-        try (SimpleLsmKvDb simpleDb = createDb(simpleDirectory);
+        try (LocalKvDb localDb = createDb(localDirectory);
                 RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
-            long simpleLoadStart = System.nanoTime();
-            simpleDb.bulkLoad(entries(RECORD_COUNT));
-            long simpleLoadNanos = System.nanoTime() - simpleLoadStart;
+            long localLoadStart = System.nanoTime();
+            localDb.bulkLoad(entries(RECORD_COUNT));
+            long localLoadNanos = System.nanoTime() - localLoadStart;
             long rocksLoadStart = System.nanoTime();
             rocksDb.bulkLoad(entries(RECORD_COUNT));
             long rocksLoadNanos = System.nanoTime() - rocksLoadStart;
             System.out.printf(
                     Locale.ROOT,
-                    "Build: simple=%.1f ms / %.2f MB, rocks=%.1f ms / %.2f MB%n",
-                    simpleLoadNanos / 1_000_000.0,
-                    directorySize(simpleDirectory) / (1024.0 * 1024.0),
+                    "Build: local-kv-db=%.1f ms / %.2f MB, rocks=%.1f ms / %.2f MB%n",
+                    localLoadNanos / 1_000_000.0,
+                    directorySize(localDirectory) / (1024.0 * 1024.0),
                     rocksLoadNanos / 1_000_000.0,
                     directorySize(rocksDirectory) / (1024.0 * 1024.0));
 
             Benchmark benchmark =
                     new Benchmark(
-                                    "simple-lsm-vs-rocks-point-lookup-" + benchmarkDescription(),
+                                    "local-kv-db-vs-rocks-point-lookup-" + benchmarkDescription(),
                                     OPERATION_COUNT)
                             .setNumWarmupIters(2)
                             .setOutputPerIteration(true);
-            benchmark.addCase("simple-hit", 5, () -> lookup(simpleDb, hitKeys, false));
+            benchmark.addCase("local-kv-db-hit", 5, () -> lookup(localDb, hitKeys, false));
             benchmark.addCase("rocks-hit", 5, () -> lookup(rocksDb.db, hitKeys, false));
-            benchmark.addCase("simple-miss", 5, () -> lookup(simpleDb, missKeys, true));
+            benchmark.addCase("local-kv-db-miss", 5, () -> lookup(localDb, missKeys, true));
             benchmark.addCase("rocks-miss", 5, () -> lookup(rocksDb.db, missKeys, true));
             benchmark.run();
         } finally {
-            FileIOUtils.deleteDirectoryQuietly(simpleDirectory);
+            FileIOUtils.deleteDirectoryQuietly(localDirectory);
             FileIOUtils.deleteDirectoryQuietly(rocksDirectory);
         }
         assertThat(checksum).isNotZero();
@@ -175,12 +176,12 @@ public class SimpleLsmKvDbBenchmark {
         byte[][] hitKeys = queryKeys(false);
         byte[][] values = updateValues();
 
-        try (SimpleLsmKvDb db = createDb(directory)) {
+        try (LocalKvDb db = createDb(directory)) {
             db.bulkLoad(entries(RECORD_COUNT));
 
             Benchmark benchmark =
                     new Benchmark(
-                                    "simple-lsm-mixed-read-write-" + benchmarkDescription(),
+                                    "local-kv-db-mixed-read-write-" + benchmarkDescription(),
                                     OPERATION_COUNT)
                             .setNumWarmupIters(2)
                             .setOutputPerIteration(true);
@@ -194,36 +195,38 @@ public class SimpleLsmKvDbBenchmark {
 
     @Test
     public void testMixedReadWriteComparison() throws IOException {
-        File simpleDirectory = new File(tempDir.toFile(), "mixed-read-write-simple");
+        File localDirectory = new File(tempDir.toFile(), "mixed-read-write-local-kv-db");
         File rocksDirectory = new File(tempDir.toFile(), "mixed-read-write-rocks");
         byte[][] hitKeys = queryKeys(false);
         byte[][] values = updateValues();
 
-        try (SimpleLsmKvDb simpleDb = createDb(simpleDirectory);
+        try (LocalKvDb localDb = createDb(localDirectory);
                 RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
-            simpleDb.bulkLoad(entries(RECORD_COUNT));
+            localDb.bulkLoad(entries(RECORD_COUNT));
             rocksDb.bulkLoad(entries(RECORD_COUNT));
 
             Benchmark benchmark =
                     new Benchmark(
-                                    "simple-lsm-vs-rocks-mixed-read-write-"
+                                    "local-kv-db-vs-rocks-mixed-read-write-"
                                             + benchmarkDescription(),
                                     OPERATION_COUNT)
                             .setNumWarmupIters(2)
                             .setOutputPerIteration(true);
             benchmark.addCase(
-                    "simple-50-percent-put", 5, () -> mixedReadWrite(simpleDb, hitKeys, values));
+                    "local-kv-db-50-percent-put",
+                    5,
+                    () -> mixedReadWrite(localDb, hitKeys, values));
             benchmark.addCase(
                     "rocks-50-percent-put", 5, () -> mixedReadWrite(rocksDb, hitKeys, values));
             benchmark.run();
         } finally {
-            FileIOUtils.deleteDirectoryQuietly(simpleDirectory);
+            FileIOUtils.deleteDirectoryQuietly(localDirectory);
             FileIOUtils.deleteDirectoryQuietly(rocksDirectory);
         }
         assertThat(checksum).isNotZero();
     }
 
-    private void mixedReadWrite(SimpleLsmKvDb db, byte[][] keys, byte[][] values) {
+    private void mixedReadWrite(LocalKvDb db, byte[][] keys, byte[][] values) {
         try {
             long localChecksum = 0;
             for (int i = 0; i < OPERATION_COUNT; i++) {
@@ -271,7 +274,7 @@ public class SimpleLsmKvDbBenchmark {
         return values;
     }
 
-    private void lookup(SimpleLsmKvDb db, byte[][] keys, boolean expectMiss) {
+    private void lookup(LocalKvDb db, byte[][] keys, boolean expectMiss) {
         try {
             long localChecksum = 0;
             for (byte[] key : keys) {
@@ -313,9 +316,9 @@ public class SimpleLsmKvDbBenchmark {
         }
     }
 
-    private SimpleLsmKvDb createDb(File directory) {
-        SimpleLsmKvDb.Builder builder =
-                SimpleLsmKvDb.builder(directory)
+    private LocalKvDb createDb(File directory) {
+        LocalKvDb.Builder builder =
+                LocalKvDb.builder(directory)
                         .memTableFlushThreshold(MEMTABLE_SIZE_MB * 1024L * 1024L)
                         .maxSstFileSize(SST_FILE_SIZE_MB * 1024L * 1024L)
                         .blockSize(BLOCK_SIZE_KB * 1024)

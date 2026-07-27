@@ -35,7 +35,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.sort.db.SimpleLsmKvDb;
+import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.types.RowType;
 
@@ -118,8 +118,8 @@ public class ClusteringCompactManager extends CompactFutureManager {
                 CodeGenUtils.newRecordComparator(
                         valueType.getFieldTypes(), clusteringColumnIndexes);
 
-        SimpleLsmKvDb kvDb =
-                SimpleLsmKvDb.builder(new File(ioManager.pickTempDir()))
+        LocalKvDb kvDb =
+                LocalKvDb.builder(new File(ioManager.pickTempDir()))
                         .cacheManager(cacheManager)
                         .blockSize(localKvDbBlockSize)
                         .keyComparator(new RowCompactedSerializer(keyType).createSliceComparator())

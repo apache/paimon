@@ -39,7 +39,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
-import static org.apache.paimon.lookup.sort.db.SimpleLsmKvDb.isTombstone;
+import static org.apache.paimon.lookup.sort.db.LocalKvDb.isTombstone;
 
 /**
  * Handles Universal Compaction for the LSM-Tree, inspired by RocksDB's Universal Compaction.
