@@ -201,7 +201,11 @@ class DataWriter(ABC):
             if self.pending_data.nbytes > self.target_file_size:
                 size_split = self._find_optimal_split_point(
                     self.pending_data, self.target_file_size)
-                if 0 < size_split < split_row:
+                # First row alone exceeds target_file_size: roll it by itself
+                # rather than bundling it with the rows that follow.
+                if size_split <= 0:
+                    size_split = 1
+                if size_split < split_row:
                     split_row = size_split
             if split_row <= 0 or split_row >= num_rows:
                 break

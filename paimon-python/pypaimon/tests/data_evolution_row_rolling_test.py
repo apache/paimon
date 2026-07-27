@@ -103,6 +103,22 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         # No row limit -> a small batch stays one file (size rolling only).
         self.assertEqual([50], [f.row_count for f in files])
 
+    def test_oversized_row_rolls_by_itself(self):
+        # Each row exceeds target-file-size, so the size trigger rolls every row
+        # by itself even though target-file-row-num is larger (an oversized first
+        # row must not be bundled with the rows that follow).
+        table = self._create({
+            **self.de_options,
+            'target-file-row-num': '3',
+            'target-file-size': '100 b',
+        })
+        big = 'x' * 500
+        data = pa.Table.from_pydict(
+            {'id': list(range(4)), 'name': [big] * 4}, schema=self.pa_schema)
+        files = self._write_files(table, data)
+        self.assertEqual([1, 1, 1, 1], [f.row_count for f in files])
+        self.assertEqual(list(range(4)), self._read_ids(table))
+
     def test_non_de_table_still_fails_fast(self):
         table = self._create({'target-file-row-num': '3'})
         wb = table.new_batch_write_builder()
