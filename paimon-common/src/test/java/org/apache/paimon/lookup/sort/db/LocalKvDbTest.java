@@ -1472,20 +1472,24 @@ public class LocalKvDbTest {
         entries.add(entry("key-00001", "value-1"));
         entries.add(entry("key-00002", "value-2"));
 
-        try (LocalKvDb db = createDb("bulk-load-low-entry-count")) {
+        File lowEntryCountDirectory = new File(tempDir.toFile(), "bulk-load-low-entry-count");
+        try (LocalKvDb db = createDb(lowEntryCountDirectory)) {
             IllegalArgumentException exception =
                     Assertions.assertThrows(
                             IllegalArgumentException.class,
                             () -> db.bulkLoad(entries.iterator(), entries.size() - 1));
             Assertions.assertTrue(exception.getMessage().contains("more entries"));
+            assertNoSstFiles(lowEntryCountDirectory);
         }
 
-        try (LocalKvDb db = createDb("bulk-load-high-entry-count")) {
+        File highEntryCountDirectory = new File(tempDir.toFile(), "bulk-load-high-entry-count");
+        try (LocalKvDb db = createDb(highEntryCountDirectory)) {
             IllegalArgumentException exception =
                     Assertions.assertThrows(
                             IllegalArgumentException.class,
                             () -> db.bulkLoad(entries.iterator(), entries.size() + 1));
             Assertions.assertTrue(exception.getMessage().contains("numEntries"));
+            assertNoSstFiles(highEntryCountDirectory);
         }
     }
 
@@ -1515,8 +1519,9 @@ public class LocalKvDbTest {
 
     @Test
     public void testBulkLoadFailsOnUnorderedSstRanges() throws IOException {
+        File directory = new File(tempDir.toFile(), "bulk-unordered-ranges-db");
         LocalKvDb db =
-                LocalKvDb.builder(new File(tempDir.toFile(), "bulk-unordered-ranges-db"))
+                LocalKvDb.builder(directory)
                         .memTableFlushThreshold(1024)
                         .maxSstFileSize(1)
                         .blockSize(256)
@@ -1536,6 +1541,7 @@ public class LocalKvDbTest {
                             () -> db.bulkLoad(entries.iterator(), entries.size()));
             Assertions.assertTrue(exception.getMessage().contains("ranges"));
             Assertions.assertEquals(0, db.getSstFileCount());
+            assertNoSstFiles(directory);
         } finally {
             db.close();
         }
@@ -1694,6 +1700,12 @@ public class LocalKvDbTest {
                 Assertions.assertNull(footer.getBloomFilterHandle());
             }
         }
+    }
+
+    private static void assertNoSstFiles(File directory) {
+        File[] sstFiles = directory.listFiles((dir, name) -> name.endsWith(".db"));
+        Assertions.assertNotNull(sstFiles);
+        Assertions.assertEquals(0, sstFiles.length);
     }
 
     private static String getString(LocalKvDb db, String key) throws IOException {

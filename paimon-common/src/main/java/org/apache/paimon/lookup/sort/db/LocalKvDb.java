@@ -382,6 +382,12 @@ public class LocalKvDb implements Closeable {
                     e.addSuppressed(suppressed);
                 }
             }
+            if (currentSstFile != null) {
+                deleteFileQuietly(currentSstFile);
+            }
+            for (SstFileMetadata metadata : bulkLoadFiles) {
+                deleteFileQuietly(metadata.getFile());
+            }
             throw e;
         }
 
@@ -868,7 +874,7 @@ public class LocalKvDb implements Closeable {
 
     private void deleteFileQuietly(File file) {
         if (file.exists() && !file.delete()) {
-            LOG.warn("Failed to delete incomplete compaction file: {}", file.getName());
+            LOG.warn("Failed to delete SST file: {}", file.getName());
         }
     }
 
