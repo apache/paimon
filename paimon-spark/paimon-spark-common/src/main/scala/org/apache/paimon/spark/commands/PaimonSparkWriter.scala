@@ -109,6 +109,12 @@ case class PaimonSparkWriter(
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
+    write(data, overwriteExistingData = false)
+  }
+
+  private[commands] def write(
+      data: DataFrame,
+      overwriteExistingData: Boolean): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
@@ -123,7 +129,7 @@ case class PaimonSparkWriter(
     }
     val postponeBucketAssignment =
       if (postponeBatchWriteFixedBucket) {
-        Some(preparePostponeBucketAssignment(withInitBucketCol))
+        Some(preparePostponeBucketAssignment(withInitBucketCol, overwriteExistingData))
       } else {
         None
       }
@@ -544,7 +550,9 @@ case class PaimonSparkWriter(
       .toSeq
   }
 
-  private def preparePostponeBucketAssignment(df: DataFrame): PostponeBucketAssignment = {
+  private def preparePostponeBucketAssignment(
+      df: DataFrame,
+      overwriteExistingData: Boolean): PostponeBucketAssignment = {
     val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
     val maxNumBuckets = coreOptions.postponeBatchWriteFixedBucketMaxParallelism()
     val unpartitionedTableHasKnownNumBuckets =
@@ -561,7 +569,12 @@ case class PaimonSparkWriter(
       val inferredNumBuckets: Map[BinaryRow, Int] =
         if (inferBucketNumFromData) {
           val targetRowNum = coreOptions.postponeTargetRowNumPerBucket()
-          val postponeRowCounts = PostponeUtils.getPostponeRowCounts(table)
+          val postponeRowCounts =
+            if (overwriteExistingData) {
+              java.util.Collections.emptyMap[BinaryRow, java.lang.Long]()
+            } else {
+              PostponeUtils.getPostponeRowCounts(table)
+            }
           val dataStats =
             collectDataStatsByPartition(df, collectSize = !targetRowNum.isPresent)
           dataStats.map {
@@ -569,10 +582,9 @@ case class PaimonSparkWriter(
               val postponeRowCount = postponeRowCounts.getOrDefault(partition, 0L)
               val numBuckets =
                 if (targetRowNum.isPresent) {
-                  Math.min(
-                    PostponeUtils.computeBucketNumByRowCount(
-                      Math.addExact(stats.rowCount, postponeRowCount),
-                      targetRowNum.get()),
+                  computeBucketNumByRowCount(
+                    Math.addExact(stats.rowCount, postponeRowCount),
+                    targetRowNum.get(),
                     maxNumBuckets)
                 } else {
                   computeBucketNumBySize(
@@ -687,6 +699,20 @@ case class PaimonSparkWriter(
 }
 
 object PaimonSparkWriter {
+
+  private[spark] def computeBucketNumByRowCount(
+      rowCount: Long,
+      targetRowNumPerBucket: Long,
+      maxNumBuckets: Int): Int = {
+    if (targetRowNumPerBucket <= 0) {
+      throw new IllegalArgumentException(
+        "Option 'postpone.target-row-num-per-bucket' must be greater than 0.")
+    }
+
+    val bucketNum =
+      if (rowCount <= 0) 1L else (rowCount - 1) / targetRowNumPerBucket + 1
+    Math.min(bucketNum, maxNumBuckets.toLong).toInt
+  }
 
   private case class PostponeBucketAssignment(
       partitionBucketComputer: BinaryRow => Integer,

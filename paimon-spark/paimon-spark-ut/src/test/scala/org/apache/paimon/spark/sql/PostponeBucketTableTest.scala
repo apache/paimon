@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Ident
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
+import org.apache.paimon.spark.commands.PaimonSparkWriter
 import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
 import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 
@@ -32,6 +33,14 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import scala.collection.JavaConverters._
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
+
+  test("Postpone bucket table: cap inferred row-count buckets before Int conversion") {
+    assert(
+      PaimonSparkWriter.computeBucketNumByRowCount(
+        Integer.MAX_VALUE.toLong + 1L,
+        targetRowNumPerBucket = 1L,
+        maxNumBuckets = 2048) == 2048)
+  }
 
   test("Postpone bucket table: write with different bucket number") {
     withTable("t") {
@@ -160,6 +169,73 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{2}' ORDER BY bucket"),
         Seq(Row(-2), Row(0), Row(1))
       )
+    }
+  }
+
+  test("Postpone bucket table: overwrite excludes existing postpone rows from inference") {
+    Seq(
+      (
+        "static",
+        """
+          |INSERT OVERWRITE t SELECT
+          |id AS k,
+          |CAST(id AS STRING) AS v,
+          |0 AS pt
+          |FROM range (1000, 1100)
+          |""".stripMargin),
+      (
+        "static",
+        """
+          |INSERT OVERWRITE t PARTITION (pt = 0) SELECT
+          |id AS k,
+          |CAST(id AS STRING) AS v
+          |FROM range (1000, 1100)
+          |""".stripMargin),
+      (
+        "dynamic",
+        """
+          |INSERT OVERWRITE t SELECT
+          |id AS k,
+          |CAST(id AS STRING) AS v,
+          |0 AS pt
+          |FROM range (1000, 1100)
+          |""".stripMargin)
+    ).foreach {
+      case (partitionOverwriteMode, overwriteSql) =>
+        withTable("t") {
+          sql("""
+                |CREATE TABLE t (
+                |  k INT,
+                |  v STRING,
+                |  pt INT
+                |) PARTITIONED BY (pt)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'k, pt',
+                |  'bucket' = '-2',
+                |  'postpone.batch-write-fixed-bucket' = 'false',
+                |  'postpone.target-row-num-per-bucket' = '100'
+                |)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO t SELECT
+                |id AS k,
+                |CAST(id AS STRING) AS v,
+                |0 AS pt
+                |FROM range (0, 1000)
+                |""".stripMargin)
+
+          withSparkSQLConf(
+            "spark.paimon.postpone.batch-write-fixed-bucket" -> "true",
+            "spark.sql.sources.partitionOverwriteMode" -> partitionOverwriteMode) {
+            sql(overwriteSql)
+          }
+
+          checkAnswer(
+            sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}'"),
+            Seq(Row(0))
+          )
+        }
     }
   }
 
