@@ -93,7 +93,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         this.coverage =
-                new DataEvolutionGlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
+                new DataEvolutionGlobalIndexCoverage(
+                        table,
+                        snapshot,
+                        partitionFilter,
+                        indexFiles,
+                        table.coreOptions().scalarIndexSearchMode());
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();

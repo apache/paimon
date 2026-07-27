@@ -137,11 +137,11 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             from pypaimon.common.options.core_options import GlobalIndexSearchMode
             mode = CoreOptions(
                 Options(dict(self._table.table_schema.options))
-            ).global_index_search_mode()
+            ).full_text_index_search_mode()
             if mode != GlobalIndexSearchMode.FAST:
                 raise NotImplementedError(
                     "Primary-key full-text search only supports the FAST "
-                    "global-index search mode; FULL and DETAIL require "
+                    "full-text index search mode; FULL and DETAIL require "
                     "merge-aware logical-row fallback.")
             from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
             return PrimaryKeyFullTextRead(

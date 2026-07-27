@@ -498,7 +498,9 @@ class FileScanner:
                 result = scanner.scan(self.predicate)
                 if result is None:
                     return None
-                return result.or_(scanner.unindexed_rows(self.predicate))
+                scalar_mode = self.table.options.scalar_index_search_mode()
+                return result.or_(
+                    scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
         except Exception:
             return None
 

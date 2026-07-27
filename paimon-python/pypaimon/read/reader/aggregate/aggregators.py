@@ -34,6 +34,8 @@ error rather than a silent fallback.
 """
 from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
+from _datasketches import compact_theta_sketch, theta_union
+
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.data.decimal import Decimal
@@ -66,6 +68,7 @@ NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
 NAME_COLLECT = "collect"
 NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 NAME_MERGE_MAP = "merge_map"
+NAME_THETA_SKETCH = "theta_sketch"
 
 
 # Integer range limits used for overflow checking.
@@ -364,17 +367,301 @@ class FieldFirstNonNullValueAgg(FieldAggregator):
 
 
 class FieldSumAgg(FieldAggregator):
-    """Numeric sum. ``None`` on either side returns the non-null
-    operand. Python's native ``+`` works uniformly for int / float /
-    Decimal — the values produced by the pyarrow read path already
-    arrive as the right Python primitive for the column's SQL type, so
-    no per-type branching is needed.
     """
+    Numeric sum aggregator.
+
+    Returns the non-null operand if either side is ``None``. Performs
+    overflow checking for integral types and preserves decimal
+    precision and scale for DECIMAL values.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
             return accumulator if input_field is None else input_field
-        return accumulator + input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.add(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator + input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator + input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator + input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator + input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator + input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return self._negative(retract_field) if accumulator is None else accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.subtract(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator - retract_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator - retract_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator - retract_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} - {}".format(accumulator, retract_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator - retract_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} - {}".format(accumulator,  retract_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator - retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def _negative(self, value: Any) -> Any:
+        if value is None:
+            return None
+
+        if self._base_type in _DECIMAL_TYPES:
+            return -value
+
+        elif self._base_type == "TINYINT":
+            result = -value
+            if result < _BYTE_MIN or result > _BYTE_MAX:
+                raise ArithmeticError("byte overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type == "SMALLINT":
+            result = -value
+            if result < _SHORT_MIN or result > _SHORT_MAX:
+                raise ArithmeticError("short overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type in _INT_TYPES:
+            result = -value
+            if result < _INT_MIN or result > _INT_MAX:
+                raise ArithmeticError("int overflow: -{}".format(value))
+            return result
+
+        elif self._base_type == "BIGINT":
+            result = -value
+            if result < _LONG_MIN or result > _LONG_MAX:
+                raise ArithmeticError("long overflow: -{}".format(value))
+            return result
+
+        elif self._base_type in _FLOAT_TYPES:
+            return -value
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+
+class FieldProductAgg(FieldAggregator):
+    """
+    Numeric product aggregator.
+
+    Null values are ignored and the non-null operand is returned.
+    Otherwise, returns the product of accumulator and input value.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return accumulator if input_field is None else input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            mul = Decimal.multiply(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                mul,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator * input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator * input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator * input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator * input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator * input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            div = Decimal.divide(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                div,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = int(accumulator / retract_field)
+            if value > _BYTE_MAX or value < _BYTE_MIN:
+                raise ArithmeticError(
+                    "byte overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = int(accumulator / retract_field)
+            if value > _SHORT_MAX or value < _SHORT_MIN:
+                raise ArithmeticError(
+                    "short overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            if accumulator == _INT_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "int overflow: {} / {}".format(accumulator, retract_field)
+                )
+            return int(accumulator / retract_field)
+
+        elif self._base_type == "BIGINT":
+            if accumulator == _LONG_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "long overflow: {} / {}".format(accumulator, retract_field)
+                )
+
+            # Java integer division truncates toward zero, while Python's "//"
+            # floors toward negative infinity. Divide absolute values first, then
+            # restore the sign to match Java semantics without converting through
+            # float (which would lose precision for BIGINT values).
+            if (accumulator >= 0) == (retract_field >= 0):
+                return abs(accumulator) // abs(retract_field)
+            else:
+                return -(abs(accumulator) // abs(retract_field))
+
+        elif self._base_type in _FLOAT_TYPES:
+            if retract_field == 0.0:
+                if accumulator == 0.0:
+                    return float("nan")
+                elif accumulator > 0:
+                    return float("inf")
+                else:
+                    return float("-inf")
+            return accumulator / retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
 
 
 class FieldProductAgg(FieldAggregator):
@@ -1220,6 +1507,45 @@ class FieldMergeMapAgg(FieldAggregator):
         return keys
 
 
+class FieldThetaSketchAgg(FieldAggregator):
+    """Aggregator for ThetaSketch."""
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if _atomic_base_name(field_type) not in ("VARBINARY", "BYTES"):
+            raise ValueError(
+                "Data type for theta sketch column must be 'VarBinaryType' but was '{}'.".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        if not isinstance(accumulator, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch accumulator must be bytes, got {}".format(type(accumulator))
+            )
+
+        if not isinstance(input_field, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch input must be bytes, got {}".format(type(input_field))
+            )
+
+        if isinstance(accumulator, bytearray):
+            accumulator = bytes(accumulator)
+        if isinstance(input_field, bytearray):
+            input_field = bytes(input_field)
+
+        sketch1 = compact_theta_sketch.deserialize(accumulator)
+        sketch2 = compact_theta_sketch.deserialize(input_field)
+
+        union = theta_union()
+        union.update(sketch1)
+        union.update(sketch2)
+
+        return union.get_result().serialize()
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -1308,4 +1634,7 @@ register_aggregator(
 )
 register_aggregator(
     NAME_MERGE_MAP, _build_no_type_check(FieldMergeMapAgg, NAME_MERGE_MAP)
+)
+register_aggregator(
+    NAME_THETA_SKETCH, _build_no_type_check(FieldThetaSketchAgg, NAME_THETA_SKETCH)
 )

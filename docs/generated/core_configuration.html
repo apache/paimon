@@ -747,10 +747,22 @@ under the License.
             <td>Format table file path only contain partition value.</td>
         </tr>
         <tr>
+            <td><h5>format-table.scan.list-parallelism</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The parallelism of listing partition files during split planning for a Format Table with catalog-managed partitions.</td>
+        </tr>
+        <tr>
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
+        </tr>
+        <tr>
+            <td><h5>full-text-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for full-text index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.build.max-parallelism</h5></td>
@@ -790,9 +802,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>global-index.search-mode</h5></td>
-            <td style="word-wrap: break-word;">fast</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
-            <td>Search mode for global index queries. Supported values are 'fast', 'full', and 'detail'.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+            <td>Fallback search mode for global index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.thread-num</h5></td>
@@ -1267,6 +1279,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
         </tr>
         <tr>
+            <td><h5>postpone.merge-on-read</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to merge records in the postpone bucket with records in real buckets during batch reads. This requires an execution engine capable of routing and shuffling postpone records to their target real buckets.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1321,6 +1339,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
         </tr>
         <tr>
+            <td><h5>scalar-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>scan.bounded.watermark</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1367,6 +1391,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>After configuring this time, only the data files created after this time will be read. It is independent of snapshots, but it is imprecise filtering (depending on whether or not compaction occurs).</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.split.key-range-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, a batch chain-table scan splits each bucket's snapshot and delta files into multiple splits by key range to improve read parallelism. Files with intersecting key ranges always stay in the same split so that all versions of a key across the snapshot and delta branches are merged together. Set to false to fall back to one split per bucket.</td>
         </tr>
         <tr>
             <td><h5>scan.ignore-corrupt-files</h5></td>
@@ -1712,6 +1742,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
         </tr>
         <tr>
+            <td><h5>variant.shredding.adaptive.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>Maximum number of prefix rows sampled after the first file in an adaptive Variant shredding inference session.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.adaptive.retentionRatio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Minimum combined presence ratio for retaining a Variant path selected in the previous file. This must not exceed 'variant.shredding.minFieldCardinalityRatio'.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.inferenceMode</h5></td>
+            <td style="word-wrap: break-word;">per-file</td>
+            <td><p>Enum</p></td>
+            <td>The Variant shredding inference mode. PER_FILE infers each file independently. ADAPTIVE reuses bounded evidence within one rolling writer and samples a smaller prefix after the first file.<br /><br />Possible values:<ul><li>"per-file": Infer every file independently from its own prefix rows.</li><li>"adaptive": Reuse bounded inference evidence within one rolling writer and correct it with a smaller prefix from each subsequent file.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>variant.shredding.maxInferBufferRow</h5></td>
             <td style="word-wrap: break-word;">4096</td>
             <td>Integer</td>
@@ -1746,6 +1794,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for vector index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>vector-search.distribute.enabled</h5></td>
