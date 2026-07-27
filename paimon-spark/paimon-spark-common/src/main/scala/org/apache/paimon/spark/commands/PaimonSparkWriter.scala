@@ -110,6 +110,8 @@ case class PaimonSparkWriter(
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
 
+    val inferPostponeBucketNum =
+      postponeBatchWriteFixedBucket && coreOptions.postponeTargetRowNumPerBucket().isPresent
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
       case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
@@ -118,18 +120,49 @@ case class PaimonSparkWriter(
           .withColumn(BUCKET_COL, lit(-1))
       case _ => data.withColumn(BUCKET_COL, lit(-1))
     }
+    if (inferPostponeBucketNum) {
+      withInitBucketCol.persist()
+    }
+
     val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
-      if (postponeBatchWriteFixedBucket) {
-        val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = Math.min(
-          withInitBucketCol.rdd.getNumPartitions,
-          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
-        Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
-      } else {
-        None
+      try {
+        if (postponeBatchWriteFixedBucket) {
+          val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
+          val maxNumBuckets = table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism
+          val defaultPostponeNumBuckets =
+            Math.min(withInitBucketCol.rdd.getNumPartitions, maxNumBuckets)
+          val inferredNumBuckets: Map[BinaryRow, Int] =
+            if (inferPostponeBucketNum) {
+              val targetRowNum = coreOptions.postponeTargetRowNumPerBucket().get()
+              val postponeRowCounts = PostponeUtils.getPostponeRowCounts(table)
+              countRowsByPartition(withInitBucketCol).map {
+                case (partition, rowCount) =>
+                  partition -> Math.min(
+                    PostponeUtils.computeBucketNumByRowCount(
+                      Math.addExact(rowCount, postponeRowCounts.getOrDefault(partition, 0L)),
+                      targetRowNum),
+                    maxNumBuckets)
+              }
+            } else {
+              Map.empty[BinaryRow, Int]
+            }
+          Some(
+            (p: BinaryRow) =>
+              knownNumBuckets.getOrDefault(
+                p,
+                Integer.valueOf(inferredNumBuckets.getOrElse(p, defaultPostponeNumBuckets))))
+        } else {
+          None
+        }
+      } catch {
+        case e: Throwable =>
+          if (inferPostponeBucketNum) {
+            withInitBucketCol.unpersist()
+          }
+          throw e
       }
 
     def newWrite() = PaimonDataWrite(
@@ -349,7 +382,13 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    WriteTaskResult.merge(written.collect())
+    try {
+      WriteTaskResult.merge(written.collect())
+    } finally {
+      if (inferPostponeBucketNum) {
+        withInitBucketCol.unpersist()
+      }
+    }
   }
 
   /**
@@ -534,6 +573,27 @@ case class PaimonSparkWriter(
       .map(tableSchema.fieldNames().indexOf(_))
       .map(x => col(inputSchema.fieldNames(x)))
       .toSeq
+  }
+
+  private def countRowsByPartition(df: DataFrame): Map[BinaryRow, Long] = {
+    val partitionColumns = partitionCols(df)
+    if (partitionColumns.isEmpty) {
+      Map(BinaryRow.EMPTY_ROW -> df.count())
+    } else {
+      val partitionType = tableSchema.logicalPartitionType()
+      val serializer = InternalSerializers.create(partitionType)
+      df.groupBy(partitionColumns: _*)
+        .count()
+        .collect()
+        .map {
+          row =>
+            val partitionRow = Row.fromSeq(row.toSeq.dropRight(1))
+            val partition =
+              serializer.toBinaryRow(new SparkRow(partitionType, partitionRow)).copy()
+            partition -> row.getLong(row.length - 1)
+        }
+        .toMap
+    }
   }
 
   private def deserializeCommitMessage(

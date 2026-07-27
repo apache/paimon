@@ -91,6 +91,76 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone bucket table: infer bucket number from incoming row count") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '200'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |CASE WHEN id < 100 THEN 0 ELSE 1 END AS pt
+            |FROM range (0, 550)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}' ORDER BY bucket"),
+        Seq(Row(0))
+      )
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{1}' ORDER BY bucket"),
+        Seq(Row(0), Row(1), Row(2))
+      )
+
+      // Existing partitions keep their bucket number even when the new data volume changes.
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |0 AS pt
+            |FROM range (1000, 2000)
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}' ORDER BY bucket"),
+        Seq(Row(0))
+      )
+
+      // Postpone rows are included when a partition gets real buckets for the first time.
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("""
+              |INSERT INTO t SELECT
+              |id AS k,
+              |CAST(id AS STRING) AS v,
+              |2 AS pt
+              |FROM range (2000, 2150)
+              |""".stripMargin)
+      }
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |2 AS pt
+            |FROM range (3000, 3100)
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{2}' ORDER BY bucket"),
+        Seq(Row(-2), Row(0), Row(1))
+      )
+    }
+  }
+
   test("Postpone bucket table: write fix bucket then write postpone bucket") {
     withTable("t") {
       sql("""

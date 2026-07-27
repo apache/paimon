@@ -70,12 +70,22 @@ Postpone bucket mode is configured by `'bucket' = '-2'`.
 This mode aims to solve the difficulty to determine a fixed number of buckets
 and support different buckets for different partitions.
 
-When writing records into the table,
-all records will first be stored in the `bucket-postpone` directory of each partition
-and are not available to readers.
+By default, batch writes set `postpone.batch-write-fixed-bucket` to `true`
+and write records directly to real buckets.
+For a Spark batch write to a partition without real bucket files,
+you can configure `postpone.target-row-num-per-bucket` to calculate the bucket number
+from the incoming row count plus the row count of existing postpone files.
+The calculated bucket number is
+`ceil(row_count / postpone.target-row-num-per-bucket)`, is at least `1`,
+and is limited by `postpone.batch-write-fixed-bucket.max-parallelism`.
+Without this target, Spark uses the number of input writers, also limited by the maximum parallelism.
+Inferring from row counts adds a counting stage; Spark caches the batch so that counting and writing
+use the same input rows.
 
-To move the records into the correct bucket and make them readable,
-you need to run a compaction job.
+When `postpone.batch-write-fixed-bucket` is `false`,
+records are first stored in the `bucket-postpone` directory of each partition
+and are not available to readers.
+To move these records into the correct bucket and make them readable, run a compaction job.
 See `compact` [procedure](../flink/procedures).
 The bucket number for the partitions compacted for the first time
 is configured by the option `postpone.default-bucket-num`, whose default value is `1`.

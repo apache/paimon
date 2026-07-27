@@ -2733,7 +2733,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+                            "Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
