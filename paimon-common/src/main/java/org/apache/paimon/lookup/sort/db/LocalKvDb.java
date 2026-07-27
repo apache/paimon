@@ -37,6 +37,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -123,6 +124,7 @@ public class LocalKvDb implements Closeable {
     private final Map<File, SortLookupStoreReader> readerCache;
 
     private final AtomicLong fileSequence;
+    @Nullable private BulkLoadWriter activeBulkLoadWriter;
     private boolean closed;
 
     private LocalKvDb(
@@ -147,6 +149,7 @@ public class LocalKvDb implements Closeable {
         this.levels = new LsmLevels(MAX_LEVELS);
         this.readerCache = new HashMap<>();
         this.fileSequence = new AtomicLong();
+        this.activeBulkLoadWriter = null;
         this.closed = false;
         LsmCompactor.CompactorFactory compactorFactory =
                 fileDeleter ->
@@ -214,6 +217,7 @@ public class LocalKvDb implements Closeable {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         ensureOpen();
+        ensureNoBulkLoad();
         checkCompactionFailure();
         if (value.length == 0) {
             throw new IllegalArgumentException(
@@ -239,6 +243,7 @@ public class LocalKvDb implements Closeable {
      */
     public void delete(byte[] key) throws IOException {
         ensureOpen();
+        ensureNoBulkLoad();
         checkCompactionFailure();
         MemorySlice wrappedKey = MemorySlice.wrap(key);
         byte[] oldValue = memTable.put(wrappedKey, TOMBSTONE);
@@ -262,115 +267,212 @@ public class LocalKvDb implements Closeable {
      */
     public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries, long numEntries)
             throws IOException {
-        ensureOpen();
-        checkCompactionFailure();
         checkArgument(numEntries >= 0, "numEntries must be non-negative.");
-        if (!memTable.isEmpty() || getSstFileCount() > 0) {
-            throw new IllegalStateException(
-                    "bulkLoad requires an empty database (no memTable entries and no SST files)");
-        }
-
-        int targetLevel = MAX_LEVELS - 1;
-        List<SstFileMetadata> bulkLoadFiles = new ArrayList<>();
-
-        SortLookupStoreWriter currentWriter = null;
-        File currentSstFile = null;
-        MemorySlice currentFileMinKey = null;
-        MemorySlice currentFileMaxKey = null;
-        MemorySlice previousFileMaxKey = null;
-        long currentBatchSize = 0;
-        long loadedEntries = 0;
-        long loadedBytes = 0;
-
-        try {
+        try (BulkLoadWriter writer = createBulkLoadWriter(numEntries)) {
+            long loadedEntries = 0;
             while (sortedEntries.hasNext()) {
                 checkArgument(
                         loadedEntries < numEntries,
                         "The iterator contains more entries than numEntries (%s).",
                         numEntries);
                 Map.Entry<byte[], byte[]> entry = sortedEntries.next();
-                byte[] key = entry.getKey();
-                byte[] value = entry.getValue();
-                MemorySlice currentKey = MemorySlice.wrap(key);
-                long entrySize = (long) key.length + value.length;
-
-                if (currentWriter == null) {
-                    currentSstFile = newSstFile();
-                    long expectedEntries =
-                            estimateBulkLoadSstEntries(
-                                    numEntries - loadedEntries,
-                                    loadedEntries,
-                                    loadedBytes,
-                                    entrySize);
-                    currentWriter =
-                            storeFactory.createWriter(
-                                    currentSstFile,
-                                    bloomFilterBuilderFactory.apply(expectedEntries));
-                    currentFileMinKey = currentKey;
-                    currentBatchSize = 0;
-                }
-
-                currentWriter.put(key, value);
-                currentFileMaxKey = currentKey;
-                currentBatchSize += entrySize;
+                writer.put(entry.getKey(), entry.getValue());
                 loadedEntries++;
-                loadedBytes += entrySize;
-
-                if (currentBatchSize >= maxSstFileSize) {
-                    currentWriter.close();
-                    currentWriter = null;
-                    previousFileMaxKey =
-                            addBulkLoadSstFile(
-                                    bulkLoadFiles,
-                                    currentSstFile,
-                                    currentFileMinKey,
-                                    currentFileMaxKey,
-                                    previousFileMaxKey,
-                                    targetLevel);
-                    currentSstFile = null;
-                    currentFileMinKey = null;
-                    currentFileMaxKey = null;
-                }
             }
-
-            if (currentWriter != null) {
-                currentWriter.close();
-                currentWriter = null;
-                addBulkLoadSstFile(
-                        bulkLoadFiles,
-                        currentSstFile,
-                        currentFileMinKey,
-                        currentFileMaxKey,
-                        previousFileMaxKey,
-                        targetLevel);
-            }
-
             checkArgument(
                     loadedEntries == numEntries,
                     "The iterator contains %s entries, but numEntries is %s.",
                     loadedEntries,
                     numEntries);
-        } catch (IOException | RuntimeException e) {
+            writer.finish();
+        }
+    }
+
+    /**
+     * Create a streaming bulk-load writer. Keys must be written in strictly increasing order
+     * according to the configured key comparator. The database must be empty.
+     */
+    public BulkLoadWriter createBulkLoadWriter() throws IOException {
+        return createBulkLoadWriter(UNKNOWN_NUM_ENTRIES);
+    }
+
+    private BulkLoadWriter createBulkLoadWriter(long expectedEntries) throws IOException {
+        ensureOpen();
+        checkCompactionFailure();
+        if (activeBulkLoadWriter != null) {
+            throw new IllegalStateException("Another bulk load is already in progress.");
+        }
+        if (!memTable.isEmpty() || getSstFileCount() > 0) {
+            throw new IllegalStateException(
+                    "bulkLoad requires an empty database (no memTable entries and no SST files)");
+        }
+        BulkLoadWriter writer = new BulkLoadWriter(expectedEntries);
+        activeBulkLoadWriter = writer;
+        return writer;
+    }
+
+    /** A streaming writer which atomically publishes bulk-loaded SST files on {@link #finish()}. */
+    public final class BulkLoadWriter implements Closeable {
+
+        private final long expectedEntries;
+        private final int targetLevel;
+        private final List<SstFileMetadata> bulkLoadFiles;
+
+        @Nullable private SortLookupStoreWriter currentWriter;
+        @Nullable private File currentSstFile;
+        @Nullable private MemorySlice currentFileMinKey;
+        @Nullable private MemorySlice currentFileMaxKey;
+        @Nullable private MemorySlice previousFileMaxKey;
+        @Nullable private MemorySlice previousKey;
+        private long currentBatchSize;
+        private long loadedEntries;
+        private long loadedBytes;
+        private boolean active;
+
+        private BulkLoadWriter(long expectedEntries) {
+            this.expectedEntries = expectedEntries;
+            this.targetLevel = MAX_LEVELS - 1;
+            this.bulkLoadFiles = new ArrayList<>();
+            this.active = true;
+        }
+
+        /** Write one key-value pair. */
+        public void put(byte[] key, byte[] value) throws IOException {
+            ensureActive();
+            try {
+                checkArgument(
+                        expectedEntries < 0 || loadedEntries < expectedEntries,
+                        "The bulk load contains more entries than expected (%s).",
+                        expectedEntries);
+                checkArgument(
+                        value.length > 0,
+                        "Value must not be empty, which is reserved as the tombstone marker.");
+                MemorySlice currentKey = MemorySlice.wrap(key);
+                checkArgument(
+                        previousKey == null || keyComparator.compare(previousKey, currentKey) < 0,
+                        "bulkLoad requires entries sorted in strictly increasing order according "
+                                + "to the configured key comparator; generated SST key ranges "
+                                + "must be ordered.");
+                long entrySize = (long) key.length + value.length;
+
+                if (currentWriter == null) {
+                    currentSstFile = newSstFile();
+                    long expectedEntries =
+                            this.expectedEntries < 0
+                                    ? UNKNOWN_NUM_ENTRIES
+                                    : estimateBulkLoadSstEntries(
+                                            this.expectedEntries - loadedEntries,
+                                            loadedEntries,
+                                            loadedBytes,
+                                            entrySize);
+                    currentWriter =
+                            storeFactory.createWriter(
+                                    currentSstFile,
+                                    bloomFilterBuilderFactory.apply(expectedEntries));
+                    currentFileMinKey = copyKey(key);
+                    currentBatchSize = 0;
+                }
+
+                currentWriter.put(key, value);
+                currentFileMaxKey = copyKey(key);
+                previousKey = currentFileMaxKey;
+                currentBatchSize += entrySize;
+                loadedEntries++;
+                loadedBytes += entrySize;
+
+                if (currentBatchSize >= maxSstFileSize) {
+                    closeCurrentFile();
+                }
+            } catch (IOException | RuntimeException e) {
+                abort(e);
+                throw e;
+            }
+        }
+
+        /** Finish writing and publish all generated SST files. */
+        public void finish() throws IOException {
+            ensureActive();
+            try {
+                if (currentWriter != null) {
+                    closeCurrentFile();
+                }
+                checkArgument(
+                        expectedEntries < 0 || loadedEntries == expectedEntries,
+                        "The bulk load contains %s entries, but expected %s.",
+                        loadedEntries,
+                        expectedEntries);
+                levels.addFiles(targetLevel, bulkLoadFiles);
+                active = false;
+                release();
+            } catch (IOException | RuntimeException e) {
+                abort(e);
+                throw e;
+            }
+
+            LOG.info(
+                    "Bulk-loaded {} SST files directly to level {}",
+                    bulkLoadFiles.size(),
+                    targetLevel);
+        }
+
+        private void closeCurrentFile() throws IOException {
+            if (currentWriter != null) {
+                currentWriter.close();
+                currentWriter = null;
+            }
+            previousFileMaxKey =
+                    addBulkLoadSstFile(
+                            bulkLoadFiles,
+                            currentSstFile,
+                            currentFileMinKey,
+                            currentFileMaxKey,
+                            previousFileMaxKey,
+                            targetLevel);
+            currentSstFile = null;
+            currentFileMinKey = null;
+            currentFileMaxKey = null;
+        }
+
+        private void abort(Throwable cause) {
+            if (!active) {
+                return;
+            }
             if (currentWriter != null) {
                 try {
                     currentWriter.close();
-                } catch (IOException suppressed) {
-                    e.addSuppressed(suppressed);
+                } catch (IOException e) {
+                    cause.addSuppressed(e);
                 }
+                currentWriter = null;
             }
             if (currentSstFile != null) {
                 deleteFileQuietly(currentSstFile);
+                currentSstFile = null;
             }
             for (SstFileMetadata metadata : bulkLoadFiles) {
                 deleteFileQuietly(metadata.getFile());
             }
-            throw e;
+            bulkLoadFiles.clear();
+            active = false;
+            release();
         }
 
-        levels.addFiles(targetLevel, bulkLoadFiles);
+        private void release() {
+            if (activeBulkLoadWriter == this) {
+                activeBulkLoadWriter = null;
+            }
+        }
 
-        LOG.info(
-                "Bulk-loaded {} SST files directly to level {}", bulkLoadFiles.size(), targetLevel);
+        private void ensureActive() {
+            if (!active) {
+                throw new IllegalStateException("Bulk-load writer is already closed.");
+            }
+        }
+
+        @Override
+        public void close() {
+            abort(new IOException("Bulk load was closed before finish."));
+        }
     }
 
     private long estimateBulkLoadSstEntries(
@@ -432,6 +534,7 @@ public class LocalKvDb implements Closeable {
     @Nullable
     public byte[] get(byte[] key) throws IOException {
         ensureOpen();
+        ensureNoBulkLoad();
         checkCompactionFailure();
 
         // 1. Search MemTable first (newest data)
@@ -459,6 +562,7 @@ public class LocalKvDb implements Closeable {
      */
     public void flush() throws IOException {
         ensureOpen();
+        ensureNoBulkLoad();
         checkCompactionFailure();
         if (memTable.isEmpty()) {
             return;
@@ -491,6 +595,7 @@ public class LocalKvDb implements Closeable {
      */
     public void compact() throws IOException {
         ensureOpen();
+        ensureNoBulkLoad();
         compaction.fullCompact();
     }
 
@@ -506,6 +611,9 @@ public class LocalKvDb implements Closeable {
         closed = true;
 
         IOException failure = null;
+        if (activeBulkLoadWriter != null) {
+            activeBulkLoadWriter.close();
+        }
         try {
             checkCompactionFailure();
         } catch (IOException e) {
@@ -641,6 +749,16 @@ public class LocalKvDb implements Closeable {
         if (closed) {
             throw new IllegalStateException("LocalKvDb is already closed");
         }
+    }
+
+    private void ensureNoBulkLoad() {
+        if (activeBulkLoadWriter != null) {
+            throw new IllegalStateException("A bulk load is in progress.");
+        }
+    }
+
+    private static MemorySlice copyKey(byte[] key) {
+        return MemorySlice.wrap(Arrays.copyOf(key, key.length));
     }
 
     // -------------------------------------------------------------------------
