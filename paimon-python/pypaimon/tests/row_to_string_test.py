@@ -17,7 +17,6 @@
 
 """Tests that cast_row_to_string reproduces the Java cast-to-string rules."""
 
-import struct
 import unittest
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -36,12 +35,6 @@ def _row(*pairs):
 
 def _cast(type_name, value):
     return cast_value_to_string(value, AtomicType(type_name))
-
-
-def _f32(value):
-    # a FLOAT is widened to float64 on the way in, as the reader does
-    widened = struct.unpack("<f", struct.pack("<f", value))[0]
-    return _cast("FLOAT", widened)
 
 
 class RowToStringTest(unittest.TestCase):
@@ -73,57 +66,49 @@ class RowToStringTest(unittest.TestCase):
     def test_decimal_keeps_its_scale(self):
         self.assertEqual("1.50", _cast("DECIMAL(10, 2)", Decimal("1.50")))
 
-    def test_double_decimal_range(self):
-        self.assertEqual("1.5", _cast("DOUBLE", 1.5))
-        self.assertEqual("1.0", _cast("DOUBLE", 1.0))
-        self.assertEqual("0.001", _cast("DOUBLE", 0.001))
-        self.assertEqual("123456.0", _cast("DOUBLE", 123456.0))
-        self.assertEqual("9999999.0", _cast("DOUBLE", 9999999.0))
-        self.assertEqual("-1.5", _cast("DOUBLE", -1.5))
+    def test_decimal_never_uses_scientific_notation(self):
+        # Java Decimal.toString is BigDecimal.toPlainString; str(Decimal)
+        # would give "0E-9" and "-1E-9" here
+        self.assertEqual("0.000000000",
+                         _cast("DECIMAL(20, 9)", Decimal("0E-9")))
+        self.assertEqual("-0.000000001",
+                         _cast("DECIMAL(20, 9)", Decimal("-1E-9")))
+        self.assertEqual("0.000000000000000000",
+                         _cast("DECIMAL(38, 18)", Decimal("0E-18")))
 
-    def test_double_scientific_matches_java(self):
-        # Java Double.toString: upper case E, no + sign, no zero padding
-        self.assertEqual("1.0E7", _cast("DOUBLE", 1e7))
-        self.assertEqual("1.0E-5", _cast("DOUBLE", 1e-5))
-        self.assertEqual("1.0E-4", _cast("DOUBLE", 1e-4))
-        self.assertEqual("1.0E20", _cast("DOUBLE", 1e20))
-        self.assertEqual("1.0E-20", _cast("DOUBLE", 1e-20))
-        self.assertEqual("1.23456789E300", _cast("DOUBLE", 1.23456789e300))
-        self.assertEqual("1.23456789012345E14",
-                         _cast("DOUBLE", 123456789012345.0))
+    def test_row_with_a_float_field_is_not_rendered(self):
+        self.assertIsNone(cast_row_to_string(_row(("INT", 1),
+                                                  ("FLOAT", 1.5))))
+        self.assertIsNone(cast_row_to_string(_row(("DOUBLE", 1.5))))
+        self.assertIsNone(cast_row_to_string(_row(("REAL", 1.5))))
+        self.assertIsNone(cast_row_to_string(_row(("FLOAT NOT NULL", 1.5))))
 
-    def test_double_signed_zero(self):
-        self.assertEqual("0.0", _cast("DOUBLE", 0.0))
-        self.assertEqual("-0.0", _cast("DOUBLE", -0.0))
+    def test_float_field_stops_the_row_even_when_its_value_is_null(self):
+        # the check is on the declared type, so all rows of a table agree
+        self.assertIsNone(cast_row_to_string(_row(("INT", 1),
+                                                  ("DOUBLE", None))))
 
-    def test_double_non_finite_matches_java(self):
-        self.assertEqual("NaN", _cast("DOUBLE", float("nan")))
-        self.assertEqual("Infinity", _cast("DOUBLE", float("inf")))
-        self.assertEqual("-Infinity", _cast("DOUBLE", float("-inf")))
+    def test_row_with_a_local_zoned_timestamp_is_not_rendered(self):
+        # Java formats these in TimeZone.getDefault(), so the same manifest
+        # reads differently depending on where the query runs
+        value = datetime(2024, 1, 2, 3, 4, 5)
+        self.assertIsNone(cast_row_to_string(_row(("TIMESTAMP_LTZ(3)", value))))
+        self.assertIsNone(cast_row_to_string(
+            _row(("TIMESTAMP(3) WITH LOCAL TIME ZONE", value))))
 
-    def test_float_prints_the_shortest_float32_form(self):
-        # a float32 0.1 widened to float64 is 0.10000000149011612
-        self.assertEqual("0.1", _f32(0.1))
-        self.assertEqual("1.0", _f32(1.0))
-        self.assertEqual("12345.678", _f32(12345.678))
+    def test_unrenderable_values_are_rejected(self):
+        self.assertRaises(ValueError, _cast, "FLOAT", 1.5)
+        self.assertRaises(ValueError, _cast, "DOUBLE", 1.5)
+        self.assertRaises(ValueError, _cast, "TIMESTAMP_LTZ(3)",
+                          datetime(2024, 1, 2, 3, 4, 5))
+        self.assertRaises(ValueError, _cast, "BYTES", b"ab")
 
-    def test_float_scientific_matches_java(self):
-        self.assertEqual("1.0E7", _f32(1e7))
-        self.assertEqual("1.0E-5", _f32(1e-5))
-        self.assertEqual("1.0E-4", _f32(1e-4))
-        self.assertEqual("3.4E38", _f32(3.4e38))
-        self.assertEqual("0.001", _f32(1e-3))
-        self.assertEqual("9999999.0", _f32(9999999.0))
-        self.assertEqual("-1.5", _f32(-1.5))
-
-    def test_float_signed_zero_and_non_finite(self):
-        self.assertEqual("0.0", _f32(0.0))
-        self.assertEqual("-0.0", _f32(-0.0))
-        self.assertEqual("NaN", _f32(float("nan")))
-        self.assertEqual("Infinity", _f32(float("inf")))
-
-    def test_binary_is_decoded_as_utf8(self):
-        self.assertEqual("ab", _cast("BYTES", b"ab"))
+    def test_row_with_a_binary_field_is_not_rendered(self):
+        # malformed UTF-8 yields a different replacement char count than the
+        # JDK decoder gives, so binary is not rendered at all
+        self.assertIsNone(cast_row_to_string(_row(("BYTES", b"ab"))))
+        self.assertIsNone(cast_row_to_string(_row(("BINARY(2)", b"ab"))))
+        self.assertIsNone(cast_row_to_string(_row(("VARBINARY(10)", b"ab"))))
 
     def test_date(self):
         self.assertEqual("2024-01-02", _cast("DATE", date(2024, 1, 2)))
@@ -154,6 +139,14 @@ class RowToStringTest(unittest.TestCase):
     def test_time_keeps_one_fraction_digit_at_least(self):
         self.assertEqual("03:04:05.0", _cast("TIME(3)", time(3, 4, 5)))
         self.assertEqual("03:04:05.5", _cast("TIME(3)", time(3, 4, 5, 500000)))
+
+    def test_time_keeps_a_zero_that_a_truncated_tail_sits_behind(self):
+        # 101 ms at precision 2 is ".10" in Java, not ".1": it stops only
+        # once the remaining fraction is exactly zero
+        self.assertEqual("03:04:05.10", _cast("TIME(2)", time(3, 4, 5, 101000)))
+        self.assertEqual("03:04:05.00", _cast("TIME(2)", time(3, 4, 5, 1000)))
+        self.assertEqual("03:04:05.0", _cast("TIME(2)", time(3, 4, 5)))
+        self.assertEqual("03:04:05.01", _cast("TIME(2)", time(3, 4, 5, 10000)))
 
     def test_unknown_type_falls_back_to_str(self):
         self.assertEqual("x", _cast("SOMETHING_NEW", "x"))

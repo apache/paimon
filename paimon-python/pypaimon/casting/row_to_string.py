@@ -19,24 +19,44 @@
 
 Mirrors ``RowToStringCastRule`` and the per type ``*ToStringCastRule`` rules of
 ``paimon-common``, so system tables show the same text in both languages.
+
+Only the types whose output provably matches Java are rendered. A row holding
+one of the types left out is not rendered at all, so the caller keeps the NULL
+it would have emitted anyway:
+
+- FLOAT and DOUBLE go through ``Float/Double.toString``, which up to JDK 18 is
+  the legacy ``FloatingDecimal`` and does not produce the shortest round
+  tripping decimal, while JDK 19+ does: ``2.68873286E11`` against
+  ``2.6887329E11`` for the same float.
+- TIMESTAMP WITH LOCAL TIME ZONE is formatted in ``TimeZone.getDefault()``, so
+  one manifest reads ``2024-01-02 03:04:05`` on a UTC JVM and
+  ``2024-01-02 06:04:05`` on a Europe/Moscow one.
+- BINARY, VARBINARY and BYTES are decoded as UTF-8, and malformed input leaves
+  the JDK decoder and Python disagreeing on how many replacement characters to
+  emit: ``ED A0 80`` is one in Java and three here.
 """
 
-import math
-import struct
-from decimal import Decimal
 from typing import Any, Optional
 
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
+
+_UNSUPPORTED_TYPES = ("FLOAT", "REAL", "DOUBLE", "TIMESTAMP_LTZ",
+                      "BINARY", "VARBINARY", "BYTES")
 
 
 def cast_row_to_string(row) -> Optional[str]:
     """Render ``row`` as ``{v1, v2}``, with ``null`` for null fields.
 
     An empty row renders as ``{}``, which is what an unpartitioned table has.
+    Returns None when a field has a type this module does not render.
     """
     if row is None:
         return None
     fields = getattr(row, "fields", None) or []
+    # on the declared type, not on the value, so every manifest of a table
+    # answers the same way no matter which stats happen to be null
+    if any(_is_unsupported(field.type) for field in fields):
+        return None
     parts = []
     for i in range(len(fields)):
         value = row.get_field(i)
@@ -49,15 +69,16 @@ def cast_value_to_string(value: Any, data_type) -> str:
     """Cast a single field value to string the way the Java cast rules do."""
     type_name = _type_name(data_type)
 
+    if _is_unsupported(data_type):
+        raise ValueError(
+            "{} has no portable string form, see the module docstring".format(
+                type_name))
     if type_name in ("BOOLEAN", "BOOL"):
         return "true" if value else "false"
-    if type_name in ("FLOAT", "REAL"):
-        return _format_java_float(value, True)
-    if type_name == "DOUBLE":
-        return _format_java_float(value, False)
-    if (type_name.startswith("BINARY") or type_name.startswith("VARBINARY")
-            or type_name == "BYTES"):
-        return bytes(value).decode("utf-8", "replace")
+    if type_name.startswith("DECIMAL") or type_name.startswith("NUMERIC"):
+        # Java Decimal.toString is BigDecimal.toPlainString, which never uses
+        # scientific notation, while str(Decimal) does below 1e-6
+        return "{:f}".format(value)
     if type_name == "DATE":
         return value.isoformat()
     # TIMESTAMP has to be tested before TIME, it starts with it
@@ -73,6 +94,16 @@ def cast_value_to_string(value: Any, data_type) -> str:
 def _type_name(data_type) -> str:
     name = getattr(data_type, "type", None)
     return (name if isinstance(name, str) else str(data_type)).upper().strip()
+
+
+def _is_unsupported(data_type) -> bool:
+    type_name = _type_name(data_type)
+    # the other spelling of TIMESTAMP_LTZ, see data_types.py
+    if "WITH LOCAL TIME ZONE" in type_name:
+        return True
+    # first token only, so "FLOAT NOT NULL" is caught as well
+    head = type_name.split("(", 1)[0].split()
+    return bool(head) and head[0] in _UNSUPPORTED_TYPES
 
 
 def _format_timestamp(value, precision: int) -> str:
@@ -95,71 +126,20 @@ def _format_timestamp(value, precision: int) -> str:
 def _format_time(value, precision: int) -> str:
     """Format as ``HH:mm:ss[.fraction]``.
 
-    ``DateTimeUtils.formatTimestampMillis`` emits at most ``precision`` digits
-    of the millisecond part and stops early once nothing but zeros is left, but
-    always keeps one digit when precision allows any.
+    Digit by digit off the millisecond part, exactly as
+    ``DateTimeUtils.formatTimestampMillis`` does: it stops only once nothing
+    but zeros is left, so a truncated non zero tail keeps the zero before it
+    (``.10`` for 101 ms at precision 2, not ``.1``).
     """
     text = "{:02d}:{:02d}:{:02d}".format(value.hour, value.minute, value.second)
     if precision <= 0:
         return text
-    digits = "{:03d}".format(value.microsecond // 1000)[:min(precision, 3)]
-    return text + "." + (digits.rstrip("0") or digits[:1])
-
-
-def _format_java_float(value, is_float32: bool) -> str:
-    """Format like Java ``Float.toString`` / ``Double.toString``.
-
-    Finds the shortest decimal that round trips, then lays it out with Java's
-    rules: plain decimal when ``1 <= D <= 7`` or ``-2 <= D <= 0`` (writing
-    ``value = 0.<digits> x 10^D``), otherwise ``d.dddEexp`` with an upper case
-    ``E``, a sign only when negative, and no zero padded exponent. The shortest
-    form differs from a pre JDK 19 JVM only at the denormal extremes
-    (``1.0E-45`` vs ``1.4E-45``), which partition stats never hold.
-    """
-    if value != value:
-        return "NaN"
-    if value == math.inf:
-        return "Infinity"
-    if value == -math.inf:
-        return "-Infinity"
-    sign = "-" if math.copysign(1.0, value) < 0 else ""
-    if value == 0.0:
-        return sign + "0.0"
-    digits, decimal_exp = _shortest_digits(abs(value), is_float32)
-    n = len(digits)
-    if 0 < decimal_exp <= 7:
-        if decimal_exp >= n:
-            body = digits + "0" * (decimal_exp - n) + ".0"
-        else:
-            body = digits[:decimal_exp] + "." + digits[decimal_exp:]
-    elif -3 < decimal_exp <= 0:
-        body = "0." + "0" * (-decimal_exp) + digits
-    else:
-        body = digits[0] + "." + (digits[1:] or "0") + "E" + str(decimal_exp - 1)
-    return sign + body
-
-
-def _shortest_digits(magnitude, is_float32: bool):
-    """Return ``(digits, D)`` with ``magnitude = 0.<digits> x 10^D``.
-
-    ``digits`` carries no leading or trailing zeros. ``repr`` already yields the
-    shortest float64 form; for float32 the shortest ``%g`` that round trips
-    through four bytes is used, so a widened ``0.1f`` renders as ``0.1``.
-    """
-    if is_float32:
-        packed = struct.pack("<f", magnitude)
-        text = repr(magnitude)
-        for precision in range(1, 10):
-            candidate = "%.{}g".format(precision) % magnitude
-            if struct.pack("<f", float(candidate)) == packed:
-                text = candidate
-                break
-    else:
-        text = repr(magnitude)
-    _, digit_tuple, exp = Decimal(text).as_tuple()
-    digits = list(digit_tuple)
-    while len(digits) > 1 and digits[-1] == 0:
-        digits.pop()
-        exp += 1
-    digit_str = "".join(map(str, digits))
-    return digit_str, exp + len(digit_str)
+    millis = value.microsecond // 1000
+    digits = []
+    while precision > 0:
+        digits.append(str(millis // 100))
+        millis = millis % 100 * 10
+        if millis == 0:
+            break
+        precision -= 1
+    return text + "." + "".join(digits)
